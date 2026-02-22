@@ -1,0 +1,132 @@
+.control-panel { display: flex; flex-direction: column; height: 100%; background: #ffffff; }
+
+.control-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  overflow-y: auto;
+  flex: 1;
+}
+.control-body::-webkit-scrollbar { width: 4px; }
+.control-body::-webkit-scrollbar-track { background: transparent; }
+.control-body::-webkit-scrollbar-thumb { background: #c8ddf5; border-radius: 2px; }
+
+.control-section { display: flex; flex-direction: column; gap: 7px; }
+
+.section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #7a90b8;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+}
+
+.coord-display {
+  background: #F5F5F5;
+  border: 1px solid #c8ddf5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  color: #1234e1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hint-text { font-size: 12px; color: #7a90b8; font-style: italic; }
+
+.query-input {
+  width: 100%;
+  background: #e8f5ff;
+  border: 1px solid #c8ddf5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #0f1a3e;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.6;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.query-input:focus { outline: none; border-color: #1234e1; box-shadow: 0 0 0 3px rgba(18,52,225,0.1); }
+.query-input::placeholder { color: #aab8d4; }
+.query-input:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.status-badge { padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 500; text-align: center; }
+.status-running { background: #fff7e6; border: 1px solid #f59e0b; color: #b45309; }
+.status-done    { background: #ecfdf5; border: 1px solid #10b981; color: #065f46; }
+.status-error   { background: #fef2f2; border: 1px solid #ef4444; color: #991b1b; }
+
+.btn-primary {
+  width: 100%;
+  padding: 12px;
+  background: #1234e1;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s, box-shadow 0.18s;
+  letter-spacing: 0.2px;
+}
+.btn-primary:hover:not(:disabled) { background: #0e28c8; box-shadow: 0 4px 12px rgba(18,52,225,0.3); }
+.btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-secondary {
+  margin-top: 6px;
+  padding: 5px 10px;
+  background: transparent;
+  border: 1px solid #c8ddf5;
+  border-radius: 6px;
+  color: #3d5080;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  align-self: flex-start;
+}
+.btn-secondary:hover { border-color: #1234e1; color: #1234e1; background: #F5F5F5; }
+
+.settings-gear-btn {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #c8ddf5;
+  color: #7a90b8;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 15px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.settings-gear-btn:hover:not(:disabled) { border-color: #1234e1; color: #1234e1; background: #F5F5F5; }
+.settings-gear-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.model-summary-btn {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #F5F5F5;
+  border: 1px solid #c8ddf5;
+  border-radius: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.model-summary-btn:hover:not(:disabled) { border-color: #1234e1; box-shadow: 0 0 0 2px rgba(18,52,225,0.08); }
+.model-summary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.model-summary-text { font-size: 13px; color: #1234e1; font-family: "JetBrains Mono", "Fira Code", monospace; font-weight: 600; }
+.model-summary-edit { font-size: 11px; color: #7a90b8; }
+
+.usage-guide { background: #F5F5F5; border: 1px solid #c8ddf5; border-radius: 8px; padding: 12px 14px; }
+.guide-title { font-size: 11px; font-weight: 700; color: #3d5080; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.6px; }
+.usage-guide ol { padding-left: 16px; display: flex; flex-direction: column; gap: 4px; }
+.usage-guide li { font-size: 12px; color: #3d5080; line-height: 1.6; }
+.guide-note { font-size: 11px; color: #7a90b8; margin-top: 8px; font-style: italic; }
