@@ -1,12 +1,13 @@
-
-// Slide-out settings drawer. Opened by a gear icon in ControlPanel.
-// On mount it fetches available options from GET /api/settings/defaults.
-// All changes are local until the user clicks "Apply" (calls onApply).
+// Slide-out settings drawer with four sections:
+//   1. LLM Model       — provider, model, per-session API key override
+//   2. API Keys        — persistent key storage (Google Maps, LLM providers)
+//   3. Facility Types  — EPA database checkboxes
+//   4. Analysis Params — topology depth, resample frequency
 
 import { useState, useEffect } from "react";
 import "./SettingsPanel.css";
 
-// ── Validation helpers ─────────────────────────────────────────────────────
+// ── Validation helpers ────────────────────────────────────────────────────────
 
 function clamp(value, min, max) {
   const n = parseInt(value, 10);
@@ -14,14 +15,13 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-// ── NumericField component ─────────────────────────────────────────────────
+// ── NumericField ──────────────────────────────────────────────────────────────
 
 function NumericField({ label, value, onChange, limits, defaultValue, unit, disabled = false }) {
   const { min, max } = limits;
-  const [raw, setRaw] = useState(String(value));
+  const [raw,   setRaw]   = useState(String(value));
   const [error, setError] = useState("");
 
-  // Keep raw input in sync when parent resets defaults
   useEffect(() => { setRaw(String(value)); setError(""); }, [value]);
 
   const handleChange = (e) => {
@@ -62,60 +62,187 @@ function NumericField({ label, value, onChange, limits, defaultValue, unit, disa
   );
 }
 
-// ── Main SettingsPanel component ───────────────────────────────────────────
+// ── ApiKeyField — single persistent key row ───────────────────────────────────
+//
+// States:
+//   saved   — key is stored in backend  (shows masked value + Clear button)
+//   editing — user is typing a new key  (shows input + Save button)
+//   empty   — not set                   (shows placeholder + Save button)
+
+function ApiKeyField({ label, keyName, hint, status, onSave, onClear }) {
+  const [inputVal, setInputVal] = useState("");
+  const [saving,   setSaving]   = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [localMsg, setLocalMsg] = useState("");
+
+  const isSaved = status?.set;
+
+  const handleSave = async () => {
+    if (!inputVal.trim()) return;
+    setSaving(true);
+    setLocalMsg("");
+    try {
+      await onSave(keyName, inputVal.trim());
+      setInputVal("");
+      setLocalMsg("Saved.");
+    } catch (e) {
+      setLocalMsg(`Error: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = async () => {
+    setClearing(true);
+    setLocalMsg("");
+    try {
+      await onClear(keyName);
+      setLocalMsg("Cleared.");
+    } catch (e) {
+      setLocalMsg(`Error: ${e.message}`);
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <div className="api-key-row">
+      <div className="api-key-label-row">
+        <span className="api-key-label">{label}</span>
+        {isSaved && (
+          <span className="api-key-badge saved">
+            {status.masked}
+          </span>
+        )}
+      </div>
+
+      <div className="api-key-input-row">
+        <input
+          type="password"
+          className="settings-input api-key-input"
+          placeholder={isSaved ? "Enter new key to replace..." : (hint || "Enter API key...")}
+          value={inputVal}
+          onChange={(e) => setInputVal(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSave()}
+          autoComplete="new-password"
+        />
+        <button
+          className="btn-save-key"
+          onClick={handleSave}
+          disabled={saving || !inputVal.trim()}
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        {isSaved && (
+          <button
+            className="btn-clear-key"
+            onClick={handleClear}
+            disabled={clearing}
+            title="Remove saved key (falls back to server .env)"
+          >
+            {clearing ? "..." : "Clear"}
+          </button>
+        )}
+      </div>
+
+      {localMsg && (
+        <p className={`api-key-msg ${localMsg.startsWith("Error") ? "error" : "ok"}`}>
+          {localMsg}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ── Main SettingsPanel ────────────────────────────────────────────────────────
 
 /**
  * Props:
- *   onApply(settings)  - called when user clicks Apply with the new settings
- *   onClose()          - called when user clicks X or the backdrop
- *   currentSettings    - current applied settings (to initialize form)
+ *   onApply(settings)  - called when user clicks Apply
+ *   onClose()          - called when drawer is dismissed
+ *   currentSettings    - current applied settings (to initialise form)
  */
 export default function SettingsPanel({ onApply, onClose, currentSettings }) {
-  // Available options fetched from the backend
-  const [catalogue, setCatalogue] = useState(null);
-  const [loading,   setLoading]   = useState(true);
-  const [fetchErr,  setFetchErr]  = useState("");
+  // Catalogue fetched from backend
+  const [catalogue,  setCatalogue]  = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [fetchErr,   setFetchErr]   = useState("");
 
-  // Local form state – initialized from currentSettings then user can edit
-  const [provider,          setProvider]          = useState(currentSettings.provider);
-  const [modelName,         setModelName]          = useState(currentSettings.model_name);
-  const [apiKey,            setApiKey]             = useState(currentSettings.api_key || "");
-  const [facilityTypes,     setFacilityTypes]      = useState(currentSettings.facility_types);
-  const [maxTopoDepth,      setMaxTopoDepth]       = useState(currentSettings.max_topology_depth);
-  const [resampleAuto,      setResampleAuto]       = useState(currentSettings.resample_auto ?? true);
-  const [resampleFreqH,     setResampleFreqH]      = useState(currentSettings.resample_freq_h);
-  const [weatherFreqH,      setWeatherFreqH]       = useState(currentSettings.weather_freq_h);
+  // API key status fetched from backend (masked display)
+  const [keyStatus,  setKeyStatus]  = useState({});
+  const [ollamaErr,  setOllamaErr]  = useState("");
 
-  // ── Fetch catalogue on mount ─────────────────────────────────────────────
+  // LLM section
+  const [provider,       setProvider]       = useState(currentSettings.provider);
+  const [modelName,      setModelName]      = useState(currentSettings.model_name);
+  const [sessionApiKey,  setSessionApiKey]  = useState(currentSettings.api_key || "");
+
+  // Facility types
+  const [facilityTypes,  setFacilityTypes]  = useState(currentSettings.facility_types);
+
+  // Analysis params
+  const [maxTopoDepth,   setMaxTopoDepth]   = useState(currentSettings.max_topology_depth);
+  const [resampleAuto,   setResampleAuto]   = useState(currentSettings.resample_auto ?? true);
+  const [resampleFreqH,  setResampleFreqH]  = useState(currentSettings.resample_freq_h);
+  const [weatherFreqH,   setWeatherFreqH]   = useState(currentSettings.weather_freq_h);
+
+  // ── Fetch catalogue + key status + Ollama models on mount ──────────────────
   useEffect(() => {
-    fetch("/api/settings/defaults")
-      .then((r) => r.json())
-      .then((data) => {
-        setCatalogue(data);
+    const fetchAll = async () => {
+      try {
+        // 1. Settings catalogue
+        const catRes  = await fetch("/api/settings/defaults");
+        const catData = await catRes.json();
+        setCatalogue(catData);
+
+        // 2. Try to replace Ollama model list with live local models
+        const ollamaRes  = await fetch("/api/keys/ollama-models");
+        const ollamaData = await ollamaRes.json();
+        if (ollamaData.error) {
+          setOllamaErr(ollamaData.error);
+        } else if (ollamaData.models?.length) {
+          // Patch Ollama provider models with the live list
+          setCatalogue((prev) => ({
+            ...prev,
+            providers: prev.providers.map((p) =>
+              p.id === "ollama"
+                ? { ...p, models: ollamaData.models }
+                : p
+            ),
+          }));
+        }
+
+        // 3. Saved API key status (masked)
+        const keyRes  = await fetch("/api/keys");
+        const keyData = await keyRes.json();
+        setKeyStatus(keyData);
+
         setLoading(false);
-      })
-      .catch((e) => {
+      } catch (e) {
         setFetchErr(`Failed to load settings: ${e.message}`);
         setLoading(false);
-      });
+      }
+    };
+    fetchAll();
   }, []);
 
-  // When provider changes, reset model to the first available for that provider
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
   const handleProviderChange = (newProvider) => {
     setProvider(newProvider);
     if (catalogue) {
       const prov = catalogue.providers.find((p) => p.id === newProvider);
       if (prov?.models?.length) setModelName(prov.models[0].id);
     }
+    setSessionApiKey("");
   };
 
-  // Restore all values to backend defaults
   const handleRestoreDefaults = () => {
     if (!catalogue) return;
     const d = catalogue.defaults;
     setProvider(d.provider);
     setModelName(d.model_name);
-    setApiKey("");
+    setSessionApiKey("");
     setFacilityTypes(d.facility_types);
     setMaxTopoDepth(d.max_topology_depth);
     setResampleAuto(d.resample_auto ?? true);
@@ -127,7 +254,7 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
     onApply({
       provider,
       model_name:         modelName,
-      api_key:            apiKey.trim() || null,
+      api_key:            sessionApiKey.trim() || null,
       facility_types:     facilityTypes,
       max_topology_depth: maxTopoDepth,
       resample_auto:      resampleAuto,
@@ -137,25 +264,70 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
     onClose();
   };
 
-  const toggleFacility = (id) => {
+  const toggleFacility = (id) =>
     setFacilityTypes((prev) =>
       prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]
     );
+
+  // Persist a key to the backend store
+  const handleSaveKey = async (name, value) => {
+    const res = await fetch(`/api/keys/${name}`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ value }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Save failed");
+    }
+    // Refresh key status display
+    const keyRes  = await fetch("/api/keys");
+    setKeyStatus(await keyRes.json());
   };
 
-  // ── Derived helpers ──────────────────────────────────────────────────────
+  // Remove a key from the backend store
+  const handleClearKey = async (name) => {
+    const res = await fetch(`/api/keys/${name}`, { method: "DELETE" });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || "Clear failed");
+    }
+    const keyRes  = await fetch("/api/keys");
+    setKeyStatus(await keyRes.json());
+  };
+
+  // ── Derived values ──────────────────────────────────────────────────────────
   const currentProviderInfo = catalogue?.providers.find((p) => p.id === provider);
   const availableModels     = currentProviderInfo?.models ?? [];
   const needsApiKey         = currentProviderInfo?.needs_api_key ?? false;
   const limits              = catalogue?.limits ?? {
     max_topology_depth: { min: 1, max: 20 },
-    resample_freq_h:    { min: 1, max: 24 },
-    weather_freq_h:     { min: 1, max: 24 },
+    resample_freq_h:    { min: 1, max: 168 },
+    weather_freq_h:     { min: 1, max: 168 },
   };
   const defaults = catalogue?.defaults ?? currentSettings;
 
+  // Build the API keys config list (Google Maps + per-provider)
+  const apiKeyConfigs = [
+    {
+      label:   "Google Maps API Key",
+      keyName: "GOOGLE_MAPS_API_KEY",
+      hint:    "AIza...",
+    },
+    ...(catalogue?.providers
+      .filter((p) => p.needs_api_key && p.store_key)
+      .map((p) => ({
+        label:   `${p.label} API Key`,
+        keyName: p.store_key,
+        hint:    p.api_key_hint || "",
+      })) ?? []),
+  ];
+
   return (
-    <div className="settings-overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div
+      className="settings-overlay"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
       <div className="settings-drawer">
 
         {/* Header */}
@@ -170,7 +342,7 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
         </div>
 
         <div className="settings-body">
-          {loading && <p className="settings-loading">Loading options...</p>}
+          {loading  && <p className="settings-loading">Loading options...</p>}
           {fetchErr && <p className="settings-error">{fetchErr}</p>}
 
           {!loading && !fetchErr && catalogue && (
@@ -204,6 +376,11 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                     <span className="setting-label">Model</span>
                     <span className="setting-default">default: {defaults.model_name}</span>
                   </div>
+                  {provider === "ollama" && ollamaErr && (
+                    <p className="field-error" style={{ marginBottom: "6px" }}>
+                      {ollamaErr}
+                    </p>
+                  )}
                   <select
                     className="settings-select"
                     value={modelName}
@@ -213,30 +390,60 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                       <option key={m.id} value={m.id}>{m.label}</option>
                     ))}
                   </select>
+                  {provider === "ollama" && !ollamaErr && (
+                    <p className="field-hint">Live list from local Ollama instance.</p>
+                  )}
                 </div>
 
-                {/* API Key (only for cloud providers) */}
+                {/* Session API key override (for cloud providers only) */}
                 {needsApiKey && (
                   <div className="setting-row">
                     <div className="setting-label-row">
-                      <span className="setting-label">API Key</span>
-                      <span className="setting-default">leave blank to use server .env</span>
+                      <span className="setting-label">Session Key Override</span>
+                      <span className="setting-default">overrides saved key for this session</span>
                     </div>
                     <input
                       type="password"
                       className="settings-input"
-                      placeholder={currentProviderInfo?.api_key_hint || "Enter API key..."}
-                      value={apiKey}
-                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder={currentProviderInfo?.api_key_hint || "Leave blank to use saved key"}
+                      value={sessionApiKey}
+                      onChange={(e) => setSessionApiKey(e.target.value)}
+                      autoComplete="new-password"
                     />
                     <p className="field-hint">
-                      If blank, the server uses its configured environment variable.
+                      Temporary — not saved to disk. Use the API Keys section below to save permanently.
                     </p>
                   </div>
                 )}
               </section>
 
-              {/* ── Section 2: Facility Types ────────────────────────────── */}
+              {/* ── Section 2: API Keys (persistent storage) ─────────────── */}
+              <section className="settings-section">
+                <div className="section-title">API Keys</div>
+                <p className="section-hint">
+                  Keys are saved to <code>data/user_keys.json</code> on the server and survive restarts.
+                  Use <strong>Clear</strong> to remove a key and fall back to the server&apos;s .env file.
+                </p>
+
+                {apiKeyConfigs.map((cfg) => (
+                  <ApiKeyField
+                    key={cfg.keyName}
+                    label={cfg.label}
+                    keyName={cfg.keyName}
+                    hint={cfg.hint}
+                    status={keyStatus[cfg.keyName]}
+                    onSave={handleSaveKey}
+                    onClear={handleClearKey}
+                  />
+                ))}
+
+                <p className="field-hint" style={{ marginTop: "8px" }}>
+                  The Google Maps key is used by the map component.
+                  If not set, the map falls back to OpenStreetMap (no key required).
+                </p>
+              </section>
+
+              {/* ── Section 3: Facility Types ────────────────────────────── */}
               <section className="settings-section">
                 <div className="section-title">Facility Types</div>
                 <p className="section-hint">
@@ -268,7 +475,7 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                 )}
               </section>
 
-              {/* ── Section 3: Analysis Parameters ──────────────────────── */}
+              {/* ── Section 4: Analysis Parameters ──────────────────────── */}
               <section className="settings-section">
                 <div className="section-title">Analysis Parameters</div>
 
@@ -281,18 +488,14 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                   unit="hops"
                 />
 
-                {/* ── Resample frequency: auto / manual toggle ─────── */}
                 <div className="setting-row">
                   <div className="setting-label-row">
                     <span className="setting-label">Resample Interval</span>
                     <span className="setting-default">default: auto</span>
                   </div>
 
-                  {/* Toggle switch */}
                   <label className="toggle-row">
-                    <span className="toggle-label">
-                      Auto-select based on time span
-                    </span>
+                    <span className="toggle-label">Auto-select based on time span</span>
                     <button
                       className={`toggle-switch ${resampleAuto ? "on" : "off"}`}
                       onClick={() => setResampleAuto((v) => !v)}
@@ -303,13 +506,10 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                     </button>
                   </label>
 
-                  {/* Auto preview table */}
                   {resampleAuto && catalogue?.auto_freq_rules && (
                     <div className="auto-freq-table">
                       <div className="auto-freq-header">
-                        <span>Time span</span>
-                        <span>USGS</span>
-                        <span>Weather</span>
+                        <span>Time span</span><span>USGS</span><span>Weather</span>
                       </div>
                       {catalogue.auto_freq_rules.map((r, i) => (
                         <div className="auto-freq-row" key={i}>
@@ -322,7 +522,6 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                   )}
                 </div>
 
-                {/* Manual fields — only active when auto is OFF */}
                 <NumericField
                   label="USGS Data Resample Interval"
                   value={resampleFreqH}
@@ -332,7 +531,6 @@ export default function SettingsPanel({ onApply, onClose, currentSettings }) {
                   unit="hours"
                   disabled={resampleAuto}
                 />
-
                 <NumericField
                   label="Weather Data Interval"
                   value={weatherFreqH}

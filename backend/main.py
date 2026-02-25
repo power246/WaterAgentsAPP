@@ -15,6 +15,7 @@ from app.models.river import RiverAgentData
 # Import routers
 from app.api.ws.agent_ws import router as ws_router
 from app.api.settings_router import router as settings_router
+from app.api.keys_router import router as keys_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,15 +23,6 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Server startup / shutdown lifecycle.
-
-    Startup:  reset_memory_only() – clears ./data/memory but keeps ./.cache intact.
-              This avoids the race condition where uvicorn --reload's file watcher
-              scans .cache/ while it is being deleted and recreated.
-
-    Shutdown: release HTTP client and DiskCache handles.
-    """
     EnvManager.reset_memory_only()
     logger.info("Server startup complete.")
     yield
@@ -40,7 +32,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Water-Agent API", lifespan=lifespan)
 
-# Allow all origins for development (tighten in production)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -48,11 +39,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register WebSocket router: ws://host/ws/hydro-analysis
+# WebSocket: ws://host/ws/hydro-analysis
 app.include_router(ws_router, prefix="/ws")
 
-# Register settings REST router: GET /api/settings/defaults
+# Settings catalogue: GET /api/settings/defaults
 app.include_router(settings_router, prefix="/api/settings")
+
+# API key management: GET/POST/DELETE /api/keys/...
+# Also: GET /api/keys/ollama-models, GET /api/keys/map-key
+app.include_router(keys_router, prefix="/api/keys")
 
 
 # ── Request / Response schemas ─────────────────────────────────────────────
@@ -71,7 +66,7 @@ class AnalyzeResponse(BaseModel):
     target_id: str
     summary: Optional[Any] = None
     all_agents_data: Dict[str, Any] = Field(
-        ..., description="Full inference results for all river segments (used for map rendering)"
+        ..., description="Full inference results for all river segments"
     )
     params_used: List[List[str]]
     time_range: Dict[str, str]
@@ -81,25 +76,16 @@ class AnalyzeResponse(BaseModel):
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_water_system(request: AnalyzeRequest):
-    """
-    REST endpoint (non-streaming).
-    Runs the full inference pipeline and returns when all agents finish.
-    For real-time streaming, use the WebSocket endpoint at /ws/hydro-analysis.
-    """
     logger.info(f"[REST] Received query: {request.query!r}")
 
-    # Step 1: parse intent and build topology
     context = await AskerService.prepare_inference_context(
         user_query=request.query,
         selected_model=request.model_name
     )
     if not context:
-        raise HTTPException(
-            status_code=400,
-            detail="Unable to parse query intent or coordinates are invalid."
-        )
+        raise HTTPException(status_code=400,
+                            detail="Unable to parse query intent or coordinates are invalid.")
 
-    # Step 2: build agent dict and LangGraph
     agents_dict = {
         cid: RiverAgentData(**data)
         for cid, data in context["global_data"].items()
@@ -111,7 +97,6 @@ async def analyze_water_system(request: AnalyzeRequest):
     if not graph_app:
         raise HTTPException(status_code=500, detail="Computation graph construction failed.")
 
-    # Step 3: run inference
     initial_state = {
         "task":           request.query,
         "current_params": context["current_params"],
@@ -124,8 +109,8 @@ async def analyze_water_system(request: AnalyzeRequest):
     }
 
     try:
-        final_state   = await graph_app.ainvoke(initial_state)
-        target_agent  = final_state["global_data"].get(target_id)
+        final_state  = await graph_app.ainvoke(initial_state)
+        target_agent = final_state["global_data"].get(target_id)
 
         return AnalyzeResponse(
             target_id=target_id,

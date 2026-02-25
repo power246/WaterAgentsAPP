@@ -1,5 +1,3 @@
-// frontend/src/components/RightPanel.jsx
-
 import { useEffect, useRef, useState } from "react";
 import "./RightPanel.css";
 
@@ -29,13 +27,14 @@ function formatLogMessage(log) {
       return log.message || `Preparing: ${log.step}`;
 
     case "topology": {
-      // Use active_node_count / active_edge_count if available (sent by backend).
-      // These exclude nodes that have no data path from any USGS inlet.
-      const nc = log.active_node_count ?? log.nodes?.length ?? 0;
-      const ec = log.active_edge_count ?? log.edges?.length ?? 0;
-      const excluded = (log.nodes?.length ?? 0) - nc;
-      const exStr = excluded > 0 ? ` (+${excluded} excluded)` : "";
-      return `Topology ready: ${nc} active nodes${exStr}, ${ec} edges`;
+      // Count active vs excluded using the is_excluded flag set by graph.py BFS.
+      const allNodes    = log.nodes ?? [];
+      const allEdges    = log.edges ?? [];
+      const activeNodes = allNodes.filter((n) => !n.is_excluded);
+      const activeEdges = allEdges.filter((e) => !e.is_excluded);
+      const exclCount   = allNodes.length - activeNodes.length;
+      const exStr = exclCount > 0 ? ` (+${exclCount} excluded, no data path)` : "";
+      return `Topology ready: ${activeNodes.length} active nodes${exStr}, ${activeEdges.length} active edges`;
     }
 
     case "agent_start":

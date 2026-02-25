@@ -78,10 +78,9 @@ function ClickHandler({ onMapClick }) {
 }
 
 /**
- * Auto-zoom the map once the first node with real coordinates appears.
- * Coordinates arrive via agent_done events (not in the topology event),
- * so we watch validCount (nodes with non-zero lat/lon) instead of total
- * node count. hasFit prevents repeated re-centering after each agent.
+ * Auto-zoom the map once coordinates become available.
+ * Includes ALL nodes (active and excluded) so the full topology is visible.
+ * hasFit prevents repeated re-centering after each agent_done event.
  */
 function FitBoundsController({ nodes }) {
   const map = useMap();
@@ -158,6 +157,7 @@ export default function MapView({
   selectedPoint,
   topology,
   activeComid,
+  googleMapsKey,    // optional — when set, use Google Maps tiles instead of OSM
 }) {
   // 默认中心：北美中部
   const defaultCenter = [39.5, -98.35];
@@ -187,11 +187,18 @@ export default function MapView({
         zoom={defaultZoom}
         style={{ width: "100%", height: "100%" }}
       >
-        {/* 底图：OpenStreetMap（免费，无需 API Key）*/}
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        {/* Base tile layer — Google Maps when a key is available, OSM otherwise */}
+        {googleMapsKey ? (
+          <TileLayer
+            attribution="&copy; Google Maps"
+            url={`https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&key=${googleMapsKey}`}
+          />
+        ) : (
+          <TileLayer
+            attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
 
         {/* 地图点击监听 */}
         <ClickHandler onMapClick={onMapClick} />
@@ -216,13 +223,16 @@ export default function MapView({
           return <DirectedEdge key={i} fromNode={fromNode} toNode={toNode} isExcluded={edge.is_excluded} />;
         })}
 
-        {/* ── Agent 节点 ── */}
+        {/* ── Agent nodes ── */}
         {deduplicateCoords(topology.nodes).map((node) => {
+          // Skip rendering if coordinates are not yet available.
+          // With the pre-fetch in graph.py this should only happen on the
+          // very first render frame before the topology event arrives.
           if (!node.lat || !node.lon) return null;
 
-          const color     = getNodeColor(node, activeComid);
-          const isActive  = node.comid === activeComid;
-          const radius    = node.is_target ? 12 : node.is_inlet ? 10 : 8;
+          const color    = getNodeColor(node, activeComid);
+          const isActive = node.comid === activeComid;
+          const radius   = node.is_target ? 12 : node.is_inlet ? 10 : 8;
 
           return (
             <span key={node.comid}>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import MapView from "./components/MapView";
 import ControlPanel from "./components/ControlPanel";
 import RightPanel from "./components/RightPanel";
@@ -27,6 +27,20 @@ export default function App() {
 
   // Overall pipeline status: idle | running | done | error
   const [status, setStatus] = useState("idle");
+
+  // Google Maps API key fetched from the backend key store.
+  // If null, MapView falls back to OpenStreetMap (no key required).
+  const [googleMapsKey, setGoogleMapsKey] = useState(null);
+
+  // Fetch the Google Maps key once on mount
+  useEffect(() => {
+    fetch("/api/keys/map-key")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.key) setGoogleMapsKey(data.key);
+      })
+      .catch(() => { /* silently fall back to OSM */ });
+  }, []);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -130,6 +144,7 @@ export default function App() {
                     // back to whatever was already stored if the new value is 0.
                     lat:            data.lat  || n.lat,
                     lon:            data.lon  || n.lon,
+                    site_id:        data.site_id  || n.site_id,
                     result:         data.result,
                     prompt_used:    data.prompt_used,
                     llm_raw_output: data.llm_raw_output,
@@ -198,6 +213,7 @@ export default function App() {
           selectedPoint={selectedPoint}
           topology={topology}
           activeComid={activeComid}
+          googleMapsKey={googleMapsKey}
         />
       </main>
 

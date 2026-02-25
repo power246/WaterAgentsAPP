@@ -17,12 +17,12 @@ ToDo:
 2. 可以有个按钮清除记忆与cache
 3. map中的node不好点，判定可以大些
 
-（Claude替换最新 Prompt.py，nodes.py，ControlPanel.jsx，App.css）
+（Claude替换最新）
 4. (完成) 根据时间跨度来切换平均值跨度
 5. (完成) 解释要更加清晰
 6. (完成) Icon 改成学校的
 7. 画图（数据解释）
-8. google map API
+8. (完成) google map API
 9. 可以中断推理
 
 100. show的剧本
@@ -42,4 +42,11 @@ catch 删除 (FastAPI 调用？)
 
 test:
 Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.
+
+
+inspector:
+1. USGS site   yes
+2. Confidence  全都是80%
+3. 只有Analysis文本，我还需要LLM input prompt和row output来观察输出与输入
+4. Analysis 要更加清晰（结合我之前的prompt文本）
 

@@ -2,7 +2,7 @@
   "history": [],
   "past_inferences": [
     {
-      "timestamp": "2026-02-20T21:12:57.105857",
+      "timestamp": "2026-02-24T19:49:35.792928",
       "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
       "structured_inference": {
         "parameters": [
@@ -16,14 +16,14 @@
             "name": "Alkalinity",
             "code": "00409",
             "estimate_value": null,
-            "unit": null
+            "unit": "mg/L"
           }
         ],
         "estimated_flow": null,
-        "confidence": 0.8,
-        "analysis": "WHAT WE KNOW\nUSGS gauge at this site recorded pH = 7.6 on 2026-01-08 at 12:00.\nWHY THE ESTIMATE IS WHAT IT IS\nThe observed pH of 7.6 suggests mildly alkaline conditions. Moving downstream, the river passes through sandstone terrain which tends to resist pH change (a process called buffering), so we expect pH to remain near 7.5-7.7 at this segment.\nWHAT THE VALUE MEANS\nA pH of 7.6 is slightly alkaline — similar to tap water in most cities. It is safe for most fish species and poses no immediate concern for human contact.\nUNCERTAINTY & CONFIDENCE\nWe assigned a confidence level of 0.8 because we have real-time USGS observations, but the data is relatively consistent, with minor fluctuations over time. No nearby facilities or weather events significantly impact our estimate.\nKEY TAKEAWAY\nThe river pH at this segment remains mildly alkaline, posing no immediate concerns for aquatic life or human contact."
+        "confidence": 0.95,
+        "analysis": "WHAT WE KNOW: We have direct real-time USGS sensor readings for pH (USGS code 00400) from site 04024000, covering the time range 2026-01-01 to 2026-01-15. ALL values are 7.6, with no variation across this full window. WHY THE ESTIMATE: The physical process is that sandstone terrain buffers (resists) pH change, keeping it near 7.5. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have 16 direct sensor readings with zero variation across the full 15-day window, giving high certainty. KEY TAKEAWAY: The pH remains stable at a safe level throughout this period."
       },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.6,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": null\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.8,\n  \"analysis\": \"WHAT WE KNOW\\nUSGS gauge at this site recorded pH = 7.6 on 2026-01-08 at 12:00.\\nWHY THE ESTIMATE IS WHAT IT IS\\nThe observed pH of 7.6 suggests mildly alkaline conditions. Moving downstream, the river passes through sandstone terrain which tends to resist pH change (a process called buffering), so we expect pH to remain near 7.5-7.7 at this segment.\\nWHAT THE VALUE MEANS\\nA pH of 7.6 is slightly alkaline — similar to tap water in most cities. It is safe for most fish species and poses no immediate concern for human contact.\\nUNCERTAINTY & CONFIDENCE\\nWe assigned a confidence level of 0.8 because we have real-time USGS observations, but the data is relatively consistent, with minor fluctuations over time. No nearby facilities or weather events significantly impact our estimate.\\nKEY TAKEAWAY\\nThe river pH at this segment remains mildly alkaline, posing no immediate concerns for aquatic life or human contact.\"\n}"
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.6,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.95,\n  \"analysis\": \"WHAT WE KNOW: We have direct real-time USGS sensor readings for pH (USGS code 00400) from site 04024000, covering the time range 2026-01-01 to 2026-01-15. ALL values are 7.6, with no variation across this full window. WHY THE ESTIMATE: The physical process is that sandstone terrain buffers (resists) pH change, keeping it near 7.5. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have 16 direct sensor readings with zero variation across the full 15-day window, giving high certainty. KEY TAKEAWAY: The pH remains stable at a safe level throughout this period.\" \n}"
     }
   ],
   "static_metadata": {

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import "./LogPanel.css";
 
 /**
- * Return the corresponding icon and color class name based on the event type
+ * 根据事件类型返回对应的图标和颜色类名
  */
 function getEventStyle(type) {
   switch (type) {
@@ -16,19 +16,27 @@ function getEventStyle(type) {
 }
 
 /**
- * Format a single event object into readable text
+ * 将单条事件对象格式化为可读文本
  */
 function formatEventMessage(log) {
   switch (log.type) {
-    case "topology":
-      return `Topology ready: ${log.nodes?.length || 0} nodes, ${log.edges?.length || 0} edges`;
+    case "topology": {
+      const allNodes    = log.nodes ?? [];
+      const activeCount = allNodes.filter((n) => !n.is_excluded).length;
+      const exclCount   = allNodes.filter((n) =>  n.is_excluded).length;
+      const activeEdges = (log.edges ?? []).filter((e) => !e.is_excluded).length;
+      return (
+        `Topology ready: ${activeCount} active nodes, ${activeEdges} active edges` +
+        (exclCount > 0 ? ` (+${exclCount} excluded, no data path)` : "")
+      );
+    }
 
     case "agent_start":
-      return `Agent [${log.comid}] Start reasoning ..`;
+      return `Agent [${log.comid}] 开始推理...`;
 
     case "agent_done": {
       const result = log.result;
-      if (!result) return `Agent [${log.comid}] Completed (with no result)`;
+      if (!result) return `Agent [${log.comid}] 完成（无结果）`;
       const paramStr = result.parameters
         ?.map((p) =>
           p.estimate_value !== null
@@ -36,14 +44,14 @@ function formatEventMessage(log) {
             : `${p.name}: N/A`
         )
         .join(" | ");
-      return `Agent [${log.comid}] completed → ${paramStr || "No parameter"} | Confidence: ${((result.confidence || 0) * 100).toFixed(0)}%`;
+      return `Agent [${log.comid}] 完成 → ${paramStr || "无参数"} | 置信度: ${((result.confidence || 0) * 100).toFixed(0)}%`;
     }
 
     case "done":
-      return `All reasoning completed, target node: ${log.target_id}`;
+      return `✔ 全部推理完成，目标节点: ${log.target_id}`;
 
     case "error":
-      return `Error: ${log.message}`;
+      return `错误: ${log.message}`;
 
     default:
       return log.message || JSON.stringify(log);
@@ -51,14 +59,14 @@ function formatEventMessage(log) {
 }
 
 /**
- * Log panel component
+ * 日志面板组件
  * 
  * Props:
- *   logs   - Log list, each entry containing event data + timestamp field
- *   status - Current status: idle | running | done | error
+ *   logs   - 日志列表，每条包含事件数据 + timestamp 字段
+ *   status - 当前状态 idle | running | done | error
  */
 export default function LogPanel({ logs, status }) {
-  // Used for automatically scrolling to the latest log
+  // 用于自动滚动到最新日志
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -67,35 +75,35 @@ export default function LogPanel({ logs, status }) {
 
   return (
     <div className="log-panel">
-      {/* head */}
+      {/* 头部 */}
       <div className="panel-header">
         <span className="icon">📡</span>
-        <h2>Real-time inference log</h2>
+        <h2>实时推理日志</h2>
         <span className={`log-status-dot dot-${status}`} title={status} />
       </div>
 
-      {/* Log List */}
+      {/* 日志列表 */}
       <div className="log-list">
         {logs.length === 0 ? (
-          <div className="log-empty">Waiting for analysis to start ..</div>
+          <div className="log-empty">等待分析开始...</div>
         ) : (
           logs.map((log, i) => {
             const { icon, cls } = getEventStyle(log.type);
             return (
               <div key={i} className={`log-entry ${cls}`}>
-                {/* timestamp */}
+                {/* 时间戳 */}
                 <span className="log-time">{log.timestamp}</span>
 
-                {/* icon */}
+                {/* 图标 */}
                 <span className="log-icon">{icon}</span>
 
-                {/* Main message text */}
+                {/* 主要消息文本 */}
                 <span className="log-msg">{formatEventMessage(log)}</span>
 
-                {/* If it is "agent_done", display the analysis text (collapsible) */}
+                {/* 如果是 agent_done，展示分析文本（可折叠）*/}
                 {log.type === "agent_done" && log.result?.analysis && (
                   <details className="log-detail">
-                    <summary>View analysis details</summary>
+                    <summary>查看分析详情</summary>
                     <p>{log.result.analysis}</p>
                   </details>
                 )}
@@ -103,7 +111,7 @@ export default function LogPanel({ logs, status }) {
             );
           })
         )}
-        {/* scroll anchor */}
+        {/* 滚动锚点 */}
         <div ref={bottomRef} />
       </div>
     </div>

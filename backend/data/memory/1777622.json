@@ -2,28 +2,28 @@
   "history": [],
   "past_inferences": [
     {
-      "timestamp": "2026-02-20T21:13:32.847359",
+      "timestamp": "2026-02-24T19:50:03.548904",
       "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
       "structured_inference": {
         "parameters": [
           {
             "name": "pH",
             "code": "00400",
-            "estimate_value": 7.6,
+            "estimate_value": 7.5,
             "unit": "std units"
           },
           {
             "name": "Alkalinity",
             "code": "00409",
             "estimate_value": null,
-            "unit": null
+            "unit": "mg/L"
           }
         ],
         "estimated_flow": null,
-        "confidence": 0.7,
-        "analysis": "WHAT WE KNOW: No USGS observations exist for this segment, so we rely solely on the upstream agent's data and apply mass balance. Upstream COMID 1777616 provided an estimated pH of 7.6 with moderate confidence (0.7). WHY THE ESTIMATE IS WHAT IT IS: Since the upstream pH is consistent, we can infer that the river's acidity remains stable due to the buffering effect of the sandstone terrain it flows through. This process resists significant changes in pH, which explains why our estimate remains consistent across the time range. WHAT THE VALUE MEANS: A pH of 7.6 is slightly alkaline, similar to tap water in most cities. It poses no immediate concern for human contact or aquatic life. UNCERTAINTY & CONFIDENCE: We assign a moderate confidence level (0.7) due to the limited data available and the possibility that recent rainfall could have changed conditions. KEY TAKEAWAY: The river's pH remains stable at 7.6 throughout the period, indicating no significant changes or concerns for human contact."
+        "confidence": 0.65,
+        "analysis": "WHAT WE KNOW: Upstream pH data comes from direct real-time USGS sensor readings for the entire 15-day period, with a consistent reading of 7.6 across all timestamps. Alkalinity has no sensor data in upstream segments, so we cannot estimate its value. WHY THE ESTIMATE: We use mass balance principles to derive values from upstream. With pH being relatively stable and only slightly affected by nearby facilities or weather, our confidence relies on the single direct reading of 7.6. Since alkalinity data is missing in all upstream segments, we set it to null as there's no reliable way to estimate its value. WHAT IT MEANS: Our estimated pH of 7.5 means the water remains slightly alkaline, similar to tap water. CONFIDENCE REASON: We have a moderate confidence level due to the single direct reading and lack of upstream data for alkalinity. KEY TAKEAWAY: The pH at this segment is estimated to be around 7.5, reflecting the stable conditions upstream."
       },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.6,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": null\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.7,\n  \"analysis\": \"WHAT WE KNOW: No USGS observations exist for this segment, so we rely solely on the upstream agent's data and apply mass balance. Upstream COMID 1777616 provided an estimated pH of 7.6 with moderate confidence (0.7). WHY THE ESTIMATE IS WHAT IT IS: Since the upstream pH is consistent, we can infer that the river's acidity remains stable due to the buffering effect of the sandstone terrain it flows through. This process resists significant changes in pH, which explains why our estimate remains consistent across the time range. WHAT THE VALUE MEANS: A pH of 7.6 is slightly alkaline, similar to tap water in most cities. It poses no immediate concern for human contact or aquatic life. UNCERTAINTY & CONFIDENCE: We assign a moderate confidence level (0.7) due to the limited data available and the possibility that recent rainfall could have changed conditions. KEY TAKEAWAY: The river's pH remains stable at 7.6 throughout the period, indicating no significant changes or concerns for human contact.\"\n}"
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: Upstream pH data comes from direct real-time USGS sensor readings for the entire 15-day period, with a consistent reading of 7.6 across all timestamps. Alkalinity has no sensor data in upstream segments, so we cannot estimate its value. WHY THE ESTIMATE: We use mass balance principles to derive values from upstream. With pH being relatively stable and only slightly affected by nearby facilities or weather, our confidence relies on the single direct reading of 7.6. Since alkalinity data is missing in all upstream segments, we set it to null as there's no reliable way to estimate its value. WHAT IT MEANS: Our estimated pH of 7.5 means the water remains slightly alkaline, similar to tap water. CONFIDENCE REASON: We have a moderate confidence level due to the single direct reading and lack of upstream data for alkalinity. KEY TAKEAWAY: The pH at this segment is estimated to be around 7.5, reflecting the stable conditions upstream.\"\n}"
     }
   ],
   "static_metadata": {

@@ -1,420 +1,253 @@
+import asyncio
 import logging
 from collections import deque
 from functools import partial
-from typing import Dict, List, AsyncGenerator, Any
+from typing import Dict, List, AsyncGenerator, Any, Set
 
 from langgraph.graph import StateGraph
 from app.agents.state import WaterSystemState, AgentSubState
 from app.agents.nodes import inference_node
 from app.models.river import RiverAgentData
+from app.services.asker_service import AskerService
+from app.services.nldi_service import NLDIService
 
 logger = logging.getLogger(__name__)
 
 
-def create_hydrological_graph(agents_dict: Dict[str, RiverAgentData], entry_points: List[str]):
+# ── Shared BFS helper ─────────────────────────────────────────────────────────
+
+def _compute_active_nodes(
+    agents_dict: Dict[str, RiverAgentData],
+    entry_points: List[str],
+) -> Set[str]:
     """
-    Build a LangGraph state machine from the topology dictionary.
-    Only keeps the active inference chain driven by USGS station entry points.
-
-    Args:
-        agents_dict:  all river agent nodes, keyed by comid
-        entry_points: comids that have real USGS measurement data
-
-    Returns:
-        compiled LangGraph app
+    BFS downstream from every USGS inlet to find all nodes reachable by data flow.
+    Nodes NOT in the returned set are "excluded" — they exist in the topology but
+    have no data path connecting them to a real measurement station.
     """
-    # ── 1. BFS: find all nodes reachable from entry points ──────────────────
-    active_nodes = set()
-    trace_queue = deque(entry_points)
+    active: Set[str] = set()
+    queue = deque(entry_points)
+    while queue:
+        cid = queue.popleft()
+        if cid in active:
+            continue
+        active.add(cid)
+        for did in agents_dict[cid].downstream_ids:
+            if did in agents_dict:
+                queue.append(did)
+    return active
 
-    while trace_queue:
-        curr_id = trace_queue.popleft()
-        if curr_id not in active_nodes:
-            active_nodes.add(curr_id)
-            for did in agents_dict[curr_id].downstream_ids:
-                if did in agents_dict:
-                    trace_queue.append(did)
 
-    logger.info(f"BFS complete: {len(active_nodes)} active nodes, entries: {entry_points}")
+# ── Graph builder ─────────────────────────────────────────────────────────────
 
-    # ── 2. Initialize LangGraph ──────────────────────────────────────────────
+def create_hydrological_graph(
+    agents_dict:  Dict[str, RiverAgentData],
+    entry_points: List[str],
+):
+    """
+    Build and compile a LangGraph state machine from the river topology.
+    Only nodes reachable by data flow (active_nodes) are added as graph nodes.
+    """
+    active_nodes = _compute_active_nodes(agents_dict, entry_points)
+    logger.info(
+        f"[Graph] BFS complete: {len(active_nodes)} active nodes, "
+        f"inlets: {entry_points}"
+    )
+
     workflow = StateGraph(WaterSystemState)
 
-    # ── 3. Node wrapper: converts WaterSystemState -> AgentSubState ──────────
+    # Node wrapper: translates WaterSystemState → AgentSubState for each agent
     async def node_wrapper(state: WaterSystemState, comid: str):
-        logger.info(f"Agent [{comid}] building inference prompt...")
+        logger.info(f"[Agent {comid}] Building inference prompt...")
         sub_state: AgentSubState = {
-            "comid":          comid,
-            "task":           state["task"],
-            "current_params": state["current_params"],
-            "facility_types": state["facility_types"],
-            "start_date":     state["start_date"],
-            "end_date":       state["end_date"],
-            "selected_model": state.get("selected_model"),
-            "provider":       state.get("provider", "ollama"),
-            "api_key":        state.get("api_key"),
-            "resample_freq":  state.get("resample_freq", "6h"),
-            "weather_freq":   state.get("weather_freq", "12h"),
+            "comid":           comid,
+            "task":            state["task"],
+            "current_params":  state["current_params"],
+            "facility_types":  state["facility_types"],
+            "start_date":      state["start_date"],
+            "end_date":        state["end_date"],
+            "selected_model":  state.get("selected_model"),
+            "resample_auto":   state.get("resample_auto",   True),
+            "resample_freq_h": state.get("resample_freq_h", 12),
             "upstream_results": {
                 uid: state["global_data"][uid].get("output")
                 for uid in agents_dict[comid].upstream_ids
                 if uid in state["global_data"]
-            }
+            },
         }
         return await inference_node(sub_state)
 
-    # ── 4. Register active nodes ─────────────────────────────────────────────
     for cid in active_nodes:
         workflow.add_node(cid, partial(node_wrapper, comid=cid))
 
-    # ── 5. Add dependency edges ──────────────────────────────────────────────
     for cid in active_nodes:
         for up_id in agents_dict[cid].upstream_ids:
             if up_id in active_nodes:
                 workflow.add_edge(up_id, cid)
-                logger.debug(f"  edge: {up_id} -> {cid}")
+                logger.debug(f"[Graph] Edge: {up_id} -> {cid}")
 
-    # ── 6. Set entry points ──────────────────────────────────────────────────
     for ep in entry_points:
         workflow.set_entry_point(ep)
 
-    logger.info(f"Graph compiled: {len(active_nodes)} active nodes")
+    logger.info(
+        f"[Graph] Compiled: {len(active_nodes)} active nodes, "
+        f"inlets: {entry_points}"
+    )
     return workflow.compile()
 
 
+# ── WebSocket streaming runner ────────────────────────────────────────────────
+
 async def run_hydro_graph(params: Dict[str, Any]) -> AsyncGenerator[Dict, None]:
     """
-    Streaming version of the inference pipeline for WebSocket delivery.
+    Stream inference events over WebSocket.
 
-    Yields progress events at every major step so the client receives
-    regular updates and the connection is never silently idle for long.
-
-    Event types:
-        "preparing"   : a long setup step has started (sent BEFORE the await)
-        "topology"    : topology ready, contains nodes + edges for map rendering
-        "agent_start" : an Agent node has started inference
-        "agent_done"  : an Agent node finished (result + full LLM I/O included)
-        "done"        : all agents finished successfully
-        "error"       : something went wrong
-        "ping"        : keepalive sent by agent_ws.py heartbeat (ignored by frontend)
+    Event types emitted:
+        topology    — full node/edge map including is_excluded flag and coordinates
+        agent_start — a node has begun LLM inference
+        agent_done  — a node finished; carries result + updated coordinates
+        done        — all nodes finished
+        error       — something went wrong
     """
-    from app.services.asker_service import AskerService
-    from app.services.nldi_service import NLDIService
-    from app.services.topology_service import TopologyService
-    from app.core.config import settings
-
-    user_query         = params.get("query", "")
-    model_name         = params.get("model_name", "llama3:8b")
-    provider           = params.get("provider", "ollama")
-    api_key            = params.get("api_key") or None
-    facility_types     = params.get("facility_types") or settings.FACILITY_TYPES
-    max_topology_depth = int(params.get("max_topology_depth", settings.MAX_TOPOLOGY_DEPTH))
-    resample_auto      = bool(params.get("resample_auto", True))
-    resample_freq_h    = int(params.get("resample_freq_h", 6))
-    weather_freq_h     = int(params.get("weather_freq_h", 12))
-    # Note: if resample_auto is True the freq values will be overwritten below
-    # after start_date/end_date are known (line ~210). The manual values are
-    # kept as a fallback in case auto computation cannot run.
-    resample_freq      = f"{resample_freq_h}h"
-    weather_freq       = f"{weather_freq_h}h"
+    user_query         = params.get("query",              "")
+    model_name         = params.get("model_name",         "llama3:8b")
+    max_topology_depth = params.get("max_topology_depth", None)
+    resample_auto      = params.get("resample_auto",      True)
+    resample_freq_h    = int(params.get("resample_freq_h") or 12)
 
     logger.info(
-        f"[WS] Query: {user_query!r} | provider: {provider}/{model_name} | "
-        f"depth: {max_topology_depth} | resample: {resample_freq} | weather: {weather_freq}"
+        f"[WS] Query: {user_query!r} | Model: {model_name} | "
+        f"Depth: {max_topology_depth} | "
+        f"Resample: {'auto' if resample_auto else f'{resample_freq_h}h'}"
     )
 
-    # ── Step 1a: LLM intent parsing ──────────────────────────────────────────
-    # This calls the LLM to extract location, parameters, and time range.
-    # It is the first major latency spike (~10-60s depending on model).
-    yield {
-        "type": "preparing",
-        "step": "intent_parsing",
-        "message": "Parsing query with LLM..."
-    }
+    # ── Step 1: Parse intent and build topology ───────────────────────────────
     try:
-        data_needs = await AskerService.parse_user_intent(user_query, model_name=model_name)
-    except Exception as e:
-        logger.error(f"[WS] Intent parsing failed: {e}")
-        yield {"type": "error", "message": f"Intent parsing failed: {str(e)}"}
-        return
-
-    if not data_needs or not data_needs.get("location"):
-        yield {"type": "error", "message": "Could not parse a valid location from the query."}
-        return
-
-    # ── Step 1b: Geocoding / coordinate resolution ───────────────────────────
-    yield {
-        "type": "preparing",
-        "step": "geocoding",
-        "message": "Resolving coordinates..."
-    }
-    location = data_needs["location"]
-    lat, lon = None, None
-    try:
-        if isinstance(location, list) and len(location) == 2:
-            lat, lon = float(location[0]), float(location[1])
-        elif isinstance(location, str):
-            coords = await AskerService.geocode_location(location)
-            if coords:
-                lat, lon = coords
-    except Exception as e:
-        logger.error(f"[WS] Geocoding failed: {e}")
-        yield {"type": "error", "message": f"Geocoding failed: {str(e)}"}
-        return
-
-    if lat is None or lon is None:
-        yield {"type": "error", "message": f"Could not resolve coordinates for: {location}"}
-        return
-
-    # ── Step 1c: NLDI COMID lookup ───────────────────────────────────────────
-    yield {
-        "type": "preparing",
-        "step": "comid_lookup",
-        "message": f"Finding river segment at ({lat:.4f}, {lon:.4f})..."
-    }
-    try:
-        start_comid = await NLDIService.get_main_comid(lat, lon)
-    except Exception as e:
-        logger.error(f"[WS] COMID lookup failed: {e}")
-        yield {"type": "error", "message": f"COMID lookup failed: {str(e)}"}
-        return
-
-    if not start_comid:
-        yield {"type": "error", "message": f"No river segment found near ({lat}, {lon})."}
-        return
-    logger.info(f"[WS] COMID resolved: {start_comid}")
-
-    # ── Step 1d: Semantic parameter mapping ──────────────────────────────────
-    yield {
-        "type": "preparing",
-        "step": "param_mapping",
-        "message": "Mapping parameters to USGS codes..."
-    }
-    try:
-        char_names   = data_needs.get("characteristic_names", [])
-        final_params = []
-        for name in char_names:
-            matches = await AskerService.get_parm_cd_from_name(name, top_n=2)
-            final_params.extend(matches)
-        # Deduplicate by parameter code
-        seen, unique_params = set(), []
-        for p in final_params:
-            if p[1] not in seen:
-                unique_params.append(p)
-                seen.add(p[1])
-    except Exception as e:
-        logger.error(f"[WS] Parameter mapping failed: {e}")
-        yield {"type": "error", "message": f"Parameter mapping failed: {str(e)}"}
-        return
-
-    time_range = data_needs.get("time_range", {})
-    start_date = time_range.get("start", "2026-02-01")
-    end_date   = time_range.get("end",   "2026-02-10")
-
-    # ── Auto-select resample frequency based on time span ────────────────────
-    # Overrides manual values when resample_auto is True.
-    if resample_auto:
-        try:
-            from datetime import date as _date
-            _d0 = _date.fromisoformat(start_date)
-            _d1 = _date.fromisoformat(end_date)
-            span_days = (_d1 - _d0).days
-            # Rules ordered from shortest to longest span — first match wins.
-            _RULES = [
-                (7,    6,  12),   # <= 7 days  : USGS 6h  / weather 12h
-                (14,  12,  24),   # <= 14 days : USGS 12h / weather 24h
-                (30,  24,  48),   # <= 30 days : USGS 24h / weather 48h
-                (90,  48,  72),   # <= 90 days : USGS 48h / weather 72h
-                (9999, 72, 168),  # > 90 days  : USGS 72h / weather 168h
-            ]
-            for max_d, r_h, w_h in _RULES:
-                if span_days <= max_d:
-                    resample_freq = f"{r_h}h"
-                    weather_freq  = f"{w_h}h"
-                    break
-            logger.info(
-                f"[WS] Auto-freq: span={span_days}d -> "                f"resample={resample_freq}, weather={weather_freq}"
-            )
-        except Exception as _e:
-            logger.warning(f"[WS] Auto-freq fallback (parse error: {_e})")
-
-    # ── Step 1e: Topology building (most time-consuming step) ────────────────
-    # TopologyService does BFS upstream via NLDI, checking each COMID for
-    # an associated USGS station. Each hop is a network request.
-    yield {
-        "type": "preparing",
-        "step": "topology",
-        "message": "Building upstream topology (this may take 1-2 minutes)..."
-    }
-    try:
-        agents_dict_raw = await TopologyService.build_topology(
-            start_comid=start_comid,
-            max_depth=max_topology_depth
+        context = await AskerService.prepare_inference_context(
+            user_query=user_query,
+            selected_model=model_name,
+            max_topology_depth=max_topology_depth,
         )
-    except Exception as e:
-        logger.error(f"[WS] Topology build failed: {e}")
-        yield {"type": "error", "message": f"Topology build failed: {str(e)}"}
+    except Exception as exc:
+        logger.error(f"[WS] AskerService failed: {exc}")
+        yield {"type": "error", "message": f"Intent parsing failed: {str(exc)}"}
         return
 
-    # Detect inlet nodes (those with a real USGS station)
-    inlet_comids = [cid for cid, r in agents_dict_raw.items() if r.has_usgs_site]
-    if not inlet_comids:
-        inlet_comids = [str(start_comid)]
-        logger.info(f"[WS] No upstream stations found; using target {start_comid} as isolated node")
+    if not context:
+        yield {"type": "error", "message": "Could not parse query intent or coordinates."}
+        return
 
-    target_id   = str(start_comid)
-    agents_dict = agents_dict_raw  # Dict[str, RiverAgentData]
-
-    # ── Step 1f: Pre-fetch coordinates for all nodes ──────────────────────────
-    # Coordinates are normally fetched inside inference_node, which means the
-    # topology event would carry lat:0/lon:0 for every node and MapView would
-    # filter them all out (causing invisible nodes and no pulse animation).
-    # We pre-fetch them here so the topology event contains real positions.
-    # Most will be cache hits (NLDIService uses DiskCache) so this is fast.
-    yield {
-        "type":    "preparing",
-        "step":    "coords",
-        "message": f"Pre-fetching coordinates for {len(agents_dict)} nodes..."
+    agents_dict  = {
+        cid: RiverAgentData(**data)
+        for cid, data in context["global_data"].items()
     }
+    target_id    = context["start_comid"]
+    inlet_comids = context["inlet_comids"]
 
-    from app.services.memory_service import MemoryService
-    import asyncio as _asyncio
+    # ── Step 2: Determine active vs excluded nodes ────────────────────────────
+    # Do this BEFORE sending the topology event so we can set is_excluded correctly.
+    active_nodes = _compute_active_nodes(agents_dict, inlet_comids)
+    excluded_nodes = set(agents_dict.keys()) - active_nodes
+    logger.info(
+        f"[WS] Active: {len(active_nodes)}, Excluded: {len(excluded_nodes)}"
+    )
 
-    async def _get_coords(cid: str, river) -> tuple:
-        """Return (cid, lat, lon): try memory cache → NLDIService → (0,0)."""
+    # ── Step 3: Pre-fetch coordinates for ALL nodes concurrently ─────────────
+    # Coordinates are normally fetched lazily inside inference_node.  We fetch
+    # them here upfront so the map can display ALL nodes immediately when the
+    # topology event arrives — before any inference has started.
+    # NLDIService uses a disk cache so these calls are fast on repeated runs.
+    async def _fetch_coords(cid: str):
+        """Return (cid, lat, lon) — falls back to (cid, 0.0, 0.0) on error."""
+        river = agents_dict[cid]
+        # If coordinates are already populated (e.g. from memory cache), use them.
         if river.lat and river.lon:
             return cid, river.lat, river.lon
-        mem = await MemoryService.load_memory(f"./data/memory/{cid}.json")
-        cached = mem.get("static_metadata", {})
-        if cached.get("lat") and cached.get("lon"):
-            return cid, cached["lat"], cached["lon"]
-        coords = await NLDIService.get_coords_by_comid(cid)
-        if coords:
-            return cid, coords["lat"], coords["lon"]
+        try:
+            coords = await NLDIService.get_coords_by_comid(cid)
+            if coords:
+                return cid, coords["lat"], coords["lon"]
+        except Exception as exc:
+            logger.warning(f"[WS] Coord fetch failed for {cid}: {exc}")
         return cid, 0.0, 0.0
 
-    coord_results = await _asyncio.gather(
-        *[_get_coords(cid, river) for cid, river in agents_dict.items()]
-    )
-    for cid, lat, lon in coord_results:
-        agents_dict[cid].lat = lat
-        agents_dict[cid].lon = lon
+    coord_results = await asyncio.gather(*[_fetch_coords(cid) for cid in agents_dict])
+    coord_map = {cid: (lat, lon) for cid, lat, lon in coord_results}
 
-    global_data = {cid: river.model_dump() for cid, river in agents_dict.items()}
-    logger.info(f"[WS] Coordinates ready for {len(agents_dict)} nodes")
-
-    # ── Compute active nodes via BFS (same logic as create_hydrological_graph) ─
-    # Nodes that are NOT reachable from any inlet are excluded from inference.
-    # We mark them with is_excluded=True so the frontend can render them
-    # differently (dimmed / different color) and we exclude them from counts.
-    from collections import deque as _deque
-    active_nodes: set = set()
-    _q = _deque(inlet_comids)
-    while _q:
-        _curr = _q.popleft()
-        if _curr not in active_nodes:
-            active_nodes.add(_curr)
-            for _did in agents_dict[_curr].downstream_ids:
-                if _did in agents_dict:
-                    _q.append(_did)
-
-    active_edges = set()  # "from->to" pairs that connect two active nodes
-    for cid in active_nodes:
-        for up_id in agents_dict[cid].upstream_ids:
-            if up_id in active_nodes:
-                active_edges.add((up_id, cid))
-
-    logger.info(
-        f"[WS] Active inference chain: {len(active_nodes)} nodes "
-        f"(excluded: {len(agents_dict) - len(active_nodes)})"
-    )
-
-    # ── Step 2: Push topology to frontend ────────────────────────────────────
+    # ── Step 4: Build and send topology event ────────────────────────────────
     topology_nodes = []
     topology_edges = []
+
     for cid, river in agents_dict.items():
+        lat, lon = coord_map.get(cid, (river.lat, river.lon))
         topology_nodes.append({
-            "comid":         cid,
-            "lat":           river.lat,
-            "lon":           river.lon,
+            "comid":        cid,
+            "lat":          lat,
+            "lon":          lon,
             "has_usgs_site": river.has_usgs_site,
-            "site_id":       river.site_id,
-            "is_target":     cid == target_id,
-            "is_inlet":      cid in inlet_comids,
-            # Nodes not reachable from any inlet are shown dimmed on the map
-            "is_excluded":   cid not in active_nodes,
+            "site_id":      river.site_id,
+            "is_target":    cid == target_id,
+            "is_inlet":     cid in inlet_comids,
+            # is_excluded: node exists in topology but has no USGS data path
+            "is_excluded":  cid in excluded_nodes,
         })
         for up_id in river.upstream_ids:
             topology_edges.append({
                 "from":        up_id,
                 "to":          cid,
-                # Edges between two excluded nodes (or crossing into excluded)
-                # are shown dimmed; only fully-active edges are solid
-                "is_excluded": (up_id, cid) not in active_edges,
+                # Mark edge as excluded if either endpoint is excluded
+                "is_excluded": (up_id in excluded_nodes) or (cid in excluded_nodes),
             })
 
-    # Count and log only active nodes / edges for the user-facing message
-    active_node_count = len(active_nodes)
-    active_edge_count = len(active_edges)
-
     yield {
-        "type":              "topology",
-        "nodes":             topology_nodes,
-        "edges":             topology_edges,
-        "target_id":         target_id,
-        "inlet_comids":      inlet_comids,
-        "params_used":       unique_params,
-        "time_range":        {"start": start_date, "end": end_date},
-        # Pass active counts separately so the frontend log shows the right numbers
-        "active_node_count": active_node_count,
-        "active_edge_count": active_edge_count,
+        "type":        "topology",
+        "nodes":       topology_nodes,
+        "edges":       topology_edges,
+        "target_id":   target_id,
+        "inlet_comids": inlet_comids,
+        "params_used": context["current_params"],
+        "time_range": {
+            "start": context["start_date"],
+            "end":   context["end_date"],
+        },
     }
     logger.info(
-        f"[WS] Topology pushed: {active_node_count} active nodes "
-        f"+ {len(agents_dict) - active_node_count} excluded, "
-        f"{active_edge_count} active edges"
+        f"[WS] Topology sent: {len(topology_nodes)} nodes "
+        f"({len(active_nodes)} active, {len(excluded_nodes)} excluded), "
+        f"{len(topology_edges)} edges"
     )
 
-    # ── Step 3: Build LangGraph ───────────────────────────────────────────────
-    yield {
-        "type":    "preparing",
-        "step":    "graph_build",
-        "message": f"Building inference graph ({len(inlet_comids)} entry points)..."
-    }
+    # ── Step 5: Build LangGraph (active nodes only) ───────────────────────────
     try:
         graph_app = create_hydrological_graph(agents_dict, entry_points=inlet_comids)
-    except Exception as e:
-        logger.error(f"[WS] Graph build failed: {e}")
-        yield {"type": "error", "message": f"Graph build failed: {str(e)}"}
+    except Exception as exc:
+        logger.error(f"[WS] Graph construction failed: {exc}")
+        yield {"type": "error", "message": f"Graph construction failed: {str(exc)}"}
         return
 
-    # ── Step 4: Stream inference events ──────────────────────────────────────
+    # ── Step 6: Run inference and stream events ───────────────────────────────
     initial_state = {
-        "task":           user_query,
-        "current_params": unique_params,
-        "facility_types": facility_types,
-        "start_date":     start_date,
-        "end_date":       end_date,
-        "global_data":    global_data,
-        "inlet_comids":   inlet_comids,
-        "selected_model": model_name,
-        "provider":       provider,
-        "api_key":        api_key,
-        "resample_freq":  resample_freq,
-        "weather_freq":   weather_freq,
+        "task":            user_query,
+        "current_params":  context["current_params"],
+        "facility_types":  ["ICIS", "SEMS", "TRIS", "NCDB", "CWNS", "FFEP"],
+        "start_date":      context["start_date"],
+        "end_date":        context["end_date"],
+        "global_data":     context["global_data"],
+        "inlet_comids":    inlet_comids,
+        "selected_model":  model_name,
+        "resample_auto":   resample_auto,
+        "resample_freq_h": resample_freq_h,
     }
 
     try:
         async for event in graph_app.astream_events(initial_state, version="v2"):
             event_name = event.get("event", "")
-            node_name  = event.get("name", "")
+            node_name  = event.get("name",  "")
 
-            # Agent started
             if event_name == "on_chain_start" and node_name in agents_dict:
                 logger.info(f"[WS] Agent [{node_name}] started")
                 yield {"type": "agent_start", "comid": node_name}
 
-            # Agent finished
             elif event_name == "on_chain_end" and node_name in agents_dict:
                 output_data  = event.get("data", {}).get("output", {})
                 agent_result = output_data.get("global_data", {}).get(node_name, {})
@@ -426,15 +259,20 @@ async def run_hydro_graph(params: Dict[str, Any]) -> AsyncGenerator[Dict, None]:
                     "lat":            agent_result.get("lat"),
                     "lon":            agent_result.get("lon"),
                     "has_usgs_site":  agent_result.get("has_usgs_site"),
+                    "site_id":        agent_result.get("site_id"),
                     "prompt_used":    agent_result.get("prompt_used"),
                     "llm_raw_output": agent_result.get("llm_raw_output"),
                 }
 
-    except Exception as e:
-        logger.error(f"[WS] Graph run error: {e}", exc_info=True)
-        yield {"type": "error", "message": f"Inference engine error: {str(e)}"}
+    except Exception as exc:
+        logger.error(f"[WS] Graph run error: {exc}", exc_info=True)
+        yield {"type": "error", "message": f"Inference engine error: {str(exc)}"}
         return
 
-    # ── Step 5: Done ──────────────────────────────────────────────────────────
-    logger.info(f"[WS] All agents done. Target: {target_id}")
-    yield {"type": "done", "target_id": target_id, "message": "All agents finished"}
+    # ── Step 7: Done ──────────────────────────────────────────────────────────
+    logger.info(f"[WS] All inference complete. Target: {target_id}")
+    yield {
+        "type":      "done",
+        "target_id": target_id,
+        "message":   "All agent inference complete.",
+    }
