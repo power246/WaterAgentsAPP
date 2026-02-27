@@ -23,12 +23,16 @@ export const DEFAULT_SETTINGS = {
  *   status            "idle" | "running" | "done" | "error"
  *   onStartAnalysis   ({query, settings}) => void
  */
-export default function ControlPanel({ selectedPoint, status, onStartAnalysis }) {
+export default function ControlPanel({ selectedPoint, status, onStartAnalysis, onStopAnalysis }) {
   const [query,           setQuery]           = useState("");
   const [showSettings,    setShowSettings]    = useState(false);
   const [settings,        setSettings]        = useState(DEFAULT_SETTINGS);
 
-  const isRunning = status === "running";
+  const isRunning  = status === "running";
+  const isStopping = status === "stopping";
+  // Start button + inputs are locked while running OR while waiting for
+  // the backend to confirm that all tasks have stopped.
+  const isBlocked  = isRunning || isStopping;
 
   // Auto-fill query box from map click
   const handleFillCoords = () => {
@@ -67,7 +71,7 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis })
             className="settings-gear-btn"
             onClick={() => setShowSettings(true)}
             title="Open settings"
-            disabled={isRunning}
+            disabled={isBlocked}
           >
             ⚙
           </button>
@@ -102,7 +106,7 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis })
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              disabled={isRunning}
+              disabled={isBlocked}
             />
           </section>
 
@@ -112,7 +116,7 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis })
             <button
               className="model-summary-btn"
               onClick={() => setShowSettings(true)}
-              disabled={isRunning}
+              disabled={isBlocked}
               title="Click to change model and other settings"
             >
               <span className="model-summary-text">{settingsSummary}</span>
@@ -123,9 +127,11 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis })
           {/* ── Status badge ── */}
           {status !== "idle" && (
             <div className={`status-badge status-${status}`}>
-              {status === "running" && "Inference in progress..."}
-              {status === "done"    && "Inference complete"}
-              {status === "error"   && "An error occurred"}
+              {status === "running"     && "Inference in progress..."}
+              {status === "stopping"    && "Stopping — waiting for backend..."}
+              {status === "done"        && "Inference complete"}
+              {status === "interrupted" && "Inference interrupted"}
+              {status === "error"       && "An error occurred"}
             </div>
           )}
 
@@ -133,10 +139,50 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis })
           <button
             className="btn-primary"
             onClick={handleSubmit}
-            disabled={isRunning}
+            disabled={isBlocked}
           >
-            {isRunning ? "Running..." : "Start Analysis"}
+            {isRunning  ? "Running..."  :
+             isStopping ? "Stopping..." :
+             "Start Analysis"}
           </button>
+
+          {/* ── Stop button (red when active, grey when idle) ── */}
+          <button
+            onClick={onStopAnalysis}
+            disabled={!isRunning}
+            title={
+              isRunning  ? "Stop — cancels all in-flight requests immediately" :
+              isStopping ? "Stop signal sent, waiting for backend..." :
+              "No inference running"
+            }
+            style={{
+              width:        "100%",
+              padding:      "10px",
+              marginTop:    "6px",
+              background:   isRunning ? "#dc2626" : isStopping ? "#92400e" : "#1f2937",
+              border:       `1px solid ${isRunning ? "#dc2626" : isStopping ? "#92400e" : "#374151"}`,
+              borderRadius: "8px",
+              color:        isRunning ? "#ffffff" : isStopping ? "#fcd34d" : "#4b5563",
+              cursor:       isRunning ? "pointer" : "not-allowed",
+              fontSize:     "14px",
+              fontWeight:   "600",
+              transition:   "background 0.2s, border-color 0.2s",
+            }}
+          >
+            Stop
+          </button>
+          {/* Hint shown after a run that was not a clean completion */}
+          {!isBlocked && status === "interrupted" && (
+            <p style={{
+              fontSize:   "11px",
+              color:      "#6b7280",
+              textAlign:  "center",
+              margin:     "6px 0 0",
+              fontStyle:  "italic",
+            }}>
+              Completed agents remain visible. Click "Start Analysis" to re-run.
+            </p>
+          )}
 
           {/* ── Usage guide ── */}
           <div className="usage-guide">

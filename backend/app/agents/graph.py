@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections import deque
 from functools import partial
-from typing import Dict, List, AsyncGenerator, Any, Set
+from typing import Dict, List, AsyncGenerator, Any, Optional, Set
 
 from langgraph.graph import StateGraph
 from app.agents.state import WaterSystemState, AgentSubState
@@ -98,7 +98,10 @@ def create_hydrological_graph(
 
 # ── WebSocket streaming runner ────────────────────────────────────────────────
 
-async def run_hydro_graph(params: Dict[str, Any]) -> AsyncGenerator[Dict, None]:
+async def run_hydro_graph(
+    params:     Dict[str, Any],
+    stop_event: Optional[asyncio.Event] = None,
+) -> AsyncGenerator[Dict, None]:
     """
     Stream inference events over WebSocket.
 
@@ -263,6 +266,18 @@ async def run_hydro_graph(params: Dict[str, Any]) -> AsyncGenerator[Dict, None]:
                     "prompt_used":    agent_result.get("prompt_used"),
                     "llm_raw_output": agent_result.get("llm_raw_output"),
                 }
+
+                # Plan-A stop check: after each agent completes, see if the
+                # user pressed Stop.  Current agent has already finished cleanly
+                # (and written its memory); we simply stop dispatching new ones.
+                if stop_event and stop_event.is_set():
+                    logger.info(f"[WS] Stop signal detected after agent [{node_name}] — interrupting pipeline")
+                    yield {
+                        "type":    "interrupted",
+                        "message": "Inference stopped by user. "
+                                   "Completed agents are shown on the map.",
+                    }
+                    return
 
     except Exception as exc:
         logger.error(f"[WS] Graph run error: {exc}", exc_info=True)

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import MapView from "./components/MapView";
 import ControlPanel from "./components/ControlPanel";
 import RightPanel from "./components/RightPanel";
@@ -25,8 +25,17 @@ export default function App() {
   // Shape: { comid, lat, lon, has_usgs_site, site_id, result, prompt_used, llm_raw_output }
   const [selectedAgent, setSelectedAgent] = useState(null);
 
-  // Overall pipeline status: idle | running | done | error
+  // Overall pipeline status: idle | running | stopping | done | error | interrupted
+  // "stopping": stop signal sent, waiting for backend_idle confirmation
   const [status, setStatus] = useState("idle");
+
+  // Ref to the live WebSocket so handleStopAnalysis can send a stop message
+  // without needing to be defined inside handleStartAnalysis.
+  const wsRef = useRef(null);
+
+  // Ref to the 10-second safety timeout used during "stopping" state.
+  // If backend_idle is not received in time, we force-unlock the Start button.
+  const stopTimeoutRef = useRef(null);
 
   // Google Maps API key fetched from the backend key store.
   // If null, MapView falls back to OpenStreetMap (no key required).
@@ -75,8 +84,76 @@ export default function App() {
     });
   };
 
+  /**
+   * Called when backend_idle arrives OR the 10-second safety timeout fires.
+   * Tears down the WebSocket and transitions to "interrupted".
+   * Keeps handlers alive during the "stopping" window so backend_idle can arrive.
+   */
+  const _finalizeStop = () => {
+    if (stopTimeoutRef.current) {
+      clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose   = null;
+      wsRef.current.onerror   = null;
+      try { wsRef.current.close(); } catch (_) {}
+      wsRef.current = null;
+    }
+    setActiveComid(null);
+    setStatus("interrupted");
+  };
+
+  /**
+   * User clicked the Stop button — send a stop signal and enter "stopping" state.
+   * The backend cancels all in-flight HTTP tasks and replies with backend_idle
+   * once fully clean.  The Start button stays disabled until that arrives.
+   */
+  const handleStopAnalysis = () => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "stop" }));
+    }
+    // Switch to "stopping": Start button disabled, handlers still live to
+    // receive the coming backend_idle confirmation.
+    setStatus("stopping");
+
+    // Safety fallback: if backend_idle is not received within 10 s
+    // (e.g. network issue), force-unlock the Start button anyway.
+    if (stopTimeoutRef.current) clearTimeout(stopTimeoutRef.current);
+    stopTimeoutRef.current = setTimeout(() => {
+      stopTimeoutRef.current = null;
+      // Only act if we are still in the "stopping" state
+      setStatus((prev) => {
+        if (prev === "stopping") {
+          _finalizeStop();
+        }
+        return prev;
+      });
+    }, 10000);
+  };
+
   /** User triggered a new analysis run from the ControlPanel */
   const handleStartAnalysis = ({ query, settings }) => {
+    // Cancel any pending stop-fallback timeout from a previous run.
+    if (stopTimeoutRef.current) {
+      clearTimeout(stopTimeoutRef.current);
+      stopTimeoutRef.current = null;
+    }
+
+    // Tear down any existing WebSocket BEFORE resetting state.
+    // If the previous run was stopped early, its backend may still be running
+    // and sending events.  Nulling the handlers prevents stale events from
+    // the old connection from appearing in this new run's log.
+    if (wsRef.current) {
+      const stale = wsRef.current;
+      wsRef.current = null;
+      stale.onmessage = null;  // most important: stops stale events entering state
+      stale.onclose   = null;  // prevents "WebSocket disconnected" from old run
+      stale.onerror   = null;
+      try { stale.close(); } catch (_) {}
+    }
+
     setLogs([]);
     setTopology({ nodes: [], edges: [] });
     setActiveComid(null);
@@ -89,6 +166,7 @@ export default function App() {
     });
 
     const ws = new WebSocket(`${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws/hydro-analysis`);
+    wsRef.current = ws;  // store so handleStopAnalysis can reach it
 
     ws.onopen = () => {
       appendLog({ type: "info", message: "WebSocket connected" });
@@ -109,8 +187,15 @@ export default function App() {
     ws.onmessage = (msgEvent) => {
       const data = JSON.parse(msgEvent.data);
 
-      // Suppress ping from logs – it is just a keepalive, not user-visible
+      // Suppress ping from logs — it is just a keepalive, not user-visible
       if (data.type === "ping") return;
+
+      // backend_idle is a system signal that all backend tasks have stopped.
+      // Handle it silently (no log entry) and re-enable the Start button.
+      if (data.type === "backend_idle") {
+        _finalizeStop();
+        return;
+      }
 
       appendLog(data);
 
@@ -174,6 +259,11 @@ export default function App() {
           setActiveComid(null);
           break;
 
+        case "interrupted":
+          setStatus("interrupted");
+          setActiveComid(null);
+          break;
+
         case "error":
           setStatus("error");
           setActiveComid(null);
@@ -190,6 +280,7 @@ export default function App() {
     };
 
     ws.onclose = () => {
+      wsRef.current = null;  // clear ref once connection is gone
       appendLog({ type: "info", message: "WebSocket disconnected" });
     };
   };
@@ -203,6 +294,7 @@ export default function App() {
           selectedPoint={selectedPoint}
           status={status}
           onStartAnalysis={handleStartAnalysis}
+          onStopAnalysis={handleStopAnalysis}
         />
       </aside>
 

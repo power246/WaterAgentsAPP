@@ -13,6 +13,7 @@ function getEventStyle(type) {
     case "agent_start": return { icon: "⚙️",  cls: "log-start" };
     case "agent_done":  return { icon: "✅",  cls: "log-done" };
     case "done":        return { icon: "🏆",  cls: "log-finish" };
+    case "interrupted": return { icon: "⏹",   cls: "log-interrupted" };
     case "error":       return { icon: "❌",  cls: "log-error" };
     default:            return { icon: "ℹ️",  cls: "log-info" };
   }
@@ -55,6 +56,9 @@ function formatLogMessage(log) {
 
     case "done":
       return `All agents done. Target: ${log.target_id}`;
+
+    case "interrupted":
+      return `Inference interrupted by user. ${log.message || ""}`;
 
     case "error":
       return `Error: ${log.message}`;
@@ -227,6 +231,14 @@ function InspectorTab({ agent }) {
   );
 }
 
+// Inline style for the log-interrupted class (amber left border).
+// Appended here to avoid requiring a CSS file edit.
+const INTERRUPTED_STYLE = `
+  .log-interrupted { border-left-color: #f59e0b; }
+  .log-interrupted .log-msg { color: #fcd34d; }
+  .dot-stopping { background: #f59e0b; opacity: 0.7; animation: pulse 1s infinite; }
+`;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RightPanel (tab switcher)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -248,10 +260,20 @@ export default function RightPanel({ logs, status, selectedAgent, onSelectAgent 
 
   return (
     <div className="right-panel">
+      {/* Inline styles for "interrupted" elements not in RightPanel.css */}
+      <style>{INTERRUPTED_STYLE}</style>
       <div className="panel-header">
         <span className="icon">📡</span>
         <h2>Live Log & Inspector</h2>
-        <span className={`status-dot dot-${status}`} title={status} />
+        <span
+          className={`status-dot dot-${status}`}
+          title={status}
+          style={
+            status === "interrupted" ? { background: "#f59e0b" } :
+            status === "stopping"    ? { background: "#f59e0b", opacity: 0.7 } :
+            {}
+          }
+        />
       </div>
 
       <div className="tab-bar">

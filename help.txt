@@ -23,7 +23,9 @@ ToDo:
 6. (完成) Icon 改成学校的
 7. 画图（数据解释）
 8. (完成) google map API
-9. 可以中断推理
+9. (完成) 可以中断推理
+10. 输出需要带上时间
+11. 后端退出后有Bug
 
 100. show的剧本
 
@@ -49,4 +51,17 @@ inspector:
 2. Confidence  全都是80%
 3. 只有Analysis文本，我还需要LLM input prompt和row output来观察输出与输入
 4. Analysis 要更加清晰（结合我之前的prompt文本）
+
+INFO:     connection closed
+^CINFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:app.core.lifecycle:Starting to close system resources ...
+INFO:app.core.lifecycle:All resources have been safely released.
+INFO:main:HTTP client safely shut down.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2497790]
+INFO:     Stopping reloader process [2497788]
+(waterAgentAPP) liao0238@agc09 [~/Desktop/waterAgentSys/WaterAgentsAPP/backend] % /users/0/liao0238/.conda/envs/waterAgentAPP/lib/python3.10/multiprocessing/resource_tracker.py:224: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+^C
 

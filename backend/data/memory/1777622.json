@@ -2,14 +2,14 @@
   "history": [],
   "past_inferences": [
     {
-      "timestamp": "2026-02-24T19:50:03.548904",
+      "timestamp": "2026-02-25T21:20:38.936936",
       "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
       "structured_inference": {
         "parameters": [
           {
             "name": "pH",
             "code": "00400",
-            "estimate_value": 7.5,
+            "estimate_value": 7.6,
             "unit": "std units"
           },
           {
@@ -21,9 +21,57 @@
         ],
         "estimated_flow": null,
         "confidence": 0.65,
-        "analysis": "WHAT WE KNOW: Upstream pH data comes from direct real-time USGS sensor readings for the entire 15-day period, with a consistent reading of 7.6 across all timestamps. Alkalinity has no sensor data in upstream segments, so we cannot estimate its value. WHY THE ESTIMATE: We use mass balance principles to derive values from upstream. With pH being relatively stable and only slightly affected by nearby facilities or weather, our confidence relies on the single direct reading of 7.6. Since alkalinity data is missing in all upstream segments, we set it to null as there's no reliable way to estimate its value. WHAT IT MEANS: Our estimated pH of 7.5 means the water remains slightly alkaline, similar to tap water. CONFIDENCE REASON: We have a moderate confidence level due to the single direct reading and lack of upstream data for alkalinity. KEY TAKEAWAY: The pH at this segment is estimated to be around 7.5, reflecting the stable conditions upstream."
+        "analysis": "WHAT WE KNOW: We're using an upstream COMID 1777616 with direct real-time USGS sensor reading for pH from site 04024000 between 2026-01-01 and 2026-01-15 with no variation across the full 15-day window, giving high certainty. WHY THE ESTIMATE: Since we have a stable pH upstream, it's reasonable to assume this segment follows suit due to similar geology and lack of nearby facilities altering the pH level. WHAT IT MEANS: The estimated pH is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We're basing our estimate on a single reliable upstream sensor reading with no data inconsistencies or extreme variations, giving us moderate confidence in this result. KEY TAKEAWAY: Our estimate suggests the pH remains stable at 7.6, indicating a safe environment for aquatic life."
       },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: Upstream pH data comes from direct real-time USGS sensor readings for the entire 15-day period, with a consistent reading of 7.6 across all timestamps. Alkalinity has no sensor data in upstream segments, so we cannot estimate its value. WHY THE ESTIMATE: We use mass balance principles to derive values from upstream. With pH being relatively stable and only slightly affected by nearby facilities or weather, our confidence relies on the single direct reading of 7.6. Since alkalinity data is missing in all upstream segments, we set it to null as there's no reliable way to estimate its value. WHAT IT MEANS: Our estimated pH of 7.5 means the water remains slightly alkaline, similar to tap water. CONFIDENCE REASON: We have a moderate confidence level due to the single direct reading and lack of upstream data for alkalinity. KEY TAKEAWAY: The pH at this segment is estimated to be around 7.5, reflecting the stable conditions upstream.\"\n}"
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.6,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: We're using an upstream COMID 1777616 with direct real-time USGS sensor reading for pH from site 04024000 between 2026-01-01 and 2026-01-15 with no variation across the full 15-day window, giving high certainty. WHY THE ESTIMATE: Since we have a stable pH upstream, it's reasonable to assume this segment follows suit due to similar geology and lack of nearby facilities altering the pH level. WHAT IT MEANS: The estimated pH is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We're basing our estimate on a single reliable upstream sensor reading with no data inconsistencies or extreme variations, giving us moderate confidence in this result. KEY TAKEAWAY: Our estimate suggests the pH remains stable at 7.6, indicating a safe environment for aquatic life.\"\n}"
+    },
+    {
+      "timestamp": "2026-02-25T21:27:55.957793",
+      "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
+      "structured_inference": {
+        "parameters": [
+          {
+            "name": "pH",
+            "code": "00400",
+            "estimate_value": 7.6,
+            "unit": "std units"
+          },
+          {
+            "name": "Alkalinity",
+            "code": "00409",
+            "estimate_value": null,
+            "unit": "mg/L"
+          }
+        ],
+        "estimated_flow": null,
+        "confidence": 0.87,
+        "analysis": "WHAT WE KNOW: We're using an upstream COMID 1777616 with direct real-time USGS sensor reading for pH from site 04024000 between 2026-01-01 and 2026-01-15 with no variation across the full 15-day window, giving high certainty. WHY THE ESTIMATE: The direct sensor readings provide the stable pH value of 7.6. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Confidence 0.87 because we have a direct real-time USGS sensor reading with zero variation across the full 15-day window, giving high certainty. KEY TAKEAWAY: The pH remains stable within this range, ensuring safe conditions for aquatic life."
+      },
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.6,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"confidence\": 0.87,\n  \"analysis\": \"WHAT WE KNOW: We're using an upstream COMID 1777616 with direct real-time USGS sensor reading for pH from site 04024000 between 2026-01-01 and 2026-01-15 with no variation across the full 15-day window, giving high certainty. WHY THE ESTIMATE: The direct sensor readings provide the stable pH value of 7.6. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Confidence 0.87 because we have a direct real-time USGS sensor reading with zero variation across the full 15-day window, giving high certainty. KEY TAKEAWAY: The pH remains stable within this range, ensuring safe conditions for aquatic life.\"}"
+    },
+    {
+      "timestamp": "2026-02-25T21:45:11.088599",
+      "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
+      "structured_inference": {
+        "parameters": [
+          {
+            "name": "pH",
+            "code": "00400",
+            "estimate_value": 7.6,
+            "unit": "std units"
+          },
+          {
+            "name": "Alkalinity",
+            "code": "00409",
+            "estimate_value": null,
+            "unit": "mg/L"
+          }
+        ],
+        "estimated_flow": null,
+        "confidence": 0.87,
+        "analysis": "WHAT WE KNOW: We're using an upstream COMID 1777616 with direct real-time USGS sensor reading for pH from site 04024000 between 2026-01-01 and 2026-01-15 with no variation across the full 15-day window, giving high certainty. WHY THE ESTIMATE: The USGS site provided consistent readings. WHAT IT MEANS: This pH is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have a direct real-time USGS sensor reading for this parameter. KEY TAKEAWAY: The pH remains stable."
+      },
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.6,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.87,\n  \"analysis\": \"WHAT WE KNOW: We're using an upstream COMID 1777616 with direct real-time USGS sensor reading for pH from site 04024000 between 2026-01-01 and 2026-01-15 with no variation across the full 15-day window, giving high certainty. WHY THE ESTIMATE: The USGS site provided consistent readings. WHAT IT MEANS: This pH is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have a direct real-time USGS sensor reading for this parameter. KEY TAKEAWAY: The pH remains stable.\" }"
     }
   ],
   "static_metadata": {
