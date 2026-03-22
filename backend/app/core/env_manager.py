@@ -107,6 +107,35 @@ class EnvManager:
             os.makedirs(path, exist_ok=True)
 
     @staticmethod
+    def reset_cache_contents():
+        """
+        Clear all cached entries from the three DiskCache stores WITHOUT deleting
+        the directories or closing the Cache objects.
+
+        This is the safe way to flush cache on startup when uvicorn --reload is
+        active: the reloader process holds the cache directories open, so
+        shutil.rmtree would raise "Device or resource busy". cache.clear() only
+        removes key-value entries and leaves the directory structure intact.
+
+        This method is idempotent and safe to call from any process.
+        """
+        from app.services.nldi_service import nldi_cache
+        from app.services.nwis_service import nwis_cache
+        from app.services.weather_service import weather_cache
+
+        for name, cache in [
+            ("nldi",    nldi_cache),
+            ("nwis",    nwis_cache),
+            ("weather", weather_cache),
+        ]:
+            try:
+                count = len(cache)
+                cache.clear()
+                logger.info(f"Cache cleared: {name} ({count} entries removed)")
+            except Exception as exc:
+                logger.warning(f"Cache clear warning ({name}): {exc}")
+
+    @staticmethod
     def _close_all_caches():
         """Close all DiskCache instances to release file handles before deletion."""
         from app.services.nldi_service import nldi_cache

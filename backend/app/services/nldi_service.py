@@ -1,3 +1,4 @@
+import atexit
 import logging
 import os
 from typing import Optional, Dict, List
@@ -9,6 +10,9 @@ from app.core.http_client import AsyncHttpClient
 logger = logging.getLogger(__name__)
 os.makedirs("./.cache/nldi_data", exist_ok=True)
 nldi_cache = Cache("./.cache/nldi_data", size_limit=500 * 1024**2)
+# Ensure the cache semaphore is released when any process (including uvicorn's
+# reloader process) exits — prevents resource_tracker hang on Ctrl+C.
+atexit.register(nldi_cache.close)
 
 class NLDIService:
     """

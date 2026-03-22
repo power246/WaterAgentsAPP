@@ -256,7 +256,14 @@ def _format_history_block(history_context: List[Dict]) -> str:
             parts.append(f"Inference {i} ({ts}): failed or no structured data.")
             continue
 
-        parts.append(f"Inference {i} ({ts}):")
+        # Show the data period this inference covered, not just when it ran.
+        # Without this, the LLM cannot tell whether a past result is relevant
+        # to the current query's time range.
+        start_d = record.get("start_date", "")
+        end_d   = record.get("end_date",   "")
+        period_str = f"{start_d} to {end_d}" if start_d and end_d else "unknown period"
+
+        parts.append(f"Inference {i} (run at {ts}, data period: {period_str}):")
         parts.append(f"  Task: {task}")
 
         for p in inf.get("parameters", []):
@@ -677,6 +684,8 @@ async def inference_node(state: AgentSubState) -> Dict:
     # ── 8. Persist memory ─────────────────────────────────────────────────
     memory.setdefault("past_inferences", []).append({
         "timestamp":            datetime.now().isoformat(),
+        "start_date":           state["start_date"],
+        "end_date":             state["end_date"],
         "task":                 state["task"],
         "structured_inference": inference_result,
         "llm_result":           llm_output,

@@ -12,7 +12,7 @@ class MemoryService:
         """Asynchronously load JSON memory file"""
         if not os.path.exists(file_path):
             logger.info(f"Memory file {file_path} does not exist, initializing new memory.")
-            return {"history": [], "past_inferences": []}
+            return {"past_inferences": []}
             
         try:
             async with aiofiles.open(file_path, mode='r', encoding='utf-8') as f:
@@ -20,7 +20,7 @@ class MemoryService:
                 return json.loads(content)
         except Exception as e:
             logger.error(f"Failed to load memory file: {e}")
-            return {"history": [], "past_inferences": []}
+            return {"past_inferences": []}
 
     @staticmethod
     async def save_memory(file_path: str, data: Dict[str, Any]):

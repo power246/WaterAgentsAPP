@@ -1,3 +1,4 @@
+import atexit
 import httpx
 import pandas as pd
 import numpy as np
@@ -11,6 +12,9 @@ from app.core.http_client import AsyncHttpClient
 logger = logging.getLogger(__name__)
 os.makedirs("./.cache/nwis_data", exist_ok=True)
 nwis_cache = Cache("./.cache/nwis_data", size_limit=500 * 1024**2)
+# Ensure the cache semaphore is released when any process (including uvicorn's
+# reloader process) exits — prevents resource_tracker hang on Ctrl+C.
+atexit.register(nwis_cache.close)
 
 class NWISService:
     """

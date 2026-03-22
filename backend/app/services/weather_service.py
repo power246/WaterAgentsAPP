@@ -1,9 +1,9 @@
-import httpx
+import atexit
 import pandas as pd
 import logging
 import os
-from datetime import datetime, timezone
-from typing import List, Dict, Tuple, Optional
+from datetime import timezone
+from typing import Dict
 from diskcache import Cache
 import dateutil.parser
 from app.core.config import settings
@@ -13,6 +13,9 @@ import asyncio
 logger = logging.getLogger(__name__)
 os.makedirs("./.cache/weather_data", exist_ok=True)
 weather_cache = Cache("./.cache/weather_data", size_limit=500 * 1024**2)
+# Ensure the cache semaphore is released when any process (including uvicorn's
+# reloader process) exits — prevents resource_tracker hang on Ctrl+C.
+atexit.register(weather_cache.close)
 
 class WeatherService:
     """

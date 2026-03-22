@@ -1,0 +1,843 @@
+================================================================================
+WATER AGENT SYSTEM - FEATURE EXPANSION SPRINT PLAN
+Explanation + Prediction + Time Mode Support
+================================================================================
+
+NOTES ON EXISTING IMPLEMENTATION (Do Not Modify):
+  - Sampling interval is already automated based on date range:
+      <= 7 days:  USGS 6h,  Weather 12h
+      <= 14 days: USGS 12h, Weather 24h
+      (and so on for longer ranges)
+  - This logic is already in place and requires no changes.
+
+CUMULATIVE SPRINT STRUCTURE:
+  Each sprint builds directly on the previous one.
+  Each sprint ends with a testable checkpoint.
+
+================================================================================
+SPRINT 1 - Data Model Foundation
+================================================================================
+
+GOAL:
+  Extend the Pydantic models and state definitions to support the new output
+  structures needed for Explanation, Anomaly detection, and daily results.
+  Nothing runs differently yet, but all downstream code can reference
+  these types from Sprint 2 onward.
+
+FILES TO MODIFY:
+  - app/models/river.py
+  - app/agents/state.py
+  - app/core/config.py
+
+DETAILS:
+
+  [app/core/config.py]
+    Add the following settings:
+      ANOMALY_THRESHOLD_PCT: float = 25.0
+        - A 6h window deviating more than this percentage from the daily mean
+          is flagged as an anomaly.
+      PREDICTION_MAX_DAYS: int = 7
+        - Maximum number of future days allowed for prediction mode.
+
+  [app/agents/state.py]
+    In AgentSubState, add:
+      mode: str        # "gap_filling" or "prediction"
+      time_mode: str   # "single_day" or "date_range"
+
+    In WaterSystemState, add:
+      mode: str
+      time_mode: str
+
+  [app/models/river.py]
+    Add new Pydantic models (keep all existing models unchanged):
+
+      class CausalFactor(BaseModel):
+        factor: str
+          # Source of influence, e.g. "Upstream COMID 12345" or "ICIS facility XYZ"
+        direction: str
+          # "increasing" / "decreasing" / "neutral"
+        magnitude: str
+          # "high" / "medium" / "low"
+        evidence: str
+          # Specific evidence supporting the judgment
+
+      class HydrologyExplanation(BaseModel):
+        primary_drivers: List[CausalFactor]
+          # All identified causal factors
+        reasoning_chain: str
+          # Full step-by-step causal reasoning,
+          # e.g. "A causes B, B affects C through mechanism D"
+          # In prediction mode, must also explain why values change over time.
+        uncertainty_sources: str
+          # Description of what makes this inference uncertain
+
+      class AnomalyWindow(BaseModel):
+        time_window: str
+          # e.g. "2026-01-03 06:00 to 12:00"
+        parameter: str
+        observed_value: float
+        daily_mean: float
+        deviation_pct: float
+          # Percentage deviation from daily mean
+        possible_cause: str
+          # LLM-inferred explanation for the anomaly
+
+      class DailyParameterResult(BaseModel):
+        date: str
+        representative_value: Optional[float]
+          # Daily mean, used as the single output value for that day
+        unit: Optional[str]
+        confidence: float
+        anomalies: List[AnomalyWindow] = []
+          # Anomalous 6h windows detected within this day (if any)
+
+      class ParameterResult(BaseModel):
+        name: str
+        code: str
+        unit: Optional[str]
+        daily_results: List[DailyParameterResult]
+          # Single-day mode: exactly one entry
+          # Date-range mode: one entry per day
+
+    Extend existing HydrologyInference (keep all existing fields):
+      Add:
+        detailed_results: List[ParameterResult] = []
+          # Full daily breakdown for frontend display
+        explanation: Optional[HydrologyExplanation] = None
+          # Always present in final output
+
+    Note:
+      The existing "parameters" field is kept for upstream data passing
+      between LLM agents (upstream_results). The new "detailed_results"
+      field is for frontend display only.
+
+TESTABLE CHECKPOINT:
+  - Run: python -c "from app.models.river import HydrologyInference,
+    HydrologyExplanation, AnomalyWindow, DailyParameterResult, ParameterResult;
+    print('Sprint 1 models OK')"
+  - Run: python -c "from app.agents.state import AgentSubState,
+    WaterSystemState; print('Sprint 1 state OK')"
+  - Both should import without errors.
+
+================================================================================
+SPRINT 2 - NWIS Daily Summary and Anomaly Detection
+================================================================================
+
+GOAL:
+  Add a utility method in NWISService that takes the existing 6h sampled data
+  and computes: (1) daily representative values, (2) anomaly windows.
+  This is pure data processing with no LLM involvement, so it can be
+  tested independently with real USGS data.
+
+FILES TO MODIFY:
+  - app/services/nwis_service.py
+
+DETAILS:
+
+  [app/services/nwis_service.py]
+    Add static method: compute_daily_summary(raw_data, anomaly_threshold_pct)
+
+    Input:
+      raw_data: the dict returned by get_daily_averages()
+        (contains "averages" list with 6h data per parameter)
+      anomaly_threshold_pct: from settings.ANOMALY_THRESHOLD_PCT
+
+    Processing per parameter:
+      1. Group 6h data points by calendar date.
+      2. Compute daily mean as the representative value for that day.
+      3. For each 6h window, compute deviation from daily mean:
+           deviation_pct = abs(value - daily_mean) / daily_mean * 100
+         If deviation_pct >= anomaly_threshold_pct, create an AnomalyWindow.
+      4. Build a DailyParameterResult for each day.
+      5. Build a ParameterResult wrapping all daily results.
+
+    Output:
+      List[ParameterResult]
+
+    Logging:
+      Log the number of days processed and total anomalies found per parameter.
+      Example:
+        "[NWISService] Site 12345 | pH | 7 days processed | 2 anomalies detected"
+
+TESTABLE CHECKPOINT:
+  - Write a small standalone test script (test_sprint2.py in project root):
+
+      import asyncio
+      from app.services.nwis_service import NWISService
+      from app.core.config import settings
+
+      async def test():
+          raw = await NWISService.get_daily_averages(
+              site_id="05340500",
+              start_date="2026-01-01",
+              end_date="2026-01-07",
+              parm_codes=[["pH", "00400"]]
+          )
+          if raw:
+              summary = NWISService.compute_daily_summary(
+                  raw, settings.ANOMALY_THRESHOLD_PCT
+              )
+              for param in summary:
+                  print(f"Parameter: {param.name}")
+                  for day in param.daily_results:
+                      print(f"  {day.date}: {day.representative_value}")
+                      for a in day.anomalies:
+                          print(f"    ANOMALY: {a.time_window} dev={a.deviation_pct:.1f}%")
+          else:
+              print("No data returned (check site_id or date range)")
+
+      asyncio.run(test())
+
+  - Expected: printed daily values and any detected anomaly windows.
+
+================================================================================
+SPRINT 3 - Weather Forecast API
+================================================================================
+
+GOAL:
+  Add get_weather_forecast() to WeatherService using the NOAA forecast API.
+  This enables the Prediction mode to have real future weather data
+  instead of relying solely on the LLM's internal knowledge.
+
+FILES TO MODIFY:
+  - app/services/weather_service.py
+
+DETAILS:
+
+  [app/services/weather_service.py]
+    Add static method: get_weather_forecast(lat, lon, start_date, end_date)
+
+    NOAA API flow:
+      Step 1: GET https://api.weather.gov/points/{lat},{lon}
+        -> Extract "forecastHourly" URL from response properties
+      Step 2: GET {forecastHourly URL}
+        -> Returns hourly forecast for approximately the next 7 days
+
+    Processing:
+      1. Filter forecast periods to the requested date range.
+      2. Aggregate to daily values (resample using same WEATHER_FREQ setting
+         as existing observations, to keep format consistent).
+         - temperature: daily mean
+         - precipitation probability: daily mean (as proxy for precipitation)
+      3. Build output in the same format as existing get_weather_and_alerts()
+         "observations" list:
+           [{"time": ISO string, "temp_c": float, "precip_mm": float}, ...]
+
+    Caching:
+      Use existing weather_cache with expire=3600
+      (NOAA forecast updates approximately hourly)
+
+    Cache key format:
+      "forecast_{lat}_{lon}_{start_date}_{end_date}"
+
+    Logging:
+      "[WeatherService] Forecast fetched for ({lat}, {lon}):
+       {n} daily entries from {start} to {end}"
+
+    Error handling:
+      If NOAA returns non-200 or empty, return {"observations": [], "alerts": []}
+      and log a warning. Do not raise exceptions (matches existing behavior).
+
+TESTABLE CHECKPOINT:
+  - Write test_sprint3.py:
+
+      import asyncio
+      from app.services.weather_service import WeatherService
+      from datetime import date, timedelta
+
+      async def test():
+          lat, lon = 46.68, -92.41
+          today = date.today()
+          start = today.isoformat()
+          end = (today + timedelta(days=5)).isoformat()
+          result = await WeatherService.get_weather_forecast(lat, lon, start, end)
+          print(f"Forecast entries: {len(result['observations'])}")
+          for obs in result['observations']:
+              print(f"  {obs['time']}: {obs['temp_c']} C, {obs['precip_mm']} mm")
+
+      asyncio.run(test())
+
+  - Expected: 5-7 daily forecast entries with temperature and precipitation.
+
+================================================================================
+SPRINT 4 - Time Mode Detection and Split-Range Handling
+================================================================================
+
+GOAL:
+  Update AskerService to automatically detect mode and time_mode from the
+  user-specified date range. Handle the mixed-range case (part historical,
+  part future) by splitting into two time segments.
+
+FILES TO MODIFY:
+  - app/services/asker_service.py
+  - app/core/config.py (already modified in Sprint 1)
+
+DETAILS:
+
+  [app/services/asker_service.py]
+    In prepare_inference_context(), after parsing start_date and end_date:
+
+    Step 1 - Determine time_mode:
+      if start_date == end_date:
+          time_mode = "single_day"
+      else:
+          time_mode = "date_range"
+
+    Step 2 - Determine mode and handle mixed ranges:
+      today = date.today()
+      start = date.fromisoformat(start_date)
+      end = date.fromisoformat(end_date)
+
+      Case A - Fully historical (end <= today):
+          mode = "gap_filling"
+          segments = [{"start": start_date, "end": end_date,
+                       "mode": "gap_filling"}]
+
+      Case B - Fully future (start > today):
+          mode = "prediction"
+          # Enforce 7-day cap
+          if (end - start).days > settings.PREDICTION_MAX_DAYS:
+              end = start + timedelta(days=settings.PREDICTION_MAX_DAYS)
+              end_date = end.isoformat()
+              log warning that range was capped
+          segments = [{"start": start_date, "end": end_date,
+                       "mode": "prediction"}]
+
+      Case C - Mixed (start <= today < end):
+          mode = "mixed"
+          hist_end = today.isoformat()
+          pred_start = (today + timedelta(days=1)).isoformat()
+          # Enforce 7-day cap on prediction segment
+          pred_end = end_date
+          if (end - today).days > settings.PREDICTION_MAX_DAYS:
+              pred_end = (today + timedelta(
+                           days=settings.PREDICTION_MAX_DAYS)).isoformat()
+              log warning
+          segments = [
+              {"start": start_date, "end": hist_end,  "mode": "gap_filling"},
+              {"start": pred_start, "end": pred_end,  "mode": "prediction"}
+          ]
+
+    Add "mode", "time_mode", and "segments" to the returned context dict.
+
+    Logging:
+      "[AskerService] time_mode={time_mode} | mode={mode}"
+      "[AskerService] Segments: {segments}"
+      For mixed: "[AskerService] Mixed range detected. Splitting into
+                  historical ({start} to {hist_end}) and
+                  prediction ({pred_start} to {pred_end})"
+
+TESTABLE CHECKPOINT:
+  - Write test_sprint4.py:
+
+      import asyncio
+      from app.services.asker_service import AskerService
+
+      async def test():
+          # Test gap_filling
+          ctx = await AskerService.prepare_inference_context(
+              user_query="pH at -92.41, 46.68 from 2026-01-01 to 2026-01-07",
+              selected_model="llama3:8b"
+          )
+          print(f"Mode: {ctx['mode']}, TimeMode: {ctx['time_mode']}")
+          print(f"Segments: {ctx['segments']}")
+
+          # Test prediction
+          ctx2 = await AskerService.prepare_inference_context(
+              user_query="pH at -92.41, 46.68 from 2026-03-25 to 2026-03-30",
+              selected_model="llama3:8b"
+          )
+          print(f"Mode: {ctx2['mode']}, TimeMode: {ctx2['time_mode']}")
+
+          # Test mixed (adjust dates to straddle today)
+          ctx3 = await AskerService.prepare_inference_context(
+              user_query="pH at -92.41, 46.68 from 2026-03-18 to 2026-03-25",
+              selected_model="llama3:8b"
+          )
+          print(f"Mode: {ctx3['mode']}, TimeMode: {ctx3['time_mode']}")
+          print(f"Segments: {ctx3['segments']}")
+
+      asyncio.run(test())
+
+  - Expected: correct mode/time_mode for each case, mixed case shows 2 segments.
+
+================================================================================
+SPRINT 5 - Prompt Redesign for Explanation and Prediction
+================================================================================
+
+GOAL:
+  Replace the single HYDRO_AGENT_PROMPT with two prompts that enforce
+  structured Explanation output and handle the Prediction mode correctly.
+  The DATA_NEEDS_PROMPT is not changed.
+
+FILES TO MODIFY:
+  - app/agents/prompts.py
+
+DETAILS:
+
+  [app/agents/prompts.py]
+    Remove: HYDRO_AGENT_PROMPT
+
+    Add: HYDRO_AGENT_GAP_FILLING_PROMPT
+      System role:
+        - All existing guidelines from HYDRO_AGENT_PROMPT (keep unchanged)
+        - Add: Requirement to output "explanation" block with:
+            primary_drivers: list each influence source with factor,
+              direction (increasing/decreasing/neutral),
+              magnitude (high/medium/low), and specific evidence text.
+            reasoning_chain: write full causal chain, e.g.
+              "Upstream COMID X shows pH 6.2, which combined with
+               industrial discharge from facility Y reduces pH at
+               current section by approximately 0.5 units."
+            uncertainty_sources: describe what data is missing or
+              what assumptions were made.
+        - Add: If raw sub-daily data contains anomalies, provide
+            possible_cause for each anomaly window in the output.
+
+      Updated OUTPUT FORMAT JSON structure:
+        {
+          "parameters": [...],         <- existing, keep for upstream passing
+          "estimated_flow": float,
+          "confidence": float,
+          "analysis": "...",
+          "detailed_results": [
+            {
+              "name": "pH",
+              "code": "00400",
+              "unit": "...",
+              "daily_results": [
+                {
+                  "date": "2026-01-03",
+                  "representative_value": 7.1,
+                  "unit": "...",
+                  "confidence": 0.8,
+                  "anomalies": [
+                    {
+                      "time_window": "2026-01-03 06:00 to 12:00",
+                      "parameter": "pH",
+                      "observed_value": 5.1,
+                      "daily_mean": 7.1,
+                      "deviation_pct": 28.2,
+                      "possible_cause": "..."
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "explanation": {
+            "primary_drivers": [
+              {
+                "factor": "...",
+                "direction": "decreasing",
+                "magnitude": "high",
+                "evidence": "..."
+              }
+            ],
+            "reasoning_chain": "...",
+            "uncertainty_sources": "..."
+          }
+        }
+
+    Add: HYDRO_AGENT_PREDICTION_PROMPT
+      System role:
+        - Mode is PREDICTION: input data is weather forecast, not observations.
+        - Must reason about how values will change over the forecast period.
+        - reasoning_chain must explain temporal changes, e.g.:
+            "Day 1-2: stable pH expected due to low precipitation.
+             Day 3: forecasted heavy rain may cause runoff and pH decrease."
+        - primary_drivers should include forecast-based factors
+            (e.g. "Forecasted precipitation on Day 3: decreasing pH, high magnitude")
+        - "representative_value" for future days is a prediction, not an observation.
+        - Confidence should generally be lower than gap_filling.
+        - Output format is identical to HYDRO_AGENT_GAP_FILLING_PROMPT.
+
+TESTABLE CHECKPOINT:
+  - Use debug_main.py (or a small test script) to call the LLM with each prompt
+    on a known dataset and inspect whether:
+    1. The JSON output is valid and matches HydrologyInference schema.
+    2. "explanation" block is present and non-empty.
+    3. "detailed_results" contains the expected daily entries.
+    4. For prediction prompt: reasoning_chain mentions temporal changes.
+  - Tip: Test with a short date range (1-3 days) to keep LLM output small
+    and easier to inspect.
+
+================================================================================
+SPRINT 6 - Node Inference Logic Update
+================================================================================
+
+GOAL:
+  Update inference_node() in nodes.py to:
+    1. Select the correct prompt based on mode.
+    2. Call weather forecast API for prediction mode.
+    3. Call compute_daily_summary() and pass anomaly info into the prompt.
+    4. Validate that the new explanation and detailed_results fields
+       are present in the parsed output.
+    5. Handle the mixed-range case by running two sequential inference passes
+       (one gap_filling, one prediction) and merging the results.
+
+FILES TO MODIFY:
+  - app/agents/nodes.py
+
+DETAILS:
+
+  [app/agents/nodes.py]
+    At the top of inference_node():
+      Read mode and time_mode from state.
+
+    Branch A - mode == "gap_filling":
+      Keep all existing data fetching logic unchanged.
+      After fetching USGS data, call:
+        NWISService.compute_daily_summary(current_obs, ANOMALY_THRESHOLD_PCT)
+      Pass daily_summary into the data_block for the prompt.
+      Use HYDRO_AGENT_GAP_FILLING_PROMPT.
+
+    Branch B - mode == "prediction":
+      Skip get_daily_averages() (no historical observations for future dates).
+      Call WeatherService.get_weather_forecast() instead of
+        get_weather_and_alerts().
+      Use upstream_results from state as the primary data source.
+      Use HYDRO_AGENT_PREDICTION_PROMPT.
+
+    Branch C - mode == "mixed":
+      Run Branch A for the historical segment (segments[0]).
+      Run Branch B for the future segment (segments[1]).
+      Merge detailed_results: concatenate daily_results lists per parameter.
+      Merge explanation: keep both reasoning chains, concatenate primary_drivers.
+      Use the lower confidence value of the two passes as the overall confidence.
+
+    After LLM output parsing (all branches):
+      Validate that parsed_data.explanation is not None.
+        If None: log error and insert a placeholder explanation.
+      Validate that parsed_data.detailed_results is not empty.
+        If empty: log warning.
+      Store river.output = inference_result as before.
+
+    Logging additions:
+      "[Agent {comid}] mode={mode} | time_mode={time_mode}"
+      "[Agent {comid}] Daily summary: {n} days, {k} anomalies"
+      "[Agent {comid}] Explanation drivers: {len(primary_drivers)} factors"
+      "[Agent {comid}] Mixed mode: gap_filling segment done, 
+                        running prediction segment..."
+
+TESTABLE CHECKPOINT:
+  - Run debug_main.py with a gap_filling date range and check that:
+      final_output["output"]["explanation"] is present
+      final_output["output"]["detailed_results"] has correct daily entries
+  - Run debug_main.py with a future date range and check prediction output.
+  - Run debug_main.py with a mixed date range (straddles today) and check
+      that detailed_results spans both historical and future days.
+  - All existing gap_filling behavior (upstream passing via "parameters" field)
+    should still work as before.
+
+================================================================================
+SPRINT 7 - API Layer Update
+================================================================================
+
+GOAL:
+  Update the REST endpoint and WebSocket event format to expose
+  mode, time_mode, segments, explanation, anomalies, and daily_results
+  to the frontend.
+
+FILES TO MODIFY:
+  - app/main.py
+  - app/agents/agent_ws.py (if additional fields need passing)
+
+DETAILS:
+
+  [app/main.py]
+    Update AnalyzeRequest:
+      Add optional fields:
+        start_date: Optional[str] = None
+        end_date: Optional[str] = None
+      (If not provided, fall back to letting AskerService parse from query string,
+       maintaining backward compatibility.)
+
+    Update AnalyzeResponse:
+      Add:
+        mode: str
+        time_mode: str
+        segments: List[Dict]   # the split segments computed in Sprint 4
+
+    The all_agents_data field already carries detailed_results and explanation
+    inside each agent's output dict, so no structural change is needed there.
+
+    Update WebSocket agent_done event (in run_hydro_graph in graph.py):
+      Add to the yielded dict:
+        "explanation": agent_result.get("output", {}).get("explanation"),
+        "detailed_results": agent_result.get("output", {}).get("detailed_results"),
+        "anomalies": [
+            anomaly
+            for param in (agent_result.get("output", {})
+                          .get("detailed_results") or [])
+            for day in param.get("daily_results", [])
+            for anomaly in day.get("anomalies", [])
+        ]
+
+    Logging:
+      "[API] /analyze | mode={mode} | time_mode={time_mode} | 
+             segments={segments}"
+
+TESTABLE CHECKPOINT:
+  - Start the FastAPI server: uvicorn main:app --reload
+  - Send a POST to /analyze with a gap_filling query:
+      curl -X POST http://localhost:8000/analyze \
+        -H "Content-Type: application/json" \
+        -d '{"query": "pH at -92.41, 46.68 from 2026-01-01 to 2026-01-07",
+             "model_name": "llama3:8b"}'
+  - Verify response contains: mode, time_mode, segments fields.
+  - Verify all_agents_data entries contain explanation and detailed_results.
+  - Send a prediction query (future dates) and verify mode="prediction".
+  - Send a mixed query and verify mode="mixed" with 2 segments.
+  - Connect a WebSocket client and verify agent_done events contain
+    explanation, detailed_results, and anomalies fields.
+
+================================================================================
+SPRINT 8 - Frontend: Control Panel Date Selection and Mode Display
+================================================================================
+
+GOAL:
+  Replace the hardcoded date strings in ControlPanel with real date inputs.
+  Show the user which mode will be triggered based on their date selection.
+  Enforce the 7-day cap on future dates in the UI.
+
+FILES TO MODIFY:
+  - src/components/ControlPanel.jsx
+  - src/components/ControlPanel.css
+
+DETAILS:
+
+  [ControlPanel.jsx]
+    Add state:
+      const [startDate, setStartDate] = useState("")
+      const [endDate, setEndDate] = useState("")
+
+    Add computed value (derived from startDate/endDate):
+      const detectedMode = useMemo(() => {
+        if (!startDate || !endDate) return null
+        const today = new Date().toISOString().split("T")[0]
+        if (startDate === endDate) {
+          return endDate > today ? "Single Day - Prediction" : "Single Day - Gap-Filling"
+        }
+        if (endDate <= today) return "Date Range - Gap-Filling"
+        if (startDate > today) return "Date Range - Prediction"
+        return "Date Range - Mixed (Historical + Prediction)"
+      }, [startDate, endDate])
+
+    Add validation on endDate change:
+      const today = new Date()
+      const maxDate = new Date(today)
+      maxDate.setDate(today.getDate() + 7)
+      If endDate > maxDate: show warning, set endDate = maxDate.toISOString().split("T")[0]
+
+    Update handleFillCoords to include placeholder dates:
+      Fill start as today - 7 days, end as today (default gap_filling)
+
+    Update handleSubmit to include startDate and endDate in the payload:
+      ws.send(JSON.stringify({
+        query: query.trim(),
+        model_name: modelName,
+        start_date: startDate,
+        end_date: endDate
+      }))
+
+    Add UI elements:
+      Two <input type="date"> fields for start and end.
+      A mode indicator badge showing detectedMode.
+
+  [ControlPanel.css]
+    Add styles for:
+      .date-inputs: flex row with gap, two date inputs side by side
+      .mode-indicator: small badge showing current mode with color coding
+        gap_filling -> blue
+        prediction  -> purple
+        mixed       -> orange
+        single_day  -> gray prefix
+
+TESTABLE CHECKPOINT:
+  - Open the frontend in browser.
+  - Select a past date range: verify badge shows "Date Range - Gap-Filling".
+  - Select a future date range: verify badge shows "Date Range - Prediction".
+  - Select today to 5 days in future: verify badge shows "Date Range - Mixed".
+  - Select same start and end in past: verify "Single Day - Gap-Filling".
+  - Select end date > today+7: verify it is automatically capped.
+  - Click "Start Analysis" and verify the WebSocket payload in browser DevTools
+    contains start_date and end_date.
+
+================================================================================
+SPRINT 9 - Frontend: Time Series Chart Component
+================================================================================
+
+GOAL:
+  Add a TimeSeriesChart component that renders daily parameter values
+  as line charts using recharts. One chart per LLM agent node, covering
+  all parameters for that node. Show confidence as a shaded band.
+  Mark anomaly days with a distinct point style.
+
+FILES TO ADD:
+  - src/components/TimeSeriesChart.jsx
+  - src/components/TimeSeriesChart.css
+
+FILES TO MODIFY:
+  - src/App.jsx (add timeSeriesData state, update agent_done handler)
+  - src/components/MapView.jsx (trigger chart display on node click)
+
+DETAILS:
+
+  [App.jsx]
+    Add state:
+      const [timeSeriesData, setTimeSeriesData] = useState({})
+        // comid -> { parameterName -> [{date, value, confidence, hasAnomaly}] }
+      const [selectedChartComid, setSelectedChartComid] = useState(null)
+
+    In agent_done handler:
+      Parse detailed_results from event data.
+      For each parameter in detailed_results:
+        Build array: daily_results.map(d => ({
+          date: d.date,
+          value: d.representative_value,
+          confidence: d.confidence,
+          hasAnomaly: d.anomalies.length > 0
+        }))
+      Store in timeSeriesData[comid][paramName].
+
+    Pass to MapView:
+      onNodeClick={(comid) => setSelectedChartComid(comid)}
+
+    Render TimeSeriesChart when selectedChartComid is set:
+      Show as a bottom panel or modal overlay.
+      Include a close button.
+
+  [TimeSeriesChart.jsx]
+    Props: comid, data (the per-parameter dict), onClose
+
+    For each parameter, render a recharts ComposedChart:
+      X axis: date (string)
+      Y axis: parameter value
+      Line: representative_value (solid line)
+      Area: confidence band (value +/- (1-confidence)*value as approximation)
+        Use low opacity fill (0.15) for the band
+      Scatter: anomaly points (red dots on days where hasAnomaly=true)
+
+    Tab or dropdown to switch between parameters if multiple exist.
+
+    For prediction segment days: use dashed line style.
+    For historical segment days: use solid line style.
+    (Distinguish by comparing date to today in the component.)
+
+    Chart title: "COMID {comid} - {parameterName} over time"
+
+  [TimeSeriesChart.css]
+    Panel styling: fixed bottom panel, dark background matching app theme.
+    Tab styling for parameter switching.
+    Close button in top-right corner.
+
+TESTABLE CHECKPOINT:
+  - Run a gap_filling analysis with a multi-day range.
+  - After analysis completes, click a node on the map.
+  - Verify the time series chart appears at the bottom.
+  - Verify each parameter has a tab or is selectable.
+  - Verify anomaly days appear as red dots.
+  - Run a prediction or mixed analysis.
+  - Verify future days render with dashed line style.
+  - Verify confidence band is visible around the line.
+
+================================================================================
+SPRINT 10 - Frontend: Anomaly Panel and Explanation Display
+================================================================================
+
+GOAL:
+  Add a dedicated AnomalyPanel component that aggregates anomalies
+  from all nodes. Upgrade LogPanel to display structured Explanation
+  output with causal factors listed per agent.
+
+FILES TO ADD:
+  - src/components/AnomalyPanel.jsx
+  - src/components/AnomalyPanel.css
+
+FILES TO MODIFY:
+  - src/App.jsx (anomalies state, panel toggle)
+  - src/components/LogPanel.jsx (structured explanation display)
+  - src/App.css (layout adjustment for anomaly panel if needed)
+
+DETAILS:
+
+  [App.jsx]
+    Add state:
+      const [anomalies, setAnomalies] = useState([])
+        // flat list of {comid, ...AnomalyWindow fields}
+      const [showAnomalyPanel, setShowAnomalyPanel] = useState(false)
+
+    In agent_done handler:
+      Extract anomalies array from event (added in Sprint 7).
+      Append to anomalies state, tagging each with comid.
+
+  [AnomalyPanel.jsx]
+    Props: anomalies (list), onClose
+
+    Renders a scrollable list grouped by comid:
+      COMID 12345:
+        2026-01-03 06:00 to 12:00 | pH
+          Observed: 5.1 | Daily Mean: 7.1 | Deviation: -28.2%
+          Possible Cause: "..."
+
+        2026-01-05 18:00 to 00:00 | DO
+          Observed: 2.1 mg/L | Daily Mean: 8.3 mg/L | Deviation: -74.7%
+          Possible Cause: "..."
+
+    Header shows total anomaly count as a badge.
+    If no anomalies: show "No anomalies detected."
+
+    Toggle button in App layout (e.g., floating button or tab in right panel).
+
+  [LogPanel.jsx]
+    Update agent_done entry rendering:
+      Show structured Explanation below the summary line:
+
+        Agent [12345] Done
+          Causal Factors:
+            [decreasing / high]  Upstream COMID 9876
+              "pH 6.2 observed at upstream station..."
+            [decreasing / medium]  ICIS Facility XYZ
+              "Discharge permit records indicate..."
+          Reasoning Chain:
+            "Upstream acidic input combines with..."
+          Uncertainty:
+            "No direct observation at this section..."
+          [2 anomalies detected - click Anomaly Panel]
+
+      Keep existing <details> tag for collapsing this block.
+      Add a small clickable link at the bottom of each entry that
+        sets showAnomalyPanel=true and scrolls to that comid's anomalies.
+
+TESTABLE CHECKPOINT:
+  - Run a gap_filling or prediction analysis.
+  - After completion, check LogPanel for each completed agent:
+      Verify "Causal Factors" section lists at least one factor.
+      Verify "Reasoning Chain" is non-empty.
+  - If any anomalies were detected:
+      Verify the anomaly count link appears in the log entry.
+      Click the anomaly panel toggle: verify AnomalyPanel opens.
+      Verify anomalies are grouped by comid with correct fields.
+  - If no anomalies: verify "No anomalies detected." message in panel.
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+
+Sprint | Primary Files                          | What You Can Test
+-------|----------------------------------------|----------------------------------
+  1    | river.py, state.py, config.py          | Import new models without errors
+  2    | nwis_service.py                        | Daily summary + anomaly detection
+  3    | weather_service.py                     | NOAA forecast data retrieval
+  4    | asker_service.py                       | Mode/segment detection from dates
+  5    | prompts.py                             | LLM outputs explanation + details
+  6    | nodes.py                               | Full inference with new structure
+  7    | main.py, graph.py                      | API and WebSocket event fields
+  8    | ControlPanel.jsx/css                   | Date picker + mode badge in UI
+  9    | TimeSeriesChart.jsx/css, App.jsx       | Line chart on node click
+  10   | AnomalyPanel.jsx/css, LogPanel.jsx     | Anomaly list + explanation log
+
+================================================================================
+END OF SPRINT PLAN
+================================================================================

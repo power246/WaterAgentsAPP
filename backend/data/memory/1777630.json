@@ -1,8 +1,9 @@
 {
-  "history": [],
   "past_inferences": [
     {
-      "timestamp": "2026-02-25T21:33:40.804682",
+      "timestamp": "2026-03-21T18:52:30.620609",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-15",
       "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
       "structured_inference": {
         "parameters": [
@@ -20,34 +21,10 @@
           }
         ],
         "estimated_flow": null,
-        "confidence": 0.65,
-        "analysis": "WHAT WE KNOW: We used upstream data from COMID 1777618. WHY THE ESTIMATE: The pH value of 7.6 was directly measured, and we're applying mass balance principles to derive our estimate for this segment. Since there's no local sensor data, we're relying on the stable pH reading from upstream. WHAT IT MEANS: Our estimated pH of 7.5 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have high confidence because we're applying a well-established principle (mass balance) and there's no contradictory data in our records. KEY TAKEAWAY: This segment has a stable pH environment suitable for aquatic life."
+        "confidence": 0.87,
+        "analysis": "WHAT WE KNOW: We have direct real-time sensor readings from upstream COMID 1777618 for pH, providing high confidence in the estimate. Upstream segment has slightly alkaline conditions persisting in this segment, remaining safe for most fish. WHAT IT MEANS: The pH of 7.5 is slightly alkaline, similar to tap water, which means it's suitable for most aquatic life. WHY THE ESTIMATE: We applied mass balance principles to derive the estimate from upstream values, considering flow volumes and concentration mixtures. CONFIDENCE REASON: We have confidence in our estimate due to direct real-time sensor readings upstream, with no significant changes or variations observed during the time period. KEY TAKEAWAY: This segment's pH remains slightly alkaline, suitable for most aquatic life."
       },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: We used upstream data from COMID 1777618. WHY THE ESTIMATE: The pH value of 7.6 was directly measured, and we're applying mass balance principles to derive our estimate for this segment. Since there's no local sensor data, we're relying on the stable pH reading from upstream. WHAT IT MEANS: Our estimated pH of 7.5 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have high confidence because we're applying a well-established principle (mass balance) and there's no contradictory data in our records. KEY TAKEAWAY: This segment has a stable pH environment suitable for aquatic life.\"\n}"
-    },
-    {
-      "timestamp": "2026-02-25T21:46:54.363852",
-      "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
-      "structured_inference": {
-        "parameters": [
-          {
-            "name": "pH",
-            "code": "00400",
-            "estimate_value": 7.5,
-            "unit": "std units"
-          },
-          {
-            "name": "Alkalinity",
-            "code": "00409",
-            "estimate_value": null,
-            "unit": "mg/L"
-          }
-        ],
-        "estimated_flow": null,
-        "confidence": 0.65,
-        "analysis": "WHAT WE KNOW: We used upstream data from COMID 1777618. WHY THE ESTIMATE: The pH value of 7.6 was directly measured, and we're applying mass balance principles to derive our estimate for this segment. Assuming the pH remains stable due to sandstone terrain buffering (resists) pH change, keeping pH near 7.5. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Confidence 0.65 because we have one upstream sensor reading with no variation across the full 15-day window, giving moderate certainty. KEY TAKEAWAY: The pH in this segment remains stable and safe for aquatic life."
-      },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: We used upstream data from COMID 1777618. WHY THE ESTIMATE: The pH value of 7.6 was directly measured, and we're applying mass balance principles to derive our estimate for this segment. Assuming the pH remains stable due to sandstone terrain buffering (resists) pH change, keeping pH near 7.5. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Confidence 0.65 because we have one upstream sensor reading with no variation across the full 15-day window, giving moderate certainty. KEY TAKEAWAY: The pH in this segment remains stable and safe for aquatic life.\" \n}"
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.87,\n  \"analysis\": \"WHAT WE KNOW: We have direct real-time sensor readings from upstream COMID 1777618 for pH, providing high confidence in the estimate. Upstream segment has slightly alkaline conditions persisting in this segment, remaining safe for most fish. WHAT IT MEANS: The pH of 7.5 is slightly alkaline, similar to tap water, which means it's suitable for most aquatic life. WHY THE ESTIMATE: We applied mass balance principles to derive the estimate from upstream values, considering flow volumes and concentration mixtures. CONFIDENCE REASON: We have confidence in our estimate due to direct real-time sensor readings upstream, with no significant changes or variations observed during the time period. KEY TAKEAWAY: This segment's pH remains slightly alkaline, suitable for most aquatic life.\" }"
     }
   ],
   "static_metadata": {

@@ -1,8 +1,9 @@
 {
-  "history": [],
   "past_inferences": [
     {
-      "timestamp": "2026-02-25T21:36:52.261337",
+      "timestamp": "2026-03-21T18:52:41.194424",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-15",
       "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
       "structured_inference": {
         "parameters": [
@@ -20,34 +21,10 @@
           }
         ],
         "estimated_flow": null,
-        "confidence": 0.65,
-        "analysis": "WHAT WE KNOW: We're using upstream COMID 1777630 with pH value of 7.5 and no Alkalinity data. WHY THE ESTIMATE: Since there's no local sensor data, we're relying on mass balance principles to derive our estimate for this segment. The higher total flow in the upstream segments dilutes the concentrations, resulting in a lower estimated pH value. WHAT IT MEANS: pH 7.5 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Confidence 0.65 because we're relying on mass balance principles and there's no local sensor data to directly measure the parameter values. KEY TAKEAWAY: The estimated pH value of 7.5 indicates a slightly alkaline environment suitable for most aquatic life."
+        "confidence": 0.87,
+        "analysis": "WHAT WE KNOW: We have direct real-time sensor readings from upstream COMID 1777618 for pH, providing high confidence in the estimate. Derive Alkalinity value from upstream segment COMID 1777622 with no data available. WHY THE ESTIMATE: The sensor data shows a constant value of 7.5 for pH and no data exists for Alkalinity. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have direct real-time USGS sensor reading from upstream segment COMID 1777618 for pH, providing consistent values across the time range of 2026-01-01 to 2026-01-15. KEY TAKEAWAY: pH remains stable at 7.5; Alkalinity data is unavailable."
       },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: We're using upstream COMID 1777630 with pH value of 7.5 and no Alkalinity data. WHY THE ESTIMATE: Since there's no local sensor data, we're relying on mass balance principles to derive our estimate for this segment. The higher total flow in the upstream segments dilutes the concentrations, resulting in a lower estimated pH value. WHAT IT MEANS: pH 7.5 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Confidence 0.65 because we're relying on mass balance principles and there's no local sensor data to directly measure the parameter values. KEY TAKEAWAY: The estimated pH value of 7.5 indicates a slightly alkaline environment suitable for most aquatic life.\" }"
-    },
-    {
-      "timestamp": "2026-02-25T21:47:01.171957",
-      "task": "Compute the pH at coordinates: -92.414165705, 46.682323895 from 2026-01-01 to 2026-01-15.",
-      "structured_inference": {
-        "parameters": [
-          {
-            "name": "pH",
-            "code": "00400",
-            "estimate_value": 7.5,
-            "unit": "std units"
-          },
-          {
-            "name": "Alkalinity",
-            "code": "00409",
-            "estimate_value": null,
-            "unit": "mg/L"
-          }
-        ],
-        "estimated_flow": null,
-        "confidence": 0.65,
-        "analysis": "WHAT WE KNOW: We're using upstream COMID 1777630 with pH value of 7.5 and no Alkalinity data. WHY THE ESTIMATE: Since there's no local sensor data, we're relying on mass balance principles to derive our estimate for this segment. Assuming the pH remains stable due to sandstone terrain buffers (resists) pH change, keeping pH near 7.5. WHAT IT MEANS: The pH is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Our confidence is 0.65 because we're relying on a single upstream segment with data from COMID 1777618. KEY TAKEAWAY: This segment's pH remains stable, and our estimate reflects this."
-      },
-      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.65,\n  \"analysis\": \"WHAT WE KNOW: We're using upstream COMID 1777630 with pH value of 7.5 and no Alkalinity data. WHY THE ESTIMATE: Since there's no local sensor data, we're relying on mass balance principles to derive our estimate for this segment. Assuming the pH remains stable due to sandstone terrain buffers (resists) pH change, keeping pH near 7.5. WHAT IT MEANS: The pH is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: Our confidence is 0.65 because we're relying on a single upstream segment with data from COMID 1777618. KEY TAKEAWAY: This segment's pH remains stable, and our estimate reflects this.\"}"
+      "llm_result": "{\n  \"parameters\": [\n    {\n      \"name\": \"pH\",\n      \"code\": \"00400\",\n      \"estimate_value\": 7.5,\n      \"unit\": \"std units\"\n    },\n    {\n      \"name\": \"Alkalinity\",\n      \"code\": \"00409\",\n      \"estimate_value\": null,\n      \"unit\": \"mg/L\"\n    }\n  ],\n  \"estimated_flow\": null,\n  \"confidence\": 0.87,\n  \"analysis\": \"WHAT WE KNOW: We have direct real-time sensor readings from upstream COMID 1777618 for pH, providing high confidence in the estimate. Derive Alkalinity value from upstream segment COMID 1777622 with no data available. WHY THE ESTIMATE: The sensor data shows a constant value of 7.5 for pH and no data exists for Alkalinity. WHAT IT MEANS: pH 7.6 is slightly alkaline, similar to tap water. Safe for most fish. CONFIDENCE REASON: We have direct real-time USGS sensor reading from upstream segment COMID 1777618 for pH, providing consistent values across the time range of 2026-01-01 to 2026-01-15. KEY TAKEAWAY: pH remains stable at 7.5; Alkalinity data is unavailable.\" \n}"
     }
   ],
   "static_metadata": {
