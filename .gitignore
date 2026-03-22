@@ -1,4 +1,5 @@
 .env
 __pycache__/
-backend/.cache
-backend/data
+*.pyc
+backend/.cache/
+backend/data/
