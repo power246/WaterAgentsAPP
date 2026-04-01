@@ -191,3 +191,77 @@
 .code-block::-webkit-scrollbar { width: 4px; }
 .code-block::-webkit-scrollbar-track { background: transparent; }
 .code-block::-webkit-scrollbar-thumb { background: #c8ddf5; border-radius: 2px; }
+
+/* ── Anomaly Tab ── */
+.anomaly-summary {
+  font-size: 11px;
+  color: #64748b;
+  padding: 4px 2px 8px;
+  font-style: italic;
+}
+
+.anomaly-entry {
+  border-bottom: 1px solid #1e2340;
+  padding: 8px 0;
+}
+.anomaly-entry:last-child { border-bottom: none; }
+
+.anomaly-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.anomaly-param {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f59e0b;
+}
+
+.anomaly-time {
+  font-size: 10.5px;
+  color: #4f5a72;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.anomaly-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.anomaly-dev { font-weight: 600; }
+.dev-high { color: #ef4444; }
+.dev-med  { color: #f59e0b; }
+
+.anomaly-cause {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+  font-style: italic;
+  padding-top: 2px;
+}
+
+/* Badge for anomaly count */
+.anomaly-badge {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  border-radius: 10px;
+  padding: 1px 6px;
+  font-size: 10px;
+}
+
+/* ── Analysis scroll container ── */
+.analysis-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 0 12px 10px;
+  border-top: 1px solid #2d3148;
+}
+.analysis-scroll::-webkit-scrollbar       { width: 4px; }
+.analysis-scroll::-webkit-scrollbar-track { background: transparent; }
+.analysis-scroll::-webkit-scrollbar-thumb { background: #2d3148; border-radius: 2px; }

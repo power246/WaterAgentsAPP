@@ -53,19 +53,26 @@ app.include_router(ws_router,        prefix="/ws")
 # Schemas
 class AnalyzeRequest(BaseModel):
     query: str = Field(
-        ..., 
+        ...,
         json_schema_extra={
-            "example": "Compare the pH at coordinates: -92.4141, 46.6823 from 2026-01-01 to 2026-01-15."
+            "example": "Compare the pH at coordinates: -92.4141, 46.6823"
         }
     )
     model_name: Optional[str] = Field("llama3:8b", description="Name of the LLM model used")
+    # Dates are required — the frontend date picker is the authoritative source.
+    # The query text should NOT contain date strings.
+    start_date: str = Field(..., description="Analysis start date (YYYY-MM-DD), provided by the frontend date picker")
+    end_date:   str = Field(..., description="Analysis end date (YYYY-MM-DD), provided by the frontend date picker")
 
 class AnalyzeResponse(BaseModel):
     target_id: str
     summary: Optional[Any] = None
-    all_agents_data: Dict[str, Any] = Field(..., description="The derivation results of the entire river section for front-end drawing")
+    all_agents_data: Dict[str, Any] = Field(..., description="Inference results for all river segments")
     params_used: List[List[str]]
     time_range: Dict[str, str]
+    mode:      str = Field(..., description="Inference mode: gap_filling | prediction | mixed")
+    time_mode: str = Field(..., description="Time granularity: single_day | date_range")
+    segments:  List[Dict] = Field(..., description="Ordered time segments (one for pure modes, two for mixed)")
 
 
 # Routing implementation
@@ -76,7 +83,10 @@ async def analyze_water_system(request: AnalyzeRequest):
     # Asker analyzes the context (including topology construction here)
     context = await AskerService.prepare_inference_context(
         user_query=request.query,
-        selected_model=request.model_name
+        selected_model=request.model_name,
+        # Sprint 7: frontend-provided dates take priority over anything in the query text
+        start_date=request.start_date,
+        end_date=request.end_date,
     )
     
     if not context:
@@ -98,14 +108,21 @@ async def analyze_water_system(request: AnalyzeRequest):
 
     # run inference
     initial_state = {
-        "task": request.query,
-        "current_params": context["current_params"],
-        "facility_types": ["ICIS", "SEMS", "TRIS", "NCDB", "CWNS", "FFEP"],
-        "start_date": context["start_date"],
-        "end_date": context["end_date"],
-        "global_data": context["global_data"],
-        "inlet_comids": inlet_comids,
-        "selected_model": request.model_name
+        "task":            request.query,
+        "current_params":  context["current_params"],
+        "facility_types":  ["ICIS", "SEMS", "TRIS", "NCDB", "CWNS", "FFEP"],
+        "start_date":      context["start_date"],
+        "end_date":        context["end_date"],
+        "global_data":     context["global_data"],
+        "inlet_comids":    inlet_comids,
+        "selected_model":  request.model_name,
+        # Sprint 7: pass mode/time_mode/segments so nodes.py selects the correct prompt
+        "mode":            context.get("mode",      "gap_filling"),
+        "time_mode":       context.get("time_mode", "date_range"),
+        "segments":        context.get("segments",  []),
+        # Use auto resampling by default for REST endpoint
+        "resample_auto":   True,
+        "resample_freq_h": 6,
     }
 
     try:
@@ -119,7 +136,11 @@ async def analyze_water_system(request: AnalyzeRequest):
             summary=target_agent.get("output") if target_agent else "No data",
             all_agents_data=final_state["global_data"],
             params_used=context["current_params"],
-            time_range={"start": context["start_date"], "end": context["end_date"]}
+            time_range={"start": context["start_date"], "end": context["end_date"]},
+            # Sprint 7: expose mode/time_mode/segments
+            mode=context.get("mode",      "gap_filling"),
+            time_mode=context.get("time_mode", "date_range"),
+            segments=context.get("segments",  []),
         )
 
     except Exception as e:

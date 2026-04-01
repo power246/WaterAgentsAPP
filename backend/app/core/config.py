@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     USGS_SEARCH_DISTANCE: float = 0.1   # km radius when looking for nearby USGS sites
     MAX_TOPOLOGY_DEPTH:   int   = 10    # BFS depth limit when building the river graph
 
+    # ── Anomaly detection & prediction limits ─────────────────────────────────
+    # A sub-daily window deviating more than this percentage from the daily mean
+    # is flagged as an anomaly and passed to the LLM for explanation.
+    ANOMALY_THRESHOLD_PCT: float = 25.0
+    PREDICTION_MAX_DAYS: int = 7         # Maximum number of future days allowed in prediction mode.
+
     # ── Data resampling frequencies (used as fallback when auto-freq is off) ──
     WATER_DATA_RESAMPLE_FREQ: str = "6h"
     WEATHER_FREQ:             str = "12h"

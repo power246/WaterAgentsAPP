@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import MapView from "./components/MapView";
 import ControlPanel from "./components/ControlPanel";
 import RightPanel from "./components/RightPanel";
+import TimeSeriesChart from "./components/TimeSeriesChart";
 import "./App.css";
 
 /**
@@ -41,6 +42,22 @@ export default function App() {
   // If null, MapView falls back to OpenStreetMap (no key required).
   const [googleMapsKey, setGoogleMapsKey] = useState(null);
 
+  // Segments from the most recent query, used by TimeSeriesChart to accurately
+  // classify historical vs prediction days (avoids timezone-related date bugs).
+  const [querySegments, setQuerySegments] = useState([]);
+
+  // Time-series chart data built from agent_done events.
+  // Shape: { comid -> { paramName -> [{date, value, confidence, hasAnomaly, unit}] } }
+  const [timeSeriesData,    setTimeSeriesData]    = useState({});
+
+  // comid of the node whose chart is currently open (null = hidden)
+  const [selectedChartComid, setSelectedChartComid] = useState(null);
+
+  // Flat list of anomaly windows collected from all completed agents.
+  // Each entry is tagged with comid for grouping in the AnomalyTab.
+  // Shape: [{comid, time_window, parameter, observed_value, daily_mean, deviation_pct, possible_cause}, ...]
+  const [anomalies, setAnomalies] = useState([]);
+
   // Fetch the Google Maps key once on mount
   useEffect(() => {
     fetch("/api/keys/map-key")
@@ -52,6 +69,42 @@ export default function App() {
   }, []);
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+
+  /**
+   * Parse an agent's output into the flat time-series structure used by TimeSeriesChart.
+   * Handles both detailed_results (per-parameter daily values) and
+   * flow_results (discharge daily values).
+   */
+  const _parseTimeSeries = (result) => {
+    const data = {};
+    if (!result) return data;
+
+    // Parse each parameter's daily breakdown
+    for (const param of result.detailed_results || []) {
+      data[param.name] = (param.daily_results || []).map((d) => ({
+        date:       d.date,
+        value:      d.representative_value,
+        confidence: d.confidence,
+        hasAnomaly: (d.anomalies || []).length > 0,
+        unit:       d.unit || param.unit || "",
+      }));
+    }
+
+    // Parse discharge time-series as an additional pseudo-parameter
+    const flow = result.flow_results;
+    if (flow) {
+      const name = flow.name || "Discharge";
+      data[name] = (flow.daily_results || []).map((d) => ({
+        date:       d.date,
+        value:      d.representative_value,
+        confidence: d.confidence,
+        hasAnomaly: (d.anomalies || []).length > 0,
+        unit:       d.unit || flow.unit || "ft3/s",
+      }));
+    }
+
+    return data;
+  };
 
   const appendLog = (event) => {
     setLogs((prev) => [
@@ -82,6 +135,19 @@ export default function App() {
       type: "info",
       message: `Selected node: ${node.comid}${node.result ? " (done)" : " (pending)"}`,
     });
+    // Open time-series chart if the node has inference results
+    if (node.result) {
+      setSelectedChartComid(node.comid);
+      // Ensure the chart data is populated (may not be present if this is
+      // a page reload with stale topology, or the node is from a cached run)
+      setTimeSeriesData((prev) => {
+        if (prev[node.comid]) return prev;  // already parsed
+        const parsed = _parseTimeSeries(node.result);
+        return { ...prev, [node.comid]: parsed };
+      });
+    } else {
+      setSelectedChartComid(null);
+    }
   };
 
   /**
@@ -134,12 +200,13 @@ export default function App() {
   };
 
   /** User triggered a new analysis run from the ControlPanel */
-  const handleStartAnalysis = ({ query, settings }) => {
+  const handleStartAnalysis = ({ query, startDate, endDate, settings }) => {
     // Cancel any pending stop-fallback timeout from a previous run.
     if (stopTimeoutRef.current) {
       clearTimeout(stopTimeoutRef.current);
       stopTimeoutRef.current = null;
     }
+    
 
     // Tear down any existing WebSocket BEFORE resetting state.
     // If the previous run was stopped early, its backend may still be running
@@ -158,6 +225,9 @@ export default function App() {
     setTopology({ nodes: [], edges: [] });
     setActiveComid(null);
     setSelectedAgent(null);
+    setAnomalies([]);
+    setSelectedChartComid(null);
+    setTimeSeriesData({});
     setStatus("running");
 
     appendLog({
@@ -174,6 +244,8 @@ export default function App() {
       ws.send(JSON.stringify({
         query,
         model_name:         settings.model_name,
+        start_date:         startDate,
+        end_date:           endDate,
         provider:           settings.provider,
         api_key:            settings.api_key || null,
         facility_types:     settings.facility_types,
@@ -207,6 +279,8 @@ export default function App() {
 
         case "topology":
           setTopology({ nodes: data.nodes, edges: data.edges });
+          // Store segments for TimeSeriesChart classification
+          setQuerySegments(data.segments || []);
           break;
 
         case "agent_start":
@@ -214,6 +288,11 @@ export default function App() {
           break;
 
         case "agent_done":
+          // Collect anomalies from this agent's output and append to the global list.
+          // data.anomalies is the flat list pre-computed in graph.py (Sprint 7).
+          if (data.anomalies && data.anomalies.length > 0) {
+            setAnomalies((prev) => [...prev, ...data.anomalies]);
+          }
           // Merge result + coordinates + LLM I/O into the topology node.
           // IMPORTANT: lat/lon are only known after inference_node runs
           // (RiverManager.get_river_metadata is called there, not during
@@ -238,6 +317,12 @@ export default function App() {
                 : n
             ),
           }));
+
+          // Build time-series data from this agent's output for the chart
+          if (data.result) {
+            const parsed = _parseTimeSeries(data.result);
+            setTimeSeriesData((prev) => ({ ...prev, [data.comid]: parsed }));
+          }
 
           // If this node is already open in the Inspector, update it live
           setSelectedAgent((prev) =>
@@ -307,6 +392,14 @@ export default function App() {
           activeComid={activeComid}
           googleMapsKey={googleMapsKey}
         />
+        {selectedChartComid && timeSeriesData[selectedChartComid] && (
+          <TimeSeriesChart
+            comid={selectedChartComid}
+            data={timeSeriesData[selectedChartComid]}
+            segments={querySegments}
+            onClose={() => setSelectedChartComid(null)}
+          />
+        )}
       </main>
 
       <aside className="panel-right">
@@ -315,6 +408,7 @@ export default function App() {
           status={status}
           selectedAgent={selectedAgent}
           onSelectAgent={setSelectedAgent}
+          anomalies={anomalies}
         />
       </aside>
     </div>

@@ -69,6 +69,9 @@ def create_hydrological_graph(
             "selected_model":  state.get("selected_model"),
             "resample_auto":   state.get("resample_auto",   True),
             "resample_freq_h": state.get("resample_freq_h", 12),
+            "mode":            state.get("mode",      "gap_filling"),
+            "time_mode":       state.get("time_mode", "date_range"),
+            "segments":        state.get("segments",  []),
             "upstream_results": {
                 uid: state["global_data"][uid].get("output")
                 for uid in agents_dict[comid].upstream_ids
@@ -130,6 +133,8 @@ async def run_hydro_graph(
             user_query=user_query,
             selected_model=model_name,
             max_topology_depth=max_topology_depth,
+            start_date=params.get("start_date"),   # frontend-provided dates take priority
+            end_date=params.get("end_date"),
         )
     except Exception as exc:
         logger.error(f"[WS] AskerService failed: {exc}")
@@ -213,6 +218,9 @@ async def run_hydro_graph(
             "start": context["start_date"],
             "end":   context["end_date"],
         },
+        # Pass segments so the frontend can accurately classify historical vs
+        # prediction days without relying on a potentially timezone-skewed date comparison.
+        "segments": context.get("segments", []),
     }
     logger.info(
         f"[WS] Topology sent: {len(topology_nodes)} nodes "
@@ -240,6 +248,9 @@ async def run_hydro_graph(
         "selected_model":  model_name,
         "resample_auto":   resample_auto,
         "resample_freq_h": resample_freq_h,
+        "mode":            context.get("mode",      "gap_filling"),
+        "time_mode":       context.get("time_mode", "date_range"),
+        "segments":        context.get("segments",  []),
     }
 
     try:
@@ -255,16 +266,29 @@ async def run_hydro_graph(
                 output_data  = event.get("data", {}).get("output", {})
                 agent_result = output_data.get("global_data", {}).get(node_name, {})
                 logger.info(f"[WS] Agent [{node_name}] done")
+                # Flatten anomalies from all parameters' daily_results for the
+                # AnomalyPanel (Sprint 10). Each anomaly is tagged with its comid.
+                output_data_inner = agent_result.get("output") or {}
+                flat_anomalies = [
+                    {**anomaly, "comid": node_name}
+                    for param in (output_data_inner.get("detailed_results") or [])
+                    for day   in (param.get("daily_results") or [])
+                    for anomaly in (day.get("anomalies") or [])
+                ]
                 yield {
-                    "type":           "agent_done",
-                    "comid":          node_name,
-                    "result":         agent_result.get("output"),
-                    "lat":            agent_result.get("lat"),
-                    "lon":            agent_result.get("lon"),
-                    "has_usgs_site":  agent_result.get("has_usgs_site"),
-                    "site_id":        agent_result.get("site_id"),
-                    "prompt_used":    agent_result.get("prompt_used"),
-                    "llm_raw_output": agent_result.get("llm_raw_output"),
+                    "type":            "agent_done",
+                    "comid":           node_name,
+                    "result":          output_data_inner,
+                    "lat":             agent_result.get("lat"),
+                    "lon":             agent_result.get("lon"),
+                    "has_usgs_site":   agent_result.get("has_usgs_site"),
+                    "site_id":         agent_result.get("site_id"),
+                    "prompt_used":     agent_result.get("prompt_used"),
+                    "llm_raw_output":  agent_result.get("llm_raw_output"),
+                    "explanation":     output_data_inner.get("explanation"),
+                    "detailed_results": output_data_inner.get("detailed_results"),
+                    "flow_results":    output_data_inner.get("flow_results"),
+                    "anomalies":       flat_anomalies,
                 }
 
                 # Plan-A stop check: after each agent completes, see if the

@@ -114,12 +114,78 @@ function LogsTab({ logs, onSelectAgent }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Anomaly Tab
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * AnomalyTab
+ * Groups all detected anomaly windows by COMID.
+ * Each entry shows time_window, parameter, observed vs mean, deviation, and cause.
+ */
+function AnomalyTab({ anomalies }) {
+  if (!anomalies || anomalies.length === 0) {
+    return (
+      <div className="tab-content inspector-empty">
+        <div className="inspector-empty-icon">📊</div>
+        <p>No anomalies detected<br />in any completed agent</p>
+      </div>
+    );
+  }
+
+  // Group anomalies by comid
+  const grouped = anomalies.reduce((acc, a) => {
+    const key = a.comid || "Unknown";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(a);
+    return acc;
+  }, {});
+
+  return (
+    <div className="tab-content inspector-content">
+      <div className="anomaly-summary">
+        {anomalies.length} anomaly window{anomalies.length !== 1 ? "s" : ""} across {Object.keys(grouped).length} node{Object.keys(grouped).length !== 1 ? "s" : ""}
+      </div>
+
+      {Object.entries(grouped).map(([comid, items]) => (
+        <section key={comid} className="insp-section">
+          <div className="insp-section-title">COMID {comid}</div>
+          {items.map((a, i) => (
+            <div key={i} className="anomaly-entry">
+              <div className="anomaly-header">
+                <span className="anomaly-param">{a.parameter}</span>
+                <span className="anomaly-time">{a.time_window}</span>
+              </div>
+              <div className="anomaly-values">
+                <span>
+                  Observed: <strong className="num-val">{a.observed_value}</strong>
+                </span>
+                <span>
+                  Daily mean: <strong>{a.daily_mean}</strong>
+                </span>
+                <span className={`anomaly-dev ${a.deviation_pct > 50 ? "dev-high" : "dev-med"}`}>
+                  Deviation: {a.deviation_pct?.toFixed(1)}%
+                </span>
+              </div>
+              {a.possible_cause && a.possible_cause !== "Pending LLM analysis" && (
+                <div className="anomaly-cause">{a.possible_cause}</div>
+              )}
+            </div>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Inspector Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
 function InspectorTab({ agent }) {
-  const [showPrompt,  setShowPrompt]  = useState(false);
-  const [showRawOut,  setShowRawOut]  = useState(false);
+  const [showPrompt,   setShowPrompt]   = useState(false);
+  const [showRawOut,   setShowRawOut]   = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(true);
 
   if (!agent) {
     return (
@@ -194,11 +260,20 @@ function InspectorTab({ agent }) {
         </section>
       )}
 
-      {/* Analysis text */}
+      {/* Analysis text — collapsible with scroll */}
       {result.analysis && (
-        <section className="insp-section">
-          <div className="insp-section-title">Analysis</div>
-          <p className="analysis-text">{result.analysis}</p>
+        <section className="insp-section collapsible">
+          <button
+            className="collapse-toggle"
+            onClick={() => setShowAnalysis((v) => !v)}
+          >
+            {showAnalysis ? "▾" : "▸"} Analysis
+          </button>
+          {showAnalysis && (
+            <div className="analysis-scroll">
+              <p className="analysis-text">{result.analysis}</p>
+            </div>
+          )}
         </section>
       )}
 
@@ -250,7 +325,7 @@ const INTERRUPTED_STYLE = `
  *   selectedAgent - agent data to show in Inspector (maintained in App.jsx)
  *   onSelectAgent - callback to update selectedAgent from the log tab
  */
-export default function RightPanel({ logs, status, selectedAgent, onSelectAgent }) {
+export default function RightPanel({ logs, status, selectedAgent, onSelectAgent, anomalies }) {
   const [activeTab, setActiveTab] = useState("logs");
 
   // Auto-switch to Inspector when a new agent is selected
@@ -291,6 +366,15 @@ export default function RightPanel({ logs, status, selectedAgent, onSelectAgent 
           Inspector
           {selectedAgent && <span className="tab-badge inspector-badge">●</span>}
         </button>
+        <button
+          className={`tab-btn ${activeTab === "anomalies" ? "active" : ""}`}
+          onClick={() => setActiveTab("anomalies")}
+        >
+          Anomalies
+          {anomalies?.length > 0 && (
+            <span className="tab-badge anomaly-badge">{anomalies.length}</span>
+          )}
+        </button>
       </div>
 
       {activeTab === "logs" ? (
@@ -309,6 +393,8 @@ export default function RightPanel({ logs, status, selectedAgent, onSelectAgent 
             });
           }}
         />
+      ) : activeTab === "anomalies" ? (
+        <AnomalyTab anomalies={anomalies} />
       ) : (
         <InspectorTab agent={selectedAgent} />
       )}

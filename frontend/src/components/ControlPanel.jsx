@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import SettingsPanel from "./SettingsPanel";
 import "./ControlPanel.css";
 
@@ -27,6 +27,35 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis, o
   const [query,           setQuery]           = useState("");
   const [showSettings,    setShowSettings]    = useState(false);
   const [settings,        setSettings]        = useState(DEFAULT_SETTINGS);
+  const [startDate, setStartDate] = useState("");
+  const [endDate,   setEndDate]   = useState("");
+
+  // Derive the inference mode from the selected dates so the user knows
+  // what will happen before clicking Start.
+  const detectedMode = useMemo(() => {
+    if (!startDate || !endDate) return null;
+    const today = new Date().toISOString().split("T")[0];
+    if (startDate === endDate) {
+      return endDate > today ? "Single Day - Prediction" : "Single Day - Gap-Filling";
+    }
+    if (endDate <= today) return "Date Range - Gap-Filling";
+    if (startDate > today) return "Date Range - Prediction";
+    return "Date Range - Mixed (Historical + Prediction)";
+  }, [startDate, endDate]);
+
+  // Validate and cap the end date: future range cannot exceed 7 days from today.
+  const handleEndDateChange = (value) => {
+    const today    = new Date();
+    const maxDate  = new Date(today);
+    maxDate.setDate(today.getDate() + 7);
+    const maxStr   = maxDate.toISOString().split("T")[0];
+    if (value > maxStr) {
+      alert(`Prediction range is capped at 7 days from today. End date set to ${maxStr}.`);
+      setEndDate(maxStr);
+    } else {
+      setEndDate(value);
+    }
+  };
 
   const isRunning  = status === "running";
   const isStopping = status === "stopping";
@@ -34,14 +63,21 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis, o
   // the backend to confirm that all tasks have stopped.
   const isBlocked  = isRunning || isStopping;
 
-  // Auto-fill query box from map click
+  // Auto-fill coordinates into the query box AND pre-fill a default date range
+  // (last 7 days → today) so the user can start immediately.
   const handleFillCoords = () => {
     if (!selectedPoint) return;
     const { lat, lng } = selectedPoint;
+    // Query text: location + parameters only — NO dates (dates come from the date inputs)
     setQuery(
-      `Compute the pH at coordinates: ` +
-      `${lng.toFixed(6)}, ${lat.toFixed(6)} from 2026-01-01 to 2026-01-15.`
+      `Compute the pH at coordinates: ${lng.toFixed(6)}, ${lat.toFixed(6)}`
     );
+    // Pre-fill a default gap-filling range: 7 days ending today
+    const today = new Date();
+    const weekAgo = new Date(today);
+    weekAgo.setDate(today.getDate() - 7);
+    setStartDate(weekAgo.toISOString().split("T")[0]);
+    setEndDate(today.toISOString().split("T")[0]);
   };
 
   const handleSubmit = () => {
@@ -49,8 +85,17 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis, o
       alert("Please enter a query.");
       return;
     }
-    // Pass both the natural-language query and the current runtime settings
-    onStartAnalysis({ query: query.trim(), settings });
+    // Dates are required — the frontend is the authoritative source
+    if (!startDate || !endDate) {
+      alert("Please select both a start date and an end date.");
+      return;
+    }
+    if (startDate > endDate) {
+      alert("Start date must be on or before end date.");
+      return;
+    }
+    // Pass query, dates, and runtime settings to the parent
+    onStartAnalysis({ query: query.trim(), startDate, endDate, settings });
   };
 
   const handleApplySettings = (newSettings) => {
@@ -101,8 +146,8 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis, o
               className="query-input"
               rows={5}
               placeholder={
-                "Example:\nCompute the pH at coordinates: -92.41, 46.68 " +
-                "from 2026-01-01 to 2026-01-15."
+                "Describe what to analyze and where.\nDates are set below — do not include them here.\n\n" +
+                "Example:\nCompute the pH at coordinates: -92.41, 46.68"
               }
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -122,6 +167,43 @@ export default function ControlPanel({ selectedPoint, status, onStartAnalysis, o
               <span className="model-summary-text">{settingsSummary}</span>
               <span className="model-summary-edit">Edit ⚙</span>
             </button>
+          </section>
+
+          {/* ── Date range (required) ── */}
+          <section className="control-section">
+            <label className="section-label">Date Range (required)</label>
+            <div className="date-inputs">
+              <div className="date-field">
+                <span className="date-label">Start</span>
+                <input
+                  type="date"
+                  className="date-input"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  disabled={isBlocked}
+                />
+              </div>
+              <div className="date-field">
+                <span className="date-label">End</span>
+                <input
+                  type="date"
+                  className="date-input"
+                  value={endDate}
+                  onChange={(e) => handleEndDateChange(e.target.value)}
+                  disabled={isBlocked}
+                />
+              </div>
+            </div>
+
+            {/* Mode badge: shown once both dates are selected */}
+            {detectedMode && (
+              <div className={`mode-indicator mode-${
+                detectedMode.includes("Gap-Filling") ? "gap" :
+                detectedMode.includes("Prediction")  ? "pred" : "mixed"
+              }`}>
+                {detectedMode}
+              </div>
+            )}
           </section>
 
           {/* ── Status badge ── */}

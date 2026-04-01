@@ -1,0 +1,140 @@
+/* ── Bottom panel container ── */
+.ts-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: #ffffff;
+  border-top: 2px solid #c8ddf5;
+  box-shadow: 0 -4px 20px rgba(18, 52, 225, 0.12);
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+}
+
+/* ── Header row ── */
+.ts-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid #e8f5ff;
+  background: #f0f7ff;
+  flex-shrink: 0;
+}
+
+.ts-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1234e1;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+
+/* ── Parameter tabs ── */
+.ts-tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.ts-tab {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid #c8ddf5;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #7a90b8;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.ts-tab:hover {
+  border-color: #1234e1;
+  color: #1234e1;
+}
+
+.ts-tab-active {
+  background: #1234e1;
+  border-color: #1234e1;
+  color: #ffffff;
+}
+
+/* ── Close button ── */
+.ts-close {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid #c8ddf5;
+  border-radius: 4px;
+  color: #7a90b8;
+  width: 24px;
+  height: 24px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ts-close:hover {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+
+/* ── Chart area ── */
+.ts-chart-area {
+  flex: 1;
+  padding: 4px 4px 0;
+  overflow: hidden;
+}
+
+.ts-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 12px;
+  color: #7a90b8;
+  font-style: italic;
+}
+
+/* ── Legend strip ── */
+.ts-legend {
+  display: flex;
+  gap: 16px;
+  padding: 4px 16px 8px;
+  flex-shrink: 0;
+}
+
+.ts-leg-item {
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ts-leg-item::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.ts-leg-hist::before  { background: #1234e1; }
+.ts-leg-pred::before  { background: #6d28d9; border-top: 3px dashed #6d28d9; height: 0; }
+.ts-leg-anom::before  { background: #ef4444; width: 10px; height: 10px; border-radius: 50%; }
+.ts-leg-band::before  { background: #bfdbfe; height: 8px; border-radius: 2px; }
+
+.ts-leg-hist  { color: #1234e1; }
+.ts-leg-pred  { color: #7c3aed; }
+.ts-leg-anom  { color: #ef4444; }
+.ts-leg-band  { color: #7a90b8; }
+

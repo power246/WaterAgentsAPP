@@ -2,7 +2,7 @@ import pandas as pd
 import logging
 import json
 from typing import Optional, Tuple, Dict, List, Any
-
+from datetime import date, timedelta
 from sentence_transformers import SentenceTransformer, util
 
 from app.core.config import settings
@@ -144,6 +144,8 @@ class AskerService:
         user_query:         str,
         selected_model:     str,
         max_topology_depth: int = None,
+        start_date:         str = None,
+        end_date:           str = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Full pipeline: parse intent → resolve location → map parameters →
@@ -158,13 +160,13 @@ class AskerService:
             f"Model: {selected_model} | BFS depth: {depth}"
         )
 
-        # Step 1: LLM intent parsing
+        # LLM intent parsing
         data_needs = await cls.parse_user_intent(user_query, model_name=selected_model)
         if not data_needs or not data_needs.get("location"):
             logger.error("[AskerService] Could not extract a valid location from the query.")
             return None
 
-        # Step 2: Resolve location to (lat, lon)
+        # Resolve location to (lat, lon)
         location = data_needs["location"]
         lat, lon = None, None
 
@@ -177,7 +179,7 @@ class AskerService:
             logger.error(f"[AskerService] Coordinate resolution failed for: {location!r}")
             return None
 
-        # Step 3: COMID lookup
+        # COMID lookup
         start_comid = await NLDIService.get_main_comid(lat, lon)
         if not start_comid:
             logger.error(
@@ -186,7 +188,7 @@ class AskerService:
             return None
         logger.info(f"[AskerService] Resolved COMID: {start_comid}")
 
-        # Step 4: Semantic parameter mapping
+        # Semantic parameter mapping
         char_names  = data_needs.get("characteristic_names", [])
         final_params: List[List[str]] = []
         for name in char_names:
@@ -200,18 +202,100 @@ class AskerService:
                 unique_params.append(p)
                 seen.add(p[1])
 
-        # Step 5: Time range
-        time_range = data_needs.get("time_range", {})
-        start_date = time_range.get("start", "2026-02-01")
-        end_date   = time_range.get("end",   "2026-02-10")
+        # Time range
+        # Frontend-provided dates take priority over anything the LLM may have
+        # extracted from the query text. If the caller supplies both start_date
+        # and end_date, use them directly and skip the LLM time_range entirely.
+        if start_date and end_date:
+            logger.info(
+                f"[AskerService] Using frontend-provided dates: "
+                f"{start_date} -> {end_date}"
+            )
+        else:
+            # Fallback: parse from LLM output (legacy / API-only usage)
+            time_range = data_needs.get("time_range", {})
+            start_date = start_date or time_range.get("start", "2026-02-01")
+            end_date   = end_date   or time_range.get("end",   "2026-02-10")
+            logger.info(
+                f"[AskerService] Using LLM-parsed dates: "
+                f"{start_date} -> {end_date}"
+            )
 
-        # Step 6: Build topology
+        # Detect time_mode, mode, and split mixed ranges into segments
+        today      = date.today()
+        start_d    = date.fromisoformat(start_date)
+        end_d      = date.fromisoformat(end_date)
+
+        # time_mode: single_day when both dates are the same, otherwise date_range
+        time_mode = "single_day" if start_d == end_d else "date_range"
+
+        # Determine mode and build segments list.
+        # A segment is {"start": str, "end": str, "mode": str}.
+        # Most queries produce one segment; mixed-range queries produce two.
+        if end_d <= today:
+            # Fully historical
+            mode     = "gap_filling"
+            segments = [{"start": start_date, "end": end_date, "mode": "gap_filling"}]
+            logger.info(
+                f"[AskerService] time_mode={time_mode} | mode={mode} | "
+                f"segments={segments}"
+            )
+
+        elif start_d > today:
+            # Fully future — enforce PREDICTION_MAX_DAYS cap
+            max_end = start_d + timedelta(days=settings.PREDICTION_MAX_DAYS)
+            if end_d > max_end:
+                logger.warning(
+                    f"[AskerService] Prediction range capped from {end_date} "
+                    f"to {max_end.isoformat()} (PREDICTION_MAX_DAYS="
+                    f"{settings.PREDICTION_MAX_DAYS})"
+                )
+                end_d    = max_end
+                end_date = max_end.isoformat()
+            mode     = "prediction"
+            segments = [{"start": start_date, "end": end_date, "mode": "prediction"}]
+            logger.info(
+                f"[AskerService] time_mode={time_mode} | mode={mode} | "
+                f"segments={segments}"
+            )
+
+        else:
+            # Mixed: start is in the past, end is in the future
+            hist_end   = today.isoformat()
+            pred_start = (today + timedelta(days=1)).isoformat()
+
+            # Enforce cap on the prediction portion
+            max_pred_end = today + timedelta(days=settings.PREDICTION_MAX_DAYS)
+            if end_d > max_pred_end:
+                logger.warning(
+                    f"[AskerService] Mixed-range prediction portion capped from "
+                    f"{end_date} to {max_pred_end.isoformat()}"
+                )
+                end_d    = max_pred_end
+                end_date = max_pred_end.isoformat()
+
+            mode     = "mixed"
+            segments = [
+                {"start": start_date, "end": hist_end,   "mode": "gap_filling"},
+                {"start": pred_start, "end": end_date,   "mode": "prediction"},
+            ]
+            logger.info(
+                f"[AskerService] Mixed range detected. "
+                f"Historical: {start_date} to {hist_end} | "
+                f"Prediction: {pred_start} to {end_date}"
+            )
+            logger.info(
+                f"[AskerService] time_mode={time_mode} | mode={mode} | "
+                f"segments={segments}"
+            )
+
+        # Build topology
         agents_dict = await TopologyService.build_topology(
             start_comid=start_comid,
             max_depth=depth,
         )
 
-        # Step 7: Find inlet nodes (river segments with real USGS gauge data)
+        # Find inlet nodes (river segments with real USGS gauge data)
         inlet_comids = [
             cid for cid, river in agents_dict.items() if river.has_usgs_site
         ]
@@ -236,4 +320,7 @@ class AskerService:
             "global_data":   {cid: river.model_dump() for cid, river in agents_dict.items()},
             "task":          user_query,
             "selected_model": selected_model,
+            "mode":           mode,       # "gap_filling" | "prediction" | "mixed"
+            "time_mode":      time_mode,  # "single_day"  | "date_range"
+            "segments":       segments,   # ordered list of {start, end, mode}
         }

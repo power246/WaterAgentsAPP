@@ -12,9 +12,19 @@ class AgentSubState(TypedDict):
     task: str
     upstream_results: Dict[str, Any]
     selected_model: str
+    
     # Resampling settings forwarded from frontend settings panel
     resample_auto:   bool   # True = auto-select interval from date range
     resample_freq_h: int    # Manual override: interval in hours (ignored when auto=True)
+    
+    # Inference mode: "gap_filling" (historical) or "prediction" (future)
+    mode: str
+    # Time granularity: "single_day" (start == end) or "date_range"
+    time_mode: str
+    # Ordered list of time segments; mixed-range queries produce two entries:
+    # [{"start":..., "end":..., "mode":"gap_filling"},
+    #  {"start":..., "end":..., "mode":"prediction"}]
+    segments: List[Dict[str, Any]]
 
 
 # Global state definition of the Water Agent system
@@ -36,3 +46,10 @@ class WaterSystemState(TypedDict):
     # Resampling settings forwarded from frontend settings panel
     resample_auto:   bool   # True = auto-select interval from date range
     resample_freq_h: int    # Manual override: interval in hours (ignored when auto=True)
+    
+    # Inference mode: "gap_filling", "prediction", or "mixed"
+    mode: str
+    # Time granularity: "single_day" or "date_range"
+    time_mode: str
+    # Ordered list of time segments (see AgentSubState for structure)
+    segments: List[Dict[str, Any]]

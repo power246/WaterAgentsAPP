@@ -65,3 +65,9 @@ INFO:     Stopping reloader process [2497788]
   warnings.warn('resource_tracker: There appear to be %d '
 ^C
 
+
+
+1. 输出不稳定
+2. 输出可能太多，会被切断
+重新设计LLM的交互模式。为每一个水体的每一个需要推测的数值分配一个LLM。并且使用一个LLM将单个水体的所有数值的LLM的推理做个总体总结。
+
