@@ -7,7 +7,8 @@
 - 新代码只写入 `backend/`，不得修改 `backend_bk/`。
 - 不恢复或兼容旧 `/analyze`、`/ws/hydro-analysis`、旧事件和旧前端字段。
 - M1 只实现 project shell、Domain、窗口规划、ports 协议和测试；不提前实现 session、SSE、transcript、数据库、evidence tools、Agent、RAG 或真实 adapter。
-- Python 最低版本为 3.11；Domain 使用 Pydantic v2。
+- Python 最低版本为 3.11；Domain 使用 Pydantic v2；同一份新后端代码必须支持 macOS、Windows 和 Linux。
+- 生产代码使用 `pathlib`/`tempfile` 等标准库跨平台抽象，不硬编码 POSIX 路径、`/tmp`、盘符、shell 命令或 macOS 专用能力。
 - Domain 只能依赖标准库、Pydantic 和 `app.domain`，不能依赖 FastAPI、数据库、LLM framework、外部 API SDK 或其他应用层。
 - 采用一类一文件，不把多个核心对象重新合并成通用 `models.py`。
 - Domain model 使用 `extra=forbid`、`frozen=true`、`str_strip_whitespace=true`、`allow_inf_nan=false`。
@@ -21,7 +22,7 @@
 ## 成功标准
 
 - `backend/` 是可安装、可启动、可测试的 Python 3.11+ 工程。
-- `uvicorn app.main:app --app-dir backend` 可以启动，`GET /health` 精确返回 `{"status":"healthy"}`。
+- `python -m uvicorn app.main:app --app-dir backend` 可以启动，`GET /health` 精确返回 `{"status":"healthy"}`。
 - M1 约定的 Domain 对象都有真实类型、校验和 JSON round-trip 测试。
 - `TimeResolution` 只接受 `6h / 12h / 24h`，默认 `12h`，并保留 `time_resolution_source`。
 - `build_time_windows` 正确处理普通日期、DST、重复本地时间和从请求起点滚动的窗口。
@@ -30,6 +31,7 @@
 - Evidence 的 collection status、provenance、ParameterKey 和引用完整性成立。
 - Domain 依赖扫描证明没有 FastAPI、数据库、LLM provider 或外部 API 依赖。
 - 没有向 `backend_bk/` 写入代码，没有引入 M2-M9 运行时实现或旧接口兼容层。
+- project shell、配置、路径和启动方式不依赖当前开发机，macOS、Windows、Linux 使用同一份代码和 `pyproject.toml`。
 
 ## 已确认设计结论
 
@@ -54,27 +56,40 @@
 
 目标：确认新后端起点、工具链和用户已有改动，不开始生产代码。
 
-- [ ] 执行 `git status --short --branch`，记录当前分支和已有 rename/untracked 文件。
-- [ ] 确认 `backend/` 当前没有需要保留的新架构实现；如已有文件，逐项判断归属，不直接覆盖。
-- [ ] 确认 `backend_bk/` 只作为只读历史参考。
-- [ ] 确认正式技术设计为 `docs/M1/m1_project_shell_domain_design.md`。
-- [ ] 确认总 milestones 已移除第一版 `Waterbody` 并登记所有 deferred contracts。
-- [ ] 执行 `python3 --version`，确认实际解释器为 Python 3.11+。
-- [ ] 确认当前环境可创建隔离虚拟环境并安装 `pyproject.toml` 依赖。
-- [ ] 搜索根目录和 `backend_bk/` 中已有 Python packaging/test 配置，确认不会误复用旧空 `requirements.txt`。
-- [ ] 记录 M1 开工前的测试基线；如果没有新后端测试，明确记录为“尚无 M1 test suite”。
+- [x] 执行 `git status --short --branch`，记录当前分支和已有 rename/untracked 文件。
+- [x] 确认 `backend/` 当前没有需要保留的新架构实现；如已有文件，逐项判断归属，不直接覆盖。
+- [x] 确认 `backend_bk/` 只作为只读历史参考。
+- [x] 确认正式技术设计为 `docs/M1/m1_project_shell_domain_design.md`。
+- [x] 确认总 milestones 已移除第一版 `Waterbody` 并登记所有 deferred contracts。
+- [x] 执行 `python --version`，确认实际解释器为 Python 3.11+。
+- [x] 确认当前环境可创建隔离虚拟环境并安装 `pyproject.toml` 依赖。
+- [x] 搜索根目录和 `backend_bk/` 中已有 Python packaging/test 配置，确认不会误复用旧空 `requirements.txt`。
+- [x] 记录 M1 开工前的测试基线；如果没有新后端测试，明确记录为“尚无 M1 test suite”。
 
 验证点：
 
-- [ ] 能说明哪些工作区改动属于用户，M1 不会覆盖哪些文件。
-- [ ] 能说明新 backend 的启动目录、package import root 和测试执行目录。
-- [ ] 准备阶段没有产生 backend 生产代码修改。
+- [x] 能说明哪些工作区改动属于用户，M1 不会覆盖哪些文件。
+- [x] 能说明新 backend 的启动目录、package import root 和测试执行目录。
+- [x] 准备阶段没有产生 backend 生产代码修改。
+
+### Milestone 0 基线记录（2026-09-07）
+
+- 起始分支为 `codex/m1-design`，跟踪 `origin/m1-design`；工作树干净，没有 rename、untracked 或其他用户未提交改动。基线确认后创建并切换到 `codex/m1-implementation`。
+- `backend/` 为空，没有需要保留或判断归属的新架构文件。后续 M1 不覆盖 `backend_bk/`、`frontend/` 或根目录中的旧项目文件。
+- `backend_bk/` 仅作为只读历史参考；本 Milestone 没有修改其中任何文件。
+- 正式技术设计为 `docs/M1/m1_project_shell_domain_design.md`。总 milestones 中第一版业务身份只保留 COMID，`Waterbody` 仅出现在 Future deferred contract；M3-M9 与 Future 的延后契约均已登记。
+- 当前 macOS 开发机的系统默认 `/usr/bin/python3` 为 Python 3.9.6，不能用于 M1。已明确选择 Codex bundled Python 3.12.14 作为本机 M1 解释器，并在 `/private/tmp/wateragents-m0-venv` 成功创建隔离虚拟环境；这些绝对路径只属于 M0 本机验证，不得进入生产代码、配置、测试或用户文档。
+- `backend/pyproject.toml` 按设计要在 Milestone 1 创建，因此 M0 无法执行尚不存在文件的 editable install。为验证安装能力，已在临时 Python 3.12 环境中安装设计声明的生产/开发依赖（FastAPI、Pydantic v2、pydantic-settings、Uvicorn、tzdata、pytest、httpx），`pip check` 与导入检查均通过；清空 `PYTHONTZPATH` 后仍能通过 `tzdata` 加载 `America/Chicago`。创建正式 `pyproject.toml` 后仍须执行清单中的 editable install 验收。
+- packaging/test 配置搜索只发现 0 行的 `backend_bk/requirements.txt`；根目录与空 `backend/` 没有 `pyproject.toml`、setup/pytest/tox 配置。M1 不复用该旧 requirements 文件。
+- 测试基线：尚无 M1 test suite。
+- 新 backend 从仓库根启动，使用 `--app-dir backend`；package import root 为 `backend/`（Python package 为 `backend/app/`）；测试从仓库根执行，目标目录为 `backend/tests/`。
+- 准备阶段仅回写本 TODO，没有产生 `backend/` 生产代码修改。
 
 建议命令：
 
 ```bash
 git status --short --branch
-python3 --version
+python --version
 find backend -maxdepth 3 -type f -print
 find backend_bk -maxdepth 2 -type f -print
 ```
@@ -85,45 +100,61 @@ find backend_bk -maxdepth 2 -type f -print
 
 ### Packaging
 
-- [ ] 创建 `backend/pyproject.toml`，设置 Python `>=3.11`。
-- [ ] 生产依赖仅加入 FastAPI、Pydantic v2、pydantic-settings、Uvicorn。
-- [ ] dev 依赖仅加入 pytest 和 httpx。
-- [ ] 配置 pytest test path，保证从仓库根执行命令时能稳定导入 `app`。
-- [ ] 不加入 LangChain、LangGraph、SQLAlchemy、数据库 driver、provider SDK、cache 或 retry 库。
-- [ ] 创建 `backend/README.md`，记录安装、测试和启动命令。
+- [x] 创建 `backend/pyproject.toml`，设置 Python `>=3.11`。
+- [x] 生产依赖仅加入 FastAPI、Pydantic v2、pydantic-settings、Uvicorn 和跨平台 IANA timezone fallback `tzdata`。
+- [x] dev 依赖仅加入 pytest 和 httpx。
+- [x] 配置 pytest test path，保证从仓库根执行命令时能稳定导入 `app`。
+- [x] 不加入 LangChain、LangGraph、SQLAlchemy、数据库 driver、provider SDK、cache 或 retry 库。
+- [x] 创建 `backend/README.md`，记录 macOS/Linux POSIX shell 与 Windows PowerShell 的虚拟环境激活方式，以及统一的安装、测试和启动命令。
+- [x] 在 `backend/.venv` 创建本机隔离环境并通过 `.gitignore` 排除；各平台从同一 `pyproject.toml` 创建自己的 `.venv`，不提交平台专用二进制。
+- [x] 提交跨平台 `backend/uv.lock`；安装了 `uv` 的环境可用一条 `uv run --project backend --extra dev python -m app` 创建/同步隔离环境并启动，未安装时保留标准库 `venv + pip` 路径。
 
 ### App 与 settings
 
-- [ ] 创建 `backend/app/__init__.py` 及最小 API/config package。
-- [ ] 实现 `AppSettings`：`app_name`、`environment`、`log_level`、`host`、`port`、`analysis_timezone`。
-- [ ] 默认 `analysis_timezone="America/Chicago"`。
-- [ ] 使用 `zoneinfo.ZoneInfo` 校验 IANA timezone；非法配置启动失败，不静默回退。
-- [ ] 环境变量统一使用 `WATERAGENTS_` 前缀。
-- [ ] 实现 `create_app(settings: AppSettings | None = None) -> FastAPI` 和模块级 `app`。
-- [ ] 实现 `GET /health`，精确返回 `{"status":"healthy"}`。
-- [ ] 启动时不清理文件、不创建数据库、不联网、不启动后台任务。
-- [ ] 不添加旧 router、WebSocket、CORS 兼容或 LangGraph engine 字段。
+- [x] 创建 `backend/app/__init__.py` 及最小 API/config package。
+- [x] 实现 `AppSettings`：`app_name`、`environment`、`log_level`、`host`、`port`、`analysis_timezone`。
+- [x] 默认 `analysis_timezone="America/Chicago"`。
+- [x] 使用 `zoneinfo.ZoneInfo` 校验 IANA timezone；非法配置启动失败，不静默回退。
+- [x] 环境变量统一使用 `WATERAGENTS_` 前缀。
+- [x] 实现 `create_app(settings: AppSettings | None = None) -> FastAPI` 和模块级 `app`。
+- [x] 实现 `GET /health`，精确返回 `{"status":"healthy"}`。
+- [x] 启动时不清理文件、不创建数据库、不联网、不启动后台任务。
+- [x] 不添加旧 router、WebSocket、CORS 兼容或 LangGraph engine 字段。
+- [x] 提供跨平台最短启动入口 `python -m app` 和安装后的 `wateragents` console script。
 
 ### 测试
 
-- [ ] app 在无 `.env`、API key、网络和数据库时可构造。
-- [ ] health 返回 HTTP 200 和精确 body。
-- [ ] 非法 analysis timezone 产生明确配置错误。
-- [ ] 导入 `app.main` 不产生文件、网络或线程副作用。
+- [x] app 在无 `.env`、API key、网络和数据库时可构造。
+- [x] health 返回 HTTP 200 和精确 body。
+- [x] 非法 analysis timezone 产生明确配置错误。
+- [x] 导入 `app.main` 不产生文件、网络或线程副作用。
+- [x] shell/config 测试证明没有硬编码开发机绝对路径、POSIX-only shell/subprocess、`/tmp`、盘符或 macOS-only import。
+- [x] `America/Chicago` 的校验不假设操作系统自带 IANA timezone database，Windows 可通过 `tzdata` 获得相同语义。
 
 验证点：
 
-- [ ] editable install 成功。
-- [ ] 聚焦测试通过。
-- [ ] Uvicorn 手工启动后 health 可访问。
+- [x] editable install 成功。
+- [x] 聚焦测试通过。
+- [x] Uvicorn 手工启动后 health 可访问。
+
+### Milestone 1 完成记录（2026-09-07）
+
+- 本机隔离环境：`backend/.venv`，Python 3.12.14；目录已忽略，不作为跨平台产物提交。
+- 最短跨平台入口：提交 `backend/uv.lock`，`uv run --project backend --extra dev python -m app` 自动创建/同步项目内 `.venv` 并启动；本机已验证该入口返回健康响应，`uv` 不是生产依赖。
+- editable install：`backend/.venv/bin/python -m pip install -e './backend[dev]'` 成功，`pip check` 无损坏依赖。
+- 已安装版本：FastAPI 0.141.1、Pydantic 2.13.5、pydantic-settings 2.15.0、Uvicorn 0.52.4、tzdata 2026.3、pytest 9.1.1、httpx 0.28.1。
+- 测试：`backend/.venv/bin/python -m pytest backend/tests -q`，8 passed。
+- 时区 fallback：清空 `PYTHONTZPATH` 后，`AppSettings` 仍通过 `tzdata` 加载 `America/Chicago`。
+- 进程 smoke test：显式 Uvicorn 命令和 `python -m app` 均在 `127.0.0.1:8000` 成功启动；`GET /health` 返回 HTTP 200 与精确 body `{"status":"healthy"}`；服务已正常停止。
+- 平台说明：当前仅在 macOS 完成动态运行；Windows/Linux 的真实环境矩阵验收保留在 Milestone 7，M1 已加入平台无关静态门禁和 `tzdata` fallback 测试。
 
 建议命令：
 
 ```bash
-python3 -m pip install -e './backend[dev]'
-pytest backend/tests/api/test_health.py -q
-uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
-curl http://127.0.0.1:8000/health
+python -m pip install -e './backend[dev]'
+python -m pytest backend/tests/api/test_health.py -q
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+python -c "import httpx; response = httpx.get('http://127.0.0.1:8000/health'); response.raise_for_status(); print(response.json())"
 ```
 
 ## Milestone 2：Domain 基类与 Hydrology 对象
@@ -168,7 +199,7 @@ curl http://127.0.0.1:8000/health
 建议测试：
 
 ```bash
-pytest backend/tests/domain/test_hydrology.py backend/tests/domain/test_serialization.py -q
+python -m pytest backend/tests/domain/test_hydrology.py backend/tests/domain/test_serialization.py -q
 ```
 
 ## Milestone 3：Time 对象与墙上时钟窗口规划
@@ -219,7 +250,7 @@ pytest backend/tests/domain/test_hydrology.py backend/tests/domain/test_serializ
 建议测试：
 
 ```bash
-pytest backend/tests/domain/test_time.py backend/tests/domain/test_time_windows.py -q
+python -m pytest backend/tests/domain/test_time.py backend/tests/domain/test_time_windows.py -q
 ```
 
 ## Milestone 4：Evidence Domain
@@ -265,7 +296,7 @@ pytest backend/tests/domain/test_time.py backend/tests/domain/test_time_windows.
 建议测试：
 
 ```bash
-pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serialization.py -q
+python -m pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serialization.py -q
 ```
 
 ## Milestone 5：Inference 与 Attribution Domain
@@ -327,7 +358,7 @@ pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serializa
 建议测试：
 
 ```bash
-pytest backend/tests/domain/test_results.py backend/tests/domain/test_serialization.py -q
+python -m pytest backend/tests/domain/test_results.py backend/tests/domain/test_serialization.py -q
 ```
 
 ## Milestone 6：Ports 与异常契约
@@ -371,7 +402,7 @@ pytest backend/tests/domain/test_results.py backend/tests/domain/test_serializat
 建议测试：
 
 ```bash
-pytest backend/tests/architecture/test_port_imports.py -q
+python -m pytest backend/tests/architecture/test_port_imports.py -q
 ```
 
 ## Milestone 7：架构门禁与完整回归
@@ -404,17 +435,19 @@ pytest backend/tests/architecture/test_port_imports.py -q
 - [ ] 在干净 Python 3.11+ 虚拟环境执行 editable install 和测试。
 - [ ] 手工启动 Uvicorn 并验证 health。
 - [ ] 确认测试不访问网络、不依赖 `.env`、API key、数据库或本机 timezone。
+- [ ] 确认生产代码和测试使用 `pathlib`/`tempfile` 等跨平台 API，不依赖 POSIX shell、路径分隔符、`/tmp`、盘符、macOS-only import、`fork` 或大小写敏感文件系统。
+- [ ] 在 macOS、Windows、Linux CI 或等效干净环境中分别执行 editable install、完整测试和 health smoke test，并记录结果。
 
 验证点：
 
-- [ ] `pytest backend/tests -q` 全绿。
+- [ ] `python -m pytest backend/tests -q` 全绿。
 - [ ] 架构测试对一个临时禁止 import 能稳定报错，移除后恢复通过。
 - [ ] 所有 M1 成功标准均有自动化或明确手工验收证据。
 
 建议命令：
 
 ```bash
-pytest backend/tests -q
+python -m pytest backend/tests -q
 rg -n 'fastapi|sqlalchemy|httpx|langchain|langgraph|Any' backend/app/domain
 rg -n '/analyze|/ws/hydro-analysis|HydrologyInference|Waterbody' backend/app
 git diff --check
@@ -435,10 +468,10 @@ git diff --check
 
 最终验证：
 
-- [ ] `python3 -m pip install -e './backend[dev]'` 成功。
-- [ ] `pytest backend/tests -q` 全绿。
-- [ ] `uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000` 可启动。
-- [ ] `curl http://127.0.0.1:8000/health` 返回 `{"status":"healthy"}`。
+- [ ] `python -m pip install -e './backend[dev]'` 成功。
+- [ ] `python -m pytest backend/tests -q` 全绿。
+- [ ] `python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000` 可启动。
+- [ ] 使用 Python HTTP client 请求 `http://127.0.0.1:8000/health`，返回 `{"status":"healthy"}`。
 - [ ] `git diff --check` 通过。
 
 完成记录模板：

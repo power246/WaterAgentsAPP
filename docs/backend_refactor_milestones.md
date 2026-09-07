@@ -34,6 +34,10 @@
    - 如果某个 port DTO、policy 或产品接口缺少真实上下文，不在早期 milestone 用 `Any` 或猜测结构强行定型。
    - 延后项必须记录所属 milestone、必须保留的约束和独立验收入口。
 
+6. macOS、Windows 和 Linux 是同等支持的运行平台。
+   - 生产代码和默认配置不得依赖 POSIX 路径、shell、`/tmp` 或 macOS 专用能力。
+   - 每个 milestone 的安装、启动和测试入口应保持平台无关；平台专用 adapter 必须隔离并提供等价实现或明确能力检测。
+
 ## 2. 第一版 Milestone 总览
 
 ```text
@@ -91,6 +95,7 @@ M9  Settings/keys/admin + demo closure
 - 按 IANA timezone 和本地墙上时钟切分窗口的 `build_time_windows`。
 - `ports` 层接口占位。
 - 基础配置和应用启动入口。
+- macOS、Windows、Linux 通用的安装、启动和测试入口。
 
 独立验收：
 
@@ -101,6 +106,8 @@ M9  Settings/keys/admin + demo closure
 - 默认 `analysis_timezone=America/Chicago`，DST 窗口、UTC 身份和重复本地时间测试通过。
 - 每个计划窗口都有结果；完全缺证据时使用带 reason code 和 evidence refs 的 indeterminate。
 - 测试能证明 Domain 层不依赖 FastAPI、数据库、LLM provider 或具体外部 API。
+- project shell 不依赖操作系统自带 IANA timezone 数据，并且不包含平台专用路径或启动逻辑。
+- macOS、Windows、Linux 的 CI 或等效干净环境均能完成安装、测试和 health smoke test。
 
 ## 4. M2: Analysis Session + SSE Shell
 

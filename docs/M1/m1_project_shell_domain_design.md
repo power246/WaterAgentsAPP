@@ -10,7 +10,8 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 
 ## 1. 核心决策
 
-- 使用 Python 3.11+、FastAPI、Pydantic v2 和 `pyproject.toml`。
+- 使用 Python 3.11+、FastAPI、Pydantic v2 和 `pyproject.toml`，支持 macOS、Windows 和 Linux。
+- 生产代码不硬编码 POSIX 路径、`/tmp`、shell 命令或 macOS 专用能力；路径处理使用 `pathlib`，运行入口使用 Python 模块调用。
 - Domain 允许直接依赖 Pydantic v2，但不依赖 FastAPI、数据库、LLM framework 或外部 API SDK。
 - 新代码只写入 `backend/`；`backend_bk/` 只作历史参考。
 - 第一版业务目标只用 COMID 表达，不引入 `Waterbody`；通用水体抽象留给未来版本。
@@ -41,6 +42,7 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 - 时间窗口与 DST 语义测试。
 - Domain 依赖边界静态测试。
 - 启动与 health smoke test。
+- 跨平台 shell 约束测试，确保代码和配置不依赖当前开发机路径或操作系统专用行为。
 
 ### 2.2 M1 不包含
 
@@ -677,11 +679,13 @@ empty 与 unavailable 不混淆；Application 在后续 milestone 决定 retry�
 
 ### 8.1 依赖
 
-生产依赖：FastAPI、Pydantic v2、pydantic-settings、Uvicorn。
+生产依赖：FastAPI、Pydantic v2、pydantic-settings、Uvicorn、tzdata。
 
 开发依赖：pytest、httpx。
 
-M1 不安装 LangGraph、LangChain、数据库 driver、HTTP retry/cache 库或 provider SDK。Python 最低版本为 3.11。
+M1 不安装 LangGraph、LangChain、数据库 driver、HTTP retry/cache 库或 provider SDK。Python 最低版本为 3.11。`tzdata` 用于保证 Windows 等未提供系统 IANA timezone database 的环境仍可解析 `America/Chicago`，不能仅依赖开发机的系统时区数据。
+
+仓库提交跨平台 `uv.lock` 以提供可复现的一命令环境同步与启动；`uv` 是可选的开发机工具，不是应用运行依赖。没有 `uv` 时仍可使用标准库 `venv` 和 `pip` 完成同一安装。
 
 ### 8.2 Settings
 
@@ -712,10 +716,20 @@ M1 health：
 从仓库根启动：
 
 ```bash
-uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
 启动时不清空 memory/cache，不建数据库、不联网、不启动后台任务。
+
+### 8.4 跨平台约束
+
+- macOS、Windows 和 Linux 使用同一个 `pyproject.toml`、application factory 和模块启动入口。
+- 生产代码使用 `pathlib.Path` 和标准库 API 处理路径，不拼接 `/` 或 `\\`，不依赖当前工作目录解析资源。
+- 不调用 `bash`、`zsh`、PowerShell、`find`、`rm` 等系统 shell 命令实现应用功能。
+- 临时文件使用 `tempfile`，不硬编码 `/tmp`；编码显式使用 UTF-8，不能依赖平台默认编码。
+- M1 不依赖 `fork`、POSIX signal、Unix socket、文件权限位或大小写敏感文件系统语义。
+- README 分别说明 POSIX shell 与 Windows PowerShell 的虚拟环境激活方式；激活后统一使用 `python -m pip`、`python -m pytest` 和 `python -m uvicorn`。
+- 当前开发机的 bundled Python 路径只用于本地验证，不得写入生产代码、配置、测试或用户安装说明。
 
 ## 9. 测试设计
 
@@ -761,10 +775,13 @@ port import test 验证所有协议可从 `app.ports` 导入，且不导入 infr
 - 无 `.env`、API key、网络和数据库时可构造 app。
 - `GET /health` 精确返回 HTTP 200 与 `{"status":"healthy"}`。
 - 导入 app.main 无文件清理、网络请求或后台线程副作用。
+- 静态检查与 shell 测试拒绝硬编码 `/tmp`、用户目录、盘符、POSIX-only subprocess 或 macOS-only import。
+- timezone 测试在不依赖系统 zoneinfo database 的前提下可使用 `tzdata`。
+- 最终验收需要保留 macOS、Windows、Linux CI 或等效干净环境中的安装、测试和 health smoke test 结果。
 
 ## 10. M1 验收标准
 
-1. `backend/` 是 Python 3.11+ 独立可安装工程。
+1. `backend/` 是 Python 3.11+ 独立可安装工程，同一份代码支持 macOS、Windows 和 Linux。
 2. Uvicorn 可启动，health 返回 200。
 3. M1 列出的 Domain 对象和 `build_time_windows` 有真实实现。
 4. 所有顶层 Domain 对象可 JSON round-trip。
@@ -774,14 +791,15 @@ port import test 验证所有协议可从 `app.ports` 导入，且不导入 infr
 8. Domain dependency test 证明无 FastAPI/DB/LLM/外部 API 依赖。
 9. 未向 `backend_bk/` 写入代码。
 10. 未提前实现 M2-M9 运行时能力或旧接口兼容。
+11. macOS、Windows、Linux 的 CI 或等效干净环境均通过安装、测试和 health smoke test。
 
 建议命令：
 
 ```bash
 python -m pip install -e './backend[dev]'
-pytest backend/tests -q
-uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
-curl http://127.0.0.1:8000/health
+python -m pytest backend/tests -q
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+python -c "import httpx; response = httpx.get('http://127.0.0.1:8000/health'); response.raise_for_status(); print(response.json())"
 ```
 
 ## 11. 实现顺序
@@ -800,7 +818,7 @@ curl http://127.0.0.1:8000/health
    -> verify: stable/generic ports 可导入，无反向依赖
 
 5. architecture/full regression
-   -> verify: pytest backend/tests -q 全绿
+   -> verify: python -m pytest backend/tests -q 全绿
 ```
 
 ## 12. Deferred Contract Register
