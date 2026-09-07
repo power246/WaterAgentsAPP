@@ -329,55 +329,64 @@ python -m pytest backend/tests/domain/test_evidence.py backend/tests/domain/test
 
 ### Outcome
 
-- [ ] 实现 `OutcomeStatus`：`quantified / directional / indeterminate`。
-- [ ] 实现 `ResultSource`：`observed / inferred / predicted`。
-- [ ] 实现 aggregation、trend、risk 和 indeterminate reason 枚举。
-- [ ] 实现 `RiskOrTrendAssessment(summary, trend, risk_level, reason_codes)`。
-- [ ] quantified 必须有 finite value，assessment 可选。
-- [ ] directional 禁止 value，且必须有至少一个确定的 trend/risk，不能只填 uncertain/indeterminate。
-- [ ] indeterminate 禁止 value，assessment 和 reason code 必填。
-- [ ] reason code 只允许出现在 indeterminate。
-- [ ] 三种状态都只对 confidence 做 `[0,1]` 校验，不增加状态绑定规则。
-- [ ] 所有窗口 evidence refs 非空且唯一。
+- [x] 实现 `OutcomeStatus`：`quantified / directional / indeterminate`。
+- [x] 实现 `ResultSource`：`observed / inferred / predicted`。
+- [x] 实现 aggregation、trend、risk 和 indeterminate reason 枚举。
+- [x] 实现 `RiskOrTrendAssessment(summary, trend, risk_level, reason_codes)`。
+- [x] quantified 必须有 finite value，assessment 可选。
+- [x] directional 禁止 value，且必须有至少一个确定的 trend/risk，不能只填 uncertain/indeterminate。
+- [x] indeterminate 禁止 value，assessment 和 reason code 必填。
+- [x] reason code 只允许出现在 indeterminate。
+- [x] 三种状态都只对 confidence 做 `[0,1]` 校验，不增加状态绑定规则。
+- [x] 所有窗口 evidence refs 非空且唯一。
 
 ### Series 与 result
 
-- [ ] 实现 `ParameterTimeSeries`，包含 parameter、resolution/source、points 和 parameter confidence。
-- [ ] points 按 UTC start 严格升序且不重叠。
-- [ ] 每个 `build_time_windows` 计划窗口恰好有一个 point；缺少/额外 point 均失败。
-- [ ] 不以 UTC elapsed duration 判断 resolution，使用 window plan 校验。
-- [ ] 实现 `InferenceResult` 的 target COMID、mode、time range/segments、analysis timezone、resolution/source、series、overall confidence、attribution、analysis detail、evidence chain 和 generated time。
-- [ ] ParameterKey 在 series 中唯一。
-- [ ] time segments 有序、无重叠、无缺口并完整覆盖 request range。
-- [ ] mixed 同时包含 gap filling 和 prediction segment。
-- [ ] prediction segment 只接受 predicted source；gap filling 接受 observed/inferred source。
-- [ ] 每条 series 的 resolution/source 与 result 一致。
-- [ ] window、attribution、analysis step 的 evidence refs 必须存在于 EvidenceChain。
+- [x] 实现 `ParameterTimeSeries`，包含 parameter、resolution/source、points 和 parameter confidence。
+- [x] points 按 UTC start 严格升序且不重叠。
+- [x] 每个 `build_time_windows` 计划窗口恰好有一个 point；缺少/额外 point 均失败。
+- [x] 不以 UTC elapsed duration 判断 resolution，使用 window plan 校验。
+- [x] 实现 `InferenceResult` 的 target COMID、mode、time range/segments、analysis timezone、resolution/source、series、overall confidence、attribution、analysis detail、evidence chain 和 generated time。
+- [x] ParameterKey 在 series 中唯一。
+- [x] time segments 有序、无重叠、无缺口并完整覆盖 request range。
+- [x] mixed 同时包含 gap filling 和 prediction segment。
+- [x] prediction segment 只接受 predicted source；gap filling 接受 observed/inferred source。
+- [x] 每条 series 的 resolution/source 与 result 一致。
+- [x] window、attribution、analysis step 的 evidence refs 必须存在于 EvidenceChain。
 
 ### Attribution 与 detail
 
-- [ ] 实现 attribution direction/magnitude/basis 枚举。
-- [ ] 实现 `AttributionFactor`，每项必须有 basis、explanation 和 evidence refs。
-- [ ] 实现 `AttributionSummary`；无 factor 时允许用 summary 说明证据不足。
-- [ ] 实现 `AnalysisStep(type, title, content, evidence_refs, transcript_item_refs)`。
-- [ ] 实现 `AnalysisDetail(summary, steps, transcript_item_refs)`。
-- [ ] analysis detail 只保存可折叠 timeline 内容和引用，不复制完整 EvidenceFragment。
-- [ ] 不在 M1 实现 transcript lazy loader、prompt/raw output 持久化或 secret redaction。
+- [x] 实现 attribution direction/magnitude/basis 枚举。
+- [x] 实现 `AttributionFactor`，每项必须有 basis、explanation 和 evidence refs。
+- [x] 实现 `AttributionSummary`；无 factor 时允许用 summary 说明证据不足。
+- [x] 实现 `AnalysisStep(type, title, content, evidence_refs, transcript_item_refs)`。
+- [x] 实现 `AnalysisDetail(summary, steps, transcript_item_refs)`。
+- [x] analysis detail 只保存可折叠 timeline 内容和引用，不复制完整 EvidenceFragment。
+- [x] 不在 M1 实现 transcript lazy loader、prompt/raw output 持久化或 secret redaction。
 
 ### 测试
 
-- [ ] quantified value-only 和 value + assessment 均通过。
-- [ ] directional/indeterminate 的缺失字段和非法字段组合均失败。
-- [ ] confidence=0 或 1 在任意 outcome status 均可通过，证明没有隐藏硬绑定。
-- [ ] 完整无证据样例为所有窗口构造 indeterminate，并引用 empty/unavailable evidence。
-- [ ] series 缺点、额外点、错边界、乱序和重叠均失败。
-- [ ] evidence chain 外引用失败。
-- [ ] attribution basis 和 analysis timeline JSON round-trip。
+- [x] quantified value-only 和 value + assessment 均通过。
+- [x] directional/indeterminate 的缺失字段和非法字段组合均失败。
+- [x] confidence=0 或 1 在任意 outcome status 均可通过，证明没有隐藏硬绑定。
+- [x] 完整无证据样例为所有窗口构造 indeterminate，并引用 empty/unavailable evidence。
+- [x] series 缺点、额外点、错边界、乱序和重叠均失败。
+- [x] evidence chain 外引用失败。
+- [x] attribution basis 和 analysis timeline JSON round-trip。
 
 验证点：
 
-- [ ] 模型只校验结构一致性，不实现 SufficiencyPolicy 或 confidence 算法。
-- [ ] 没有 LLM prompt、parser、Agent 或旧 HydrologyInference 兼容字段。
+- [x] 模型只校验结构一致性，不实现 SufficiencyPolicy 或 confidence 算法。
+- [x] 没有 LLM prompt、parser、Agent 或旧 HydrologyInference 兼容字段。
+
+### Milestone 5 完成记录（2026-09-07）
+
+- Outcome：实现三态 `TimeWindowResult`、结果来源及 aggregation/trend/risk/reason 枚举；finite value、方向性判断、结构化空判断、confidence 和 evidence refs 均按契约校验。
+- Series/result：实现 `ParameterTimeSeries` 与 `InferenceResult`，使用 `build_time_windows` 校验完整窗口计划，并校验 ParameterKey、resolution/source、segment coverage/mode/source 及 EvidenceChain 引用闭包。
+- Attribution/detail：实现 direction/magnitude/basis、`AttributionFactor`、`AttributionSummary`、`AnalysisStep` 和 `AnalysisDetail`；只保存 JSON timeline 内容与引用。
+- 聚焦测试：`python -m pytest backend/tests/domain/test_results.py backend/tests/domain/test_serialization.py -q`，55 passed。
+- 完整回归：`python -m pytest backend/tests -q`，148 passed；所有 Domain 包入口可独立导入，`git diff --check` 通过。
+- 依赖回扫：未实现 SufficiencyPolicy、confidence 算法、LLM prompt/parser/Agent、transcript loader 或旧 HydrologyInference 兼容字段。
 
 建议测试：
 
