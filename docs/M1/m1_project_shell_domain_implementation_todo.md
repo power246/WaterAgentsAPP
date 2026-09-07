@@ -216,44 +216,52 @@ python -m pytest backend/tests/domain/test_hydrology.py backend/tests/domain/tes
 
 ### Time objects
 
-- [ ] 实现 `TimeResolution`，只接受 `6h / 12h / 24h`。
-- [ ] 实现 `TimeResolutionSource`：`frontend / default / auto`。
-- [ ] 实现 `TimeRange(start, end)`；拒绝 naive、相等和反向时间。
-- [ ] aware datetime 进入 Domain 时统一转 UTC。
-- [ ] 实现无副作用 `contains` 和 `overlaps`。
-- [ ] 实现 `InferenceMode`：`gap_filling / prediction / mixed`。
-- [ ] 实现 `TimeSegment`，只允许 gap filling 或 prediction，不允许 mixed segment。
-- [ ] 含 resolution 的模型默认 `12h`。
+- [x] 实现 `TimeResolution`，只接受 `6h / 12h / 24h`。
+- [x] 实现 `TimeResolutionSource`：`frontend / default / auto`。
+- [x] 实现 `TimeRange(start, end)`；拒绝 naive、相等和反向时间。
+- [x] aware datetime 进入 Domain 时统一转 UTC。
+- [x] 实现无副作用 `contains` 和 `overlaps`。
+- [x] 实现 `InferenceMode`：`gap_filling / prediction / mixed`。
+- [x] 实现 `TimeSegment`，只允许 gap filling 或 prediction，不允许 mixed segment。
+- [x] 含 resolution 的模型默认 `12h`。
 
 ### Window builder
 
-- [ ] 实现 `build_time_windows(time_range, time_resolution, analysis_timezone)`。
-- [ ] 校验 analysis timezone 为有效 IANA 名称。
-- [ ] 从请求起点对应的本地墙上时间滚动 6/12/24 小时。
-- [ ] 每个本地边界转换为唯一 UTC instant 后写入 TimeRange。
-- [ ] 最后一个窗口不能超过请求 end；不足完整墙上时钟跨度时截断。
-- [ ] 第一版日期请求从本地 00:00 开始，可生成 `00-06/06-12/12-18/18-24`。
-- [ ] 不使用固定 elapsed seconds 直接在 UTC 上加时长。
-- [ ] 不使用“5 到 7 小时都合法”的宽泛容差；只有 zoneinfo offset transition 可以解释完整窗口时长差。
-- [ ] 不用格式化后的本地时间字符串作为窗口 key。
-- [ ] 保留未来自定义时间从请求起点滚动的能力，不实现对应 API。
+- [x] 实现 `build_time_windows(time_range, time_resolution, analysis_timezone)`。
+- [x] 校验 analysis timezone 为有效 IANA 名称。
+- [x] 从请求起点对应的本地墙上时间滚动 6/12/24 小时。
+- [x] 每个本地边界转换为唯一 UTC instant 后写入 TimeRange。
+- [x] 最后一个窗口不能超过请求 end；不足完整墙上时钟跨度时截断。
+- [x] 第一版日期请求从本地 00:00 开始，可生成 `00-06/06-12/12-18/18-24`。
+- [x] 不使用固定 elapsed seconds 直接在 UTC 上加时长。
+- [x] 不使用“5 到 7 小时都合法”的宽泛容差；只有 zoneinfo offset transition 可以解释完整窗口时长差。
+- [x] 不用格式化后的本地时间字符串作为窗口 key。
+- [x] 保留未来自定义时间从请求起点滚动的能力，不实现对应 API。
 
 ### DST tests
 
-- [ ] 普通日 6h/12h/24h 边界正确。
-- [ ] `America/Chicago` spring-forward 的 `00-06` elapsed 5h，`00-24` elapsed 23h。
-- [ ] `America/Chicago` fall-back 的 `00-06` elapsed 7h，`00-24` elapsed 25h。
-- [ ] fall-back 重复的本地 `01:xx` 使用 fold/UTC 后是两个不同 instant，写入映射时不覆盖。
-- [ ] 无 offset transition 时，错误的 5h/7h“完整 6h 窗口”不被接受。
-- [ ] `03:20-17:40` 预留行为生成 `03:20-09:20 / 09:20-15:20 / 15:20-17:40`。
-- [ ] 尾部截断窗口可被识别，后续可添加 `partial_coverage`。
-- [ ] 非 America/Chicago 的有效 IANA timezone 至少有一个测试，证明配置不是硬编码。
+- [x] 普通日 6h/12h/24h 边界正确。
+- [x] `America/Chicago` spring-forward 的 `00-06` elapsed 5h，`00-24` elapsed 23h。
+- [x] `America/Chicago` fall-back 的 `00-06` elapsed 7h，`00-24` elapsed 25h。
+- [x] fall-back 重复的本地 `01:xx` 使用 fold/UTC 后是两个不同 instant，写入映射时不覆盖。
+- [x] 无 offset transition 时，错误的 5h/7h“完整 6h 窗口”不被接受。
+- [x] `03:20-17:40` 预留行为生成 `03:20-09:20 / 09:20-15:20 / 15:20-17:40`。
+- [x] 尾部截断窗口可被识别，后续可添加 `partial_coverage`。
+- [x] 非 America/Chicago 的有效 IANA timezone 至少有一个测试，证明配置不是硬编码。
 
 验证点：
 
-- [ ] 生成窗口按 UTC 严格递增、无重叠、完整覆盖 request range。
-- [ ] DST 测试不依赖机器本地 timezone。
-- [ ] Time 模块只使用标准库、Pydantic 和 Domain 内部类型。
+- [x] 生成窗口按 UTC 严格递增、无重叠、完整覆盖 request range。
+- [x] DST 测试不依赖机器本地 timezone。
+- [x] Time 模块只使用标准库、Pydantic 和 Domain 内部类型。
+
+### Milestone 3 完成记录（2026-09-07）
+
+- Time objects：实现并导出 `TimeResolution`、`TimeResolutionSource`、`TimeRange`、`InferenceMode` 和 `TimeSegment`；统一 UTC、半开区间与 atomic segment mode 约束，并以 `DEFAULT_TIME_RESOLUTION` 固定 `12h` 默认值。
+- Window builder：使用标准库 `zoneinfo` 从请求起点按本地墙上时钟推进，UTC `TimeRange` 作为窗口身份，尾窗在 request end 截断；无固定 UTC elapsed duration 容差。
+- 聚焦测试：`python -m pytest backend/tests/domain/test_time.py backend/tests/domain/test_time_windows.py -q`，28 passed。
+- 完整回归：`python -m pytest backend/tests -q`，67 passed。
+- 依赖回扫：Time/Inference 仅依赖标准库、Pydantic 和 Domain 内部类型；`git diff --check` 通过。
 
 建议测试：
 
