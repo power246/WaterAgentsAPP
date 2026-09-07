@@ -1,8 +1,8 @@
 from datetime import timedelta, timezone
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.domain.time.time_range import TimeRange
 from app.domain.time.time_resolution import TimeResolution
+from app.domain.time.timezone import get_iana_timezone
 
 
 def build_time_windows(
@@ -10,12 +10,7 @@ def build_time_windows(
     time_resolution: TimeResolution,
     analysis_timezone: str,
 ) -> tuple[TimeRange, ...]:
-    try:
-        zone = ZoneInfo(analysis_timezone)
-    except (TypeError, ValueError, ZoneInfoNotFoundError) as error:
-        raise ValueError(
-            "analysis_timezone must be a valid IANA timezone name"
-        ) from error
+    zone = get_iana_timezone(analysis_timezone)
 
     try:
         resolution = TimeResolution(time_resolution)
