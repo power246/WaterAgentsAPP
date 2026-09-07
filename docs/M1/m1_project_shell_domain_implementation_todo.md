@@ -275,39 +275,47 @@ python -m pytest backend/tests/domain/test_time.py backend/tests/domain/test_tim
 
 ### Enums 与 supporting objects
 
-- [ ] 实现 `CollectionStatus`：`available / empty / unavailable / invalid`。
-- [ ] 实现 `DataQualityFlag`：`missing`、`partial_coverage`、`possible_freezing`、`anomalous`、`estimated`、`historical_inference`、`stale`、`provider_flagged`、`unit_unresolved`、`conflicting_observations`。
-- [ ] 实现 `EvidenceLocation(point, comid, station_id, distance_to_target_km)`。
-- [ ] EvidenceLocation 至少包含 point/comid/station_id 之一，距离不能为负。
-- [ ] 实现 `Provenance(provider, retrieved_at, source_uri, source_record_ids, source_timezone, source_utc_offset, metadata)`。
-- [ ] provenance timestamp 统一 UTC；源 timezone/offset 可以保留。
+- [x] 实现 `CollectionStatus`：`available / empty / unavailable / invalid`。
+- [x] 实现 `DataQualityFlag`：`missing`、`partial_coverage`、`possible_freezing`、`anomalous`、`estimated`、`historical_inference`、`stale`、`provider_flagged`、`unit_unresolved`、`conflicting_observations`。
+- [x] 实现 `EvidenceLocation(point, comid, station_id, distance_to_target_km)`。
+- [x] EvidenceLocation 至少包含 point/comid/station_id 之一，距离不能为负。
+- [x] 实现 `Provenance(provider, retrieved_at, source_uri, source_record_ids, source_timezone, source_utc_offset, metadata)`。
+- [x] provenance timestamp 统一 UTC；源 timezone/offset 可以保留。
 
 ### Evidence models
 
-- [ ] 实现 `EvidenceFragment` 全部 envelope 字段。
-- [ ] parameter refs 使用 ParameterKey，不使用裸 code。
-- [ ] value/summary 只接受 JsonValue。
-- [ ] confidence hint 只校验 `[0,1]`。
-- [ ] rag eligible 默认 false。
-- [ ] empty/unavailable/invalid 可以携带结构化原因或 null payload。
-- [ ] 实现 `EvidenceBundle`，固化 COMID、time range、analysis timezone、resolution/source 和 requested parameters。
-- [ ] EvidenceBundle 允许没有 available evidence，但 requested parameters 至少一个且唯一。
-- [ ] 同一 bundle 的 evidence ID 不得重复；fragment 允许来自上游 COMID。
-- [ ] 实现 `EvidenceReference(evidence_id, role, summary)` 和 `EvidenceChain(references)`。
-- [ ] EvidenceChain 非空且 evidence ID 唯一，只保存引用和摘要，不嵌入 fragment。
+- [x] 实现 `EvidenceFragment` 全部 envelope 字段。
+- [x] parameter refs 使用 ParameterKey，不使用裸 code。
+- [x] value/summary 只接受 JsonValue。
+- [x] confidence hint 只校验 `[0,1]`。
+- [x] rag eligible 默认 false。
+- [x] empty/unavailable/invalid 可以携带结构化原因或 null payload。
+- [x] 实现 `EvidenceBundle`，固化 COMID、time range、analysis timezone、resolution/source 和 requested parameters。
+- [x] EvidenceBundle 允许没有 available evidence，但 requested parameters 至少一个且唯一。
+- [x] 同一 bundle 的 evidence ID 不得重复；fragment 允许来自上游 COMID。
+- [x] 实现 `EvidenceReference(evidence_id, role, summary)` 和 `EvidenceChain(references)`。
+- [x] EvidenceChain 非空且 evidence ID 唯一，只保存引用和摘要，不嵌入 fragment。
 
 ### 测试
 
-- [ ] 四种 collection status 均可 round-trip。
-- [ ] empty 与 unavailable 在序列化后保持不同语义。
-- [ ] 重复 evidence ID、重复 ParameterKey、非法位置/距离/confidence 被拒绝。
-- [ ] evidence ID 不承担跨 session 稳定性；source record IDs 完整保留。
-- [ ] 修改原始 payload 或 dump 后 payload 不改变已创建模型。
+- [x] 四种 collection status 均可 round-trip。
+- [x] empty 与 unavailable 在序列化后保持不同语义。
+- [x] 重复 evidence ID、重复 ParameterKey、非法位置/距离/confidence 被拒绝。
+- [x] evidence ID 不承担跨 session 稳定性；source record IDs 完整保留。
+- [x] 修改原始 payload 或 dump 后 payload 不改变已创建模型。
 
 验证点：
 
-- [ ] Evidence Domain 没有真实 adapter、HTTP client、tool registry 或 source-specific payload class。
-- [ ] Adapter 构造 EvidenceFragment 的行为没有出现在 M1。
+- [x] Evidence Domain 没有真实 adapter、HTTP client、tool registry 或 source-specific payload class。
+- [x] Adapter 构造 EvidenceFragment 的行为没有出现在 M1。
+
+### Milestone 4 完成记录（2026-09-07）
+
+- Supporting objects：实现并导出 `CollectionStatus`、`DataQualityFlag`、`EvidenceLocation` 和 `Provenance`，包含位置身份、非负距离、UTC retrieval timestamp 与来源 metadata 约束。
+- Evidence envelope：实现 `EvidenceFragment`、`EvidenceBundle`、`EvidenceReference` 和 `EvidenceChain`；ParameterKey、bundle/chain 局部唯一性、默认 `12h` resolution、IANA timezone、null/结构化原因和 reference-only chain 均按契约校验。
+- 聚焦测试：`python -m pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serialization.py -q`，44 passed。
+- 完整回归：`python -m pytest backend/tests -q`，102 passed。
+- 依赖回扫：Evidence Domain 未引入 adapter、HTTP client、tool registry、source-specific payload、ports 或 infrastructure；`git diff --check` 通过。
 
 建议测试：
 
