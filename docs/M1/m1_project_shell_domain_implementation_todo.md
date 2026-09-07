@@ -1,0 +1,466 @@
+# M1 Project Shell + Domain Skeleton Implementation TODO
+
+技术契约以 [m1_project_shell_domain_design.md](m1_project_shell_domain_design.md) 为准，总体边界以 [../backend_refactor_milestones.md](../backend_refactor_milestones.md) 和 [../backend_architecture_skeleton.md](../backend_architecture_skeleton.md) 为准。每个子 Milestone 只引入当前阶段需要的代码，完成后运行对应聚焦测试并回写本清单。
+
+## 执行原则
+
+- 新代码只写入 `backend/`，不得修改 `backend_bk/`。
+- 不恢复或兼容旧 `/analyze`、`/ws/hydro-analysis`、旧事件和旧前端字段。
+- M1 只实现 project shell、Domain、窗口规划、ports 协议和测试；不提前实现 session、SSE、transcript、数据库、evidence tools、Agent、RAG 或真实 adapter。
+- Python 最低版本为 3.11；Domain 使用 Pydantic v2。
+- Domain 只能依赖标准库、Pydantic 和 `app.domain`，不能依赖 FastAPI、数据库、LLM framework、外部 API SDK 或其他应用层。
+- 采用一类一文件，不把多个核心对象重新合并成通用 `models.py`。
+- Domain model 使用 `extra=forbid`、`frozen=true`、`str_strip_whitespace=true`、`allow_inf_nan=false`。
+- Pydantic frozen 只保证浅层不可变；动态 JSON payload 在边界深拷贝，不新增 FrozenDict 或第三方不可变集合依赖。
+- 第一版只建模 COMID，不新增 `Waterbody`。
+- 所有时间事实存 UTC；窗口按固化的 IANA timezone 的当地墙上时钟推进。
+- 不用裸 `dict[str, Any]` 或第三方 SDK 对象绕过尚未定型的契约；后期 DTO 使用 generic Protocol 占位。
+- 如果实现需要改变已确认契约，先更新设计文档、总 milestones 和本 TODO，再继续编码。
+- 保留当前工作区已有改动，不做无关格式化、重构、依赖升级或清理。
+
+## 成功标准
+
+- `backend/` 是可安装、可启动、可测试的 Python 3.11+ 工程。
+- `uvicorn app.main:app --app-dir backend` 可以启动，`GET /health` 精确返回 `{"status":"healthy"}`。
+- M1 约定的 Domain 对象都有真实类型、校验和 JSON round-trip 测试。
+- `TimeResolution` 只接受 `6h / 12h / 24h`，默认 `12h`，并保留 `time_resolution_source`。
+- `build_time_windows` 正确处理普通日期、DST、重复本地时间和从请求起点滚动的窗口。
+- 每个参数覆盖所有计划窗口；缺少可用证据时使用 `indeterminate`，不省略 point。
+- `TimeWindowResult` 正确表达 `quantified / directional / indeterminate`，quantified 可附带风险/趋势。
+- Evidence 的 collection status、provenance、ParameterKey 和引用完整性成立。
+- Domain 依赖扫描证明没有 FastAPI、数据库、LLM provider 或外部 API 依赖。
+- 没有向 `backend_bk/` 写入代码，没有引入 M2-M9 运行时实现或旧接口兼容层。
+
+## 已确认设计结论
+
+- 默认分析时区为 `America/Chicago`，以后可动态修改；每个 session 必须固化实际时区。
+- 第一版请求只支持日期范围，结束日期包含整天。
+- `6h / 12h / 24h` 是当地墙上时钟跨度。DST 日的 5/7 小时和 23/25 小时 elapsed duration 合法。
+- 只有真实 IANA offset transition 可以解释完整窗口的 ±1 小时差异，不能设置宽泛时长容差。
+- UTC start/end 是窗口唯一身份，重复本地时间不能互相覆盖。
+- 未来自定义时间从请求起点滚动，例如 `03:20-09:20`，不对齐固定 `00/06/12/18` 网格。
+- 参数身份使用 `ParameterKey(code_system, code)`，第一版默认 `code_system=usgs`。
+- COMID 和 station 缺少坐标时使用 `None`，不能用 `0,0` 表示缺失。
+- Evidence Tool 构造 `EvidenceFragment`；adapter 只返回标准化 source record。
+- `collection_status` 区分 `available / empty / unavailable / invalid`。
+- evidence ID 只要求 session 内唯一；跨 session 源记录由 provenance 识别。
+- quantified 必须有数值且可选风险/趋势；directional 无数值但有明确方向或风险；indeterminate 无数值并带 reason code。
+- confidence 只校验 `[0,1]`，不与 outcome status 硬绑定。
+- 归因必须带 `basis: observed | correlated | inferred | hypothesized`。
+- 多站冲突由 M6 Agent 判断；原样采用有效观测可标 observed，任何加权、折中或综合结果标 inferred。
+- 最终结果保存 evidence 引用和摘要；完整上下文由 M3 transcript 保存并按需加载。
+
+## Milestone 0：实现基线与工作区确认
+
+目标：确认新后端起点、工具链和用户已有改动，不开始生产代码。
+
+- [ ] 执行 `git status --short --branch`，记录当前分支和已有 rename/untracked 文件。
+- [ ] 确认 `backend/` 当前没有需要保留的新架构实现；如已有文件，逐项判断归属，不直接覆盖。
+- [ ] 确认 `backend_bk/` 只作为只读历史参考。
+- [ ] 确认正式技术设计为 `docs/M1/m1_project_shell_domain_design.md`。
+- [ ] 确认总 milestones 已移除第一版 `Waterbody` 并登记所有 deferred contracts。
+- [ ] 执行 `python3 --version`，确认实际解释器为 Python 3.11+。
+- [ ] 确认当前环境可创建隔离虚拟环境并安装 `pyproject.toml` 依赖。
+- [ ] 搜索根目录和 `backend_bk/` 中已有 Python packaging/test 配置，确认不会误复用旧空 `requirements.txt`。
+- [ ] 记录 M1 开工前的测试基线；如果没有新后端测试，明确记录为“尚无 M1 test suite”。
+
+验证点：
+
+- [ ] 能说明哪些工作区改动属于用户，M1 不会覆盖哪些文件。
+- [ ] 能说明新 backend 的启动目录、package import root 和测试执行目录。
+- [ ] 准备阶段没有产生 backend 生产代码修改。
+
+建议命令：
+
+```bash
+git status --short --branch
+python3 --version
+find backend -maxdepth 3 -type f -print
+find backend_bk -maxdepth 2 -type f -print
+```
+
+## Milestone 1：Project shell 与健康检查
+
+目标：建立最小可安装工程和无副作用 FastAPI 入口。
+
+### Packaging
+
+- [ ] 创建 `backend/pyproject.toml`，设置 Python `>=3.11`。
+- [ ] 生产依赖仅加入 FastAPI、Pydantic v2、pydantic-settings、Uvicorn。
+- [ ] dev 依赖仅加入 pytest 和 httpx。
+- [ ] 配置 pytest test path，保证从仓库根执行命令时能稳定导入 `app`。
+- [ ] 不加入 LangChain、LangGraph、SQLAlchemy、数据库 driver、provider SDK、cache 或 retry 库。
+- [ ] 创建 `backend/README.md`，记录安装、测试和启动命令。
+
+### App 与 settings
+
+- [ ] 创建 `backend/app/__init__.py` 及最小 API/config package。
+- [ ] 实现 `AppSettings`：`app_name`、`environment`、`log_level`、`host`、`port`、`analysis_timezone`。
+- [ ] 默认 `analysis_timezone="America/Chicago"`。
+- [ ] 使用 `zoneinfo.ZoneInfo` 校验 IANA timezone；非法配置启动失败，不静默回退。
+- [ ] 环境变量统一使用 `WATERAGENTS_` 前缀。
+- [ ] 实现 `create_app(settings: AppSettings | None = None) -> FastAPI` 和模块级 `app`。
+- [ ] 实现 `GET /health`，精确返回 `{"status":"healthy"}`。
+- [ ] 启动时不清理文件、不创建数据库、不联网、不启动后台任务。
+- [ ] 不添加旧 router、WebSocket、CORS 兼容或 LangGraph engine 字段。
+
+### 测试
+
+- [ ] app 在无 `.env`、API key、网络和数据库时可构造。
+- [ ] health 返回 HTTP 200 和精确 body。
+- [ ] 非法 analysis timezone 产生明确配置错误。
+- [ ] 导入 `app.main` 不产生文件、网络或线程副作用。
+
+验证点：
+
+- [ ] editable install 成功。
+- [ ] 聚焦测试通过。
+- [ ] Uvicorn 手工启动后 health 可访问。
+
+建议命令：
+
+```bash
+python3 -m pip install -e './backend[dev]'
+pytest backend/tests/api/test_health.py -q
+uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+curl http://127.0.0.1:8000/health
+```
+
+## Milestone 2：Domain 基类与 Hydrology 对象
+
+目标：建立严格、可序列化、浅层不可变的领域基础类型。
+
+### Common
+
+- [ ] 实现 `DomainModel` 的统一 Pydantic 配置。
+- [ ] 实现递归 `JsonValue` 类型，不允许任意 Python 对象。
+- [ ] 建立非空字符串、UTC aware datetime、唯一 tuple 等最小复用 validator；不要为了单次使用建立复杂框架。
+- [ ] JSON payload 进入模型前深拷贝，对外 dump 后修改结果不影响原模型。
+- [ ] 枚举使用稳定小写字符串值。
+
+### Hydrology
+
+- [ ] 实现 `GeoPoint(latitude, longitude)` 和范围校验。
+- [ ] 实现 `RiverSegment(comid, location, upstream_comids, downstream_comids)`。
+- [ ] RiverSegment 拒绝重复上下游 COMID 和 self-reference。
+- [ ] RiverSegment location 允许 `None`；不使用 `0,0` 哨兵。
+- [ ] 实现 `ParameterKey(code_system, code)`，两字段共同构成参数身份。
+- [ ] 实现 `WaterQualityParameter(key, name, canonical_unit, is_dimensionless, category)`。
+- [ ] 非无量纲参数缺少 canonical unit 时校验失败。
+- [ ] 实现 `MonitoringStation(station_id, source, name, location, associated_comid, available_parameters)`。
+- [ ] MonitoringStation location 允许 `None`，available ParameterKey 不得重复。
+- [ ] 不创建 `Waterbody`、lake、reservoir 或 geometry 抽象。
+
+### 测试
+
+- [ ] 每个对象覆盖合法构造和 JSON round-trip。
+- [ ] 空 ID/code system/code/name 被拒绝。
+- [ ] 非法坐标、重复关系、自引用和重复 ParameterKey 被拒绝。
+- [ ] `location=None` 合法，真实 `GeoPoint(0,0)` 仍是合法坐标而不是缺失。
+- [ ] frozen model 不能重新赋值。
+- [ ] JSON payload defensive copy 行为有测试。
+
+验证点：
+
+- [ ] Hydrology 对象没有 FastAPI、ports 或 infrastructure import。
+- [ ] ParameterKey 在 dump/load 后保留 code system 和前导零。
+
+建议测试：
+
+```bash
+pytest backend/tests/domain/test_hydrology.py backend/tests/domain/test_serialization.py -q
+```
+
+## Milestone 3：Time 对象与墙上时钟窗口规划
+
+目标：固定 UTC 存储、本地墙上时钟切窗和 DST 语义。
+
+### Time objects
+
+- [ ] 实现 `TimeResolution`，只接受 `6h / 12h / 24h`。
+- [ ] 实现 `TimeResolutionSource`：`frontend / default / auto`。
+- [ ] 实现 `TimeRange(start, end)`；拒绝 naive、相等和反向时间。
+- [ ] aware datetime 进入 Domain 时统一转 UTC。
+- [ ] 实现无副作用 `contains` 和 `overlaps`。
+- [ ] 实现 `InferenceMode`：`gap_filling / prediction / mixed`。
+- [ ] 实现 `TimeSegment`，只允许 gap filling 或 prediction，不允许 mixed segment。
+- [ ] 含 resolution 的模型默认 `12h`。
+
+### Window builder
+
+- [ ] 实现 `build_time_windows(time_range, time_resolution, analysis_timezone)`。
+- [ ] 校验 analysis timezone 为有效 IANA 名称。
+- [ ] 从请求起点对应的本地墙上时间滚动 6/12/24 小时。
+- [ ] 每个本地边界转换为唯一 UTC instant 后写入 TimeRange。
+- [ ] 最后一个窗口不能超过请求 end；不足完整墙上时钟跨度时截断。
+- [ ] 第一版日期请求从本地 00:00 开始，可生成 `00-06/06-12/12-18/18-24`。
+- [ ] 不使用固定 elapsed seconds 直接在 UTC 上加时长。
+- [ ] 不使用“5 到 7 小时都合法”的宽泛容差；只有 zoneinfo offset transition 可以解释完整窗口时长差。
+- [ ] 不用格式化后的本地时间字符串作为窗口 key。
+- [ ] 保留未来自定义时间从请求起点滚动的能力，不实现对应 API。
+
+### DST tests
+
+- [ ] 普通日 6h/12h/24h 边界正确。
+- [ ] `America/Chicago` spring-forward 的 `00-06` elapsed 5h，`00-24` elapsed 23h。
+- [ ] `America/Chicago` fall-back 的 `00-06` elapsed 7h，`00-24` elapsed 25h。
+- [ ] fall-back 重复的本地 `01:xx` 使用 fold/UTC 后是两个不同 instant，写入映射时不覆盖。
+- [ ] 无 offset transition 时，错误的 5h/7h“完整 6h 窗口”不被接受。
+- [ ] `03:20-17:40` 预留行为生成 `03:20-09:20 / 09:20-15:20 / 15:20-17:40`。
+- [ ] 尾部截断窗口可被识别，后续可添加 `partial_coverage`。
+- [ ] 非 America/Chicago 的有效 IANA timezone 至少有一个测试，证明配置不是硬编码。
+
+验证点：
+
+- [ ] 生成窗口按 UTC 严格递增、无重叠、完整覆盖 request range。
+- [ ] DST 测试不依赖机器本地 timezone。
+- [ ] Time 模块只使用标准库、Pydantic 和 Domain 内部类型。
+
+建议测试：
+
+```bash
+pytest backend/tests/domain/test_time.py backend/tests/domain/test_time_windows.py -q
+```
+
+## Milestone 4：Evidence Domain
+
+目标：固定 evidence envelope、采集状态、provenance 和引用关系，不实现真实采集。
+
+### Enums 与 supporting objects
+
+- [ ] 实现 `CollectionStatus`：`available / empty / unavailable / invalid`。
+- [ ] 实现 `DataQualityFlag`：`missing`、`partial_coverage`、`possible_freezing`、`anomalous`、`estimated`、`historical_inference`、`stale`、`provider_flagged`、`unit_unresolved`、`conflicting_observations`。
+- [ ] 实现 `EvidenceLocation(point, comid, station_id, distance_to_target_km)`。
+- [ ] EvidenceLocation 至少包含 point/comid/station_id 之一，距离不能为负。
+- [ ] 实现 `Provenance(provider, retrieved_at, source_uri, source_record_ids, source_timezone, source_utc_offset, metadata)`。
+- [ ] provenance timestamp 统一 UTC；源 timezone/offset 可以保留。
+
+### Evidence models
+
+- [ ] 实现 `EvidenceFragment` 全部 envelope 字段。
+- [ ] parameter refs 使用 ParameterKey，不使用裸 code。
+- [ ] value/summary 只接受 JsonValue。
+- [ ] confidence hint 只校验 `[0,1]`。
+- [ ] rag eligible 默认 false。
+- [ ] empty/unavailable/invalid 可以携带结构化原因或 null payload。
+- [ ] 实现 `EvidenceBundle`，固化 COMID、time range、analysis timezone、resolution/source 和 requested parameters。
+- [ ] EvidenceBundle 允许没有 available evidence，但 requested parameters 至少一个且唯一。
+- [ ] 同一 bundle 的 evidence ID 不得重复；fragment 允许来自上游 COMID。
+- [ ] 实现 `EvidenceReference(evidence_id, role, summary)` 和 `EvidenceChain(references)`。
+- [ ] EvidenceChain 非空且 evidence ID 唯一，只保存引用和摘要，不嵌入 fragment。
+
+### 测试
+
+- [ ] 四种 collection status 均可 round-trip。
+- [ ] empty 与 unavailable 在序列化后保持不同语义。
+- [ ] 重复 evidence ID、重复 ParameterKey、非法位置/距离/confidence 被拒绝。
+- [ ] evidence ID 不承担跨 session 稳定性；source record IDs 完整保留。
+- [ ] 修改原始 payload 或 dump 后 payload 不改变已创建模型。
+
+验证点：
+
+- [ ] Evidence Domain 没有真实 adapter、HTTP client、tool registry 或 source-specific payload class。
+- [ ] Adapter 构造 EvidenceFragment 的行为没有出现在 M1。
+
+建议测试：
+
+```bash
+pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serialization.py -q
+```
+
+## Milestone 5：Inference 与 Attribution Domain
+
+目标：实现三态时间窗口结果、完整 series、归因和可折叠分析上下文。
+
+### Outcome
+
+- [ ] 实现 `OutcomeStatus`：`quantified / directional / indeterminate`。
+- [ ] 实现 `ResultSource`：`observed / inferred / predicted`。
+- [ ] 实现 aggregation、trend、risk 和 indeterminate reason 枚举。
+- [ ] 实现 `RiskOrTrendAssessment(summary, trend, risk_level, reason_codes)`。
+- [ ] quantified 必须有 finite value，assessment 可选。
+- [ ] directional 禁止 value，且必须有至少一个确定的 trend/risk，不能只填 uncertain/indeterminate。
+- [ ] indeterminate 禁止 value，assessment 和 reason code 必填。
+- [ ] reason code 只允许出现在 indeterminate。
+- [ ] 三种状态都只对 confidence 做 `[0,1]` 校验，不增加状态绑定规则。
+- [ ] 所有窗口 evidence refs 非空且唯一。
+
+### Series 与 result
+
+- [ ] 实现 `ParameterTimeSeries`，包含 parameter、resolution/source、points 和 parameter confidence。
+- [ ] points 按 UTC start 严格升序且不重叠。
+- [ ] 每个 `build_time_windows` 计划窗口恰好有一个 point；缺少/额外 point 均失败。
+- [ ] 不以 UTC elapsed duration 判断 resolution，使用 window plan 校验。
+- [ ] 实现 `InferenceResult` 的 target COMID、mode、time range/segments、analysis timezone、resolution/source、series、overall confidence、attribution、analysis detail、evidence chain 和 generated time。
+- [ ] ParameterKey 在 series 中唯一。
+- [ ] time segments 有序、无重叠、无缺口并完整覆盖 request range。
+- [ ] mixed 同时包含 gap filling 和 prediction segment。
+- [ ] prediction segment 只接受 predicted source；gap filling 接受 observed/inferred source。
+- [ ] 每条 series 的 resolution/source 与 result 一致。
+- [ ] window、attribution、analysis step 的 evidence refs 必须存在于 EvidenceChain。
+
+### Attribution 与 detail
+
+- [ ] 实现 attribution direction/magnitude/basis 枚举。
+- [ ] 实现 `AttributionFactor`，每项必须有 basis、explanation 和 evidence refs。
+- [ ] 实现 `AttributionSummary`；无 factor 时允许用 summary 说明证据不足。
+- [ ] 实现 `AnalysisStep(type, title, content, evidence_refs, transcript_item_refs)`。
+- [ ] 实现 `AnalysisDetail(summary, steps, transcript_item_refs)`。
+- [ ] analysis detail 只保存可折叠 timeline 内容和引用，不复制完整 EvidenceFragment。
+- [ ] 不在 M1 实现 transcript lazy loader、prompt/raw output 持久化或 secret redaction。
+
+### 测试
+
+- [ ] quantified value-only 和 value + assessment 均通过。
+- [ ] directional/indeterminate 的缺失字段和非法字段组合均失败。
+- [ ] confidence=0 或 1 在任意 outcome status 均可通过，证明没有隐藏硬绑定。
+- [ ] 完整无证据样例为所有窗口构造 indeterminate，并引用 empty/unavailable evidence。
+- [ ] series 缺点、额外点、错边界、乱序和重叠均失败。
+- [ ] evidence chain 外引用失败。
+- [ ] attribution basis 和 analysis timeline JSON round-trip。
+
+验证点：
+
+- [ ] 模型只校验结构一致性，不实现 SufficiencyPolicy 或 confidence 算法。
+- [ ] 没有 LLM prompt、parser、Agent 或旧 HydrologyInference 兼容字段。
+
+建议测试：
+
+```bash
+pytest backend/tests/domain/test_results.py backend/tests/domain/test_serialization.py -q
+```
+
+## Milestone 6：Ports 与异常契约
+
+目标：为后续能力提供稳定入口，不提前猜测尚未设计的 DTO。
+
+### Stable protocols
+
+- [ ] 实现 `ClockPort.now() -> UTC datetime`。
+- [ ] 实现 `GeocodingPort.resolve(location_text) -> GeoPoint | None`。
+- [ ] 实现 `ComidLookupPort.lookup_comid(point) -> str | None`。
+- [ ] 实现 `TopologyDataPort.get_segment(...)` 和 `get_direct_upstreams(...)`。
+- [ ] 实现 `MonitoringStationPort.find_for_segment(...)`，参数身份使用 ParameterKey。
+
+### Generic protocols
+
+- [ ] 为 WaterObservation、WeatherObservation、WeatherForecast、FacilitySearch 定义 RequestT/RecordT generic Protocol。
+- [ ] 为 LLM 定义 RequestT/ResponseT generic Protocol。
+- [ ] 为 TranscriptStore、RAGIndex、EventPublisher、Cache 定义最小 generic 操作语义。
+- [ ] 为 KeyStore 保留模块和 Protocol；masked status DTO 延后到 M9。
+- [ ] 不使用 `Any`、裸 dict 或 EvidenceFragment 代替尚未定型的 source record。
+- [ ] 不创建 fake/real adapter；它们在使用这些 port 的 milestone 引入。
+
+### Errors
+
+- [ ] 实现 `PortError`、`PortUnavailableError`、`PortTimeoutError`、`InvalidPortResponseError`。
+- [ ] 找不到使用 None/空 tuple，不作为 PortError。
+- [ ] 协议 docstring 明确 empty 与 unavailable 不同。
+
+### 测试
+
+- [ ] 所有约定 port 可从 `app.ports` 导入。
+- [ ] Protocol 方法签名和 async/sync 语义符合设计。
+- [ ] port modules 不导入 infrastructure、FastAPI 或第三方 SDK。
+
+验证点：
+
+- [ ] M1 port 能为 M2-M5 提供 import-stable 入口。
+- [ ] 没有为了通过 import test 创建无意义 adapter 或 runtime wiring。
+
+建议测试：
+
+```bash
+pytest backend/tests/architecture/test_port_imports.py -q
+```
+
+## Milestone 7：架构门禁与完整回归
+
+目标：用自动化测试证明 M1 边界，而不是只依赖目录约定。
+
+### Dependency test
+
+- [ ] 使用 Python AST 扫描 `backend/app/domain/**/*.py`。
+- [ ] allowlist 只包含标准库、Pydantic 和 `app.domain`。
+- [ ] 明确拒绝 FastAPI、SQLAlchemy、httpx、LangChain、LangGraph、provider SDK、app.api、app.ports、app.infrastructure 及后续应用层。
+- [ ] 扫描 import 和 from-import 两种语法。
+- [ ] 测试失败信息包含违规文件、行号和 import 名称。
+
+### Contract sweep
+
+- [ ] 搜索所有 Domain class 名称，确认一类一文件且导出完整。
+- [ ] 搜索 `Waterbody`，确认只存在文档中的 deferred 描述，不存在 M1 生产类型。
+- [ ] 搜索旧 `/analyze`、`/ws/hydro-analysis`、旧事件名和旧 `HydrologyInference`，确认新 backend 未引入。
+- [ ] 搜索 Domain 中的 `Any`、FastAPI、数据库、LLM 和 SDK import。
+- [ ] 搜索 datetime 构造和 serialization，确认没有 naive timestamp 漏入。
+- [ ] 搜索窗口 key，确认没有只用本地格式化时间字符串。
+- [ ] 搜索 ParameterKey 调用，确认没有退回裸 USGS code 去重。
+- [ ] 搜索 evidence refs，确认 result/attribution/detail 引用均经过 cross validation。
+
+### Full tests
+
+- [ ] 运行全部 M1 tests。
+- [ ] 运行 `git diff --check`。
+- [ ] 在干净 Python 3.11+ 虚拟环境执行 editable install 和测试。
+- [ ] 手工启动 Uvicorn 并验证 health。
+- [ ] 确认测试不访问网络、不依赖 `.env`、API key、数据库或本机 timezone。
+
+验证点：
+
+- [ ] `pytest backend/tests -q` 全绿。
+- [ ] 架构测试对一个临时禁止 import 能稳定报错，移除后恢复通过。
+- [ ] 所有 M1 成功标准均有自动化或明确手工验收证据。
+
+建议命令：
+
+```bash
+pytest backend/tests -q
+rg -n 'fastapi|sqlalchemy|httpx|langchain|langgraph|Any' backend/app/domain
+rg -n '/analyze|/ws/hydro-analysis|HydrologyInference|Waterbody' backend/app
+git diff --check
+```
+
+## Milestone 8：收尾与接力
+
+目标：把 M1 留在可复用、可审计、后续可以直接接力的状态。
+
+- [ ] 回看正式设计，逐条确认实现没有遗留被推翻的旧假设。
+- [ ] 回看总 milestones 的 deferred contract register，确认 M1 没有抢跑后续职责。
+- [ ] 在本 TODO 中勾选实际完成项；未完成项不能因为“后续会做”而标记完成。
+- [ ] 对任何与设计不同但已获确认的实现，同步更新设计和总 milestones。
+- [ ] 在本节追加完成记录：日期、Python 版本、依赖版本、测试命令和结果。
+- [ ] 记录 M2 可直接复用的 app factory、settings snapshot 字段和 EventPublisherPort 入口。
+- [ ] 记录 M3/M4/M5/M6 需要补全的 generic DTO，不在 M1 提前实现。
+- [ ] 确认没有修改 `backend_bk/`，没有覆盖用户无关改动。
+
+最终验证：
+
+- [ ] `python3 -m pip install -e './backend[dev]'` 成功。
+- [ ] `pytest backend/tests -q` 全绿。
+- [ ] `uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000` 可启动。
+- [ ] `curl http://127.0.0.1:8000/health` 返回 `{"status":"healthy"}`。
+- [ ] `git diff --check` 通过。
+
+完成记录模板：
+
+```text
+完成日期：
+Python：
+生产依赖：
+测试命令：
+测试结果：
+已知限制：
+下一 Milestone 接力点：
+```
+
+## 后续非 M1
+
+- [ ] M2：session 状态机、SSE、cancel，以及 timezone/resolution snapshot。
+- [ ] M3：TranscriptItem、schema version、历史 API、完整折叠 timeline、secret redaction 和大 payload lazy load。
+- [ ] M4：日期请求 mapper、结束日期包含整天、ParameterResolver、自动粒度规则和 HydrologyGraph。
+- [ ] M5：source record DTO、Evidence Tool registry、真实/fake adapter、聚合、质量分类、canonical unit 表和确定性单位 tool。
+- [ ] M6：Agent、prompt/parser、三态生成策略、confidence policy、多站冲突判断和 attribution policy。
+- [ ] M7：拓扑 DAG 多 Agent 调度。
+- [ ] M8：Transcript RAG。
+- [ ] M9：settings/key/admin、动态时区、自定义单位 session override 和用户确认的全局单位表更新。
+- [ ] Future：开放任意时分输入；只在出现非 COMID 水体需求时设计 Waterbody。
