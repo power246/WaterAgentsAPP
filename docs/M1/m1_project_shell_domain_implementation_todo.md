@@ -163,38 +163,46 @@ python -c "import httpx; response = httpx.get('http://127.0.0.1:8000/health'); r
 
 ### Common
 
-- [ ] 实现 `DomainModel` 的统一 Pydantic 配置。
-- [ ] 实现递归 `JsonValue` 类型，不允许任意 Python 对象。
-- [ ] 建立非空字符串、UTC aware datetime、唯一 tuple 等最小复用 validator；不要为了单次使用建立复杂框架。
-- [ ] JSON payload 进入模型前深拷贝，对外 dump 后修改结果不影响原模型。
-- [ ] 枚举使用稳定小写字符串值。
+- [x] 实现 `DomainModel` 的统一 Pydantic 配置。
+- [x] 实现递归 `JsonValue` 类型，不允许任意 Python 对象。
+- [x] 建立非空字符串、UTC aware datetime、唯一 tuple 等最小复用 validator；不要为了单次使用建立复杂框架。
+- [x] JSON payload 进入模型前深拷贝，对外 dump 后修改结果不影响原模型。
+- [x] 枚举使用稳定小写字符串值。
 
 ### Hydrology
 
-- [ ] 实现 `GeoPoint(latitude, longitude)` 和范围校验。
-- [ ] 实现 `RiverSegment(comid, location, upstream_comids, downstream_comids)`。
-- [ ] RiverSegment 拒绝重复上下游 COMID 和 self-reference。
-- [ ] RiverSegment location 允许 `None`；不使用 `0,0` 哨兵。
-- [ ] 实现 `ParameterKey(code_system, code)`，两字段共同构成参数身份。
-- [ ] 实现 `WaterQualityParameter(key, name, canonical_unit, is_dimensionless, category)`。
-- [ ] 非无量纲参数缺少 canonical unit 时校验失败。
-- [ ] 实现 `MonitoringStation(station_id, source, name, location, associated_comid, available_parameters)`。
-- [ ] MonitoringStation location 允许 `None`，available ParameterKey 不得重复。
-- [ ] 不创建 `Waterbody`、lake、reservoir 或 geometry 抽象。
+- [x] 实现 `GeoPoint(latitude, longitude)` 和范围校验。
+- [x] 实现 `RiverSegment(comid, location, upstream_comids, downstream_comids)`。
+- [x] RiverSegment 拒绝重复上下游 COMID 和 self-reference。
+- [x] RiverSegment location 允许 `None`；不使用 `0,0` 哨兵。
+- [x] 实现 `ParameterKey(code_system, code)`，两字段共同构成参数身份。
+- [x] 实现 `WaterQualityParameter(key, name, canonical_unit, is_dimensionless, category)`。
+- [x] 非无量纲参数缺少 canonical unit 时校验失败。
+- [x] 实现 `MonitoringStation(station_id, source, name, location, associated_comid, available_parameters)`。
+- [x] MonitoringStation location 允许 `None`，available ParameterKey 不得重复。
+- [x] 不创建 `Waterbody`、lake、reservoir 或 geometry 抽象。
 
 ### 测试
 
-- [ ] 每个对象覆盖合法构造和 JSON round-trip。
-- [ ] 空 ID/code system/code/name 被拒绝。
-- [ ] 非法坐标、重复关系、自引用和重复 ParameterKey 被拒绝。
-- [ ] `location=None` 合法，真实 `GeoPoint(0,0)` 仍是合法坐标而不是缺失。
-- [ ] frozen model 不能重新赋值。
-- [ ] JSON payload defensive copy 行为有测试。
+- [x] 每个对象覆盖合法构造和 JSON round-trip。
+- [x] 空 ID/code system/code/name 被拒绝。
+- [x] 非法坐标、重复关系、自引用和重复 ParameterKey 被拒绝。
+- [x] `location=None` 合法，真实 `GeoPoint(0,0)` 仍是合法坐标而不是缺失。
+- [x] frozen model 不能重新赋值。
+- [x] JSON payload defensive copy 行为有测试。
 
 验证点：
 
-- [ ] Hydrology 对象没有 FastAPI、ports 或 infrastructure import。
-- [ ] ParameterKey 在 dump/load 后保留 code system 和前导零。
+- [x] Hydrology 对象没有 FastAPI、ports 或 infrastructure import。
+- [x] ParameterKey 在 dump/load 后保留 code system 和前导零。
+
+### Milestone 2 完成记录（2026-09-07）
+
+- Common：实现 `DomainModel`、`DomainEnum`、递归 `JsonValue`、`NonEmptyString`、`UtcDatetime` 和唯一 tuple 校验；模型统一启用 `extra=forbid`、`frozen=true`、字符串 trim 与非有限数拒绝。
+- Hydrology：按一类一文件实现并导出 `GeoPoint`、`RiverSegment`、`ParameterKey`、`WaterQualityParameter`、`MonitoringStation`，未创建 `Waterbody` 或其他超范围抽象。
+- 聚焦测试：`python -m pytest backend/tests/domain/test_hydrology.py backend/tests/domain/test_serialization.py -q`，31 passed。
+- 完整回归：`python -m pytest backend/tests -q`，39 passed。
+- 依赖回扫：`backend/app/domain` 未发现 FastAPI、ports、infrastructure、数据库、HTTP/LLM framework 或 `Any` import；`git diff --check` 通过。
 
 建议测试：
 
