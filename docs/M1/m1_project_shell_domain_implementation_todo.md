@@ -453,37 +453,37 @@ python -m pytest backend/tests/architecture/test_port_imports.py -q
 
 ### Dependency test
 
-- [ ] 使用 Python AST 扫描 `backend/app/domain/**/*.py`。
-- [ ] allowlist 只包含标准库、Pydantic 和 `app.domain`。
-- [ ] 明确拒绝 FastAPI、SQLAlchemy、httpx、LangChain、LangGraph、provider SDK、app.api、app.ports、app.infrastructure 及后续应用层。
-- [ ] 扫描 import 和 from-import 两种语法。
-- [ ] 测试失败信息包含违规文件、行号和 import 名称。
+- [x] 使用 Python AST 扫描 `backend/app/domain/**/*.py`。
+- [x] allowlist 只包含标准库、Pydantic 和 `app.domain`。
+- [x] 明确拒绝 FastAPI、SQLAlchemy、httpx、LangChain、LangGraph、provider SDK、app.api、app.ports、app.infrastructure 及后续应用层。
+- [x] 扫描 import 和 from-import 两种语法。
+- [x] 测试失败信息包含违规文件、行号和 import 名称。
 
 ### Contract sweep
 
-- [ ] 搜索所有 Domain class 名称，确认一类一文件且导出完整。
-- [ ] 搜索 `Waterbody`，确认只存在文档中的 deferred 描述，不存在 M1 生产类型。
-- [ ] 搜索旧 `/analyze`、`/ws/hydro-analysis`、旧事件名和旧 `HydrologyInference`，确认新 backend 未引入。
-- [ ] 搜索 Domain 中的 `Any`、FastAPI、数据库、LLM 和 SDK import。
-- [ ] 搜索 datetime 构造和 serialization，确认没有 naive timestamp 漏入。
-- [ ] 搜索窗口 key，确认没有只用本地格式化时间字符串。
-- [ ] 搜索 ParameterKey 调用，确认没有退回裸 USGS code 去重。
-- [ ] 搜索 evidence refs，确认 result/attribution/detail 引用均经过 cross validation。
+- [x] 搜索所有 Domain class 名称，确认一类一文件且导出完整。
+- [x] 搜索 `Waterbody`，确认只存在文档中的 deferred 描述，不存在 M1 生产类型。
+- [x] 搜索旧 `/analyze`、`/ws/hydro-analysis`、旧事件名和旧 `HydrologyInference`，确认新 backend 未引入。
+- [x] 搜索 Domain 中的 `Any`、FastAPI、数据库、LLM 和 SDK import。
+- [x] 搜索 datetime 构造和 serialization，确认没有 naive timestamp 漏入。
+- [x] 搜索窗口 key，确认没有只用本地格式化时间字符串。
+- [x] 搜索 ParameterKey 调用，确认没有退回裸 USGS code 去重。
+- [x] 搜索 evidence refs，确认 result/attribution/detail 引用均经过 cross validation。
 
 ### Full tests
 
-- [ ] 运行全部 M1 tests。
-- [ ] 运行 `git diff --check`。
-- [ ] 在干净 Python 3.11+ 虚拟环境执行 editable install 和测试。
-- [ ] 手工启动 Uvicorn 并验证 health。
-- [ ] 确认测试不访问网络、不依赖 `.env`、API key、数据库或本机 timezone。
-- [ ] 确认生产代码和测试使用 `pathlib`/`tempfile` 等跨平台 API，不依赖 POSIX shell、路径分隔符、`/tmp`、盘符、macOS-only import、`fork` 或大小写敏感文件系统。
+- [x] 运行全部 M1 tests。
+- [x] 运行 `git diff --check`。
+- [x] 在干净 Python 3.11+ 虚拟环境执行 editable install 和测试。
+- [x] 手工启动 Uvicorn 并验证 health。
+- [x] 确认测试不访问外部网络、不依赖 `.env`、API key、数据库或本机 timezone；health smoke 仅使用 loopback。
+- [x] 确认生产代码和测试使用 `pathlib`/`tempfile` 等跨平台 API，不依赖 POSIX shell、路径分隔符、`/tmp`、盘符、macOS-only import、`fork` 或大小写敏感文件系统。
 - [ ] 在 macOS、Windows、Linux CI 或等效干净环境中分别执行 editable install、完整测试和 health smoke test，并记录结果。
 
 验证点：
 
-- [ ] `python -m pytest backend/tests -q` 全绿。
-- [ ] 架构测试对一个临时禁止 import 能稳定报错，移除后恢复通过。
+- [x] `python -m pytest backend/tests -q` 全绿。
+- [x] 架构测试对一个临时禁止 import 能稳定报错，移除后恢复通过。
 - [ ] 所有 M1 成功标准均有自动化或明确手工验收证据。
 
 建议命令：
@@ -494,6 +494,15 @@ rg -n 'fastapi|sqlalchemy|httpx|langchain|langgraph|Any' backend/app/domain
 rg -n '/analyze|/ws/hydro-analysis|HydrologyInference|Waterbody' backend/app
 git diff --check
 ```
+
+### Milestone 7 本地完成记录（2026-09-08）
+
+- 架构门禁：新增 AST dependency allowlist、Domain 一类一文件/导出完整性、deferred/legacy contract、UTC model field、窗口身份和跨平台 CI contract 测试；临时禁止 import 的失败信息包含文件、行号和 import 名称，移除后恢复通过。
+- 结构整理：将 `DomainModel` 与 `DomainEnum` 拆分到各自文件，同时保留 `app.domain.common` 兼容导入。
+- 干净环境：Python 3.12.14（满足 3.11+）；`python -m pip install -e './backend[dev]'` 成功，`python -m pip check` 无 broken requirements。
+- 生产依赖：FastAPI 0.141.1、Pydantic 2.13.5、pydantic-settings 2.15.0、Uvicorn 0.52.4、tzdata 2026.3；测试依赖 pytest 9.1.1、httpx 0.28.1。
+- 完整回归：`python -m pytest backend/tests -q`，185 passed；`python backend/scripts/health_smoke.py` 返回 `{"status":"healthy"}`；`git diff --check` 通过。
+- 跨平台入口：新增 GitHub Actions 的 Ubuntu/macOS/Windows Python 3.11 matrix，每个平台执行 editable install、完整测试和 health smoke；本地已验证 macOS，Windows/Linux 结果需在分支提交并推送后由 CI 记录，因此对应两项暂不勾选。
 
 ## Milestone 8：收尾与接力
 
