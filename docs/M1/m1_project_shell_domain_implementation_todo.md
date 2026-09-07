@@ -400,37 +400,46 @@ python -m pytest backend/tests/domain/test_results.py backend/tests/domain/test_
 
 ### Stable protocols
 
-- [ ] 实现 `ClockPort.now() -> UTC datetime`。
-- [ ] 实现 `GeocodingPort.resolve(location_text) -> GeoPoint | None`。
-- [ ] 实现 `ComidLookupPort.lookup_comid(point) -> str | None`。
-- [ ] 实现 `TopologyDataPort.get_segment(...)` 和 `get_direct_upstreams(...)`。
-- [ ] 实现 `MonitoringStationPort.find_for_segment(...)`，参数身份使用 ParameterKey。
+- [x] 实现 `ClockPort.now() -> UTC datetime`。
+- [x] 实现 `GeocodingPort.resolve(location_text) -> GeoPoint | None`。
+- [x] 实现 `ComidLookupPort.lookup_comid(point) -> str | None`。
+- [x] 实现 `TopologyDataPort.get_segment(...)` 和 `get_direct_upstreams(...)`。
+- [x] 实现 `MonitoringStationPort.find_for_segment(...)`，参数身份使用 ParameterKey。
 
 ### Generic protocols
 
-- [ ] 为 WaterObservation、WeatherObservation、WeatherForecast、FacilitySearch 定义 RequestT/RecordT generic Protocol。
-- [ ] 为 LLM 定义 RequestT/ResponseT generic Protocol。
-- [ ] 为 TranscriptStore、RAGIndex、EventPublisher、Cache 定义最小 generic 操作语义。
-- [ ] 为 KeyStore 保留模块和 Protocol；masked status DTO 延后到 M9。
-- [ ] 不使用 `Any`、裸 dict 或 EvidenceFragment 代替尚未定型的 source record。
-- [ ] 不创建 fake/real adapter；它们在使用这些 port 的 milestone 引入。
+- [x] 为 WaterObservation、WeatherObservation、WeatherForecast、FacilitySearch 定义 RequestT/RecordT generic Protocol。
+- [x] 为 LLM 定义 RequestT/ResponseT generic Protocol。
+- [x] 为 TranscriptStore、RAGIndex、EventPublisher、Cache 定义最小 generic 操作语义。
+- [x] 为 KeyStore 保留模块和 Protocol；masked status DTO 延后到 M9。
+- [x] 不使用 `Any`、裸 dict 或 EvidenceFragment 代替尚未定型的 source record。
+- [x] 不创建 fake/real adapter；它们在使用这些 port 的 milestone 引入。
 
 ### Errors
 
-- [ ] 实现 `PortError`、`PortUnavailableError`、`PortTimeoutError`、`InvalidPortResponseError`。
-- [ ] 找不到使用 None/空 tuple，不作为 PortError。
-- [ ] 协议 docstring 明确 empty 与 unavailable 不同。
+- [x] 实现 `PortError`、`PortUnavailableError`、`PortTimeoutError`、`InvalidPortResponseError`。
+- [x] 找不到使用 None/空 tuple，不作为 PortError。
+- [x] 协议 docstring 明确 empty 与 unavailable 不同。
 
 ### 测试
 
-- [ ] 所有约定 port 可从 `app.ports` 导入。
-- [ ] Protocol 方法签名和 async/sync 语义符合设计。
-- [ ] port modules 不导入 infrastructure、FastAPI 或第三方 SDK。
+- [x] 所有约定 port 可从 `app.ports` 导入。
+- [x] Protocol 方法签名和 async/sync 语义符合设计。
+- [x] port modules 不导入 infrastructure、FastAPI 或第三方 SDK。
 
 验证点：
 
-- [ ] M1 port 能为 M2-M5 提供 import-stable 入口。
-- [ ] 没有为了通过 import test 创建无意义 adapter 或 runtime wiring。
+- [x] M1 port 能为 M2-M5 提供 import-stable 入口。
+- [x] 没有为了通过 import test 创建无意义 adapter 或 runtime wiring。
+
+### Milestone 6 完成记录（2026-09-07）
+
+- Stable protocols：实现同步 `ClockPort` 与异步 geocoding、COMID、topology、monitoring station 端口，返回 Domain 类型并使用 `ParameterKey` 表达参数身份。
+- Generic protocols：实现 observation/weather/forecast/facility、LLM、transcript、RAG、event publisher、cache 和 key store 的类型安全泛型入口；KeyStore masked status DTO 保持延后。
+- Errors：实现统一 `PortError` 层级；查询协议 docstring 明确 None/空 tuple 是成功但无结果，unavailable 属于外部失败。
+- 聚焦测试：`python -m pytest backend/tests/architecture/test_port_imports.py -q`，27 passed。
+- 完整回归：`python -m pytest backend/tests -q`，175 passed；`app.ports` 公开入口导入和 `git diff --check` 通过。
+- 架构回扫：Ports 只依赖标准库、Domain 和 Ports 自身；无 `Any`、裸 dict、EvidenceFragment、第三方 SDK、infrastructure、生产 adapter 或 runtime wiring。
 
 建议测试：
 
