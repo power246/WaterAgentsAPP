@@ -6,6 +6,35 @@ from app.domain.common import (
     UtcDatetime,
     ensure_unique_tuple,
 )
+from app.domain.attribution import (
+    AnalysisDetail,
+    AnalysisStep,
+    AttributionBasis,
+    AttributionDirection,
+    AttributionFactor,
+    AttributionMagnitude,
+    AttributionSummary,
+)
+from app.domain.hydrology import (
+    GeoPoint,
+    MonitoringStation,
+    ParameterKey,
+    RiverSegment,
+    WaterQualityParameter,
+)
+from app.domain.inference import (
+    AggregationMethod,
+    IndeterminateReason,
+    InferenceMode,
+    InferenceResult,
+    OutcomeStatus,
+    ParameterTimeSeries,
+    ResultSource,
+    RiskLevel,
+    RiskOrTrendAssessment,
+    TimeWindowResult,
+    TrendDirection,
+)
 from app.domain.evidence import (
     CollectionStatus,
     DataQualityFlag,
@@ -16,14 +45,6 @@ from app.domain.evidence import (
     EvidenceReference,
     Provenance,
 )
-from app.domain.hydrology import (
-    GeoPoint,
-    MonitoringStation,
-    ParameterKey,
-    RiverSegment,
-    WaterQualityParameter,
-)
-from app.domain.inference import InferenceMode
 from app.domain.time import (
     DEFAULT_TIME_RESOLUTION,
     TimeRange,
@@ -34,6 +55,14 @@ from app.domain.time import (
 )
 
 __all__ = [
+    "AggregationMethod",
+    "AnalysisDetail",
+    "AnalysisStep",
+    "AttributionBasis",
+    "AttributionDirection",
+    "AttributionFactor",
+    "AttributionMagnitude",
+    "AttributionSummary",
     "CollectionStatus",
     "DEFAULT_TIME_RESOLUTION",
     "DataQualityFlag",
@@ -46,18 +75,27 @@ __all__ = [
     "EvidenceReference",
     "GeoPoint",
     "InferenceMode",
+    "InferenceResult",
+    "IndeterminateReason",
     "JsonValue",
     "MonitoringStation",
     "NonEmptyString",
     "ParameterKey",
+    "ParameterTimeSeries",
     "Provenance",
     "RiverSegment",
+    "ResultSource",
+    "RiskLevel",
+    "RiskOrTrendAssessment",
     "TimeRange",
     "TimeResolution",
     "TimeResolutionSource",
     "TimeSegment",
+    "TimeWindowResult",
+    "TrendDirection",
     "UtcDatetime",
     "WaterQualityParameter",
+    "OutcomeStatus",
     "build_time_windows",
     "ensure_unique_tuple",
 ]
