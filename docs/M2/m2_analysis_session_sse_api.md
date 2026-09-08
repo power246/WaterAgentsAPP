@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–6](m2_analysis_session_sse_implementation_todo.md#milestone-6结构化日志与-redaction)。正式创建、SSE 订阅与取消路由已接入，支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消。WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。OpenAPI 已包含 `/health` 与三个 session 操作；接口、streaming、错误、日志与文档 raw frame 均有测试。正式 SSE server smoke/跨平台 CI 仍由 Milestone 7 完成。
+实现状态（2026-09-08）：已完成 Milestone 0–6；[Milestone 7 的实现与本机验收](m2_analysis_session_sse_implementation_todo.md#milestone-7真实-server-smokeapi-文档与-ci)已完成。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。真实 Uvicorn completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，但远端运行结果尚未取得；Milestone 8 最终 sweep 仍待完成。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -344,6 +344,7 @@ Error envelope 固定包含 `error`、`session` 和 `validation`；没有 curren
 | HTTP | code | 含义 | 建议处理 |
 |---:|---|---|---|
 | 400 | `invalid_event_cursor` | Last-Event-ID 格式非法 | 清除本地 cursor 后重新订阅 |
+| 400 | `invalid_request` | 请求体无法解码（例如非法 UTF-8），或框架拒绝请求 | 检查请求编码及 Content-Type |
 | 404 | `not_found` | HTTP 路由不存在 | 检查 URL；接口不自动重定向尾斜杠 |
 | 405 | `method_not_allowed` | HTTP 方法不支持，保留 `Allow` header | 使用文档约定的方法 |
 | 404 | `session_not_found` | 当前进程没有该 session | 检查 session_id；服务是否已重启 |
@@ -390,7 +391,7 @@ M2 不公开 `session_started`：
 2. 不带 cursor 重新请求 events；`session_created` 应当可回放。
 3. 检查 SSE response 的 status 与 `Content-Type`。
 4. 用 `session_id` 查 `lifecycle_event_committed` 日志，确认其中 `lifecycle_event.type=session_created`。
-5. 对照日志中的 sequence 与客户端最后记录的 SSE `id`。
+5. 对照日志中的 `event_sequence` 与客户端最后记录的 SSE `id`。
 
 ### 8.3 SSE 经常断开
 
@@ -429,9 +430,25 @@ cancel_accepted -> workflow_quiesced
 
 ## 9. OpenAPI 与文档一致性
 
-实现完成后应检查：
+当前校验入口：
 
-- `/docs` 中 POST/cancel 的 request、response 和 error schema 与本文一致。
-- events endpoint 标注 `text/event-stream`，并链接或引用本文的 streaming 语义。
-- examples 使用真实模型序列化结果生成或由测试校验字段，避免手写示例漂移。
-- API route、schema、本文、smoke client 和测试中没有旧 WebSocket 字段或事件名。
+- `test_openapi_describes_only_the_supported_routes_and_actual_envelopes` 核对本文路由、OpenAPI、request body、统一 error schema、SSE content-type/204 和 request ID header。GET events 的 OpenAPI description 引用本文的 streaming 语义；POST create 声明请求解码失败的 400。
+- `test_documented_create_example_matches_the_actual_response` 使用确定的 clock/ID 调用真实 route，精确对照创建示例；其余 JSON 示例通过真实 DTO 校验。API 错误测试同步检查本文错误码表中的 HTTP/code 配对。
+- `test_documented_raw_frames_match_the_encoder` 对照全部四种 raw frame 与真实 encoder；keepalive、Last-Event-ID、204、关闭行为同时由 API 测试和真实 socket smoke 覆盖。
+- JavaScript 示例使用 EventSource 默认重连与 terminal 后 `close()`，取消通过无 body 的 POST 调用；这里只提供新协议接入示例，没有修改或接入现有前端。
+
+## 10. 本机与 CI 自测
+
+安装 backend 的 dev dependencies 后，从仓库根运行：
+
+```text
+python -m pytest backend/tests -q
+python backend/scripts/health_smoke.py
+python backend/scripts/session_sse_smoke.py
+```
+
+Session/SSE smoke 成功时 stdout 为 `{"completed":"passed","cancelled":"passed"}`。Completed 使用默认 workflow；cancelled 通过 app factory 注入 gate，在收到 created/keepalive、断线重连后保持 gate 关闭并调用 cancel，验证立即且幂等的响应和唯一 cancelled event，然后释放 gate。两条路径均检查 terminal EOF、Last-Event-ID 续传和已消费完后的 204。
+
+脚本使用动态 loopback socket、真实 Uvicorn 和正式 HTTP routes，不调用 shell/进程信号、不使用固定端口或生产测试开关。HTTP 客户端忽略环境代理；成功、断言失败、调用 task 被取消和 startup 失败的服务器清理由测试覆盖。完整 tests 中的 smoke 清理测试同样需要允许本机 loopback bind。
+
+`.github/workflows/backend-m1.yml`（显示名 `Backend M1-M2`）在 Ubuntu/macOS/Windows + Python 3.11 上配置 editable install、完整 tests、health 和 session/SSE 两项 smoke。两项 smoke 的 CI 步骤显式注入不可用代理来验证 `trust_env=False`。CI 是否通过以三平台实际运行结果为准。

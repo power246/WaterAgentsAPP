@@ -36,7 +36,7 @@ router = APIRouter(
 
 @router.post(
     "", status_code=201, response_model=AnalysisSessionResponse,
-    responses={201: {"headers": REQUEST_ID_HEADERS}},
+    responses={**error_responses(400), 201: {"headers": REQUEST_ID_HEADERS}},
 )
 async def create_session(request: Request, body: CreateAnalysisSessionRequest) -> AnalysisSessionSnapshot:
     request.state.log_private_query = body.query
@@ -48,6 +48,12 @@ async def create_session(request: Request, body: CreateAnalysisSessionRequest) -
 
 @router.get(
     "/{session_id}/events", response_class=Response,
+    description=(
+        "Replays lifecycle events after Last-Event-ID, then streams new events and "
+        "unnumbered comment keepalives. The stream closes after its terminal event; "
+        "a consumed terminal cursor returns 204. Disconnecting does not cancel the session. "
+        "See docs/M2/m2_analysis_session_sse_api.md for frames and reconnection semantics."
+    ),
     responses={
         **error_responses(400, 404, 409),
         200: {

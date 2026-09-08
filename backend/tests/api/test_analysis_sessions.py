@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
@@ -20,6 +22,13 @@ from app.main import create_app
 BASE = "/api/analysis/sessions"
 SECRET = "private-token-and-query-do-not-expose"
 TIMESTAMP = "2026-09-08T03:20:00Z"
+API_DOCUMENT = (
+    Path(__file__).resolve().parents[3] / "docs/M2/m2_analysis_session_sse_api.md"
+).read_text(encoding="utf-8")
+DOCUMENTED_ERRORS = {
+    (int(status), code)
+    for status, code in re.findall(r"^\| (\d{3}) \| `([^`]+)` \|", API_DOCUMENT, re.MULTILINE)
+}
 
 
 class FixedClock:
@@ -72,6 +81,7 @@ def run(exercise) -> None:
 
 
 def assert_error(response, status, code, *, session_id=None):
+    assert (status, code) in DOCUMENTED_ERRORS
     assert response.status_code == status
     assert response.headers["content-type"] == "application/json"
     envelope = AnalysisSessionErrorResponse.model_validate(response.json())
@@ -226,6 +236,9 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
             assert envelope.validation[0].message == "The request body must contain valid JSON."
             wrong_type = await client.post(BASE, content=SECRET, headers={"Content-Type": "text/plain"})
             assert_error(wrong_type, 422, "invalid_request")
+            invalid_encoding = await client.post(BASE, content=b"\xff", headers={"Content-Type": "application/json"})
+            envelope = assert_error(invalid_encoding, 400, "invalid_request")
+            assert envelope.validation == ()
 
     run(exercise)
 
@@ -525,12 +538,22 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         BASE + "/{session_id}/cancel": {"post"},
     }
     create = paths[BASE]["post"]
+    assert "400" in create["responses"]
     assert create["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisSessionResponse")
     assert create["requestBody"]["required"] is True
     assert create["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("/CreateAnalysisSessionRequest")
     cancel = paths[BASE + "/{session_id}/cancel"]["post"]
     assert "requestBody" not in cancel
     events = paths[BASE + "/{session_id}/events"]["get"]
+    assert "m2_analysis_session_sse_api.md" in events["description"]
+    documented_routes = {
+        (path, method.lower())
+        for method, path in re.findall(r"^### `(POST|GET) ([^`]+)`", API_DOCUMENT, re.MULTILINE)
+    }
+    assert documented_routes == {
+        (path, method) for path, methods in paths.items() if path.startswith(BASE)
+        for method in methods
+    }
     assert set(events["responses"]["200"]["content"]) == {"text/event-stream"}
     assert "content" not in events["responses"]["204"]
     assert any(parameter["in"] == "header" and parameter["name"] == "Last-Event-ID" for parameter in events["parameters"])
@@ -542,6 +565,20 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
                 assert response["headers"]["X-Request-ID"]["schema"] == {"type": "string", "format": "uuid"}
                 if int(status) >= 400:
                     assert response["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisSessionErrorResponse")
+
+
+def test_documented_create_example_matches_the_actual_response() -> None:
+    examples = [json.loads(example) for example in re.findall(r"```json\n(.*?)\n```", API_DOCUMENT, re.DOTALL)]
+    request, expected = examples[:2]
+
+    async def exercise() -> None:
+        ids = iter([uuid4(), UUID(expected["session_id"])])
+        async with http_application(id_factory=lambda: next(ids)) as (_, client):
+            response = await client.post(BASE, json=request)
+            assert response.status_code == 201
+            assert response.json() == expected
+
+    run(exercise)
 
 
 def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, application_logs) -> None:

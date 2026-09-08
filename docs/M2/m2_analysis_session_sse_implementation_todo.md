@@ -742,35 +742,88 @@ Milestone 3–5 完成记录中的 JSON formatter、duration_ms 和通用 redact
 
 ### Smoke
 
-- [ ] 新增跨平台 Python smoke client/server orchestration。
-- [ ] 使用真实 Uvicorn socket 验证 create -> SSE replay -> completed。
-- [ ] 使用 controlled gate 验证 create -> cancel -> cancelled event。
-- [ ] 验证 terminal stream close。
-- [ ] smoke 不调用 shell、POSIX signal 或硬编码端口。
-- [ ] smoke 使用可用 loopback port，并可靠清理 server/task。
+- [x] 新增跨平台 Python smoke client/server orchestration。
+- [x] 使用真实 Uvicorn socket 验证 create -> SSE replay -> completed。
+- [x] 使用 controlled gate 验证 create -> cancel -> cancelled event。
+- [x] 验证 terminal stream close。
+- [x] smoke 不调用 shell、POSIX signal 或硬编码端口。
+- [x] smoke 使用可用 loopback port，并可靠清理 server/task。
 
 ### API docs
 
-- [ ] 核对 `m2_analysis_session_sse_api.md` 与实际 JSON/OpenAPI。
-- [ ] 核对 raw SSE frame、Last-Event-ID、204 和 keepalive。
-- [ ] 核对 success/error examples 和错误码表。
-- [ ] 核对 JavaScript EventSource/cancel 示例，但不修改 frontend。
-- [ ] 核对排障 runbook 中所有日志 event name 和 correlation ID。
-- [ ] 文档明确单 worker、内存态、重启 404 和无旧前端兼容。
+- [x] 核对 `m2_analysis_session_sse_api.md` 与实际 JSON/OpenAPI。
+- [x] 核对 raw SSE frame、Last-Event-ID、204 和 keepalive。
+- [x] 核对 success/error examples 和错误码表。
+- [x] 核对 JavaScript EventSource/cancel 示例，但不修改 frontend。
+- [x] 核对排障 runbook 中所有日志 event name 和 correlation ID。
+- [x] 文档明确单 worker、内存态、重启 404 和无旧前端兼容。
 
 ### CI
 
-- [ ] 更新或新增 M2 workflow，继续在 Ubuntu/macOS/Windows + Python 3.11 执行 editable install。
-- [ ] 三平台运行完整 tests。
-- [ ] 三平台运行 health smoke 和 M2 session/SSE smoke。
-- [ ] CI 不依赖系统 IANA timezone database、POSIX-only command 或固定路径。
+- [x] 更新或新增 M2 workflow，继续在 Ubuntu/macOS/Windows + Python 3.11 执行 editable install。
+- [ ] 三平台运行完整 tests（配置已接入，远端结果待运行）。
+- [ ] 三平台运行 health smoke 和 M2 session/SSE smoke（配置已接入，远端结果待运行）。
+- [x] CI 不依赖系统 IANA timezone database、POSIX-only command 或固定路径。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests -q`
-- [ ] `python backend/scripts/health_smoke.py`
-- [ ] 运行 M2 session/SSE smoke。
-- [ ] `git diff --check`
+- [x] `python -m pytest backend/tests -q`
+- [x] `python backend/scripts/health_smoke.py`
+- [x] 运行 M2 session/SSE smoke。
+- [x] `git diff --check`
+
+### Milestone 7 实现与本机验收记录（2026-09-08）
+
+本阶段新增真实 Uvicorn session/SSE smoke、完善 API/OpenAPI 文档校验，并接入三平台 CI。开始时工作区干净，基于本地 Milestone 6 提交 `6394353`，全量基线为 566 项通过。只修改新后端、相关 tests、backend README、三份 M2 文档和现有 CI workflow；不增加依赖，不修改业务流程或 HTTP/SSE 数据模型。
+
+#### 实现与验收
+
+- `backend/scripts/session_sse_smoke.py`：运行既有 `create_app` 与 `uvicorn.Server.serve`，持有绑定端口 0 的 loopback socket 并直接交给 server。Startup 用 event 通知，结束设置 `should_exit` 并等待 server/lifespan 清理；不安装 signal handler，不调用 shell 或 subprocess。Client、socket 和 server task 均有显式生命周期，网络读取和整次 smoke 有超时边界。
+- Completed 场景使用默认 workflow，断言 201/pending、timezone/resolution/source snapshot、canonical request ID、created/completed 的一致 session ID 和 sequence，以及 terminal EOF。再以 Last-Event-ID=1 精确回放终态，以 Last-Event-ID=2 得到空 body 的 204。
+- Cancelled 场景注入 gate workflow，实际收到 created 和 keepalive 后断开并从 sequence 1 重连，确认 disconnect 未设置取消信号。Gate 关闭时调用正式 cancel route，验证 API 返回时 workflow 尚未退出、取消信号已可见、只有一次 cancelled event；重复 cancel 返回相同 snapshot。释放 gate 后再验证 terminal replay/204。Reader 跳过传输 keepalive，避免 cancel response 返回前已缓冲的 comment 导致假失败；不以 sleep 决定 workflow 时序。
+- `backend/tests/smoke/test_session_sse_smoke.py` 新增 4 项真实 socket 测试：正常退出、客户端失败和调用 task 被取消时，活动 workflow 被收敛，socket 不再接收请求，无遗留 async task；lifespan startup 失败转换为可报告的启动错误，不让 Uvicorn 的 SystemExit 中止测试进程。
+- `.github/workflows/backend-m1.yml` 保留原入口，显示名为 `Backend M1-M2`，三平台 Python 3.11 的 editable install/全量 tests/health smoke 继续保留，并新增 session/SSE smoke。两项 smoke 的步骤都注入不可用 HTTP/HTTPS/ALL proxy 和空 NO_PROXY；客户端使用 `trust_env=False`。Architecture gate 校验 CI 命令、动态 socket、单 worker、无 shell/signal/sleep 和关闭控制。
+- API 对照发现非法 UTF-8 JSON body 由框架返回 `400 invalid_request`。`api/http/analysis_sessions.py` 为 POST create 补充既有统一 400 schema，并在 GET events 的 OpenAPI description 引用 streaming 文档；没有改变实际处理逻辑。错误码表和真实请求回归同步覆盖该情况。
+- API tests 以实际 route/OpenAPI 对照文档中的路由、request/response/header/media type；错误测试对照 Markdown 中 HTTP/code 配对。新增确定 clock/ID 的真实 POST 示例精确比较；复用 JSON DTO、四种 raw frame、keepalive、cursor/204、日志关联测试。JavaScript EventSource/cancel 示例已按同源新协议、自动 Last-Event-ID、无 body cancel 和 terminal close 语义核对，未修改前端或引入浏览器测试依赖。
+
+#### Verify
+
+使用现有 macOS / Python 3.12.14 环境，从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/api backend/tests/architecture/test_cross_platform_ci.py -q
+173 passed in 0.87s
+
+backend/.venv/bin/python -m pytest backend/tests/smoke -q
+4 passed in 1.19s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+572 passed in 2.35s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+backend/.venv/bin/python backend/scripts/session_sse_smoke.py
+{"completed":"passed","cancelled":"passed"}
+
+git diff --check
+```
+
+上述检查均退出 0；真实 socket 测试与 smoke 在允许 loopback bind 的环境执行。最后两项 smoke 同时设置 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 为 `http://127.0.0.1:1`，NO_PROXY 为空，验证本机请求仍能成功。全量新增 6 项测试；当前异步测试没有遗留任务，两个 smoke 均正常退出。修改后的文档继续由 schema/raw-frame/route/error 对照测试验收。
+
+#### Contract evidence 与剩余验收
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C13`。按 `MR-G01`–`MR-G14` 记录本阶段证据，中心 register 的硬约束与归属保持不变。
+
+| Contract | 实现与测试证据 | 文档与后续验收 |
+|---|---|---|
+| `GLOBAL-C04`、`GLOBAL-C09`、`M2-C02`、`M2-C03`、`M2-C04`、`M2-C08` | `completed_smoke/verify_replay` 验证真实 snapshot/event/ID/sequence、created/completed、终态 replay/204/EOF；既有状态转换/日志同一 event 回归。文档创建示例通过真实 POST 精确比对。 | API §3–4、§9–10 与设计 §16.6；三平台实际 CI 结果待取得。 |
+| `M2-C01`、`M2-C05`、`M2-C06`、`M2-C07` | `cancelled_smoke` 的真实 disconnect/reconnect/keepalive/cancel/幂等/terminal close，gate 验证 cancel 不等待在途 workflow；晚到输出和竞争 API/application 回归。 | API §4–5、§10，README smoke 入口；远端三平台验收待运行。 |
+| `GLOBAL-C07`、`M2-C09` | 真 socket request ID 检查、文档错误 HTTP/code 配对、非法 UTF-8 400 的安全响应/OpenAPI metadata；原日志 redaction、request/session/error correlation 全量通过。 | API 错误表、OpenAPI streaming 引用、runbook 的 `event_sequence` 名称同步。 |
+| `M2-C10`、`M2-C11`、`M2-C12`、`M2-C13` | 单 worker Uvicorn、动态 socket、进程内状态及无 fake 业务结果保持；`test_server_cleanup_closes_socket_and_workflow_on_client_exit` 与 startup failure 测试验证 server/lifespan/task 收尾，不伪造 cancel event。 | README 和 API 明确单 worker、内存态、重启丢失；M3 持久化/遗留处理归属不变。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C10` | 只使用新后端生产入口与 factory workflow 注入；无新依赖、测试路由或 frontend 改动。既有跨平台 CI 扩展与 architecture gates、完整 M1/M2 回归通过。 | 三份 M2 文档和 README 同步；没有新增 deferred contract，Milestone 8 最终 sweep/承接仍待完成。 |
+
+Milestone 7 的实现与本机验收完成；**远端 Ubuntu/macOS/Windows + Python 3.11 的实际 tests 和 smoke 结果尚未取得**，对应 CI 验收项保持未勾选。本次没有推送或触发远端 workflow，不能把已配置三平台矩阵或本机通过写成三平台 CI 通过。该验收仍归 Milestone 7，不转移为新的 deferred contract；M2 总成功标准和 Milestone 8 总验收保持待完成。
 
 ## Milestone 8：Contract Sweep 与接力
 

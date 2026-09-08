@@ -797,6 +797,12 @@ keepalive interval
 - 测试和 smoke 使用 Python 模块入口，支持 macOS、Windows 和 Linux。
 - M1 全量测试继续通过。
 
+真实 socket 验收入口为 `python backend/scripts/session_sse_smoke.py`。脚本通过既有 `create_app` 和 Uvicorn `Server.serve` 启动应用，将持续持有的动态 loopback socket 交给 server，避免先探测端口再重新绑定的竞争。Startup 使用事件通知，shutdown 使用 `should_exit` 并等待 server/lifespan 收尾；不发送进程信号，不调用 shell，也不添加生产测试路由。
+
+Completed 场景使用默认 workflow，验证 pending response、created/completed 帧、终态 EOF、从 sequence 1 续传及消费完后的 204。Cancelled 场景通过 factory 注入 gate workflow，在真实 stream 收到 created/keepalive 后断开并重连，确认 disconnect 不取消；保持 gate 关闭时调用正式 cancel API，验证立即/幂等响应、唯一 cancelled 帧和 EOF，再释放 gate 并验证停止信号。短 keepalive 仅在 smoke factory 注入，不用 sleep 决定取消竞争。
+
+现有 CI workflow 继续在 Ubuntu/macOS/Windows + Python 3.11 执行 editable install、完整 tests、health smoke，并增加 session/SSE smoke。实际三平台运行结果单独登记，不把本机成功或 YAML 配置存在视为远端 CI 通过。
+
 ## 17. M2 验收标准
 
 1. `POST /api/analysis/sessions` 返回 HTTP 201、UUID session_id 和 pending snapshot。
