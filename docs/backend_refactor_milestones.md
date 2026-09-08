@@ -2,37 +2,43 @@
 
 生成日期：2026-09-06
 
-本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何独立验收。
+本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
-本文档只做中等粒度拆分，不展开每个功能的内部设计。每个 milestone 都应该在完成后有可运行、可观察、可测试的结果；如果依赖后续能力，可以先使用 fake/mock adapter，但对外行为和领域对象要稳定。
+本文档只做中等粒度拆分，不展开每个功能的内部设计。每个 milestone 都应该在完成后有可运行、可观察、可测试的结果；这些结果用于后续 agent 接力和问题定位，不构成用户正式测试入口，也不要求支持任何中间态兼容。用户正式上手测试发生在 M1-M9 全部完成之后。
 
-新后端只实现 session + SSE 协议。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
+如果某个 milestone 依赖后续能力，可以先使用 fake/mock adapter。fake/mock 只需要帮助验证本阶段边界和数据形态，不代表最终外部契约；后续 milestone 可以在保持总体架构方向的前提下继续收敛和调整。
+
+新后端只实现 session + SSE 协议。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
 
 ## 0. 仓库目录约定
 
 - `backend/` 是新后端实现目录，也是所有 milestone 的开发和验收目标。
 - `backend_bk/` 是与新后端完全独立的旧后端归档，新后端完成后整体丢弃。
-- 后续 Agent 设计、实现、测试、评审或验收 `backend/` 时不得读取、导入、复制、适配、枚举或测试 `backend_bk/` 的代码与契约。
+- `frontend_bk/` 是待重构前端的历史归档，不是新后端或未来新前端的设计输入。
+- 后续 Agent 设计、实现、测试、评审或验收 `backend/` 时，不得读取、导入、复制、适配、枚举或测试 `backend_bk/` 与 `frontend_bk/` 的代码和契约。未来前端重构基于当时确认的产品设计和新后端契约独立进行。
 
 ## 1. Milestone 原则
 
-1. 每个 milestone 都要能独立验收。
+1. 每个 milestone 都要能独立自测验收。
    - 可以通过 API、SSE event、数据库记录、单元测试或最小 demo 验收。
    - 不要求最终推理准确，但要求该阶段的架构边界和数据形态成立。
+   - 这是开发过程中的接力检查点，不是用户正式测试版本。
+   - 中间结果不需要面向前端、用户或其他 milestone 保持长期兼容。
 
-2. 每个 milestone 都要留下可继续接力的接口。
+2. 每个 milestone 都要留下可继续接力的开发边界。
    - 后续 agent 应该能基于上一阶段的产物继续实现，不需要重推架构。
+   - 如果后续实现发现阶段性 DTO、fake adapter 或测试入口需要调整，可以直接更新，但必须同步更新相关文档和测试。
 
 3. 第一版优先端到端跑通。
    - 复杂 replay、accuracy benchmark、暂停/恢复、大对象外置存储先后置。
 
 4. 可以使用 fake/mock 实现通过验收。
    - 例如 LLM、NLDI、NWIS、NOAA、EPA、RAG 都可以先用 fake adapter。
-   - 但 fake adapter 产出的结构必须和正式 port 一致。
+   - 但 fake adapter 产出的结构必须和本阶段已经定义的 port 一致；若后续 milestone 收敛 port，必须同步更新相关 fake adapter、文档和测试。
 
 5. 延后设计必须显式登记。
    - 如果某个 port DTO、policy 或产品接口缺少真实上下文，不在早期 milestone 用 `Any` 或猜测结构强行定型。
-   - 延后项必须记录所属 milestone、必须保留的约束和独立验收入口。
+   - 延后项必须记录所属 milestone、必须保留的约束和阶段自测入口。
 
 6. macOS、Windows 和 Linux 是同等支持的运行平台。
    - 生产代码和默认配置不得依赖 POSIX 路径、shell、`/tmp` 或 macOS 专用能力。
@@ -52,7 +58,7 @@ M8  Memory/RAG from transcript
 M9  Settings/keys/admin + demo closure
 ```
 
-每个 milestone 都可以独立验收；后面的 milestone 可以替换前面 fake adapter 为真实 adapter。
+每个 milestone 都可以独立自测验收；后面的 milestone 可以替换前面 fake adapter 为真实 adapter，也可以收敛前面为接力而保留的阶段性接口。第一版真正面向用户测试的状态是 M1-M9 全部完成之后。
 
 ## 3. M1: Project Shell + Domain Skeleton
 
@@ -97,7 +103,7 @@ M9  Settings/keys/admin + demo closure
 - 基础配置和应用启动入口。
 - macOS、Windows、Linux 通用的安装、启动和测试入口。
 
-独立验收：
+阶段自测验收：
 
 - 后端能启动。
 - Domain 对象能通过单元测试构造、序列化、反序列化。
@@ -138,7 +144,7 @@ M9  Settings/keys/admin + demo closure
   - `time_resolution`
   - `time_resolution_source`
 
-独立验收：
+阶段自测验收：
 
 - 创建 session 后立即返回 `session_id` 和初始状态。
 - SSE 订阅能收到 session 生命周期事件。
@@ -171,7 +177,7 @@ M9  Settings/keys/admin + demo closure
   - `provenance`
   - `confidence`
 
-独立验收：
+阶段自测验收：
 
 - fake session 的请求、事件、结果能写入 transcript。
 - 历史列表能返回：
@@ -222,7 +228,7 @@ M9  Settings/keys/admin + demo closure
 - 参数解析结果使用 `ParameterKey(code_system, code)`，第一版默认 `code_system=usgs`。
 - 构建上游拓扑，找到可用检测站和 agent 顺序。
 
-独立验收：
+阶段自测验收：
 
 - 使用 fake NLDI/geocoding adapter 时，固定 query 可以稳定产出 `AnalysisContext`。
 - `params_used` 能显示实际映射到的参数。
@@ -270,7 +276,7 @@ M9  Settings/keys/admin + demo closure
   - 可调用确定性 Python 库或 API 执行量纲校验与换算
   - 未知换算不得由 Agent 猜测
 
-独立验收：
+阶段自测验收：
 
 - 每个 evidence tool 都能通过 fake adapter 返回 `EvidenceFragment`。
 - 每条 evidence 都包含：
@@ -322,7 +328,7 @@ M9  Settings/keys/admin + demo closure
 - 完全缺乏证据时输出 indeterminate result，而不是省略时间窗口。
 - 结果包含 `analysis_detail`、`attribution_summary`、`evidence_chain`。
 
-独立验收：
+阶段自测验收：
 
 - 用 fake evidence bundle 可以跑出一个完整 `InferenceResult`。
 - 当存在目标检测站读数时，最终读数锚定 observed value。
@@ -360,7 +366,7 @@ M9  Settings/keys/admin + demo closure
 - 支持 `gap_filling / prediction / mixed`。
 - 支持 session cancel 的高层语义。
 
-独立验收：
+阶段自测验收：
 
 - 使用 fake topology 可以稳定跑完至少 3 个节点的 upstream -> downstream workflow。
 - downstream agent 的 evidence bundle 中能看到 upstream evidence。
@@ -394,7 +400,7 @@ M9  Settings/keys/admin + demo closure
 - `memory_augmented` 模式允许 agent 主动检索历史 transcript。
 - `stateless` 模式不使用跨 session memory，但保留当前 session 内上游结果传递。
 
-独立验收：
+阶段自测验收：
 
 - 一个历史 session 的 eligible item 能进入 RAG index。
 - 新 session 在 `memory_augmented` 模式下能检索到历史 item。
@@ -434,7 +440,7 @@ M9  Settings/keys/admin + demo closure
 - 清理接口不删除 API keys。
 - 端到端 session 能从创建跑到完成或 cancel。
 
-独立验收：
+阶段自测验收：
 
 - settings/key/admin API 能独立通过测试。
 - 清理增长型数据后，API keys 仍然存在。
