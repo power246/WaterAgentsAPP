@@ -3,7 +3,7 @@ from typing import Annotated, Self
 from pydantic import Field, model_validator
 
 from app.domain.common import DomainModel, NonEmptyString
-from app.domain.hydrology import GeoPoint
+from app.domain.hydrology.location import GeoPoint
 
 
 class EvidenceLocation(DomainModel):

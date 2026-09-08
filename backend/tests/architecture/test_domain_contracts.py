@@ -8,6 +8,14 @@ import app.domain as domain
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = BACKEND_ROOT / "app"
 DOMAIN_ROOT = APP_ROOT / "domain"
+DOMAIN_PACKAGE_BARRELS = {
+    "app.domain",
+    "app.domain.attribution",
+    "app.domain.evidence",
+    "app.domain.hydrology",
+    "app.domain.inference",
+    "app.domain.time",
+}
 
 
 def domain_sources() -> tuple[Path, ...]:
@@ -41,20 +49,8 @@ def test_domain_classes_are_one_per_file_and_publicly_exported() -> None:
     )
 
 
-def test_new_backend_contains_no_deferred_or_legacy_contracts() -> None:
-    forbidden_names = {"HydrologyInference", "Waterbody"}
-    legacy_literals = {
-        "/analyze",
-        "/ws/hydro-analysis",
-        "agent_done",
-        "agent_start",
-        "backend_idle",
-        "done",
-        "error",
-        "interrupted",
-        "ping",
-        "topology",
-    }
+def test_m1_contains_no_deferred_domain_types() -> None:
+    forbidden_names = {"Waterbody"}
     violations: list[str] = []
 
     for source_path in sorted(APP_ROOT.rglob("*.py")):
@@ -64,12 +60,23 @@ def test_new_backend_contains_no_deferred_or_legacy_contracts() -> None:
                 violations.append(f"{source_path}:{node.lineno}: {node.id}")
             elif isinstance(node, ast.ClassDef) and node.name in forbidden_names:
                 violations.append(f"{source_path}:{node.lineno}: {node.name}")
-            elif (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and node.value in legacy_literals
+
+    assert not violations, "\n".join(violations)
+
+
+def test_domain_implementation_imports_leaf_modules_not_package_barrels() -> None:
+    violations: list[str] = []
+
+    for source_path in domain_sources():
+        if source_path.name == "__init__.py":
+            continue
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=source_path)
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.ImportFrom)
+                and node.module in DOMAIN_PACKAGE_BARRELS
             ):
-                violations.append(f"{source_path}:{node.lineno}: {node.value}")
+                violations.append(f"{source_path}:{node.lineno}: {node.module}")
 
     assert not violations, "\n".join(violations)
 

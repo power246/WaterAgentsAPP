@@ -32,4 +32,9 @@ jobs:
       - name: Run complete test suite
         run: python -m pytest backend/tests -q
       - name: Run Uvicorn health smoke test
+        env:
+          HTTP_PROXY: http://127.0.0.1:1
+          HTTPS_PROXY: http://127.0.0.1:1
+          ALL_PROXY: http://127.0.0.1:1
+          NO_PROXY: ""
         run: python backend/scripts/health_smoke.py

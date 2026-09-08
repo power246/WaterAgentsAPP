@@ -2,21 +2,19 @@ from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from app.domain.attribution import AnalysisDetail, AttributionSummary
+from app.domain.attribution.analysis_detail import AnalysisDetail
+from app.domain.attribution.attribution_summary import AttributionSummary
 from app.domain.common import DomainModel, NonEmptyString, UtcDatetime, ensure_unique_tuple
-from app.domain.evidence import EvidenceChain
+from app.domain.evidence.evidence_chain import EvidenceChain
 from app.domain.inference.mode import InferenceMode
 from app.domain.inference.parameter_time_series import ParameterTimeSeries
 from app.domain.inference.result_source import ResultSource
-from app.domain.time import (
-    DEFAULT_TIME_RESOLUTION,
-    TimeRange,
-    TimeResolution,
-    TimeResolutionSource,
-    TimeSegment,
-    build_time_windows,
-)
+from app.domain.time.time_range import TimeRange
+from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION, TimeResolution
+from app.domain.time.time_resolution_source import TimeResolutionSource
+from app.domain.time.time_segment import TimeSegment
 from app.domain.time.timezone import get_iana_timezone
+from app.domain.time.window_builder import build_time_windows
 
 
 class InferenceResult(DomainModel):

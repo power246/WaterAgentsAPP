@@ -15,6 +15,8 @@ def test_ci_runs_install_tests_and_health_on_all_supported_operating_systems() -
     assert 'python -m pip install -e "./backend[dev]"' in workflow
     assert "python -m pytest backend/tests -q" in workflow
     assert "python backend/scripts/health_smoke.py" in workflow
+    assert "HTTP_PROXY: http://127.0.0.1:1" in workflow
+    assert 'NO_PROXY: ""' in workflow
 
 
 def test_ci_commands_do_not_require_a_platform_specific_shell() -> None:
@@ -34,9 +36,32 @@ def test_health_smoke_uses_cross_platform_process_and_path_apis() -> None:
     source = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=SMOKE_SCRIPT_PATH)
     calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    popen_call = next(
+        call
+        for call in calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "subprocess"
+        and call.func.attr == "Popen"
+    )
+    client_call = next(
+        call
+        for call in calls
+        if isinstance(call.func, ast.Attribute)
+        and isinstance(call.func.value, ast.Name)
+        and call.func.value.id == "httpx"
+        and call.func.attr == "Client"
+    )
+    popen_keywords = {keyword.arg: keyword.value for keyword in popen_call.keywords}
+    client_keywords = {keyword.arg: keyword.value for keyword in client_call.keywords}
 
     assert "sys.executable" in source
     assert "Path(__file__).resolve()" in source
+    assert "PYTHONIOENCODING" in source
+    assert ast.literal_eval(popen_keywords["encoding"]) == "utf-8"
+    assert ast.literal_eval(popen_keywords["errors"]) == "replace"
+    assert "env" in popen_keywords
+    assert ast.literal_eval(client_keywords["trust_env"]) is False
     assert not any(
         any(
             keyword.arg == "shell"

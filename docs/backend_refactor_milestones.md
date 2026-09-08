@@ -6,13 +6,13 @@
 
 本文档只做中等粒度拆分，不展开每个功能的内部设计。每个 milestone 都应该在完成后有可运行、可观察、可测试的结果；如果依赖后续能力，可以先使用 fake/mock adapter，但对外行为和领域对象要稳定。
 
-新后端只实现 session + SSE 协议，不兼容旧 `/analyze`、`/ws/hydro-analysis`、旧事件或旧前端字段；前端在后端主链路稳定后迁移。
+新后端只实现 session + SSE 协议。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
 
 ## 0. 仓库目录约定
 
 - `backend/` 是新后端实现目录，也是所有 milestone 的开发和验收目标。
-- `backend_bk/` 是原后端备份目录，只用于参考已有能力、接口行为和数据链路。
-- 后续 agent 可以阅读 `backend_bk/`，但不应把新代码写回 `backend_bk/`。
+- `backend_bk/` 是与新后端完全独立的旧后端归档，新后端完成后整体丢弃。
+- 后续 Agent 设计、实现、测试、评审或验收 `backend/` 时不得读取、导入、复制、适配、枚举或测试 `backend_bk/` 的代码与契约。
 
 ## 1. Milestone 原则
 
@@ -460,7 +460,7 @@ M9  Settings/keys/admin + demo closure
 | M5 | Source record DTO、Evidence Tool 构造权、collection status、有效/可疑/无效观测分类、canonical unit 表及确定性单位 tool。 |
 | M6 | 三态结果策略、confidence 评分与聚合、结构化空判断、多站冲突的 Agent 决策、attribution basis。 |
 | M8 | Historical inference 保留原 session、原 confidence、schema version 和 RAG score，且不得覆盖当前有效观测。 |
-| M9 | 动态时区配置；自定义单位的 session override；用户确认并版本化的全局单位表更新；不实现旧接口兼容。 |
+| M9 | 动态时区配置；自定义单位的 session override；用户确认并版本化的全局单位表更新；不从旧后端归档引入兼容逻辑。 |
 | Future | 任意时分输入从请求起点按本地墙上时钟滚动，首尾允许 partial；真实 DST offset transition 可造成 elapsed duration ±1h。只有出现非 COMID 水体需求时才设计 Waterbody。 |
 
 ## 13. 第二版候选 Milestones
