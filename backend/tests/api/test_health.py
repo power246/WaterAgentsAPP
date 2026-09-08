@@ -95,6 +95,23 @@ def test_health_returns_exact_response() -> None:
     assert response.json() == {"status": "healthy"}
 
 
+@pytest.mark.parametrize("workers", ["4", "not-an-integer"])
+def test_main_entrypoint_enforces_one_worker_despite_environment(monkeypatch, workers) -> None:
+    import app.__main__ as entrypoint
+
+    monkeypatch.setenv("WEB_CONCURRENCY", workers)
+    configurations = []
+
+    def capture_run(app, **options):
+        configurations.append(entrypoint.uvicorn.Config(app, log_config=None, **options))
+
+    monkeypatch.setattr(entrypoint.uvicorn, "run", capture_run)
+    entrypoint.main()
+    assert len(configurations) == 1
+    assert configurations[0].app == "app.main:app"
+    assert configurations[0].workers == 1
+
+
 def test_import_has_no_file_network_or_thread_side_effects(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

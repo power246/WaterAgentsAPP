@@ -263,7 +263,7 @@ Contract changes:
 
 | Contract ID | Milestone | Status | Implementation/MR | Test evidence | Notes |
 |---|---|---|---|---|---|
-| — | — | — | — | — | 暂无；docs-only 设计不计为已承接。 |
+| — | — | — | — | — | 暂无满足全部验收条件的记录；M2 本地实现证据见下方，三平台 CI 待通过。 |
 
 允许的 Status：
 
@@ -274,6 +274,17 @@ cancelled
 ```
 
 `partial` 只能出现在 MR 描述中，不能进入最终承接记录。若一个 MR 只实现部分内容，应保持 contract 未承接，或先用新的稳定 ID 拆分约束。
+
+### M2 待验收索引
+
+本节只索引本地实现证据，不属于上表的最终承接记录。当前分支为 `codex/m2-analysis-session-sse`；Milestone 8 基于本地 Milestone 7 提交 `b3cd6d1`。没有发布远端 MR，也未取得 Ubuntu/macOS/Windows + Python 3.11 的实际 CI 结果，因此 `M2-C01`–`M2-C13` 保持未最终承接。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`；`M2-C01`–`M2-C13` | [M2 最终本地 contract evidence](M2/m2_analysis_session_sse_implementation_todo.md#m2-contract-evidence)、[详细设计](M2/m2_analysis_session_sse_design.md)、[API/runbook](M2/m2_analysis_session_sse_api.md)。588 项回归、health 和 completed/cancel 真实 Uvicorn smoke 通过；新增 API/application 架构门禁及正式入口单 worker 回归。 | 三平台完整 tests 和两项 smoke 的实际 CI 结果；通过后在最终承接表追加实现位置、测试结果和提交/MR 引用。 |
+| M3–M9 / Future 接力 | [后续接力入口与验收](M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)给出当前代码入口、保留约束与可观察验收。 | 各所属 Milestone 按原 ID 实现；本次只登记接力，不将未来能力计为已实现。 |
+
+未新增、拆分、替换或取消 contract。CI 待验收仍属于 M2 的 Milestone 7/8，不转移为新的 deferred contract。
 
 ## 14. 维护规则
 

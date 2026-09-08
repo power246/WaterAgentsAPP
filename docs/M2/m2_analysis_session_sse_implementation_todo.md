@@ -4,32 +4,34 @@
 
 本清单用于执行 [M2 详细设计](m2_analysis_session_sse_design.md)。实现必须同时维护 [M2 API 与排障指南](m2_analysis_session_sse_api.md)，不能让代码、OpenAPI、SSE 示例和错误码漂移。
 
+当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口。Ubuntu/macOS/Windows + Python 3.11 的实际 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最终本地记录为当前状态。
+
 ## 执行原则
 
-- [ ] 只修改新后端 `backend/`、M2 文档、必要的上层新架构文档，以及 Milestone 7 所需的 CI workflow。
-- [ ] 不读取、导入、复制、适配、枚举或测试 `backend_bk/` 与旧契约文档。
-- [ ] 不修改现有前端，不添加 WebSocket 兼容层或临时调试 UI。
-- [ ] 先实现最小生命周期闭环，再增加 replay、cancel、日志和真实 server smoke。
-- [ ] 每一步先跑 focused tests，再跑 `backend/tests` 全量回归。
-- [ ] 实现 MR 按 [跨 Milestone 延后契约](../deferred_milestone_contracts.md) 的 `MR-G01`–`MR-G14` 列出适用 contract、代码位置、测试证据和文档状态。
-- [ ] 不新增生产或开发依赖。
-- [ ] 不建立通用 event bus、DI framework、repository hierarchy 或 workflow framework。
-- [ ] 不为 M3-M9 的未知 DTO 使用 `Any` 或任意 dict 提前定型。
-- [ ] 所有真实时间通过 `ClockPort`，测试时序通过 async gate，不依赖真实 sleep。
-- [ ] 每次公开状态转换原子提交 snapshot 与 lifecycle event。
+- [x] 只修改新后端 `backend/`、M2 文档、必要的上层新架构文档，以及 Milestone 7 所需的 CI workflow。
+- [x] 不读取、导入、复制、适配、枚举或测试 `backend_bk/` 与旧契约文档。
+- [x] 不修改现有前端，不添加 WebSocket 兼容层或临时调试 UI。
+- [x] 先实现最小生命周期闭环，再增加 replay、cancel、日志和真实 server smoke。
+- [x] 每一步先跑 focused tests，再跑 `backend/tests` 全量回归。
+- [x] 实现 MR 按 [跨 Milestone 延后契约](../deferred_milestone_contracts.md) 的 `MR-G01`–`MR-G14` 列出适用 contract、代码位置、测试证据和文档状态。
+- [x] 不新增生产或开发依赖。
+- [x] 不建立通用 event bus、DI framework、repository hierarchy 或 workflow framework。
+- [x] 不为 M3-M9 的未知 DTO 使用 `Any` 或任意 dict 提前定型。
+- [x] 所有真实时间通过 `ClockPort`，测试时序通过 async gate，不依赖真实 sleep。
+- [x] 每次公开状态转换原子提交 snapshot 与 lifecycle event。
 
 ## 成功标准
 
-- [ ] POST 创建 session 并固定返回 201/pending snapshot。
-- [ ] timezone、resolution 和 source 正确固化。
-- [ ] SSE 可回放 created，并收到 completed/failed/cancelled 之一。
-- [ ] Last-Event-ID 续传无遗漏和重复。
-- [ ] SSE 断开不取消任务，多订阅者互不影响。
-- [ ] cancel 立即、幂等并遵循 terminal race 规则。
-- [ ] cancel 后没有前端或下游传播，workflow 最终 quiesced。
-- [ ] HTTP/SSE 错误可通过 request/session/error ID 回溯结构化日志。
-- [ ] 真实 Uvicorn completed/cancel smoke 通过。
-- [ ] M1 tests 全绿，Linux/macOS/Windows CI 全绿。
+- [x] POST 创建 session 并固定返回 201/pending snapshot。
+- [x] timezone、resolution 和 source 正确固化。
+- [x] SSE 可回放 created，并收到 completed/failed/cancelled 之一。
+- [x] Last-Event-ID 续传无遗漏和重复。
+- [x] SSE 断开不取消任务，多订阅者互不影响。
+- [x] cancel 立即、幂等并遵循 terminal race 规则。
+- [x] cancel 后没有前端或下游传播，workflow 最终 quiesced。
+- [x] HTTP/SSE 错误可通过 request/session/error ID 回溯结构化日志。
+- [x] 真实 Uvicorn completed/cancel smoke 通过。
+- [ ] M1 tests 全绿，Linux/macOS/Windows CI 全绿（本机 M1 回归通过；远端三平台结果待取得）。
 
 ## 已确认设计结论
 
@@ -829,41 +831,152 @@ Milestone 7 的实现与本机验收完成；**远端 Ubuntu/macOS/Windows + Pyt
 
 ### End-to-end sweep
 
-- [ ] 从 create request 追踪到 snapshot、runtime、workflow、event、SSE、日志和 cancel。
-- [ ] 搜索并移除旧 WebSocket 名称、旧字段和临时 fake result。
-- [ ] 搜索重复 event/error/session schema，保证只有一个事实模型。
-- [ ] 确认生产代码没有 test-only behavior switch。
-- [ ] 确认没有 session_started 公开事件。
-- [ ] 确认 subscriber disconnect 不触发 cancel。
-- [ ] 确认 completed/failed/cancelled 每 session 最多一个。
-- [ ] 确认未实现 history、transcript、query understanding 或 persistence。
+- [x] 从 create request 追踪到 snapshot、runtime、workflow、event、SSE、日志和 cancel。
+- [x] 搜索并移除旧 WebSocket 名称、旧字段和临时 fake result（新生产路径中未发现残留）。
+- [x] 搜索重复 event/error/session schema，保证只有一个事实模型。
+- [x] 确认生产代码没有 test-only behavior switch。
+- [x] 确认没有 session_started 公开事件。
+- [x] 确认 subscriber disconnect 不触发 cancel。
+- [x] 确认 completed/failed/cancelled 每 session 最多一个。
+- [x] 确认未实现 history、transcript、query understanding 或 persistence。
 
 ### Architecture tests
 
-- [ ] Domain 依赖边界继续成立。
-- [ ] API 只依赖 application coordinator，不直接操作 runtime 或 infrastructure 内部字段。
-- [ ] application 不依赖 FastAPI request/response 类型。
-- [ ] no-new-dependency assertion 更新为 M2 仍使用 M1 dependency set。
-- [ ] 单 worker 限制出现在启动/API 文档，不添加多 worker 配置。
+- [x] Domain 依赖边界继续成立。
+- [x] API 只依赖 application coordinator，不直接操作 runtime 或 infrastructure 内部字段。
+- [x] application 不依赖 FastAPI request/response 类型。
+- [x] no-new-dependency assertion 更新为 M2 仍使用 M1 dependency set。
+- [x] 单 worker 限制出现在启动/API 文档，不添加多 worker 配置。
 
 ### Deferred register handoff
 
-- [ ] 按中心登记表的 `MR-G01`–`MR-G14` 完成 MR contract evidence 和文档同步。
-- [ ] M3 接力 `M3-C08`–`M3-C15`：生命周期持久化、幂等创建、cancelled transcript、persistence-error、quiesced/grace cleanup 和 startup orphan handling。
-- [ ] M4 接力 `M4-C01`–`M4-C08`：final request、date mapper、auto resolution、query/topology events 和 history query 扩展。
-- [ ] M5 接力 `M5-C09`–`M5-C10`：evidence event 的 payload 容量边界和延后 producer 槽位。
-- [ ] M6/M7 接力 `M6-C11`–`M6-C13`、`M7-C04`–`M7-C08`：final result/history、agent/tool IDs、真实 cancellation boundaries、topology result 和 concurrency policy。
-- [ ] M9 接力 `M9-C06`–`M9-C09`：前端重构、最终 API 校对、admin cleanup 和单 worker demo 说明。
-- [ ] Future 接力 `FUTURE-C09`–`FUTURE-C13`：multi-worker/shared pubsub、retention/backpressure、recovery、security 和 tracing。
+- [x] 按中心登记表的 `MR-G01`–`MR-G14` 完成本地 MR contract evidence 和文档同步；最终承接仍待三平台 CI。
+- [x] M3 接力 `M3-C08`–`M3-C15`：生命周期持久化、幂等创建、cancelled transcript、persistence-error、quiesced/grace cleanup 和 startup orphan handling。
+- [x] M4 接力 `M4-C01`–`M4-C08`：final request、date mapper、auto resolution、query/topology events 和 history query 扩展。
+- [x] M5 接力 `M5-C09`–`M5-C10`：evidence event 的 payload 容量边界和延后 producer 槽位。
+- [x] M6/M7 接力 `M6-C11`–`M6-C13`、`M7-C04`–`M7-C08`：final result/history、agent/tool IDs、真实 cancellation boundaries、topology result 和 concurrency policy。
+- [x] M9 接力 `M9-C06`–`M9-C09`：前端重构、最终 API 校对、admin cleanup 和单 worker demo 说明。
+- [x] Future 接力 `FUTURE-C09`–`FUTURE-C13`：multi-worker/shared pubsub、retention/backpressure、recovery、security 和 tracing。
 
 ### Final verification
 
-- [ ] 所有 M2 focused tests 通过。
-- [ ] 所有 M1 regression tests 通过。
-- [ ] completed 和 cancel 两条真实 Uvicorn smoke 通过。
-- [ ] Linux/macOS/Windows CI 通过。
-- [ ] `git status --short` 只包含预期文件。
-- [ ] `git diff --check` 通过。
+- [x] 所有 M2 focused tests 通过。
+- [x] 所有 M1 regression tests 通过。
+- [x] completed 和 cancel 两条真实 Uvicorn smoke 通过。
+- [ ] Linux/macOS/Windows CI 通过（矩阵与命令已接入，实际运行结果待取得）。
+- [x] `git status --short` 只包含预期文件。
+- [x] `git diff --check` 通过。
+
+### Milestone 8 实现与本机验收记录（2026-09-08）
+
+开始时工作区干净，分支 `codex/m2-analysis-session-sse`，基于本地 Milestone 7 提交 `b3cd6d1`；全量基线为 572 项通过。本阶段完成 M2 内部的最终 contract sweep 和后续接力登记，不实现项目 M8 的 Memory/RAG。只修改新后端启动入口、相关测试、README、三份 M2 文档和中心 deferred register。
+
+#### 实现与范围
+
+- `backend/app/__main__.py:main` 显式使用 `workers=1`。正式入口不能因环境中的 `WEB_CONCURRENCY` 改为多进程；相同入口同时服务 `python -m app` 和 console script。README、API 和设计同步直接 Uvicorn 启动所需的 `--workers 1`。
+- `backend/tests/architecture/test_application_dependencies.py` 扫描 API/application 的依赖和 runtime 所有权，覆盖别名、相对导入、直接私有字段及常量属性名的反射访问。生产源码门禁与 13 组正反例均通过；API 可保留 transport 自身的私有字段，不能访问 coordinator 的 session map/lookup/runtime。
+- 既有 domain 门禁保持；依赖集合断言命名明确为 M2 保持 M1 dependency set，断言内容不变。没有新增依赖、通用框架或 HTTP/schema 字段。
+- 新生产代码与 scripts 的旧 WebSocket/字段/公开 `session_started`/fake outcome 开关搜索无匹配。模型定义只包含权威 application snapshot、configuration、PublicError、CorrelationContext 和 typed LifecycleEvent；API response 继承 snapshot，HTTP error 仅扩展必要的关联字段和 envelope。
+- API/application 的 history/transcript/persistence/TTL/LRU/`Any` 搜索仅命中预留状态名 `completed_with_persistence_error`，M2 不产生该终态或对应 payload。既有 generic ports 保留延后类型参数，不构成持久化实现。未发现本阶段改动导致的孤立方法；设计明确要求的 `get_snapshot` 继续作为 application immutable read 入口。
+
+#### 端到端追踪
+
+下表路径均相对于仓库根；每一步继续使用上一步的规范化事实，不再创建另一套语义模型。
+
+| 链路 | 真实入口 | 保留的身份、顺序与失败语义 |
+|---|---|---|
+| HTTP 输入与配置 | `backend/app/api/schemas/analysis_sessions.py:CreateAnalysisSessionRequest/to_configuration_snapshot`；`backend/app/api/http/analysis_sessions.py:create_session` | query 在边界校验；省略粒度得到 12h/default，显式粒度得到 frontend；IANA timezone 固化，拒绝 null/auto/额外字段，不回显 query。 |
+| 创建与所有权 | `backend/app/application/analysis_sessions/coordinator.py:create_session`；`runtime.py:SessionRuntime` | pending snapshot 与 sequence 1 created event 同一时间；map 临界区登记 workflow task 与 session 后返回捕获的 pending snapshot。runtime 不交给 API。 |
+| Workflow 与状态 | `coordinator.py:_run_workflow/_transition`；`workflow.py:WorkflowContext/CancellationToken` | 工作流拿 immutable snapshot 和 token；每次转换只读一次 ClockPort，在同一 condition 内提交 snapshot/event 并通知；running 无公开事件，终态竞争最多一个胜出者。 |
+| Event 与 replay | `models.py:LifecycleEvent`；`coordinator.py:subscribe/_events` | 类型化、版本化事件只提交一次；从保留列表派生 sequence；同一 condition 处理 replay/wait/timeout，独立 subscriber cursor，无空隙或重复。 |
+| HTTP/SSE 输出 | `backend/app/api/sse/encoder.py:encode_event`；`response.py:create_event_response` | 纯序列化原 event，精确 id/event/data framing；发送前检查 400/404/409，终态已消费返回 204。keepalive 无 ID；断线/写失败只关闭该订阅。 |
+| 日志与错误 | `backend/app/api/http/request_context.py`、`errors.py`；`backend/app/infrastructure/observability/json_logging.py` | 服务端 request ID 与 session/error ID 串联，event/error 原对象复用；公开错误安全，日志记录耗时和脱敏诊断；日志失败不回滚状态，不在 SSE headers 后追加 HTTP JSON。 |
+| Cancel 与收尾 | `coordinator.py:cancel_session/_transition/_run_workflow/shutdown`；`backend/app/main.py:create_app` lifespan | cancel 原子提交 cancelled 并立即返回，重复调用幂等；晚到结果/异常不提交新终态或传播下游。shutdown 单独发 stop signal，await task/quiesced，不伪造 cancelled。 |
+| 持久化与下游装配 | M2 不接入；见下方接力表 | 没有 history、transcript、真实业务 result、query understanding 或持久化双写；不以日志或内存 map 冒充 durable truth。 |
+
+#### Verify
+
+单 worker 回归先在未固定 worker 的正式入口执行：两例均失败，`WEB_CONCURRENCY=4` 产生 workers=4，非法整数使真实 Uvicorn Config 抛出 ValueError。固定入口后两例通过；没有放宽断言或增加生产测试开关。
+
+从仓库根执行，均使用现有 `backend/.venv`，未升级依赖：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/architecture backend/tests/api/test_health.py -q
+71 passed in 0.71s
+
+backend/.venv/bin/python -m pytest backend/tests/application backend/tests/api backend/tests/observability -q
+364 passed in 1.07s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+588 passed in 2.25s
+
+backend/.venv/bin/python -m pytest backend/tests/api -k 'document or openapi' -q
+4 passed, 167 deselected in 1.70s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+backend/.venv/bin/python backend/scripts/session_sse_smoke.py
+{"completed":"passed","cancelled":"passed"}
+
+git diff --check
+```
+
+最终全量新增 16 项测试。两项 smoke 都设置 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 为 `http://127.0.0.1:1` 且 NO_PROXY 为空；health smoke 另设置 `WEB_CONCURRENCY=not-an-integer`，验证子进程正式 `python -m app` 启动不受影响；session/SSE smoke 设置 `WEB_CONCURRENCY=4`，继续用单 worker 真实 server 验证 completed/cancel。上述检查均退出 0，server/task/socket 正常清理。测试命令中的环境变量可通过各平台的进程环境注入，不要求 POSIX shell。
+
+#### M2 contract evidence
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C13`。下表为本地实现证据，**整体验收仍待三平台实际 CI**。测试名可在 `backend/tests` 定位，均包含在上方完整回归；文档列使用设计/API 的对应章节。
+
+| Contract | 实现位置 | 测试证据 | 文档 |
+|---|---|---|---|
+| `GLOBAL-C01`、`GLOBAL-C02` | `backend/app/main.py:create_app`、API/application 新路径；无旧系统导入或兼容分支 | `test_openapi_describes_only_the_supported_routes_and_actual_envelopes`、`test_api_and_application_respect_dependency_and_runtime_boundaries`；新生产路径边界搜索 | 设计 §2、§14；API 开篇、§1 |
+| `GLOBAL-C04` | `CreateAnalysisSessionRequest.to_configuration_snapshot`、`AnalysisConfigurationSnapshot`、`SessionCoordinator._transition` | `test_create_exact_pending_snapshot_and_configuration`、`test_configuration_does_not_follow_later_settings_changes`、`test_lifecycle_commits_one_timestamp_and_event_per_public_transition` | 设计 §4–5；API §3 |
+| `GLOBAL-C07`、`M2-C09` | `api/http/errors.py`、`request_context.py`；`infrastructure/observability/json_logging.py`、`redaction.py` | `test_failure_error_id_diagnostics_and_request_context_survive_concurrent_requests`、`test_validation_and_unknown_paths_never_echo_inputs_in_json_logs`、`test_error_envelopes_reject_arbitrary_details_and_tracebacks` | 设计 §11–12；API §2、§6、§8 |
+| `GLOBAL-C09`、`M2-C08` | `application/analysis_sessions/models.py:LifecycleEvent/PublicError/CorrelationContext`、API schema 继承及 SSE/log 序列化 | `test_completed_lifecycle_json_matches_sse_and_original_objects`、`test_success_response_reuses_public_snapshot_without_query`、`test_documented_raw_frames_match_the_encoder` | 设计 §4、§7、§12；API §3–4、§9 |
+| `GLOBAL-C10` | 中心 register §13 待验收索引与本记录接力表 | `MR-G01`–`MR-G14` 对照；逐项检查原 contract ID、真实入口、约束和未来验收，未改归属或新增 ID | 设计 §18；本记录与中心 register |
+| `M2-C01` | `api/sse/response.py`、`SessionCoordinator.subscribe/_events/cancel_session` | `test_stream_disconnect_or_write_failure_does_not_cancel_workflow`、`test_multiple_subscribers_share_events_with_independent_cursors`；`cancelled_smoke` | 设计 §8–9；API §4–5 |
+| `M2-C02` | `SessionCoordinator.subscribe/_events`、`api/sse/encoder.py` | `test_replay_to_wait_has_no_gap_or_duplicate`、`test_published_event_wins_when_timeout_fires_while_waiting_for_the_lock`、`test_terminal_replay_and_consumed_cursor_response`；`verify_replay` | 设计 §7–8；API §4 |
+| `M2-C03`、`M2-C04` | `SessionCoordinator._transition/_terminal_event/_log_transition` | `test_terminal_race_has_one_winner_and_one_terminal_event`、`test_failed_validation_never_partially_commits_or_consumes_event_sequence`、`test_logging_runs_after_unlock_and_cannot_undo_committed_state` | 设计 §6–7；API §4–5 |
+| `M2-C05`、`M2-C06` | `SessionCoordinator.cancel_session/_run_workflow`、`CancellationToken` | `test_cancel_returns_before_quiescence_and_suppresses_late_output`、`test_real_workflow_and_cancel_race_commit_one_terminal`、`test_cancel_is_immediate_idempotent_and_replays_one_terminal`；`cancelled_smoke` | 设计 §9–10；API §5、§8.4 |
+| `M2-C07` | `SessionCoordinator._events`、`api/sse/encoder.py` 的 comment frame | `test_keepalive_is_transport_only_and_does_not_change_replay_or_logs`、`test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts` | 设计 §8.4；API §4.6 |
+| `M2-C10` | `backend/app/__main__.py:main`、`SessionRuntime` per-session 资源 | `test_main_entrypoint_enforces_one_worker_despite_environment`、`test_concurrent_workflows_have_independent_cancellation_and_completion`；带 worker 环境的 smoke | 设计 §13.1–2、§16.7；README 启动；API §1 |
+| `M2-C11` | `SessionCoordinator` map/event list、`create_app` lifespan；无后台清理入口 | `test_terminal_replay_and_consumed_cursor_response`、`test_lifespan_creates_fresh_runtime_on_each_start_without_import_time_tasks` | 设计 §13.3；API §1、§8.6 |
+| `M2-C12` | `DefaultFakeWorkflow`、`SessionCompletedPayload`，仅生命周期输出 | `test_default_workflow_completes_and_idempotency_key_is_not_reused`、`test_create_rejects_fields_outside_m2`；`completed_smoke` | 设计 §2、§10；API §1、§4.3 |
+| `M2-C13` | `SessionCoordinator.shutdown`、`create_app` lifespan | `test_shutdown_signals_cooperative_workflow_without_fabricating_cancel`、`test_shutdown_handles_multiple_tasks_including_cancelled_but_not_quiesced`、`test_server_cleanup_closes_socket_and_workflow_on_client_exit` | 设计 §13.4；API §5、§8.4 |
+
+#### MR 门禁对照
+
+本记录作为本地 MR 的可审阅 evidence；没有发布远端 MR 或触发远端 workflow。
+
+| 门禁 | 本阶段证据与状态 |
+|---|---|
+| `MR-G01`、`MR-G02` | 上方明确全部适用 ID、代码入口、具体测试名和文档章节；历史阶段证据继续保留。 |
+| `MR-G03`、`MR-G04` | 遵循已确认的 M2 设计；单 worker 入口、回归、README、API/设计/TODO 同步。HTTP/SSE shape 不变，现有 schema/文档/真实路由对照测试继续通过。 |
+| `MR-G05`、`MR-G06` | 修复启动契约遗漏；没有弱化断言。已逐步追踪输入到 cancel/shutdown，并搜索过时事件/字段、重复模型、未知 DTO 和越界依赖。 |
+| `MR-G07`、`MR-G08` | 测试调用正式 main、create_app、HTTP/SSE/coordinator；fake 只通过 factory 控制时序。成功/失败/重复/竞态由现有 clock/gate 回归覆盖，真实 server 两条主链路通过。 |
+| `MR-G09`、`MR-G10` | secret/error/log correlation 回归全绿；范围只在新后端与新文档，开始时无用户未提交改动，交付 status 只含预期文件。 |
+| `MR-G11` | 既有三平台架构/CI 门禁和无系统 tzdata 测试通过，入口采用 Python/Uvicorn API；实际 Ubuntu/macOS/Windows + Python 3.11 CI 尚待验收。 |
+| `MR-G12` | 本地实现、focused/regression/smoke 和待验收索引齐全；完整跨平台结果尚缺，不向中心最终承接表写入 `implemented` 或 `partial`。 |
+| `MR-G13`、`MR-G14` | 生产代码仅固定启动 worker，未新增框架或依赖；原 deferred ID、归属和硬约束保持，未发现需要新增 ID 的事项。 |
+
+#### 后续接力入口与验收
+
+以下“入口”指当前可读取、复用或直接演进的真实符号，不代表未来功能已实现。各 ID 的完整硬约束仍以中心 register 为准；后续实现必须保留 M2 基线，并在所属 Milestone 补齐 durable/业务能力的测试。
+
+| 归属与 ID | 当前接力入口 | 必须保留的约束与可观察验收 |
+|---|---|---|
+| M3：`M3-C08`、`M3-C09`（关联 `M3-C01`–`M3-C07`） | `SessionCoordinator.create_session/_transition`、`models.py`、`CreateAnalysisSessionRequest`、`backend/app/ports/transcript_store.py` | 存储 request/session/原 LifecycleEvent/errors；存在时才保存 versioned final result。durable append 后重启读取仍保留 schema version、sequence、原时间、configuration；同 key+相同规范化请求跨重启返回原 session，不同请求返回 409。大内容 preview/reference、写前脱敏及 history 无假字段一并验收。 |
+| M3：`M3-C10`、`M3-C11` | `SessionCoordinator._run_workflow/_workflow_failed/_transition`、`SessionCompletedPayload`、`PublicError` | cancelled 在途产物只追加 transcript，不进入 SSE/downstream，不增加 after-cancel 字段；分析成功但持久化失败提交 completed_with_persistence_error 与 session_completed 安全 warning/error_id。测试写失败仍能交付结果且不误报 session_failed。 |
+| M3：`M3-C12`–`M3-C15` | `SessionRuntime.workflow_quiesced`、`SessionCoordinator` session map、`shutdown/subscribe`、`create_app` lifespan | 本 session 所有适用 durable write 成功回调 + quiesced + grace 到期才清理；仅入队/建 task/live buffer 不算确认。分别验证未确认、失败、未收敛、未到期、幂等重试及 cleanup 失败不改终态；启动遗留 active 归档 failed/service_interrupted；重启后历史 timeline 不伪装可续跑 active stream。 |
+| M4：`M4-C01`–`M4-C08` | `CreateAnalysisSessionRequest`、`AnalysisConfigurationSnapshot`、`WorkflowContext`、`backend/app/domain/time/`、`models.py:LifecycleEvent` | 直接替换阶段 request，定型 AnalysisContext；包含整天结束日期按 session timezone 转 UTC，DST/auto 真正规则有测试；使用 ParameterKey，真实解析 location/COMID/mode/topology；query_understood/topology_ready 共享 envelope/sequence/replay。history 从持久化版本化 context 投影，查询时不重算。 |
+| M5：`M5-C09`、`M5-C10`；producer 归 M7 / 项目 M8 | `models.py:LifecycleEvent`、`api/sse/encoder.py`、`backend/app/ports/event_publisher.py` | 大 tool/evidence 仅 preview+reference，不把无界 raw data 放入 replay buffer；类型、容量及完整内容引用可测试。upstream-result/RAG tool 槽位明确 unavailable，真实 producer 分别由 M7 和项目 M8 接入，不能用生产 fake 伪装可用。 |
+| M6：`M6-C11`–`M6-C13` | `SessionCompletedPayload`、`CorrelationContext`、`json_logging.py`，及届时 M3 history/result projection | 用真实 versioned inference result 替换空业务 payload，SSE/log/transcript 保留同一 result identity；稳定 agent/tool/operation ID 与 stage 以 session 为根关联。history summary/confidence 来自持久化 result，不重新推理，不保留 fake 兼容结构。 |
+| M7：`M7-C04`–`M7-C08` | `AnalysisWorkflow`、`WorkflowContext.cancellation`、`SessionCoordinator._run_workflow`、`SessionRuntime.workflow_quiesced` | 逐个真实 agent/tool/阶段边界测试取消，不启动新工作或传播晚到结果；无法强杀的调用只审计到 cancelled transcript/log。记录 cancel_accepted/quiesced，cleanup 等待收敛；按真实负载明确并发/排队策略；最终 completed 收敛为一套拓扑 result 语义。 |
+| M9：`M9-C06`–`M9-C09` | `create_app`、正式 HTTP/SSE 路由、`backend/scripts/session_sse_smoke.py`、`backend/app/__main__.py`，及届时 M3 cleanup | admin 按 ownership/幂等规则清 history/transcript/index/memory/cache，测试 API keys 保留；最终 OpenAPI、SSE、独立重构的前端、smoke 和启动说明一致；不读取或迁移旧前端；demo 仍明确单 worker。 |
+| Future：`FUTURE-C09`–`FUTURE-C13` | `SessionCoordinator` map/condition/cancel、`subscribe/_events`、lifespan、`RequestContextMiddleware`、`CorrelationContext` | 共享 store/pubsub 与跨进程 cancel 必须跨 worker 验证；retention/慢订阅者 backpressure/磁盘告警须有容量与失败测试；drain/resume/crash recovery 不损坏顺序或身份；认证/授权/租户/限流/审计覆盖隔离；tracing/metrics 保留 session/request/error ID。 |
+
+中心 register §13 已增加本地证据索引及本表链接；原 contract、归属和最终状态规则不变。**剩余验收只有已配置矩阵的 Ubuntu/macOS/Windows + Python 3.11 完整 tests 与两项 smoke 的实际结果**；取得结果后更新 Milestone 7/8 的 CI 勾选、M2 成功标准及中心最终承接记录。
 
 ## 实现顺序摘要
 

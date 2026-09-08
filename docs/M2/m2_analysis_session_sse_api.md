@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 Milestone 0–6；[Milestone 7 的实现与本机验收](m2_analysis_session_sse_implementation_todo.md#milestone-7真实-server-smokeapi-文档与-ci)已完成。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。真实 Uvicorn completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，但远端运行结果尚未取得；Milestone 8 最终 sweep 仍待完成。
+实现状态（2026-09-08）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。588 项回归和真实 Uvicorn health/completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，远端运行结果尚未取得，M2 整体验收仍待该结果。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -18,7 +18,7 @@ http://127.0.0.1:8000
 
 M2 限制：
 
-- 单进程、单 Uvicorn worker。
+- 单进程、单 Uvicorn worker。`python -m app` 和 `wateragents` 启动入口固定 `workers=1`，忽略 `WEB_CONCURRENCY`；直接调用 Uvicorn 时必须传入 `--workers 1`，见 [启动说明](../../backend/README.md)。
 - 同一 worker 内允许多个 session 并发。
 - session 和 event 只存在于当前进程；服务重启后不可恢复。
 - SSE 断开不会取消 session。

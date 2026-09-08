@@ -55,7 +55,7 @@ Expected response:
 The equivalent explicit server command is:
 
 ```text
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1
 ```
 
 From the repository root, the cross-platform smoke command starts the formal `python -m app` entry point on an available loopback port, verifies the exact health response, and stops the child process:
@@ -72,7 +72,7 @@ python backend/scripts/session_sse_smoke.py
 
 Expected stdout is `{"completed":"passed","cancelled":"passed"}`. The script controls startup/shutdown without a shell or process signals and cleans up the server before returning. Both smoke clients bypass environment proxies.
 
-Use one Uvicorn worker. Sessions and events stay in memory and are lost on restart. See the [M2 API guide](../docs/M2/m2_analysis_session_sse_api.md) for the session protocol and limits.
+The `python -m app` entry point explicitly uses one Uvicorn worker and ignores `WEB_CONCURRENCY`. Keep `--workers 1` when invoking Uvicorn directly. Sessions and events stay in memory and are lost on restart. See the [M2 API guide](../docs/M2/m2_analysis_session_sse_api.md) for the session protocol and limits.
 
 The `Backend M1-M2` GitHub Actions workflow runs editable installation, the complete test suite, and both smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation.
 
