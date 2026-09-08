@@ -272,36 +272,102 @@ Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`
 
 ### Runtime
 
-- [ ] 实现 session map 和短时全局插入/查找同步。
-- [ ] 实现每 session 独立 runtime、condition、event list、cancel token 和 quiesced flag。
-- [ ] runtime 放在 application/analysis_sessions 内，只由 coordinator 使用。
-- [ ] API 通过 coordinator 的 application-facing 方法订阅，不导入 runtime 或 infrastructure internals。
-- [ ] runtime 可变对象不得进入 API 序列化。
-- [ ] event list 保留到进程退出，不实现 cleanup task。
-- [ ] session lookup 区分 invalid UUID 与 valid-but-not-found。
+- [x] 实现 session map 和短时全局插入/查找同步。
+- [x] 实现每 session 独立 runtime、condition、event list、cancel token 和 quiesced flag。
+- [x] runtime 放在 application/analysis_sessions 内，只由 coordinator 使用。
+- [x] API 通过 coordinator 的 application-facing 方法订阅，不导入 runtime 或 infrastructure internals。
+- [x] runtime 可变对象不得进入 API 序列化。
+- [x] event list 保留到进程退出，不实现 cleanup task。
+- [x] session lookup 区分 invalid UUID 与 valid-but-not-found。
 
 ### Coordinator
 
-- [ ] coordinator 成为唯一状态转换入口。
-- [ ] 实现 pending -> running 内部转换和结构化日志调用点。
-- [ ] 实现 pending/running -> completed/failed/cancelled。
-- [ ] 拒绝所有 terminal overwrite。
-- [ ] 同一次转换只调用一次 ClockPort.now。
-- [ ] 在同一临界区中提交 public state + sequence + event 并 notify subscribers。
-- [ ] 锁内不运行 workflow、I/O、logger 或不受控 callback。
-- [ ] 每个 session 最多一个 terminal event。
+- [x] coordinator 成为唯一状态转换入口。
+- [x] 实现 pending -> running 内部转换和结构化日志调用点。
+- [x] 实现 running -> completed/failed，以及 pending/running -> cancelled。
+- [x] 拒绝所有 terminal overwrite。
+- [x] 同一次转换只调用一次 ClockPort.now。
+- [x] 在同一临界区中提交 public state + sequence + event 并 notify subscribers。
+- [x] 锁内不运行 workflow、I/O、logger 或不受控 callback。
+- [x] 每个 session 最多一个 terminal event。
 
 ### Race tests
 
-- [ ] complete 与 cancel 同时到达时只有一个终态胜出。
-- [ ] fail 与 cancel 同时到达时只有一个终态胜出。
-- [ ] 失败方不追加第二个 terminal event。
-- [ ] 两个 session 的锁、状态和 sequence 完全隔离。
-- [ ] 日志 callback 失败不回滚状态或 event。
+- [x] complete 与 cancel 同时到达时只有一个终态胜出。
+- [x] fail 与 cancel 同时到达时只有一个终态胜出。
+- [x] 失败方不追加第二个 terminal event。
+- [x] 两个 session 的锁、状态和 sequence 完全隔离。
+- [x] 日志 callback 失败不回滚状态或 event。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application/test_session_state_machine.py -q`
+- [x] `python -m pytest backend/tests/application/test_session_state_machine.py -q`
+
+### Milestone 2 完成记录（2026-09-08）
+
+本阶段实现 application-owned 内存 runtime、coordinator 状态机与基础订阅入口。开工时工作区干净；仅新增本阶段的 runtime/coordinator、SystemClock、测试及包入口，更新三份 M2 文档，没有修改已有模型、schema、Domain、ports、app factory、依赖或 CI。
+
+#### 实现入口与行为
+
+| 入口 | 当前行为 |
+|---|---|
+| `backend/app/application/analysis_sessions/runtime.py:SessionRuntime` | 普通 dataclass，保存 immutable snapshot、内部 query、有序 event list、独立 condition/cancel/quiesced event、task handle 与 last_error；生产代码仅 coordinator 导入它。query 不进入 repr 或 API snapshot。 |
+| `backend/app/application/analysis_sessions/coordinator.py:SessionCoordinator` | 使用短时全局 map 锁、每 session condition 和单一合法转换表；要求注入 ClockPort，可注入 ID factory 与标准库 logger。 |
+| `create_session(query, configuration)` | 校验输入和生成的 UUID；用一次 clock 读取构造 pending snapshot 与 sequence 1 created event，完整 runtime 准备好后才插入 map；重复 ID 不覆盖已有 session。 |
+| `mark_running/complete_session/fail_session/cancel_session` | 统一经 `_transition` 提交。running 只改 snapshot 并记录状态日志；公开终态与 event、sequence、cancel signal 同临界区提交。非法转换在读取 clock 前拒绝，重复 cancelled cancel 返回原 snapshot。 |
+| `get_snapshot/subscribe` | 返回 immutable snapshot 或 typed event iterator。subscribe 在返回 iterator 前校验 UUID/lookup；从 sequence 1 读取已有事件，condition 内完成检查/等待，解锁后 yield，终态事件后关闭。 |
+| `SessionNotFoundError/InvalidSessionTransitionError` | 区分合法但未知 UUID 与非法 UUID 的 Pydantic validation error；转换冲突异常携带当前 immutable session 及目标状态，竞争失败方可读取胜出终态。 |
+| `_log_transition` | 解锁后调用标准库 logger，传入同一 committed LifecycleEvent、CorrelationContext、from/to status 与该次转换时间；logger/handler 失败不改变已提交结果。 |
+| `backend/app/infrastructure/runtime/system_clock.py:SystemClock.now` | 同步返回 aware UTC；所有状态转换时间通过 ClockPort，coordinator 不直接读取系统时间。 |
+
+事件列表在 coordinator 生命周期内持续保留，无 TTL/LRU、清理 task 或 subscriber queue。sequence 从列表中统一分配；running 不占 sequence。`completed_with_persistence_error` 仍只保留枚举名称，没有可进入该状态的 M2 转换。
+
+#### 聚焦验证
+
+测试文件：`backend/tests/application/test_session_state_machine.py`。
+
+| 验证点 | 测试证据 |
+|---|---|
+| 生命周期与时间一致性 | `test_lifecycle_commits_one_timestamp_and_event_per_public_transition` 覆盖三种终态；每次成功转换只读一次 clock，snapshot/event/payload 使用相同 UTC instant，created_at/configuration 保持不变。 |
+| 非法转换、幂等与终态保护 | `test_pending_cannot_complete_or_fail_before_running`、`test_running_cannot_be_started_twice`、`test_pending_cancel_is_atomic_and_idempotent`、`test_terminal_states_cannot_be_overwritten`。 |
+| 终态竞争 | `test_terminal_race_has_one_winner_and_one_terminal_event` 用 gate 与真实 condition 将两个调用排队，分别让 completion/failure/cancel 先到；失败方收到胜出 snapshot，事件只有 sequence 1、2。 |
+| Session 隔离与保留 | `test_sessions_have_independent_locks_events_and_cancellation` 在持有 A 的锁且 A cancel 阻塞时，让 B 创建、运行并完成；两者事件、锁、cancel/quiesced 信号独立，终态仍可再次读取和订阅。 |
+| 订阅与原子可见性 | `test_commit_notifies_all_waiting_subscribers_without_exposing_runtime` 验证全部等待者被唤醒并拿到同一个已提交 event；`test_closed_subscriber_does_not_cancel_session_or_affect_other_subscribers` 验证订阅关闭不改变 session。 |
+| 日志失败隔离 | `test_logging_runs_after_unlock_and_cannot_undo_committed_state` 检查两把锁均已释放、日志和 runtime 引用同一个 event，并验证真实 logging handler 抛错后 create/running/failed 仍成立。 |
+| 输入与部分提交防护 | Lookup 覆盖六个 application 入口；重复/非法 UUID、非法 query、PublicError 和 naive Clock 结果均不覆盖或部分提交状态，下一次有效终态仍使用 sequence 2。 |
+| 真实 clock | `test_system_clock_can_drive_a_session_without_test_configuration` 使用 SystemClock 跑通 application 创建、运行和完成。 |
+
+竞争时序使用 `asyncio.Event` 和真实锁，不使用 sleep；测试中的 5 秒 timeout 仅用于检测死锁，不用于选择竞争胜方。白盒检查限于同步原语、内部资源身份和 logger 解锁时机，所有状态变更均调用真实 coordinator 方法，没有增加测试专用生产入口。
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/application/test_session_state_machine.py -q
+37 passed in 0.84s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+364 passed in 2.51s
+
+git diff --check
+```
+
+使用现有 Python 3.12.14 环境；新增 37 项用例，M1 与 Milestone 1 回归通过，diff check 无输出并退出 0。
+
+#### 后续接入与 Contract evidence
+
+Application 订阅入口已经建立；上面的 API 边界勾选表示提供了供路由使用的 coordinator 方法，不表示 HTTP 已接入。为验证原子提交与唤醒，本阶段实现了 Milestone 4 所需的基础事件 iterator；Milestone 4 仍须完成 cursor/Last-Event-ID、keepalive、SSE encoder 和完整 replay/race/HTTP 验收。
+
+Milestone 3 继续实现 workflow Protocol/context、task 注册与协作式收敛，使用 runtime 的 cancel/quiesced 信号和 task handle。当前 create_session 仅创建内存态，不启动任务；M3 必须在对外创建成功前完成 task ownership。Milestone 5–6 接入 HTTP 404/409/422 映射、request/error ID、JSON formatter 与 redaction；本阶段只有结构化日志调用点。真实 server smoke 与三平台 CI 留在 Milestone 7。
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C06`、`M2-C08`–`M2-C12`。按 `MR-G01`–`MR-G14` 记录本阶段证据；完整 M2 smoke/CI 与端到端接入未完成，中心 register 不提前登记完整 contract 已承接。
+
+| Contract | 当前实现与证据 | 后续验收 |
+|---|---|---|
+| `GLOBAL-C04`、`M2-C03`、`M2-C04` | 单一状态转换入口、UTC Clock、snapshot/event 原子提交；时间、非法转换、终态竞争和日志失败 tests。 | Workflow/HTTP 调用这些入口；完整端到端 smoke/CI。 |
+| `M2-C01`、`M2-C02`、`M2-C05`、`M2-C06` | 基础订阅与显式 cancel、cancel token、幂等/终态保护；close/isolation/race tests。 | M3 在途输出抑制与 quiesced；Milestone 4–5 的 Last-Event-ID、keepalive、断线与 HTTP 语义。 |
+| `GLOBAL-C07`、`GLOBAL-C09`、`M2-C08`、`M2-C09` | 复用 immutable event、PublicError 与 CorrelationContext；日志不含 raw query，log callback 与公共状态隔离。 | HTTP request/error 关联、安全异常映射和完整 JSON log/redaction。 |
+| `M2-C10`、`M2-C11`、`M2-C12` | 每 session 独立资源，内存保留，无业务 result；隔离/保留/typed response tests。 | App 单 worker composition、默认 lifecycle-only fake 及真实 server smoke。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C10` | 新后端范围和现有依赖集合保持不变；三份 M2 文档同步，没有新增 deferred 功能。 | Milestone 8 全链路 sweep 与最终承接登记。 |
+
+本次将 TODO 中概括性的 pending/running 终态转换表述对齐详细设计 §6.1：只有 running 可完成/失败，pending/running 均可取消。中心 hard contracts 的语义与归属不变，Milestone 3–8 和 M2 总成功标准保持未勾选。
 
 ## Milestone 3：Fake workflow、cancel 与 lifespan
 

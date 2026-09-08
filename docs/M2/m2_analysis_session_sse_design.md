@@ -200,6 +200,10 @@ workflow quiesced event/flag
 
 可变 runtime 不使用 Pydantic，也不得通过 API 序列化。不同 session 不共享锁、事件列表、取消信号或 task handle。
 
+Milestone 2 的 application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建并保存 pending snapshot/created event；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id)` 在返回 async iterator 前完成 lookup，iterator 在同一 condition 协议内读取已有事件和等待通知，终态事件发完后结束；cursor、keepalive 和 HTTP/SSE 编码在 Milestone 4–5 接入。API 不获取 runtime、锁、task 或可变 event list。
+
+Lookup 接受 UUID 或 UUID 字符串；非法 UUID 产生 Pydantic validation error，合法但不存在的 UUID 产生 `SessionNotFoundError`。非法状态转换产生带当前 immutable `session` 和目标状态的 `InvalidSessionTransitionError`；终态竞争的失败方通过该 snapshot 得到胜出终态。重复 cancel 已 cancelled 的 session 返回同一 snapshot，不读取时钟、不追加事件。HTTP 错误映射由 Milestone 5 接入。
+
 ## 5. 创建请求与响应
 
 ### 5.1 `CreateAnalysisSessionRequest`
@@ -284,6 +288,8 @@ notify all subscribers
 锁内不执行网络、文件、数据库、LLM 或任意不受控 callback。结构化日志在成功提交后复用同一事件对象记录；日志失败不得回滚状态或事件。
 
 `pending -> running` 没有公开 lifecycle event，只原子更新内部 snapshot 并记录一次结构化状态转换日志。
+
+Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。Logger/handler 异常不改变已提交状态，JSON formatter 与完整 request correlation 在 Milestone 5–6 接入。Milestone 2 创建尚不调度 workflow task，task ownership、quiesced 收敛及 lifespan 在 Milestone 3 接入。
 
 ### 6.3 completion/cancel 竞争
 

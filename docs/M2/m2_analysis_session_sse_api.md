@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–1](m2_analysis_session_sse_implementation_todo.md#milestone-1application-models-与-api-schemas)，包含基线确认、application models 与 API schemas。本文 JSON/SSE data 示例已有模型校验测试；当前运行时 OpenAPI 仍只有 `/health`，session/SSE 路由、SSE 编码及错误 handler 尚未接入。
+实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–2](m2_analysis_session_sse_implementation_todo.md#milestone-2in-memory-runtime-与状态机)，包含 models/schemas、application-owned 内存 runtime、原子状态机及基础事件订阅。本文 JSON/SSE data 示例已有模型校验测试；当前运行时 OpenAPI 仍只有 `/health`，workflow task、session/SSE 路由、cursor/keepalive、SSE 编码及错误 handler 尚未接入。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
