@@ -3,6 +3,7 @@ from typing import Annotated, Self
 from pydantic import Field, model_validator
 
 from app.domain.common import (
+    DomainFloat,
     DomainModel,
     NonEmptyString,
     UtcDatetime,
@@ -21,10 +22,10 @@ class TimeWindowResult(DomainModel):
     start_time: UtcDatetime
     end_time: UtcDatetime
     outcome_status: OutcomeStatus
-    representative_value: float | None
+    representative_value: DomainFloat | None
     assessment: RiskOrTrendAssessment | None
     source: ResultSource
-    confidence: Annotated[float, Field(ge=0, le=1)]
+    confidence: Annotated[DomainFloat, Field(ge=0, le=1)]
     aggregation_method: AggregationMethod | None
     evidence_refs: tuple[NonEmptyString, ...]
     quality_flags: tuple[DataQualityFlag, ...] = ()

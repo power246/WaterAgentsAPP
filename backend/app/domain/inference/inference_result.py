@@ -4,7 +4,13 @@ from pydantic import Field, field_validator, model_validator
 
 from app.domain.attribution.analysis_detail import AnalysisDetail
 from app.domain.attribution.attribution_summary import AttributionSummary
-from app.domain.common import DomainModel, NonEmptyString, UtcDatetime, ensure_unique_tuple
+from app.domain.common import (
+    DomainFloat,
+    DomainModel,
+    NonEmptyString,
+    UtcDatetime,
+    ensure_unique_tuple,
+)
 from app.domain.evidence.evidence_chain import EvidenceChain
 from app.domain.inference.mode import InferenceMode
 from app.domain.inference.parameter_time_series import ParameterTimeSeries
@@ -27,7 +33,7 @@ class InferenceResult(DomainModel):
     time_resolution: TimeResolution = DEFAULT_TIME_RESOLUTION
     time_resolution_source: TimeResolutionSource
     series: tuple[ParameterTimeSeries, ...]
-    overall_confidence: Annotated[float, Field(ge=0, le=1)]
+    overall_confidence: Annotated[DomainFloat, Field(ge=0, le=1)]
     attribution_summary: AttributionSummary
     analysis_detail: AnalysisDetail
     evidence_chain: EvidenceChain
@@ -63,16 +69,25 @@ class InferenceResult(DomainModel):
         ):
             raise ValueError("time_segments must be ordered and contiguous")
 
-        segment_modes = {segment.mode for segment in self.time_segments}
+        segment_modes = tuple(segment.mode for segment in self.time_segments)
         if self.mode is InferenceMode.MIXED:
-            if segment_modes != {
-                InferenceMode.GAP_FILLING,
-                InferenceMode.PREDICTION,
-            }:
-                raise ValueError(
-                    "mixed mode requires gap_filling and prediction segments"
+            if (
+                segment_modes[0] is not InferenceMode.GAP_FILLING
+                or segment_modes[-1] is not InferenceMode.PREDICTION
+                or any(
+                    previous is InferenceMode.PREDICTION
+                    and current is InferenceMode.GAP_FILLING
+                    for previous, current in zip(
+                        segment_modes,
+                        segment_modes[1:],
+                    )
                 )
-        elif segment_modes != {self.mode}:
+            ):
+                raise ValueError(
+                    "mixed mode requires gap_filling segments followed by "
+                    "prediction segments"
+                )
+        elif set(segment_modes) != {self.mode}:
             raise ValueError("time segment modes must match result mode")
 
     def _validate_series(self) -> None:

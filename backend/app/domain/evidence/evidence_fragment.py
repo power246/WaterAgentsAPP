@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import Field
 
-from app.domain.common import DomainModel, JsonValue, NonEmptyString
+from app.domain.common import DomainFloat, DomainModel, JsonValue, NonEmptyString
 from app.domain.evidence.collection_status import CollectionStatus
 from app.domain.evidence.data_quality import DataQualityFlag
 from app.domain.evidence.evidence_location import EvidenceLocation
@@ -22,6 +22,6 @@ class EvidenceFragment(DomainModel):
     data_type: NonEmptyString
     value_or_summary: JsonValue
     quality_flags: tuple[DataQualityFlag, ...] = ()
-    confidence_hint: Annotated[float, Field(ge=0, le=1)] | None
+    confidence_hint: Annotated[DomainFloat, Field(ge=0, le=1)] | None
     provenance: Provenance
     rag_eligible: bool = False

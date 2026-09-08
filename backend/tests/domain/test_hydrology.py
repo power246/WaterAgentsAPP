@@ -35,6 +35,8 @@ def test_geo_point_accepts_boundaries_zero_and_round_trips() -> None:
         (0, 180.1),
         (math.nan, 0),
         (0, math.inf),
+        (True, 0),
+        (0, False),
     ],
 )
 def test_geo_point_rejects_invalid_coordinates(
@@ -43,6 +45,13 @@ def test_geo_point_rejects_invalid_coordinates(
 ) -> None:
     with pytest.raises(ValidationError):
         GeoPoint(latitude=latitude, longitude=longitude)
+
+
+def test_geo_point_converts_integer_coordinates_to_float() -> None:
+    point = GeoPoint(latitude=1, longitude=0)
+
+    assert isinstance(point.latitude, float)
+    assert isinstance(point.longitude, float)
 
 
 def test_river_segment_accepts_missing_location_and_round_trips() -> None:

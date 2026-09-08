@@ -6,6 +6,7 @@ from pydantic import (
     AfterValidator,
     BeforeValidator,
     JsonValue as PydanticJsonValue,
+    StrictFloat,
     StringConstraints,
 )
 
@@ -13,6 +14,7 @@ from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
 
 ItemT = TypeVar("ItemT", bound=Hashable)
+DomainFloat: TypeAlias = StrictFloat
 
 NonEmptyString: TypeAlias = Annotated[
     str,

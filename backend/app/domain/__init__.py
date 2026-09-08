@@ -1,5 +1,6 @@
 from app.domain.common import (
     DomainEnum,
+    DomainFloat,
     DomainModel,
     JsonValue,
     NonEmptyString,
@@ -67,6 +68,7 @@ __all__ = [
     "DEFAULT_TIME_RESOLUTION",
     "DataQualityFlag",
     "DomainEnum",
+    "DomainFloat",
     "DomainModel",
     "EvidenceBundle",
     "EvidenceChain",

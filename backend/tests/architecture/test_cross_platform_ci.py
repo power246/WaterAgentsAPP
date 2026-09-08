@@ -54,10 +54,16 @@ def test_health_smoke_uses_cross_platform_process_and_path_apis() -> None:
     )
     popen_keywords = {keyword.arg: keyword.value for keyword in popen_call.keywords}
     client_keywords = {keyword.arg: keyword.value for keyword in client_call.keywords}
+    command = popen_call.args[0]
 
     assert "sys.executable" in source
     assert "Path(__file__).resolve()" in source
+    assert isinstance(command, ast.List)
+    assert [ast.literal_eval(item) for item in command.elts[1:]] == ["-m", "app"]
     assert "PYTHONIOENCODING" in source
+    assert "WATERAGENTS_HOST" in source
+    assert "WATERAGENTS_PORT" in source
+    assert "WATERAGENTS_LOG_LEVEL" in source
     assert ast.literal_eval(popen_keywords["encoding"]) == "utf-8"
     assert ast.literal_eval(popen_keywords["errors"]) == "replace"
     assert "env" in popen_keywords

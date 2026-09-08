@@ -349,6 +349,46 @@ def test_quantified_requires_a_finite_value() -> None:
             TimeWindowResult.model_validate(values)
 
 
+@pytest.mark.parametrize(
+    "field_path",
+    (
+        "representative_value",
+        "window_confidence",
+        "series_confidence",
+        "overall_confidence",
+    ),
+)
+def test_result_numeric_fields_reject_booleans(field_path: str) -> None:
+    requested = local_day()
+    windows = build_time_windows(
+        requested,
+        TimeResolution.TWELVE_HOURS,
+        ANALYSIS_TIMEZONE,
+    )
+    series = ParameterTimeSeries(
+        parameter=temperature_parameter(),
+        time_resolution_source=TimeResolutionSource.DEFAULT,
+        points=tuple(
+            make_point(window, outcome_status=OutcomeStatus.QUANTIFIED)
+            for window in windows
+        ),
+        confidence=0.5,
+    )
+    values = make_result(time_range=requested, series=(series,)).model_dump()
+
+    if field_path == "representative_value":
+        values["series"][0]["points"][0]["representative_value"] = True
+    elif field_path == "window_confidence":
+        values["series"][0]["points"][0]["confidence"] = True
+    elif field_path == "series_confidence":
+        values["series"][0]["confidence"] = True
+    else:
+        values["overall_confidence"] = True
+
+    with pytest.raises(ValidationError):
+        InferenceResult.model_validate(values)
+
+
 @pytest.mark.parametrize("confidence", [0.0, 1.0])
 @pytest.mark.parametrize("status", list(OutcomeStatus))
 def test_confidence_boundaries_are_valid_for_every_outcome(
@@ -569,7 +609,7 @@ def test_mixed_result_requires_both_segment_modes_and_matching_sources() -> None
 
     assert_json_round_trip(result)
 
-    with pytest.raises(ValidationError, match="requires gap_filling and prediction"):
+    with pytest.raises(ValidationError, match="requires gap_filling segments followed"):
         make_result(
             time_range=requested,
             mode=InferenceMode.MIXED,
@@ -581,6 +621,64 @@ def test_mixed_result_requires_both_segment_modes_and_matching_sources() -> None
                 ),
             ),
             series=(make_series(requested),),
+        )
+
+
+@pytest.mark.parametrize(
+    "segment_modes",
+    (
+        (
+            InferenceMode.PREDICTION,
+            InferenceMode.PREDICTION,
+            InferenceMode.GAP_FILLING,
+            InferenceMode.GAP_FILLING,
+        ),
+        (
+            InferenceMode.GAP_FILLING,
+            InferenceMode.PREDICTION,
+            InferenceMode.GAP_FILLING,
+            InferenceMode.PREDICTION,
+        ),
+        (
+            InferenceMode.PREDICTION,
+            InferenceMode.GAP_FILLING,
+            InferenceMode.PREDICTION,
+            InferenceMode.PREDICTION,
+        ),
+    ),
+)
+def test_mixed_result_rejects_reversed_or_repeated_mode_transitions(
+    segment_modes: tuple[InferenceMode, ...],
+) -> None:
+    requested = local_day()
+    windows = build_time_windows(
+        requested,
+        TimeResolution.SIX_HOURS,
+        ANALYSIS_TIMEZONE,
+    )
+    segments = tuple(
+        TimeSegment(start=window.start, end=window.end, mode=mode)
+        for window, mode in zip(windows, segment_modes, strict=True)
+    )
+    point_sources = tuple(
+        ResultSource.PREDICTED
+        if mode is InferenceMode.PREDICTION
+        else ResultSource.INFERRED
+        for mode in segment_modes
+    )
+    series = make_series(
+        requested,
+        resolution=TimeResolution.SIX_HOURS,
+        point_sources=point_sources,
+    )
+
+    with pytest.raises(ValidationError, match="requires gap_filling segments followed"):
+        make_result(
+            time_range=requested,
+            mode=InferenceMode.MIXED,
+            time_segments=segments,
+            resolution=TimeResolution.SIX_HOURS,
+            series=(series,),
         )
 
 
