@@ -199,7 +199,6 @@ configuration: AnalysisConfigurationSnapshot
 
 ```text
 query
-last_public_sequence
 last_error, if any
 ```
 
@@ -216,7 +215,7 @@ workflow task handle
 workflow quiesced event/flag
 ```
 
-可变 runtime 不使用 Pydantic，也不得通过 API 序列化。不同 session 不共享锁、事件列表、取消信号或 task handle。
+可变 runtime 不使用 Pydantic，也不得通过 API 序列化。不同 session 不共享锁、事件列表、取消信号或 task handle。最新公开 sequence 从保留的有序 event list 得到，不维护第二个计数器。
 
 Application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建 pending snapshot/created event，在同一 map 临界区登记 workflow task handle 和 session，再返回捕获的 pending snapshot；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id, after_sequence=...)` 在返回 async generator 前完成 lookup、cursor 与终态校验；已消费完终态返回 `None`，否则在同一 condition 协议内读取已有事件和等待通知。generator 的 `None` item 表示 keepalive，LifecycleEvent item 复用原事件对象，终态事件发完后结束。纯 SSE encoder、response factory、正式 HTTP 路由及统一错误映射已接入。API 不获取 runtime、锁、task 或可变 event list。
 
@@ -675,6 +674,7 @@ M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item�
 ### 13.1 单 worker 契约
 
 - 只支持单进程、单 Uvicorn worker。
+- `python -m app` 和 `wateragents` console entrypoint 显式传入 `workers=1`，不继承 `WEB_CONCURRENCY`。直接调用 Uvicorn 时必须使用 `--workers 1`。
 - 文档和启动命令不得建议 `--workers > 1`。
 - 多 worker 下 POST、SSE 和 cancel 可能命中不同进程，因此明确标为不支持，而不是依赖 sticky session 偶然工作。
 - M2 不增加数据库、Redis、消息队列或共享 pub/sub。
@@ -803,6 +803,12 @@ Completed 场景使用默认 workflow，验证 pending response、created/comple
 
 现有 CI workflow 继续在 Ubuntu/macOS/Windows + Python 3.11 执行 editable install、完整 tests、health smoke，并增加 session/SSE smoke。实际三平台运行结果单独登记，不把本机成功或 YAML 配置存在视为远端 CI 通过。
 
+### 16.7 架构与启动门禁
+
+`backend/tests/architecture/test_application_dependencies.py` 检查 API/application 的直接导入、别名和相对导入：application 只依赖标准库、Pydantic、domain、ports 和 application；API 使用 HTTP 框架、application 的公开入口与模型，不导入 infrastructure 或 runtime。`SessionRuntime` 只由 coordinator 引用。API 对外部对象的私有属性访问（包括常量属性名的 `getattr/setattr/delattr`）会报错，保留 transport 自身私有字段和 Python dunder 的正常用途。
+
+既有 domain 依赖门禁继续执行，`test_m2_project_metadata_preserves_the_m1_dependency_set` 固定 M1 的生产/开发依赖集合。`test_main_entrypoint_enforces_one_worker_despite_environment` 调用正式入口并检查真实 Uvicorn 配置，在 `WEB_CONCURRENCY=4` 或非法整数时均得到单 worker。
+
 ## 17. M2 验收标准
 
 1. `POST /api/analysis/sessions` 返回 HTTP 201、UUID session_id 和 pending snapshot。
@@ -821,6 +827,8 @@ Completed 场景使用默认 workflow，验证 pending response、created/comple
 ## 18. Deferred Contract Register
 
 跨 Milestone 硬约束的统一事实源是 [deferred_milestone_contracts.md](../deferred_milestone_contracts.md)。后续 MR 必须遵循其中的 `MR-G01`–`MR-G14` 门禁，并在 MR 描述与承接记录中引用适用 contract ID。
+
+本地实现、逐项契约证据和真实 server 验证见 [Milestone 8 验收记录](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)；后续改动从其中的[接力入口与验收](m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)开始。三平台实际 CI 尚待通过，中心登记尚不将 M2 标为最终已承接。
 
 本节保留 M2 产生这些延后项的上下文；中心登记中的对应范围为：
 
