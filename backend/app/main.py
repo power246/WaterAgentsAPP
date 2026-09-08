@@ -14,6 +14,7 @@ from app.api.http.request_context import RequestContextMiddleware
 from app.application.analysis_sessions.coordinator import SessionCoordinator
 from app.application.analysis_sessions.workflow import AnalysisWorkflow
 from app.infrastructure.config import AppSettings
+from app.infrastructure.observability.json_logging import configure_logging
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.ports.clock import ClockPort
 
@@ -32,6 +33,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        configure_logging(resolved_settings.log_level)
         coordinator = SessionCoordinator(
             resolved_clock,
             workflow=workflow,

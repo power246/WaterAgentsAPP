@@ -209,7 +209,7 @@ class SessionCoordinator:
     async def _workflow_failed(self, runtime: SessionRuntime, exception: BaseException) -> None:
         if runtime.stop_requested.is_set() or runtime.snapshot.status not in _TRANSITIONS:
             self._log_activity(
-                "workflow_output_suppressed", runtime, exception_type=type(exception).__name__
+                "workflow_output_suppressed", runtime, exception=exception
             )
             return
         error = PublicError(
@@ -222,13 +222,13 @@ class SessionCoordinator:
         try:
             snapshot = await self.fail_session(runtime.snapshot.session_id, error)
         except (InvalidSessionTransitionError, ServiceShuttingDownError):
-            self._log_activity("workflow_output_suppressed", runtime)
+            self._log_activity("workflow_output_suppressed", runtime, exception=exception)
         else:
             self._log_activity(
                 "session_failed",
                 runtime,
                 timestamp=snapshot.updated_at,
-                exception_type=type(exception).__name__,
+                exception=exception,
             )
 
     def _workflow_done(self, runtime: SessionRuntime, task: asyncio.Task[None]) -> None:
@@ -236,7 +236,7 @@ class SessionCoordinator:
             error = task.exception()
             if error is not None:
                 self._log_activity(
-                    "workflow_task_error", runtime, exception_type=type(error).__name__
+                    "workflow_task_error", runtime, exception=error
                 )
         self._mark_quiesced(runtime)
 
@@ -251,11 +251,15 @@ class SessionCoordinator:
         runtime: SessionRuntime,
         *,
         timestamp: datetime | None = None,
+        exception: BaseException | None = None,
         **fields: object,
     ) -> None:
         try:
-            self._logger.info(
+            self._logger.log(
+                logging.ERROR if exception is not None else logging.INFO,
                 "Analysis workflow lifecycle.",
+                exc_info=(type(exception), exception, exception.__traceback__)
+                if exception is not None else None,
                 extra={
                     "event_name": event_name,
                     "timestamp": (
@@ -267,6 +271,8 @@ class SessionCoordinator:
                         session_id=runtime.snapshot.session_id,
                         error_id=runtime.last_error.error_id if runtime.last_error else None,
                     ),
+                    "exception_type": type(exception).__name__ if exception is not None else None,
+                    "redaction_values": (runtime.query,) if exception is not None else (),
                     **fields,
                 },
             )

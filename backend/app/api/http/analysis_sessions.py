@@ -39,6 +39,7 @@ router = APIRouter(
     responses={201: {"headers": REQUEST_ID_HEADERS}},
 )
 async def create_session(request: Request, body: CreateAnalysisSessionRequest) -> AnalysisSessionSnapshot:
+    request.state.log_private_query = body.query
     configuration = body.to_configuration_snapshot(request.app.state.settings.analysis_timezone)
     snapshot = await request.app.state.session_coordinator.create_session(body.query, configuration)
     request.state.session_id = snapshot.session_id

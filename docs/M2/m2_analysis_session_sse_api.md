@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–5](m2_analysis_session_sse_implementation_todo.md#milestone-5http-routes-与统一错误)。正式创建、SSE 订阅与取消路由已接入，支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消。OpenAPI 已包含 `/health` 与三个 session 操作；接口、streaming、错误与文档 raw frame 均有测试。JSON 日志 formatter/完整 redaction 和正式 SSE server smoke/跨平台 CI 仍由 Milestone 6–7 完成。
+实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–6](m2_analysis_session_sse_implementation_todo.md#milestone-6结构化日志与-redaction)。正式创建、SSE 订阅与取消路由已接入，支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消。WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。OpenAPI 已包含 `/health` 与三个 session 操作；接口、streaming、错误、日志与文档 raw frame 均有测试。正式 SSE server smoke/跨平台 CI 仍由 Milestone 7 完成。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -337,7 +337,7 @@ Error envelope 固定包含 `error`、`session` 和 `validation`；没有 curren
 }
 ```
 
-`ValidationViolation.field` 是字符串/整数路径数组；`type` 是稳定 snake_case error type，`message` 是非空安全摘要。不包含原始 `input`、异常 `ctx`、原始 `msg` 或任意 details map。已知字段路径保留，任意未知 JSON key 用 `unknown_field` 代替，避免字段名本身携带敏感输入；不认识的校验 type 归一为 `invalid_value`。HTTP 422 与安全摘要已接入，通用日志 redaction 由 Milestone 6 接入。
+`ValidationViolation.field` 是字符串/整数路径数组；`type` 是稳定 snake_case error type，`message` 是非空安全摘要。不包含原始 `input`、异常 `ctx`、原始 `msg` 或任意 details map。已知字段路径保留，任意未知 JSON key 用 `unknown_field` 代替，避免字段名本身携带敏感输入；不认识的校验 type 归一为 `invalid_value`。422 日志复用安全公开错误，只记录异常类型，不输出原始 validation exception。
 
 错误码：
 
@@ -373,6 +373,10 @@ M2 不公开 `session_started`：
 
 ## 8. 排障 Runbook
 
+应用启动后，`wateragents.*` 日志以单行 JSON 写到 stderr，级别由 `WATERAGENTS_LOG_LEVEL` 控制（默认 info）。Uvicorn/第三方日志保持其自身格式；只将 WaterAgents 自有日志作为本节 JSON 查询对象。每行包含 `timestamp/level/event_name/message/component`，ID 按上下文出现。`http_request_completed` 包含 `method/route/status_code/duration_ms`，其中 route 是模板，duration 覆盖完整 SSE 订阅时间。UTC 时钟回拨时 duration 为 0。
+
+异常日志的 `exception_type/exception_message/stack_trace` 包含脱敏后的调用位置和 cause/context chain，不含源码行或局部变量。不要把它们当作原始请求存档；query、request body、完整 headers 和凭据不会作为普通日志字段输出。`log_format_failed` 表示本条日志格式化/脱敏失败，其固定安全记录的 timestamp 为 null；业务结果不受影响。
+
 ### 8.1 POST 没有返回 session
 
 1. 保存 HTTP status、`X-Request-ID` 和 error body。
@@ -385,7 +389,7 @@ M2 不公开 `session_started`：
 1. 确认使用 POST 返回的准确 `session_id`。
 2. 不带 cursor 重新请求 events；`session_created` 应当可回放。
 3. 检查 SSE response 的 status 与 `Content-Type`。
-4. 用 `session_id` 查 `session_created` 和 `lifecycle_event_committed` 日志。
+4. 用 `session_id` 查 `lifecycle_event_committed` 日志，确认其中 `lifecycle_event.type=session_created`。
 5. 对照日志中的 sequence 与客户端最后记录的 SSE `id`。
 
 ### 8.3 SSE 经常断开
@@ -395,6 +399,7 @@ M2 不公开 `session_started`：
 3. 检查代理是否 buffer `text/event-stream`。
 4. 检查客户端是否错误地把 keepalive 当作 JSON event。
 5. terminal 后服务端主动关闭是正常行为；客户端应关闭 EventSource。
+6. 若出现 `http_stream_failed`，用该订阅的 request_id 和 session_id 查传输异常；这不会将 session 改成 failed。
 
 ### 8.4 cancel 后仍有后台日志
 

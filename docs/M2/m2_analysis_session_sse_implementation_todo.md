@@ -660,34 +660,83 @@ Milestone 3–4 完成记录中待 HTTP 接入的 200/204/400/404/409/422 项已
 
 ### JSON logs
 
-- [ ] 实现 WaterAgents application logger 的单行 JSON formatter。
-- [ ] timestamp、level、event_name 和 message 稳定存在。
-- [ ] request/session/error/event sequence 等 correlation 字段按上下文加入。
-- [ ] 状态转换包含 from_status/to_status。
-- [ ] HTTP completion 包含 method、route template、status 和 duration_ms。
-- [ ] workflow exception 包含 exception type、message、traceback 和 cause chain。
-- [ ] lifecycle log 直接复用 committed LifecycleEvent。
-- [ ] keepalive 不逐条记录。
+- [x] 实现 WaterAgents application logger 的单行 JSON formatter。
+- [x] timestamp、level、event_name 和 message 稳定存在。
+- [x] request/session/error/event sequence 等 correlation 字段按上下文加入。
+- [x] 状态转换包含 from_status/to_status。
+- [x] HTTP completion 包含 method、route template、status 和 duration_ms。
+- [x] workflow exception 包含 exception type、message、traceback 和 cause chain。
+- [x] lifecycle log 直接复用 committed LifecycleEvent。
+- [x] keepalive 不逐条记录。
 
 ### Redaction
 
-- [ ] 不记录 raw request body、query 或完整 headers。
-- [ ] Authorization、Cookie、Set-Cookie、API key 和 credential names 大小写不敏感脱敏。
-- [ ] PublicError 从 safe message 构造，不透传 exception string。
-- [ ] redaction helper 对 nested JSON-like values 有测试。
-- [ ] 日志 formatter/redactor 失败不能改变 API/session 结果。
+- [x] 不记录 raw request body、query 或完整 headers。
+- [x] Authorization、Cookie、Set-Cookie、API key 和 credential names 大小写不敏感脱敏。
+- [x] PublicError 从 safe message 构造，不透传 exception string。
+- [x] redaction helper 对 nested JSON-like values 有测试。
+- [x] 日志 formatter/redactor 失败不能改变 API/session 结果。
 
 ### Correlation tests
 
-- [ ] HTTP request_id 可在 response 和 log 同时找到。
-- [ ] session_failed error_id 可在 SSE 和异常日志同时找到。
-- [ ] lifecycle sequence 可在 SSE 和 lifecycle log 对齐。
-- [ ] 每条 application log 可独立 JSON parse。
-- [ ] 捕获日志中不存在测试 secret、raw query 或内部路径泄漏到 public response。
+- [x] HTTP request_id 可在 response 和 log 同时找到。
+- [x] session_failed error_id 可在 SSE 和异常日志同时找到。
+- [x] lifecycle sequence 可在 SSE 和 lifecycle log 对齐。
+- [x] 每条 application log 可独立 JSON parse。
+- [x] 捕获日志中不存在测试 secret、raw query 或内部路径泄漏到 public response。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/observability -q`
+- [x] `python -m pytest backend/tests/observability -q`
+
+### Milestone 6 完成记录（2026-09-08）
+
+本阶段完成 WaterAgents 单行 JSON 日志、请求耗时、异常诊断和输出边界 redaction。开始时工作区干净，基于本地 Milestone 5 提交 `e76afb4`；全量基线为 502 项通过。改动仅涉及新后端、相关测试、backend README 与三份 M2 文档，没有新增依赖或修改业务/HTTP/SSE schema。
+
+#### 实现与验收
+
+- `backend/app/infrastructure/observability/json_logging.py`：formatter 固定核心字段，展平 `CorrelationContext`，直接序列化 committed `LifecycleEvent` 和既有 `PublicError`。显式选择可输出字段，不导出任意 LogRecord extra；每行独立 JSON parse，换行和非 ASCII 字符使用 JSON 转义，非 UTF-8 控制台也能无损解析。
+- `backend/app/main.py` 在 lifespan 中按 `AppSettings.log_level` 安装并复用 `wateragents` 自有 handler。单行 JSON 写 stderr，不向 root 传播，不修改 Uvicorn/第三方 handler，也不在 app import/factory 阶段安装日志。handler/级别为进程级，不构建 app 级日志管理框架。
+- `backend/app/infrastructure/observability/redaction.py`：递归复制 JSON-like 值，按大小写不敏感凭据 key 以及 query/body/headers policy 替换敏感内容；诊断文本处理具名 credential、Authorization/Cookie、多 Cookie 值、Bearer/Basic 和 URL 用户凭据。屏蔽已知 query 的原文、repr 和 JSON 转义形式；不读取、缓存或输出完整请求 body/headers。
+- `coordinator.py` 在已有错误和晚到异常调用点传递 exception；formatter 保留类型、安全化消息和标准 cause/context/group traceback 的位置，省略源码行和局部变量。公开错误继续由固定 safe message 构造；异常日志和 session_failed SSE 使用相同 error ID。Cancel 获胜后的异常只记 suppression，不产生 failed event 或新的公开 error ID。
+- `api/http/request_context.py` 与 `errors.py` 用既有 `ClockPort` 记录请求开始/结束和 duration_ms，时钟回拨时为 0，SSE duration 覆盖整个订阅。HTTP 日志只有 route template，没有完整 URL。未处理异常提供脱敏诊断；validation/HTTPException 不格式化可能带 input/detail 的原始异常。Headers 后异常记 `http_stream_failed`，不追加错误 envelope 或改变 session。
+- Formatter/redactor/序列化失败只生成固定安全 `log_format_failed` JSON，timestamp 为 null；写入失败丢弃记录，避免默认 logging error handler 回显原始异常。所有日志调用继续在业务提交之后、session condition 之外，失败不改变 API、terminal event 或 quiesced。
+- `backend/tests/conftest.py:application_logs` 捕获真实 formatter 的 JSON 输出，并在测试结束恢复 logger 配置。原 workflow/API 安全断言移到最终 JSON 输出边界，同时保留对原始 committed event 对象、CorrelationContext 和状态的断言；不会以删除覆盖掩盖原始 exception 进入诊断链后的变化。Keepalive 原有无日志断言增加 JSON 行数/内容检查。
+
+#### Verify
+
+使用现有 Python 3.12.14 环境，从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/observability -q
+64 passed in 1.96s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+566 passed in 1.80s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+git diff --check
+```
+
+上述验收均退出 0。Health smoke 首次受 sandbox loopback bind 限制，允许本机临时端口后重跑通过并清理子进程。新增 observability 测试共 64 项，涵盖 nested redaction、转义 query、单行字段、cause/context/group、真实 stderr 输出、模拟非 UTF-8 控制台编码、并发 ID 关联、SSE/event 对齐、HTTP 耗时/回拨、validation/未知路由保护、取消后晚到异常，以及 formatter/redactor/writer 故障下 completed/failed/cancelled 九种组合。复用已有真实 routes 和注入 workflow，不增加测试专用 production 路由或行为开关。
+
+本次未运行远端 CI；正式 completed/cancel 真实 SSE server smoke 与 Linux/macOS/Windows CI 仍由 Milestone 7 完成。本机 health smoke 不等同于该验收。
+
+#### Contract evidence 与后续接入
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C13`。按 `MR-G01`–`MR-G14` 记录阶段证据；中心 register 的硬约束与归属不变。
+
+| Contract | 当前实现与测试证据 | 文档与剩余验收 |
+|---|---|---|
+| `GLOBAL-C07`、`M2-C09` | `JsonFormatter/redact/log_http/_log_activity`；nested/text/escaped query tests、`test_failure_error_id_diagnostics_and_request_context_survive_concurrent_requests`、HTTP safe diagnostics/validation tests。公开输出无 secret/内部路径，后端诊断有安全化 chain。 | 详细设计 §11–12、API ID/error/runbook 与 README；M3 持久化写入边界继续独立执行 redaction。 |
+| `GLOBAL-C04`、`GLOBAL-C09`、`M2-C02`、`M2-C03`、`M2-C04`、`M2-C08` | `test_completed_lifecycle_json_matches_sse_and_original_objects` 验证 committed 对象身份、timestamp、sequence、request/session ID 与 SSE 一致；状态机 race/原子提交和 event replay 回归通过。 | 详细设计 §6、§12，API lifecycle log 查询方式；Milestone 7 真实 SSE smoke。 |
+| `M2-C01`、`M2-C05`、`M2-C06`、`M2-C07`、`M2-C13` | `test_cancelled_late_exception_keeps_diagnostics_without_a_failed_event`、keepalive JSON 不变、headers 后失败关联，及现有 disconnect/cancel/shutdown/quiesced 全量回归。 | API 断线/cancel 排障与设计 §12；Milestone 7 server/CI，M3 持久化遗留处理归属不变。 |
+| `M2-C10`、`M2-C11`、`M2-C12` | 幂等 logger 配置、九组日志故障×业务终态测试；现有并发 session/lifespan/task ownership 回归。无新增 task/worker、容量清理、持久化或 fake 业务结果。 | 设计进程级 logger/单 worker 说明；Milestone 7 跨平台验收、Milestone 8 最终 sweep。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C10` | 仅新后端路径；无新依赖和 API/schema 变更，既有 architecture/OpenAPI gates 全绿。最终 JSON capture 承接原有日志安全断言。 | 三份 M2 文档和 backend README 同步；中心 register 无新增 deferred contract，Milestone 8 最终承接登记待完成。 |
+
+Milestone 3–5 完成记录中的 JSON formatter、duration_ms 和通用 redaction 待接入项已由本阶段承接。M2 总成功标准与 Milestone 7–8 保持未勾选，不将本阶段日志完成等同于完整 M2 已验收。
 
 ## Milestone 7：真实 Server Smoke、API 文档与 CI
 
