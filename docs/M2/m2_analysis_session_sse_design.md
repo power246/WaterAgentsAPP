@@ -155,6 +155,7 @@ time_resolution_source: TimeResolutionSource
 - 请求省略 resolution 时使用 `DEFAULT_TIME_RESOLUTION`，source 为 `default`。
 - 显式 JSON `null` 不等同于省略，应由请求校验拒绝。
 - M2 不产生 source=`auto`；M4 定义自动选择规则后才使用。
+- `CreateAnalysisSessionRequest.to_configuration_snapshot(analysis_timezone)` 根据 `model_fields_set` 固化 source，并校验 IANA timezone；不持有 settings 引用。
 
 ### 4.3 `AnalysisSessionSnapshot`
 
@@ -213,6 +214,7 @@ time_resolution: TimeResolution = 12h
 - 禁止未知字段。
 - query 是稳定的用户意图入口，但 M2 不解析其业务含义。
 - request model 需要区分 time_resolution 是省略还是显式提供，以产生正确 source。
+- 原始请求重序列化使用 `model_dump_json(exclude_unset=True)` 保留字段是否提供；规范化后的 configuration snapshot 显式保存 resolution/source，可直接 JSON round-trip。
 - M2 不接受 `auto`、timezone override、日期、位置、参数、provider、API key、mode 或 memory mode。
 - M4 可以直接修订该内部阶段契约，不需要为 M2 客户端维护兼容层。
 
@@ -315,6 +317,8 @@ session_cancelled
 ```
 
 不增加 `session_started`。`type` 和 payload 的具体模型必须匹配，不能构造交叉组合。
+
+实现使用 `SessionCreatedEvent`、`SessionCompletedEvent`、`SessionFailedEvent`、`SessionCancelledEvent` 四种 immutable envelope，共享基础字段；`LifecycleEvent` 是以 `type` 为 discriminator 的 union，可由 `TypeAdapter(LifecycleEvent)` 校验和生成 JSON Schema。每个分支固定自己的 type、payload 类型及 payload status，避免仅靠运行时 validator 校验而让 JSON Schema 接受错配。`schema_version` 只接受整数 1，sequence 只接受正整数（拒绝 bool、浮点数和数字字符串），created 的 sequence 固定为 1。
 
 ### 7.2 Payload
 
@@ -498,6 +502,10 @@ validation: typed field violations or empty
 - `session` 只在例如 cancel terminal conflict 时返回，复用正常 snapshot，不使用自由形态 details map。
 - validation error 只给出 field path、stable error type 和 safe message，不回显原始 input。
 - 所有非 2xx response 带 `X-Request-ID`。
+
+API schema 使用 `AnalysisSessionResponse` 继承公开 snapshot 字段，`HttpPublicError` 继承 `PublicError` 并增加必填 UUID `request_id` 与可空 UUID `session_id`。`AnalysisSessionErrorResponse` 固定包含 `error`、`session`、`validation`；不适用时后两项分别为 null 和空数组。`ValidationViolation` 的字段为 `field`（字符串/整数路径数组）、`type`（stable snake_case error type）和 `message`（非空安全摘要），不包含原始 `input`、异常 `ctx` 或任意 details map。
+
+所有模型禁止 extra；公开错误的 `code` 与非空 `failed_stage` 使用小写 snake_case，`retryable` 只接受 bool。最小 `CorrelationContext` 包含可空 UUID `request_id/session_id/error_id` 和可空正整数 `event_sequence`。模型只校验结构；从异常生成安全 message、移除 validation input 和写日志前 redaction 由 Milestone 5–6 实现，不能以字符串类型校验代替脱敏。
 
 M2 稳定错误码至少包括：
 

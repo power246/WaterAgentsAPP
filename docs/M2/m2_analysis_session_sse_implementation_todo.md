@@ -6,7 +6,7 @@
 
 ## 执行原则
 
-- [ ] 只修改新后端 `backend/`、M2 文档和必要的上层新架构文档。
+- [ ] 只修改新后端 `backend/`、M2 文档、必要的上层新架构文档，以及 Milestone 7 所需的 CI workflow。
 - [ ] 不读取、导入、复制、适配、枚举或测试 `backend_bk/` 与旧契约文档。
 - [ ] 不修改现有前端，不添加 WebSocket 兼容层或临时调试 UI。
 - [ ] 先实现最小生命周期闭环，再增加 replay、cancel、日志和真实 server smoke。
@@ -55,57 +55,218 @@
 
 ### 基线
 
-- [ ] 确认工作区状态，记录已有用户改动并避免覆盖。
-- [ ] 使用 `backend/.venv` 或干净 Python 3.11+ 环境运行 M1 全量测试。
-- [ ] 记录基线 test count、Python/FastAPI/Pydantic 版本。
-- [ ] 确认 `create_app(settings=None)`、`application.state.settings`、`ClockPort`、`EventPublisherPort`、`TimeResolution` 和 `TimeResolutionSource` 的真实入口。
+- [x] 确认工作区状态，记录已有用户改动并避免覆盖。
+- [x] 使用 `backend/.venv` 或干净 Python 3.11+ 环境运行 M1 全量测试。
+- [x] 记录基线 test count、Python/FastAPI/Pydantic 版本。
+- [x] 确认 `create_app(settings=None)`、`application.state.settings`、`ClockPort`、`EventPublisherPort`、`TimeResolution` 和 `TimeResolutionSource` 的真实入口。
 
 ### 边界扫描
 
-- [ ] 确认 M2 实现不引用现有 frontend、backend_bk 或旧契约文档。
-- [ ] 确认没有提前存在的 application/session/SSE runtime 需要迁移。
-- [ ] 列出 M2 将新增和修改的文件，避免无关 refactor。
+- [x] 确认 M2 实现不引用现有 frontend、backend_bk 或旧契约文档。
+- [x] 确认没有提前存在的 application/session/SSE runtime 需要迁移。
+- [x] 列出 M2 将新增和修改的文件，避免无关 refactor。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests -q`
-- [ ] `git diff --check`
+- [x] `python -m pytest backend/tests -q`
+- [x] `git diff --check`
+
+### Milestone 0 完成记录（2026-09-08）
+
+本阶段完成基线与边界确认；session/SSE 实现从 Milestone 1 开始。本次只更新本 TODO 和 API 文档的实现状态，没有新增生产代码、测试或依赖。
+
+#### 工作区与本地 MR
+
+- 当前分支：`codex/m2-analysis-session-sse`，HEAD：`0d921fd99db575ba9ff7df5c5f4fc6962745125e`（`docs: design M2 analysis session and SSE shell`）。
+- 本地 M2 设计提交基于 `3f57638`，包含三份 M2 文档及 `backend_architecture_skeleton.md`、`backend_refactor_milestones.md`、`deferred_milestone_contracts.md`，共 6 个文档文件；没有 backend 实现改动。
+- 开始时有 3 个未暂存改动：根目录 `.DS_Store`、`docs/M1/m1_project_shell_domain_design.md`、`docs/M1/m1_project_shell_domain_implementation_todo.md`；没有 staged 或 untracked 文件。三者作为已有用户改动保留，交付前用 SHA-256 对照确认内容未变。
+- 验收期间另观察到 `.gitignore` 的未暂存改动；该文件不属于本次 M0 修改，保持原样。
+- 项目目标是为 COMID 与时间窗口提供带证据链、置信度和归因的水质判断。M1 提供领域模型、UTC/当地墙上时钟窗口语义和 ports；M2 只建立创建、订阅、取消的生命周期协议。Transcript/history、query/topology、evidence、reasoning、RAG 和最终前端分别由后续里程碑承接。
+- 需求依据为新架构骨架、总 milestones、M1 接力记录、M2 三份文档与中心 deferred register；旧归档和旧契约不作为 M2 的行为或测试依据。
+
+#### 环境与测试证据
+
+使用现有 `backend/.venv`，未重建环境或升级依赖。本机为 macOS 26.6.2 / arm64：
+
+| 项目 | 实测版本 |
+|---|---|
+| Python | 3.12.14（满足 `>=3.11`） |
+| FastAPI / Starlette | 0.141.1 / 1.6.0 |
+| Pydantic / pydantic-settings | 2.13.5 / 2.15.0 |
+| Uvicorn / tzdata | 0.52.4 / 2026.3 |
+| pytest / httpx | 9.1.1 / 0.28.1 |
+
+从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests -q
+219 passed in 0.53s
+
+git diff --check
+```
+
+两个命令均退出 0；diff check 无输出。上面的解释器路径仅为本次 macOS 验证记录；激活对应平台的虚拟环境后，统一使用 `python -m pytest backend/tests -q`。
+
+M1 接力文档中的 `186 passed` 是此前完成时的历史记录，本次起点以 `219 passed` 为准。现有 `.github/workflows/backend-m1.yml` 配置了 Ubuntu/macOS/Windows + Python 3.11 的安装、全量测试与 health smoke；本次未运行远端 CI 或真实 server smoke，不将配置存在等同于三平台验收通过。M1 尚未勾选的跨平台结果继续保留，M2 在 Milestone 7 补齐自身 smoke/CI 证据。
+
+#### 已核实的复用入口
+
+以下路径相对 `backend/`；入口均经源码检查和实际导入确认。
+
+| 能力 | 真实入口 | M2 接入约束 |
+|---|---|---|
+| App factory | `app/main.py:create_app(settings: AppSettings \| None = None) -> FastAPI`；模块级 `app` | 保持原有调用可用；在此组合 coordinator、router、lifespan 与少量测试注入点。 |
+| Settings | `app/infrastructure/config/settings.py:AppSettings`，从 `app.infrastructure.config` 导出 | `application.state.settings` 当前保存传入的同一 settings 对象；session 必须复制 `analysis_timezone` 到 immutable snapshot，不能保存该可变对象引用。默认时区为 `America/Chicago`。 |
+| 时钟 | `app/ports/clock.py:ClockPort.now() -> datetime`，从 `app.ports` 导出 | 同步方法，约定 aware UTC；目前没有 system clock 实现，M2 在 infrastructure 新增，每次状态转换只读取一次。 |
+| Event sink | `app/ports/event_publisher.py:EventPublisherPort[EventT].publish(event) -> None`，从 `app.ports` 导出 | 异步 generic Protocol；作为未来外部 sink 的窄扩展点。权威 SSE event list 在 application runtime 内原子提交，不依赖 publisher 成功，不预造 repository/event bus。 |
+| 时间粒度 | `app/domain/time/time_resolution.py:TimeResolution` 与 `DEFAULT_TIME_RESOLUTION`，从 `app.domain.time` 导出 | 仅 `6h/12h/24h`，默认 `12h`；直接复用，不新增平行枚举。 |
+| 粒度来源 | `app/domain/time/time_resolution_source.py:TimeResolutionSource`，从 `app.domain.time` 导出 | 枚举含 `frontend/default/auto`；M2 只产生前两者，省略、显式值、显式 null 必须分别处理。 |
+| UTC 校验 | `app/domain/common.py:UtcDatetime`、`normalize_utc_datetime` | 拒绝 naive datetime，转换为 UTC；snapshot/event 共用该规范化能力。 |
+
+#### 边界扫描证据
+
+边界扫描只检查新后端源码、测试、scripts、包配置和现有 CI，没有借助旧接口清单判断兼容性：
+
+```text
+rg -n -i 'backend_bk|frontend(_bk)?|backend_refactor_contract|websocket' backend/app backend/tests backend/scripts backend/pyproject.toml backend/uv.lock .github/workflows
+rg -n 'SessionRuntime|SessionCoordinator|AnalysisSession|LifecycleEvent|StreamingResponse|EventSourceResponse|asyncio\.(Condition|Event|create_task)|lifespan|session_created|text/event-stream' backend/app backend/tests backend/scripts
+```
+
+- 第一项只命中 `TimeResolutionSource.FRONTEND` 的定义及其领域测试；这是新设计明确要求的稳定枚举值，不是前端代码依赖。没有归档、旧契约或 WebSocket 引用。
+- 第二项无匹配。`backend/app/application/`、`api/schemas/`、`api/sse/`、`infrastructure/runtime/` 和 `infrastructure/observability/` 均不存在，没有需要迁移的 session map、task ownership、replay buffer 或 subscriber runtime。
+- 实际调用 `create_app(AppSettings(...)).openapi()` 只有 `/health`；app state 只有 `settings`。M2 三个 endpoint 目前尚未注册，API 文档中的示例是待实现契约。
+- 现有 Domain 与 ports 架构门禁已随全量测试通过。异步测试已有 `asyncio.run` 模式，后续用 `asyncio.Event` gate 控制时序，无需新增 pytest async 插件。
+
+#### M2 文件改动计划
+
+下表是后续 Milestone 1–8 的落点，不表示文件已经创建。路径相对仓库根；实现时只按当前步骤创建有实际职责的模块，必要的模块合并或拆分应同步本表。
+
+| 操作 | 文件 | 用途 / 阶段 |
+|---|---|---|
+| 新增 | `backend/app/application/analysis_sessions/models.py` | immutable session/configuration、typed lifecycle payload/envelope、PublicError、CorrelationContext；Milestone 1。 |
+| 新增 | `backend/app/api/schemas/analysis_sessions.py` | create request、success/error/validation response；Milestone 1。 |
+| 新增 | `backend/app/application/analysis_sessions/runtime.py`、`coordinator.py`（同目录） | application-owned runtime、原子状态机与订阅入口；Milestone 2–4。 |
+| 新增 | `backend/app/application/analysis_sessions/workflow.py` | 最小 workflow Protocol、取消上下文与默认生命周期 fake；Milestone 3。 |
+| 新增 | `backend/app/infrastructure/runtime/system_clock.py` | `ClockPort` 的 aware UTC 实现；接入 coordinator 时创建。 |
+| 新增 | `backend/app/api/sse/encoder.py` | 纯 SSE framing 与 comment keepalive；Milestone 4。 |
+| 新增 | `backend/app/api/http/analysis_sessions.py`、`errors.py`（同目录） | 三个 endpoint、统一 HTTP error handler；Milestone 5。 |
+| 新增 | `backend/app/api/request_context.py` | server-owned request ID、response header 与 HTTP completion 记录；Milestone 5–6。 |
+| 新增 | `backend/app/infrastructure/observability/json_logging.py` | JSON formatter、correlation 与 redaction；Milestone 6。 |
+| 新增 | `backend/app/application/__init__.py`、`backend/app/application/analysis_sessions/__init__.py`、`backend/app/api/schemas/__init__.py`、`backend/app/api/sse/__init__.py`、`backend/app/infrastructure/runtime/__init__.py`、`backend/app/infrastructure/observability/__init__.py` | 随各模块首次实现建立包入口，不提前建立空框架。 |
+| 修改 | `backend/app/main.py` | composition、lifespan、clock/ID/workflow/keepalive 注入及 HTTP handler 注册；保留 health 与 settings 入口。 |
+| 新增 | `backend/tests/application/test_session_models.py`、`test_session_state_machine.py`、`test_session_workflow.py`（同目录） | model/JSON、终态竞态、隔离、cancel/quiesced/shutdown；Milestone 1–3。 |
+| 新增 | `backend/tests/api/test_analysis_schemas.py`、`test_analysis_sessions.py`、`test_analysis_events.py`（同目录） | schema、HTTP/OpenAPI/error、SSE framing/replay/keepalive/disconnect；Milestone 1、4–5。 |
+| 新增 | `backend/tests/observability/test_json_logging.py`、`backend/tests/architecture/test_application_dependencies.py` | 日志关联与脱敏、API/application/runtime 依赖边界；Milestone 6、8。 |
+| 新增 | `backend/scripts/analysis_session_smoke.py` | 跨平台真实 Uvicorn completed/cancel smoke，controlled fake/gate 由测试 composition 注入；Milestone 7。 |
+| 修改 | `backend/tests/api/test_health.py`、`backend/tests/architecture/test_project_shell.py`、`backend/tests/architecture/test_cross_platform_ci.py` | 保留 health/import/无新增依赖断言，补充新 composition 与 M2 smoke/CI 断言。 |
+| 修改 | `.github/workflows/backend-m1.yml`、`backend/README.md` | 复用现有三平台矩阵增加 M2 smoke，更新显示名称和单 worker/API 启动说明；不复制第二套 CI。 |
+| 同步 | 三份 `docs/M2/m2_analysis_session_sse_*.md`、`docs/deferred_milestone_contracts.md`；语义变化时同步 `docs/backend_architecture_skeleton.md`、`docs/backend_refactor_milestones.md` | 实现证据、API/SSE 示例、MR contract evidence 与最终承接记录。 |
+
+`backend/app/domain/`、`backend/app/ports/`、现有 settings、`backend/app/__main__.py`、health route/smoke、`backend/pyproject.toml` 和 `backend/uv.lock` 可直接复用，当前没有计划修改。CI 文件是本清单 Milestone 7 明确要求的必要上层改动，已在执行原则中列明。
+
+#### Contract 状态与接力
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`–`GLOBAL-C10`、`M2-C01`–`M2-C13`；执行门禁为 `MR-G01`–`MR-G14`。以下只记录 M0 已核实的起点与后续验收位置，不将设计确认登记为 `implemented`。
+
+| Contract | 当前证据 / 代码位置 | 后续验收与文档状态 |
+|---|---|---|
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C08` | 新后端边界扫描通过；本地 M2 提交仅为设计文档。 | 保持新系统独立；Milestone 8 再做实现边界 sweep。 |
+| `GLOBAL-C04` | 现有 settings、UTC normalization、TimeResolution/source 入口及 M1 测试。 | Session configuration 固化由 Milestone 1–3 实现和测试，尚未承接 session 层契约。 |
+| `GLOBAL-C07`、`GLOBAL-C09`、`M2-C08`、`M2-C09` | 设计已定义统一 LifecycleEvent、PublicError 和 correlation；当前无实现。 | Milestone 1、5–6 验证 typed model、公开错误、日志关联与 secret 边界。 |
+| `M2-C01`–`M2-C07`、`M2-C10`–`M2-C13` | 当前不存在 session/workflow/SSE runtime。 | Milestone 2–7 用 state machine、workflow、events tests 与真实 server smoke 验证；三份 M2 文档仍为设计契约。 |
+| `GLOBAL-C10` | 中心 register 已登记 M3–M9/Future 的归属与验收点。 | 本次没有新增 deferred 功能或修改契约语义；Milestone 8 完成实现后的承接记录。 |
+
+`MR-G03/G10/G12/G13` 本阶段通过设计先行、保存用户改动和限定文档范围落实；`MR-G04/G06` 随实际数据路径实现做一致性 sweep，`MR-G07/G08/G09/G11` 的生产路径、竞态、脱敏和三平台证据由相应后续步骤完成。中心 register 的最终承接表保持未承接状态，M2 总成功标准及 Milestone 1–8 继续未勾选。
 
 ## Milestone 1：Application models 与 API schemas
 
 ### Application models
 
-- [ ] 实现 `SessionStatus` 六值枚举。
-- [ ] 实现 immutable `AnalysisConfigurationSnapshot`。
-- [ ] 实现 immutable `AnalysisSessionSnapshot`。
-- [ ] 实现四种 lifecycle event type 和版本 1 envelope。
-- [ ] 实现四种 typed event payload，拒绝 type/payload 错配。
-- [ ] 实现 `PublicError` 和最小 `CorrelationContext`。
-- [ ] 所有 datetime 复用 M1 UTC normalization，拒绝 naive time。
-- [ ] UUID、sequence 和非空 stable code 做边界校验。
+- [x] 实现 `SessionStatus` 六值枚举。
+- [x] 实现 immutable `AnalysisConfigurationSnapshot`。
+- [x] 实现 immutable `AnalysisSessionSnapshot`。
+- [x] 实现四种 lifecycle event type 和版本 1 envelope。
+- [x] 实现四种 typed event payload，拒绝 type/payload 错配。
+- [x] 实现 `PublicError` 和最小 `CorrelationContext`。
+- [x] 所有 datetime 复用 M1 UTC normalization，拒绝 naive time。
+- [x] UUID、sequence 和非空 stable code 做边界校验。
 
 ### API schemas
 
-- [ ] 实现 `CreateAnalysisSessionRequest`，query trim 后非空且禁止 extra。
-- [ ] 显式提供 resolution 与省略 resolution 可被可靠区分。
-- [ ] 省略 resolution 使用 12h/default；显式值使用 frontend。
-- [ ] 显式 null、auto 和其他非法 resolution 返回标准 validation error。
-- [ ] 实现创建/cancel success snapshot response。
-- [ ] 实现统一 HTTP error envelope、typed validation violation 和可选 current session snapshot。
-- [ ] success response 和 event 不回显 query。
+- [x] 实现 `CreateAnalysisSessionRequest`，query trim 后非空且禁止 extra。
+- [x] 显式提供 resolution 与省略 resolution 可被可靠区分。
+- [x] 省略 resolution 使用 12h/default；显式值使用 frontend。
+- [x] 显式 null、auto 和其他非法 resolution 返回标准 validation error。
+- [x] 实现创建/cancel success snapshot response。
+- [x] 实现统一 HTTP error envelope、typed validation violation 和可选 current session snapshot。
+- [x] success response 和 event 不回显 query。
 
 ### Tests
 
-- [ ] model construction/validation tests。
-- [ ] JSON round-trip tests。
-- [ ] event discrimination tests。
-- [ ] explicit/omitted/null resolution tests。
-- [ ] extra field rejection tests。
-- [ ] UTC/UUID/sequence validation tests。
+- [x] model construction/validation tests。
+- [x] JSON round-trip tests。
+- [x] event discrimination tests。
+- [x] explicit/omitted/null resolution tests。
+- [x] extra field rejection tests。
+- [x] UTC/UUID/sequence validation tests。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application backend/tests/api -q`
+- [x] `python -m pytest backend/tests/application backend/tests/api -q`
+
+### Milestone 1 完成记录（2026-09-08）
+
+本阶段完成 models/schema 及其校验；没有修改 app factory、health、Domain、ports、依赖或 CI。当前运行时仍只有 `/health`，没有 session runtime、workflow、SSE encoder 或 analysis route。上面的标准 validation error 是模型产生的 Pydantic `ValidationError`；HTTP 422/error handler 在 Milestone 5 接入。
+
+#### 实现与测试位置
+
+| 产物 | 实现 | 验证 |
+|---|---|---|
+| Session/configuration | `backend/app/application/analysis_sessions/models.py:SessionStatus/AnalysisConfigurationSnapshot/AnalysisSessionSnapshot` | `backend/tests/application/test_session_models.py`：UTC/UUID round-trip、嵌套 immutable、IANA timezone 与 extra 校验。 |
+| Lifecycle events | 同一 `models.py` 中的四种 payload/event、`LifecycleEventType` 与 `LifecycleEvent` | 同一测试文件：四种事件 round-trip、全部 12 种 type/payload 错配、JSON Schema discriminator、strict version/sequence、created sequence 1、naive time 拒绝。 |
+| PublicError/correlation | 同一 `models.py:PublicError/CorrelationContext` | 同一测试文件：UUID、正整数 sequence、snake_case code/stage、严格 bool、空 message 与 extra 拒绝。 |
+| Create request/configuration mapping | `backend/app/api/schemas/analysis_sessions.py:CreateAnalysisSessionRequest.to_configuration_snapshot` | `backend/tests/api/test_analysis_schemas.py`：Python/JSON 输入的 omitted/explicit resolution、显式 null/auto 拒绝、query trim、settings 修改后的 snapshot 隔离。 |
+| Success/error/validation schema | 同一 `analysis_sessions.py:AnalysisSessionResponse/HttpPublicError/AnalysisSessionErrorResponse/ValidationViolation` | 同一测试文件：success 不含 query、error 默认 null/空数组与 current snapshot、typed field path、禁止原始 input/ctx/details、SSE 只序列化 PublicError 字段。 |
+| 文档示例与 schema 一致性 | 三份 M2 文档同步具体模型与字段契约 | `test_api_document_json_and_sse_data_examples_validate_against_real_models` 逐个校验 API 文档的 JSON 与四种 SSE data 示例；request/event JSON Schema 有 focused assertions。 |
+
+只新增 `application/`、`application/analysis_sessions/`、`api/schemas/` 所需包入口，以及上述两个实现模块和两个测试文件。后续包、runtime 与框架按各自里程碑创建。
+
+#### 已固定的边界
+
+- 配置在 `to_configuration_snapshot` 边界固化，time resolution/source 复用 M1 枚举；省略得到 `12h/default`，显式有效值得到 `frontend`。原始 request 重序列化使用 `exclude_unset=True` 保留字段是否提供；固化后的 configuration 可直接完整 JSON round-trip。
+- 事件使用四个具体 immutable envelope，`LifecycleEvent` 为按 type 区分的 union；调用方可直接构造具体 event，通用读取使用 `TypeAdapter(LifecycleEvent)`。状态机负责事件与 snapshot 的原子提交、sequence 分配及同次转换 timestamp 一致性，属于 Milestone 2。
+- API response 继承公开 snapshot，HTTP error 继承 PublicError，复用字段事实；error envelope 固定 `error/session/validation`。字段校验错误定型为 `field/type/message`，省略原始 input、ctx 和任意 details map。
+- 模型结构校验不等于 secret 检测或异常脱敏；安全 message 映射、Request ID header 和 redaction 仍由 Milestone 5–6 验收。未在当前模型中添加 future 业务 payload 或生产 fake outcome 开关。
+
+#### 验证结果
+
+使用 `backend/.venv` 的 Python 3.12.14、FastAPI 0.141.1、Pydantic 2.13.5，从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/application backend/tests/api -q
+122 passed in 0.62s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+327 passed in 0.61s
+
+git diff --check
+```
+
+相对 M0 的 219 项基线新增 108 项用例，全量回归通过；diff check 无输出并退出 0。没有新增依赖，也没有真实 sleep、网络、数据库或测试专用生产开关。真实 server smoke 和三平台 CI 仍由 Milestone 7 验收。
+
+#### Contract evidence
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`–`GLOBAL-C10`、`M2-C03`、`M2-C08`、`M2-C09`、`M2-C12`。本阶段只完成其模型/schema 部分，遵循 `MR-G01`–`MR-G14`，不将部分实现写入中心 register 的最终承接表。
+
+| Contract | 已有实现与证据 | 尚待验收 |
+|---|---|---|
+| `GLOBAL-C04` | UTC snapshot 与 request/configuration mapping；对应 UTC/naive/settings isolation/JSON tests。 | Milestone 2–3 在 session 创建与状态转换中使用这些模型。 |
+| `GLOBAL-C09`、`M2-C08` | 单一 typed LifecycleEvent、共享 success/error 字段；discrimination/schema/document example tests。 | Milestone 4–6 接入 SSE 和日志；M3 接入 transcript projection。 |
+| `GLOBAL-C07`、`M2-C09` | PublicError、HTTP error 与 CorrelationContext；严格字段及无 input/query/traceback extra 的 schema tests。 | Milestone 5–6 的 request/error ID 生成、异常安全映射和日志脱敏。 |
+| `M2-C03`、`M2-C12` | event type 只有 created/completed/failed/cancelled；completed payload 无业务 result。 | Milestone 2 的唯一终态竞争和 Milestone 3 的 lifecycle-only fake。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C08`、`GLOBAL-C10` | 实现限于新后端模型，三份 M2 文档同步；未增加旧协议兼容、前端修改或新 deferred 功能。 | Milestone 8 继续完成全链路边界 sweep 和承接登记。 |
+
+本次细化了 union、typed violation 与 optional error 字段的序列化形式，已同步详细设计和 API 文档；中心 hard contracts 的语义、归属和验收要求未改变。Milestone 2–8 与 M2 总成功标准保持未勾选。
 
 ## Milestone 2：In-memory runtime 与状态机
 
