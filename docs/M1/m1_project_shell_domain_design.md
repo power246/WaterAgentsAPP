@@ -187,6 +187,7 @@ allow_inf_nan = false
 - 不用裸 `dict[str, Any]` 表示核心业务结构。
 - 外部源尚未定型的 payload 使用递归 `JsonValue`，不能保存 Python 任意对象。
 - Pydantic frozen 是浅层不可变。动态 JSON payload 在构造时深拷贝，对外序列化返回新对象；M1 不引入 FrozenDict。
+- 通用 JSON payload 的键和值按原样保存，不继承业务字符串的空白裁剪规则；Python 与 JSON 输入都递归拒绝 NaN/Infinity。
 - 枚举继承 `str, Enum`，JSON 使用稳定小写值。
 - round-trip 标准为 `model_dump_json()` 后可由同类型 `model_validate_json()` 恢复为相等对象。
 
@@ -254,6 +255,7 @@ build_time_windows(
 - 从请求起点对应的本地墙上时间开始滚动 resolution。
 - 从请求起点建立独立的当地墙上时钟名义网格，每次在名义网格上增加 `6/12/24` 小时，再解析为 UTC 边界；实际边界的 DST 调整不得改变后续名义网格。
 - 名义边界落入 spring-forward 不存在时段时，按真实 DST gap 向前移动；落入 fall-back 重复时段时选择第一次出现（`fold=0`）。
+- 时区发生整日跳变时，映射后没有沿 UTC 前进的名义边界直接跳过，后续名义网格继续计算。
 - 不超过请求 end；最后不足一个完整墙上时钟窗口时返回截断窗口，由后续阶段标记 `partial_coverage`。
 - 第一版日期输入从 00:00 开始，因此自然得到固定本地网格。
 - 未来自定义时间例如 `03:20-17:40`，按 `03:20-09:20 / 09:20-15:20 / 15:20-17:40` 滚动；DST 仍按墙上时钟语义处理。
@@ -774,6 +776,7 @@ python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 - 没有 timezone transition 时，错误的 5/7 小时完整窗口不被接受。
 - 自定义时间预留行为：从 03:20 滚动，而不是对齐 06:00；尾窗可截断。
 - 自定义时间跨 spring-forward 时只前移不存在的边界，后续边界回到原始名义网格；跨 fall-back 时重复边界选择 `fold=0`。
+- `Pacific/Apia` 整日跳变期间的 6h/12h/24h 窗口仍连续覆盖完整请求范围。
 
 ### 9.3 架构
 

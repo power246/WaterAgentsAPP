@@ -218,6 +218,36 @@ def test_ambiguous_boundary_uses_first_occurrence_without_grid_drift() -> None:
     assert_contiguous_coverage(windows, requested)
 
 
+@pytest.mark.parametrize(
+    ("resolution", "expected_window_count"),
+    (
+        (TimeResolution.SIX_HOURS, 8),
+        (TimeResolution.TWELVE_HOURS, 4),
+        (TimeResolution.TWENTY_FOUR_HOURS, 2),
+    ),
+)
+def test_full_day_timezone_jump_skips_non_advancing_boundaries(
+    resolution: TimeResolution,
+    expected_window_count: int,
+) -> None:
+    timezone_name = "Pacific/Apia"
+    requested = local_time_range(
+        timezone_name,
+        datetime(2011, 12, 29),
+        datetime(2012, 1, 1),
+    )
+
+    windows = build_time_windows(requested, resolution, timezone_name)
+    bounds = local_bounds(windows, timezone_name)
+
+    assert len(windows) == expected_window_count
+    assert {window.end - window.start for window in windows} == {
+        timedelta(hours=resolution.hours)
+    }
+    assert any(start.day == 29 and end.day == 31 for start, end in bounds)
+    assert_contiguous_coverage(windows, requested)
+
+
 def test_non_chicago_iana_timezone_is_used() -> None:
     timezone_name = "Europe/Berlin"
     requested = local_time_range(
