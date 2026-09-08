@@ -473,49 +473,98 @@ Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`
 
 ### Encoder
 
-- [ ] 实现纯函数 lifecycle event -> SSE UTF-8 frame。
-- [ ] `id` 等于 sequence，`event` 等于 type，`data` 为 compact JSON envelope。
-- [ ] data 中的换行和特殊字符经 JSON 正确 escaping。
-- [ ] frame 以空行结束。
-- [ ] 实现 `: keepalive\n\n` 常量或纯函数。
+- [x] 实现纯函数 lifecycle event -> SSE UTF-8 frame。
+- [x] `id` 等于 sequence，`event` 等于 type，`data` 为 compact JSON envelope。
+- [x] data 中的换行和特殊字符经 JSON 正确 escaping。
+- [x] frame 以空行结束。
+- [x] 实现 `: keepalive\n\n` 常量或纯函数。
 
 ### Replay/wait
 
-- [ ] 无 Last-Event-ID 从 sequence 1 回放。
-- [ ] 合法 cursor 只返回 sequence 更大的事件。
-- [ ] 在同一同步协议中完成 replay snapshot 与 wait 注册，消除丢事件窗口。
-- [ ] subscriber 通过共享 immutable event list + 自身 cursor 消费，不复制长期 queue。
-- [ ] publish event 后唤醒全部订阅者。
-- [ ] client disconnect 只结束自己的 generator。
+- [x] 无 Last-Event-ID 从 sequence 1 回放。
+- [x] 合法 cursor 只返回 sequence 更大的事件。
+- [x] 在同一同步协议中完成 replay snapshot 与 wait 注册，消除丢事件窗口。
+- [x] subscriber 通过共享 immutable event list + 自身 cursor 消费，不复制长期 queue。
+- [x] publish event 后唤醒全部订阅者。
+- [x] client disconnect 只结束自己的 generator。
 
 ### Cursor/terminal
 
-- [ ] 非整数/负数 cursor 返回 400。
-- [ ] cursor ahead 返回 409。
-- [ ] unknown session 返回 404。
-- [ ] terminal 且有缺失事件时回放后关闭。
-- [ ] terminal 且 cursor 已到最后 event 时返回 204。
+- [x] 非整数/负数 cursor 产生 `InvalidEventCursorError`，供 Milestone 5 映射 HTTP 400。
+- [x] cursor ahead 产生 `EventCursorAheadError`，供 Milestone 5 映射 HTTP 409。
+- [x] unknown session 产生 `SessionNotFoundError`，供 Milestone 5 映射 HTTP 404。
+- [x] terminal 且有缺失事件时回放后关闭。
+- [x] terminal 且 cursor 已到最后 event 时返回 204。
 
 ### Keepalive
 
-- [ ] 空闲 15 秒发送 comment keepalive。
-- [ ] test 可注入短 interval，不等待真实 15 秒。
-- [ ] keepalive 不占 sequence、不存储、不回放、不进入 lifecycle log。
-- [ ] business event 和 timeout 同时发生时优先发送 event，避免无意义额外 keepalive。
+- [x] 空闲 15 秒发送 comment keepalive。
+- [x] test 可注入短 interval，不等待真实 15 秒。
+- [x] keepalive 不占 sequence、不存储、不回放、不进入 lifecycle log。
+- [x] business event 和 timeout 同时发生时优先发送 event，避免无意义额外 keepalive。
 
 ### Tests
 
-- [ ] exact frame unit tests。
-- [ ] replay/cursor edge tests。
-- [ ] replay-to-wait race test。
-- [ ] multiple subscribers test。
-- [ ] disconnect without cancel test。
-- [ ] keepalive classification test。
-- [ ] terminal close/204 test。
+- [x] exact frame unit tests。
+- [x] replay/cursor edge tests。
+- [x] replay-to-wait race test。
+- [x] multiple subscribers test。
+- [x] disconnect without cancel test。
+- [x] keepalive classification test。
+- [x] terminal close/204 test。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api/test_analysis_events.py -q`
+- [x] `python -m pytest backend/tests/api/test_analysis_events.py -q`
+
+### Milestone 4 完成记录（2026-09-08）
+
+本阶段完成 SSE encoder、cursor/replay、keepalive 以及 stream/204 response 构造与订阅清理。开始时工作区干净，基于本地 Milestone 3 提交 `092f28e`，全量基线为 393 项通过。改动限定于新后端、API tests 和三份 M2 文档，没有新增依赖、业务 DTO 或生产请求开关。
+
+#### 实现与验收
+
+- `backend/app/api/sse/encoder.py`：纯函数 `encode_event(LifecycleEvent) -> bytes` 直接序列化共享 immutable event；UTF-8、单行 compact JSON、严格对应的 id/type，以及结束空行。`KEEPALIVE_FRAME` 固定为无 ID/data 的 comment。API 文档四个 raw frame 与 encoder 逐字节一致，额外覆盖中文、emoji、引号、反斜杠、CR/LF、tab 与 NUL escaping。
+- `backend/app/application/analysis_sessions/coordinator.py:subscribe`：开始 stream 前校验 cursor、session 是否存在和终态。缺失 cursor 从 0 开始；数字字符串允许前导零，只接受 ASCII 十进制；严格 int 不接受 bool/float。超长合法数字先与当前最大 sequence 比较，不依赖 Python 的超长字符串转 int。非法、越界和 unknown session 分别产生安全的 application 异常；已消费完终态返回 `None`。
+- `_events`：每 subscriber 持有独立 cursor，共享原 immutable event 对象，不新增长期队列。读取、等待与超时后复查都使用同一个 session condition；公开终态发送完立即结束。真实 `asyncio.Timeout.reschedule` 配合 gate 验证超时已触发、订阅者等待重新取得锁期间发布终态时，仍优先交付 event。
+- `backend/app/main.py:create_app` 和 coordinator 提供 `keepalive_interval` keyword-only 注入，默认 15 秒并校验有限正值。心跳不写事件列表、日志或 session 时间，不更新 sequence；计时使用当前订阅 task 的 `asyncio.timeout`，无额外心跳 task。
+- `backend/app/api/sse/response.py:create_event_response`：合法订阅构造 `200 text/event-stream; charset=utf-8`、`Cache-Control: no-cache`；已消费完终态构造无 body 的 204。response 拥有 frame/subscription generator，在结束、断线、task cancellation 和发送失败时关闭两者；不修改 session，也不取消 workflow。
+- `backend/tests/api/test_analysis_events.py` 新增 58 项测试：exact frame、Markdown frame 一致性、成功/失败/取消终态的 replay/204、非法与超长 cursor、UUID/unknown session、replay-to-wait 三个时序窗口、真实 timer 竞争、独立订阅、keepalive 分类、ASGI disconnect/send failure 清理。ASGI 测试直接调用真实 response factory 和 response，不注册临时测试路由或 fake outcome 参数。
+
+#### Verify
+
+使用现有 Python 3.12.14 环境，从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/api/test_analysis_events.py -q
+58 passed in 0.58s
+
+backend/.venv/bin/python -m pytest backend/tests/application/test_session_state_machine.py backend/tests/application/test_session_workflow.py -q
+66 passed in 0.54s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+451 passed in 0.92s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+git diff --check
+```
+
+命令均退出 0；diff check 无输出，新文件另检查行尾空白。时序测试用 async gate 或主动触发真实 timeout；短 keepalive interval 不用于断言墙钟耗时。ASGI 层验证了 200/204、逐帧交付与断线清理，现有本机 Uvicorn health smoke 通过；正式 session/SSE 路由与真实 SSE server smoke 分别属于 Milestone 5 和 7。未运行远端 CI，不能将本机通过写成 Linux/macOS/Windows 三平台验收完成。
+
+#### Contract evidence 与后续接入
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C13`。按 `MR-G01`–`MR-G14` 记录阶段证据；中心 register 的硬约束和归属不变，完整 M2 contract 承接仍等待后续 HTTP、日志、smoke/CI 和最终 sweep。
+
+| Contract | 当前实现与测试证据 | 文档与剩余验收 |
+|---|---|---|
+| `GLOBAL-C04`、`GLOBAL-C09`、`M2-C02`、`M2-C03`、`M2-C04`、`M2-C08` | `subscribe/_events/encode_event` 复用同一 event、sequence 和 UTC timestamp；exact frame、terminal replay/204、replay-to-wait race 与 state machine 回归。 | 详细设计 §4、§8，API raw frames/续传说明；Milestone 5 路由及 Milestone 7 真实 server 验收。 |
+| `M2-C01`、`M2-C05`、`M2-C06`、`M2-C10`、`M2-C13` | response 只关闭本订阅；`test_disconnect_or_write_failure_closes_only_its_subscription`、multiple subscribers，以及原有 workflow/cancel/shutdown 回归。 | 详细设计 §8.5、API 实现状态；正式 HTTP disconnect/cancel 和真实 server smoke 由 Milestone 5、7 验收。 |
+| `M2-C07`、`M2-C11` | 默认 15 秒、独立 None transport 信号、无额外 task，事件保留；keepalive 的事件/时间/log/task 检查，实际 timeout 与 publish 竞争测试。 | 详细设计 §8.4、API keepalive；Milestone 6 日志 formatter 与 Milestone 7 server/CI 验收。 |
+| `GLOBAL-C07`、`M2-C09`、`M2-C12` | encoder 不增加 query/业务 result，cursor 异常不保存原始输入；终态 SSE safe error、UUID/error ID、JSON escaping 与 M3 secret tests 回归。 | API 错误和 raw frame 说明；request correlation、统一 400/404/409/422 envelope 与完整 redaction 在 Milestone 5–6 接入。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C10` | 只扩展现有 application 入口和 API SSE adapter，不引入兼容分支、依赖或后台清理；architecture gates 和全量回归通过。 | 三份 M2 文档同步；Milestone 8 最终全链路 sweep/承接登记待完成。 |
+
+本阶段 400/404/409 勾选指可在发送前确定的 application 错误分类，最终 HTTP 状态码和统一 envelope 仍由 Milestone 5 接入；200/204 已在真实 response 的 ASGI 调用中验证。当前运行时 OpenAPI 仍只有 `/health`，没有提前注册 session 路由。M2 总成功标准与 Milestone 5–8 保持未勾选，无新增 deferred contract。
 
 ## Milestone 5：HTTP routes 与统一错误
 
