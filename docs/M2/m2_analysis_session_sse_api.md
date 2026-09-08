@@ -2,6 +2,8 @@
 
 生成日期：2026-09-08
 
+实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–1](m2_analysis_session_sse_implementation_todo.md#milestone-1application-models-与-api-schemas)，包含基线确认、application models 与 API schemas。本文 JSON/SSE data 示例已有模型校验测试；当前运行时 OpenAPI 仍只有 `/health`，session/SSE 路由、SSE 编码及错误 handler 尚未接入。
+
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
 M2 是后端内部里程碑，不与现有 WebSocket 前端兼容。最终前端重构应在 M9 按当时的最终 OpenAPI 和事件文档接入。
@@ -118,11 +120,19 @@ X-Request-ID: <request UUID>
   "sequence": 1,
   "type": "session_created",
   "occurred_at": "2026-09-08T03:20:00Z",
-  "payload": {}
+  "payload": {
+    "status": "pending",
+    "created_at": "2026-09-08T03:20:00Z",
+    "configuration": {
+      "analysis_timezone": "America/Chicago",
+      "time_resolution": "12h",
+      "time_resolution_source": "frontend"
+    }
+  }
 }
 ```
 
-`payload` 的真实结构由 event type 决定，不是任意 JSON map。
+`payload` 的结构由 event type 决定，不是任意 JSON map。四个具体 event model 通过 `LifecycleEvent` discriminated union 校验，JSON Schema 也按 `type` 表达对应的 payload。所有模型禁止 extra，版本只接受整数 1，sequence 只接受正整数；UUID 输出为标准小写连字符形式，aware datetime 统一输出 UTC，naive datetime 被拒绝。
 
 ### 4.2 `session_created`
 
@@ -294,7 +304,33 @@ cancel response 表示取消已经被接受，不表示所有在途工作都已�
 }
 ```
 
-`session` 和 `validation` 只在适用时出现；它们分别复用 session snapshot 和 typed field violation schema，不使用任意 details map。
+Error envelope 固定包含 `error`、`session` 和 `validation`；没有 current snapshot 时 `session` 为 null，没有字段校验错误时 `validation` 为空数组。`error.request_id` 必填，`error.session_id` 与 `error.failed_stage` 可为 null。`code` 和非空 `failed_stage` 必须是小写 snake_case，`retryable` 必须是 bool。
+
+字段校验错误示例：
+
+```json
+{
+  "error": {
+    "error_id": "4a1b720f-0eed-4be0-aaea-8d8300f439ca",
+    "request_id": "82ca317a-b20e-45da-9621-8c35a626cbba",
+    "session_id": null,
+    "code": "invalid_request",
+    "message": "The request is invalid.",
+    "failed_stage": null,
+    "retryable": false
+  },
+  "session": null,
+  "validation": [
+    {
+      "field": ["body", "query"],
+      "type": "string_too_short",
+      "message": "The query must not be empty."
+    }
+  ]
+}
+```
+
+`ValidationViolation.field` 是字符串/整数路径数组；`type` 是稳定 snake_case error type，`message` 是非空安全摘要。不包含原始 `input`、异常 `ctx` 或任意 details map。Milestone 1 已校验这些结构；实际 HTTP 422 映射和安全 message 构造由 Milestone 5 接入，日志脱敏由 Milestone 6 接入。
 
 错误码：
 
