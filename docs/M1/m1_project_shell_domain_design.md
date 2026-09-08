@@ -840,18 +840,7 @@ python -c "import httpx; response = httpx.get('http://127.0.0.1:8000/health'); r
 
 ## 12. Deferred Contract Register
 
-后续 milestone 必须承接以下事项：
-
-| Milestone | 必须实现或完成的设计 |
-|---|---|
-| M2 | session 创建时固化 analysis timezone、time resolution 及其 source；只提供新 session + SSE 协议。 |
-| M3 | transcript item/content 使用 `content_type + content_schema_version` envelope；保存 session timezone；完整上下文支持折叠 timeline 和 lazy load；保存前强制移除 API key、Authorization、Cookie 等 secret；大 payload 只内联预览，完整内容可外置或引用。 |
-| M4 | 第一版输入只接受日期；结束日期包含整天；按 session timezone 转 UTC；输出 `time_resolution` 与 `time_resolution_source`；ParameterResolver 输出 ParameterKey；自动粒度规则在此定义。 |
-| M5 | 为 observation/weather/flow/facility/upstream 定义 source record DTO；adapter 返回 record，Evidence Tool 生成 EvidenceFragment；区分 empty/unavailable/invalid；可疑值原样保留，明确无效值不作为 observed result；建立 ParameterKey 到 canonical unit 的表和单位 tool；保留源单位与转换 provenance；确定性库/API 执行换算，未知换算不得猜测。 |
-| M6 | 设计 quantified/directional/indeterminate 生成规则；无证据仍输出 indeterminate；制定 confidence 评分和聚合规则但保留 Agent 判断空间；多站冲突由 Agent 判断并引用全部证据，综合结果标 inferred；Agent 选择目标单位但换算调用确定性 tool；归因输出 basis；当前有效观测优先于历史推理。 |
-| M8 | historical inference 保留原 session、原 confidence、schema version 和 RAG score；不得覆盖当前观测。 |
-| M9 | 动态修改默认 IANA timezone；单位自定义接口先通过 tool 和 Agent 校验，默认仅生成 session override；写入全局单位表必须由用户显式确认并保存版本记录；不从旧后端归档引入任何兼容层。 |
-| Future | 开放任意时分输入；窗口从请求起点按本地墙上时钟滚动，首尾可 partial；根据真实 IANA transition 接受 DST 时长变化。通用 Waterbody 抽象仅在出现非 COMID 水体需求时设计。 |
+M3 及之后的已确认功能、硬约束和验收重点已迁入 [../deferred_milestone_contracts.md](../deferred_milestone_contracts.md) 统一维护。本 M1 文档不再复制具体条目，避免与后续 Milestone 设计漂移。
 
 ## 13. 设计取舍
 

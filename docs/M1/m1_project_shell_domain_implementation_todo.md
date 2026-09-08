@@ -509,7 +509,7 @@ git diff --check
 目标：把 M1 留在可复用、可审计、后续可以直接接力的状态。
 
 - [x] 回看正式设计，逐条确认实现没有遗留被推翻的旧假设。
-- [x] 回看总 milestones 的 deferred contract register，确认 M1 没有抢跑后续职责。
+- [x] 回看 [../deferred_milestone_contracts.md](../deferred_milestone_contracts.md)，确认 M1 没有抢跑 M3 及之后的职责。
 - [x] 在本 TODO 中勾选实际完成项；未完成项不能因为“后续会做”而标记完成。
 - [x] 对任何与设计不同但已获确认的实现，同步更新设计和总 milestones。
 - [x] 在本节追加完成记录：日期、Python 版本、依赖版本、测试命令和结果。
@@ -544,6 +544,8 @@ git diff --check
 - Events/time：从 `app.ports` 导入异步 `EventPublisherPort[EventT].publish(event)`，由 M2 定义 lifecycle event DTO；时间戳可通过同步 `ClockPort.now()` 注入。
 
 #### 后续 generic DTO 接力
+
+M3 及之后的完整功能约定以 [../deferred_milestone_contracts.md](../deferred_milestone_contracts.md) 为准；下表只记录 M1 已留下的 generic port 接力点。
 
 | 总里程碑 | 需要在获得真实上下文后定型的类型 |
 |---|---|
