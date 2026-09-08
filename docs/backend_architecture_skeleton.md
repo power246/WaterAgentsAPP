@@ -6,6 +6,8 @@
 
 本文档不写 milestone，不分配具体 agent 任务，不选择具体数据库 schema，不展开每个功能的实现细节。后续 milestone 文档会在本文基础上说明需要哪些 agent 完成哪些功能；具体功能设计再由功能实现 agent 逐项细化。
 
+M3 及之后必须承接的已确认功能，统一登记在 [deferred_milestone_contracts.md](deferred_milestone_contracts.md)。
+
 第一版新后端只实现 session + SSE 主协议。新后端的需求和契约只以本文档与后续新架构设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
 
 ## 0. 仓库目录约定
@@ -249,13 +251,14 @@ session_cancelled
 
 ### 5.3 Cancel 语义
 
-第一版 cancel 是 session 级能力。用户点击 cancel 或前端主动断开流，都按 cancel 处理。
+第一版 cancel 是 session 级能力。只有显式调用 cancel API 才取消 session；前端断开 SSE、页面刷新、网络抖动或代理超时都不改变 session 状态。客户端可以使用 `Last-Event-ID` 重连并续传事件。
 
 高层语义：
 
 - session 标记为 `cancelled`。
 - 已产生的过程和结果仍写入 transcript。
 - cancel 后停止向下游 agent 或后续 reasoning 传播结果。
+- cancel endpoint 在终态提交后立即返回，不等待在途 workflow 完全停止；workflow 在阶段边界协作式收敛。
 - 不要求第一版实现复杂暂停/恢复。
 
 具体到 tool/LLM 调用是否强杀、如何标记 partial item，属于后续功能级设计。
