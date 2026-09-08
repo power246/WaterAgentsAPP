@@ -58,14 +58,18 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 
 ## 3. 目录和模块设计
 
-采用一类一文件：
+生产 Domain class 采用一类一文件；`common.py` 只保留共享 type alias、校验函数和兼容导入：
 
 ```text
+.github/
+  workflows/
+    backend-m1.yml
 backend/
   pyproject.toml
   README.md
   app/
     __init__.py
+    __main__.py
     main.py
     api/
       __init__.py
@@ -75,6 +79,8 @@ backend/
     domain/
       __init__.py
       common.py
+      domain_enum.py
+      domain_model.py
       hydrology/
         __init__.py
         location.py
@@ -133,12 +139,17 @@ backend/
       config/
         __init__.py
         settings.py
+  scripts/
+    health_smoke.py
   tests/
     api/
       test_health.py
     architecture/
+      test_cross_platform_ci.py
+      test_domain_contracts.py
       test_domain_dependencies.py
       test_port_imports.py
+      test_project_shell.py
     domain/
       test_hydrology.py
       test_time.py

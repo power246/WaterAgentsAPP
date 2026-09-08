@@ -508,34 +508,50 @@ git diff --check
 
 目标：把 M1 留在可复用、可审计、后续可以直接接力的状态。
 
-- [ ] 回看正式设计，逐条确认实现没有遗留被推翻的旧假设。
-- [ ] 回看总 milestones 的 deferred contract register，确认 M1 没有抢跑后续职责。
-- [ ] 在本 TODO 中勾选实际完成项；未完成项不能因为“后续会做”而标记完成。
-- [ ] 对任何与设计不同但已获确认的实现，同步更新设计和总 milestones。
-- [ ] 在本节追加完成记录：日期、Python 版本、依赖版本、测试命令和结果。
-- [ ] 记录 M2 可直接复用的 app factory、settings snapshot 字段和 EventPublisherPort 入口。
-- [ ] 记录 M3/M4/M5/M6 需要补全的 generic DTO，不在 M1 提前实现。
-- [ ] 确认没有修改 `backend_bk/`，没有覆盖用户无关改动。
+- [x] 回看正式设计，逐条确认实现没有遗留被推翻的旧假设。
+- [x] 回看总 milestones 的 deferred contract register，确认 M1 没有抢跑后续职责。
+- [x] 在本 TODO 中勾选实际完成项；未完成项不能因为“后续会做”而标记完成。
+- [x] 对任何与设计不同但已获确认的实现，同步更新设计和总 milestones。
+- [x] 在本节追加完成记录：日期、Python 版本、依赖版本、测试命令和结果。
+- [x] 记录 M2 可直接复用的 app factory、settings snapshot 字段和 EventPublisherPort 入口。
+- [x] 记录 M3/M4/M5/M6 需要补全的 generic DTO，不在 M1 提前实现。
+- [x] 确认没有修改 `backend_bk/`，没有覆盖用户无关改动。
 
 最终验证：
 
-- [ ] `python -m pip install -e './backend[dev]'` 成功。
-- [ ] `python -m pytest backend/tests -q` 全绿。
-- [ ] `python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000` 可启动。
-- [ ] 使用 Python HTTP client 请求 `http://127.0.0.1:8000/health`，返回 `{"status":"healthy"}`。
-- [ ] `git diff --check` 通过。
+- [x] `python -m pip install -e './backend[dev]'` 成功。
+- [x] `python -m pytest backend/tests -q` 全绿。
+- [x] `python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000` 可启动。
+- [x] 使用 Python HTTP client 请求 `http://127.0.0.1:8000/health`，返回 `{"status":"healthy"}`。
+- [x] `git diff --check` 通过。
 
-完成记录模板：
+### Milestone 8 完成记录（2026-09-08）
 
-```text
-完成日期：
-Python：
-生产依赖：
-测试命令：
-测试结果：
-已知限制：
-下一 Milestone 接力点：
-```
+- 完成日期：2026-09-08。
+- 干净环境：Python 3.12.14；`python -m pip install -e './backend[dev]'` 成功，`python -m pip check` 无 broken requirements。
+- 生产依赖：FastAPI 0.141.1、Pydantic 2.13.5、pydantic-settings 2.15.0、Uvicorn 0.52.4、tzdata 2026.3；测试依赖 pytest 9.1.1、httpx 0.28.1。
+- 测试命令：`python -m pytest backend/tests -q`；结果：185 passed。
+- 启动验收：使用清单中的显式 Uvicorn 命令启动成功；独立 Python/httpx client 请求 `/health` 返回 HTTP 200 和 `{"status":"healthy"}`，随后正常关闭进程。
+- 边界审计：实现相对 M1 设计基线没有修改 `backend_bk/` 或 `frontend/`，没有 session/SSE/transcript/adapter/Agent/RAG/admin 运行时或旧接口兼容层；M8 开始前工作区干净，未覆盖用户无关改动。
+- 设计同步：M7 为满足一类一文件拆分了 `DomainModel` 与 `DomainEnum`，已同步详细设计的目录树；总 milestones 的行为契约无需变更。
+- 已知限制：M7 的 Ubuntu/macOS/Windows workflow 已配置，本机 macOS 验收通过；远端 Windows/Linux CI 尚未执行，因此 M7 的跨三平台结果及 M1 全成功标准两项继续保持未勾选。
+
+#### M2 可直接复用入口
+
+- App factory：`app.main.create_app(settings: AppSettings | None = None) -> FastAPI`；模块级 `app` 可直接供 Uvicorn 使用，解析后的 settings 保存在 `application.state.settings`。
+- Session snapshot：创建 session 时从 `AppSettings.analysis_timezone` 固化实际时区，并同时固化请求解析出的 `TimeResolution` 与 `TimeResolutionSource`；后续全局设置变化不得修改已有 snapshot。
+- Events/time：从 `app.ports` 导入异步 `EventPublisherPort[EventT].publish(event)`，由 M2 定义 lifecycle event DTO；时间戳可通过同步 `ClockPort.now()` 注入。
+
+#### 后续 generic DTO 接力
+
+| 总里程碑 | 需要在获得真实上下文后定型的类型 |
+|---|---|
+| M3 | 为 `TranscriptStorePort[ItemT]` 定义版本化 `TranscriptItem` 和 history DTO；content 使用 `content_type + content_schema_version`，写入前 redaction，大 payload 使用 preview + reference。 |
+| M4 | 定义 analysis request/context、日期 mapper、ParameterResolver result、`HydrologyGraph` 和 `query_understood/topology_ready` event DTO；现有 geocoding/COMID/topology/station ports 已返回稳定 Domain 类型，不需要猜测 source record。 |
+| M5 | 为 `WaterObservationPort`、`WeatherObservationPort`、`WeatherForecastPort`、`FacilitySearchPort` 补全各自 Request/Record DTO，并按需要定型 `CachePort[ValueT]`；adapter 返回 record，Evidence Tool 才构造 `EvidenceFragment`。 |
+| M6 | 为 `LLMPort[RequestT, ResponseT]` 定义 prompt/request 与 raw/structured response DTO，并补充 agent lifecycle event DTO；confidence、sufficiency、冲突处理和 attribution policy 留在 reasoning 层。 |
+| M8 | 为 `RAGIndexPort[ItemT, QueryT, ResultT]` 定义 projection/query/result DTO，保留原 session、confidence、schema version 和 RAG score，不覆盖当前有效观测。 |
+| M9 | 为 `KeyStorePort[SecretT]` 定义 secret 与 masked status DTO；动态时区、单位 override 和经用户确认的全局单位版本记录在该阶段完成。 |
 
 ## 后续非 M1
 
