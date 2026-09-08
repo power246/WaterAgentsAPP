@@ -50,6 +50,22 @@ def test_json_payload_is_defensively_copied_at_input_and_dump_boundaries() -> No
     assert model.payload["series"][0]["value"] == 7.2
 
 
+def test_json_payload_preserves_whitespace_in_keys_and_values() -> None:
+    raw = '{"payload":{"x":1," x ":2,"text":" value "}}'
+
+    model = PayloadModel.model_validate_json(raw)
+
+    assert model.payload == {"x": 1, " x ": 2, "text": " value "}
+    assert PayloadModel.model_validate_json(model.model_dump_json()) == model
+
+
+def test_business_strings_remain_trimmed() -> None:
+    key = ParameterKey(code_system=" usgs ", code=" 00400 ")
+
+    assert key.code_system == "usgs"
+    assert key.code == "00400"
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -62,6 +78,14 @@ def test_json_payload_is_defensively_copied_at_input_and_dump_boundaries() -> No
 def test_json_payload_rejects_non_json_values(payload) -> None:
     with pytest.raises(ValidationError):
         PayloadModel(payload=payload)
+
+
+@pytest.mark.parametrize("number", ("NaN", "Infinity", "-Infinity", "1e400"))
+def test_json_payload_rejects_non_finite_numbers_from_json(number: str) -> None:
+    raw = f'{{"payload":{{"nested":[{number}]}}}}'
+
+    with pytest.raises(ValidationError, match="JSON numbers must be finite"):
+        PayloadModel.model_validate_json(raw)
 
 
 def test_json_payload_round_trips() -> None:

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Annotated, Hashable, TypeAlias, TypeVar
 
 from pydantic import (
@@ -20,9 +21,24 @@ NonEmptyString: TypeAlias = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
+
+
+def ensure_finite_json_numbers(value: object) -> object:
+    if isinstance(value, float) and not isfinite(value):
+        raise ValueError("JSON numbers must be finite")
+    if isinstance(value, list):
+        for item in value:
+            ensure_finite_json_numbers(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            ensure_finite_json_numbers(item)
+    return value
+
+
 JsonValue: TypeAlias = Annotated[
     PydanticJsonValue,
     BeforeValidator(deepcopy),
+    AfterValidator(ensure_finite_json_numbers),
 ]
 
 

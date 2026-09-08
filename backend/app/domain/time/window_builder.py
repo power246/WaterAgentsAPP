@@ -49,9 +49,9 @@ def build_time_windows(
     while cursor < time_range.end:
         nominal_local_boundary += wall_clock_step
         next_boundary = _resolve_local_boundary(nominal_local_boundary, zone)
+        if next_boundary <= cursor:
+            continue
         window_end = min(next_boundary, time_range.end)
-        if window_end <= cursor:
-            raise ValueError("time window boundary must advance in UTC")
         windows.append(TimeRange(start=cursor, end=window_end))
         cursor = window_end
 
