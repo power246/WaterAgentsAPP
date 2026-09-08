@@ -4,8 +4,8 @@
 
 ## 执行原则
 
-- 新代码只写入 `backend/`。`backend_bk/` 与旧契约文档完全排除在新后端上下文外，不得用来推导功能或实现。
-- 不读取、导入、复制、适配、枚举或测试旧后端的代码和契约；新后端不为任何旧行为添加兼容或特殊处理。
+- 新代码只写入 `backend/`。`backend_bk/`、`frontend_bk/` 与旧契约文档完全排除在新后端上下文外，不得用来推导功能或实现。
+- 不读取、导入、复制、适配、枚举或测试旧后端或旧前端的代码和契约；新后端不为任何旧行为添加兼容或特殊处理。
 - M1 只实现 project shell、Domain、窗口规划、ports 协议和测试；不提前实现 session、SSE、transcript、数据库、evidence tools、Agent、RAG 或真实 adapter。
 - Python 最低版本为 3.11；Domain 使用 Pydantic v2；同一份新后端代码必须支持 macOS、Windows 和 Linux。
 - 生产代码使用 `pathlib`/`tempfile` 等标准库跨平台抽象，不硬编码 POSIX 路径、`/tmp`、盘符、shell 命令或 macOS 专用能力。
@@ -30,7 +30,7 @@
 - `TimeWindowResult` 正确表达 `quantified / directional / indeterminate`，quantified 可附带风险/趋势。
 - Evidence 的 collection status、provenance、ParameterKey 和引用完整性成立。
 - Domain 依赖扫描证明没有 FastAPI、数据库、LLM provider 或外部 API 依赖。
-- `backend/` 的生产代码、包配置和测试不依赖或引用 `backend_bk/` 与旧契约文档，也没有引入 M2-M9 运行时实现。
+- `backend/` 的生产代码、包配置和测试不依赖或引用 `backend_bk/`、`frontend_bk/` 与旧契约文档，也没有引入 M2-M9 运行时实现。
 - project shell、配置、路径和启动方式不依赖当前开发机，macOS、Windows、Linux 使用同一份代码和 `pyproject.toml`。
 
 ## 已确认设计结论
@@ -58,7 +58,7 @@
 
 - [x] 执行 `git status --short --branch`，记录当前分支和已有 rename/untracked 文件。
 - [x] 确认 `backend/` 当前没有需要保留的新架构实现；如已有文件，逐项判断归属，不直接覆盖。
-- [x] 确认 `backend_bk/` 是完全排除在新后端上下文外的独立归档。
+- [x] 确认 `backend_bk/` 和 `frontend_bk/` 是完全排除在新后端上下文外的独立归档。
 - [x] 确认正式技术设计为 `docs/M1/m1_project_shell_domain_design.md`。
 - [x] 确认总 milestones 已移除第一版 `Waterbody` 并登记所有 deferred contracts。
 - [x] 执行 `python --version`，确认实际解释器为 Python 3.11+。
@@ -75,8 +75,8 @@
 ### Milestone 0 基线记录（2026-09-07）
 
 - 起始分支为 `codex/m1-design`，跟踪 `origin/m1-design`；工作树干净，没有 rename、untracked 或其他用户未提交改动。基线确认后创建并切换到 `codex/m1-implementation`。
-- `backend/` 为空，没有需要保留或判断归属的新架构文件。后续 M1 不覆盖 `backend_bk/`、`frontend/` 或根目录中的旧项目文件。
-- `backend_bk/` 是完全独立的旧后端归档；本 Milestone 没有修改它，也没有从中推导新后端契约或实现。
+- `backend/` 为空，没有需要保留或判断归属的新架构文件。后续 M1 不覆盖 `backend_bk/`、`frontend_bk/` 或根目录中的旧项目文件。
+- `backend_bk/` 和 `frontend_bk/` 是完全独立的旧系统归档；本 Milestone 没有修改它们，也没有从中推导新后端契约或实现。
 - 正式技术设计为 `docs/M1/m1_project_shell_domain_design.md`。总 milestones 中第一版业务身份只保留 COMID，`Waterbody` 仅出现在 Future deferred contract；M3-M9 与 Future 的延后契约均已登记。
 - 当前 macOS 开发机的系统默认 `/usr/bin/python3` 为 Python 3.9.6，不能用于 M1。已明确选择 Codex bundled Python 3.12.14 作为本机 M1 解释器，并在 `/private/tmp/wateragents-m0-venv` 成功创建隔离虚拟环境；这些绝对路径只属于 M0 本机验证，不得进入生产代码、配置、测试或用户文档。
 - `backend/pyproject.toml` 按设计要在 Milestone 1 创建，因此 M0 无法执行尚不存在文件的 editable install。为验证安装能力，已在临时 Python 3.12 环境中安装设计声明的生产/开发依赖（FastAPI、Pydantic v2、pydantic-settings、Uvicorn、tzdata、pytest、httpx），`pip check` 与导入检查均通过；清空 `PYTHONTZPATH` 后仍能通过 `tzdata` 加载 `America/Chicago`。创建正式 `pyproject.toml` 后仍须执行清单中的 editable install 验收。
@@ -462,7 +462,7 @@ python -m pytest backend/tests/architecture/test_port_imports.py -q
 
 - [x] 搜索所有 Domain class 名称，确认一类一文件且导出完整。
 - [x] 搜索 `Waterbody`，确认只存在文档中的 deferred 描述，不存在 M1 生产类型。
-- [x] 检查新 backend 的生产代码与包配置，确认不引用 `backend_bk/` 或旧契约文档；不枚举或判断旧接口内容。
+- [x] 检查新 backend 的生产代码与包配置，确认不引用 `backend_bk/`、`frontend_bk/` 或旧契约文档；不枚举或判断旧接口内容。
 - [x] 搜索 Domain 中的 `Any`、FastAPI、数据库、LLM 和 SDK import。
 - [x] 搜索 datetime 构造和 serialization，确认没有 naive timestamp 漏入。
 - [x] 搜索窗口 key，确认没有只用本地格式化时间字符串。
@@ -491,7 +491,7 @@ python -m pytest backend/tests/architecture/test_port_imports.py -q
 python -m pytest backend/tests -q
 rg -n 'fastapi|sqlalchemy|httpx|langchain|langgraph|Any' backend/app/domain
 rg -n 'Waterbody' backend/app
-rg -n 'backend_bk|backend_refactor_contract' backend/app backend/pyproject.toml
+rg -n 'backend_bk|frontend_bk|backend_refactor_contract' backend/app backend/pyproject.toml
 git diff --check
 ```
 
@@ -532,9 +532,9 @@ git diff --check
 - 生产依赖：FastAPI 0.141.1、Pydantic 2.13.5、pydantic-settings 2.15.0、Uvicorn 0.52.4、tzdata 2026.3；测试依赖 pytest 9.1.1、httpx 0.28.1。
 - 测试命令：`python -m pytest backend/tests -q`；结果：186 passed。
 - 启动验收：使用清单中的显式 Uvicorn 命令启动成功；独立 Python/httpx client 请求 `/health` 返回 HTTP 200 和 `{"status":"healthy"}`，随后正常关闭进程。
-- 边界审计：实现相对 M1 设计基线没有修改或依赖 `backend_bk/`、旧契约文档或 `frontend/`，没有 session/SSE/transcript/adapter/Agent/RAG/admin 运行时；M8 开始前工作区干净，未覆盖用户无关改动。
+- 边界审计：实现相对 M1 设计基线没有修改或依赖 `backend_bk/`、`frontend_bk/` 或旧契约文档，没有 session/SSE/transcript/adapter/Agent/RAG/admin 运行时；M8 开始前工作区干净，未覆盖用户无关改动。
 - 设计同步：M7 为满足一类一文件拆分了 `DomainModel` 与 `DomainEnum`，已同步详细设计的目录树；总 milestones 的行为契约无需变更。
-- 新旧边界修订（2026-09-08）：旧后端归档不再作为业务、数据源或契约参考；新后端架构测试只检查自身设计不变量，不包含旧接口、事件、DTO 清单或归档专用判断。
+- 新旧边界修订（2026-09-08）：旧后端和旧前端归档不作为业务、数据源、交互或契约参考；新后端架构测试只检查自身设计不变量，不包含旧系统接口、事件、DTO、组件或字段清单。
 - 已知限制：M7 的 Ubuntu/macOS/Windows workflow 已配置，本机 macOS 验收通过；远端 Windows/Linux CI 尚未执行，因此 M7 的跨三平台结果及 M1 全成功标准两项继续保持未勾选。
 
 #### M2 可直接复用入口

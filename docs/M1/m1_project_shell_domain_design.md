@@ -2,7 +2,7 @@
 
 生成日期：2026-09-07
 
-本文把 `backend_refactor_milestones.md` 中的 M1 展开为可直接实现和验收的技术设计。它服从 `backend_architecture_skeleton.md` 的分层与依赖方向。`backend_bk/` 与 `backend_refactor_contract.md` 是独立的旧后端归档，不是 M1 或后续新后端的设计、实现、测试或验收输入。
+本文把 `backend_refactor_milestones.md` 中的 M1 展开为可直接实现和验收的技术设计。它服从 `backend_architecture_skeleton.md` 的分层与依赖方向。`backend_bk/`、`frontend_bk/` 与 `backend_refactor_contract.md` 是独立的旧系统归档，不是 M1 或后续新系统的设计、实现、测试或验收输入。
 
 M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖的项目入口、领域语言、时间语义、数据不变量和 port 模块入口。
 
@@ -13,7 +13,7 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 - 使用 Python 3.11+、FastAPI、Pydantic v2 和 `pyproject.toml`，支持 macOS、Windows 和 Linux。
 - 生产代码不硬编码 POSIX 路径、`/tmp`、shell 命令或 macOS 专用能力；路径处理使用 `pathlib`，运行入口使用 Python 模块调用。
 - Domain 允许直接依赖 Pydantic v2，但不依赖 FastAPI、数据库、LLM framework 或外部 API SDK。
-- 新代码只写入 `backend/`；不读取、导入、复制、适配、枚举或测试 `backend_bk/` 与旧契约文档的内容。
+- 新代码只写入 `backend/`；不读取、导入、复制、适配、枚举或测试 `backend_bk/`、`frontend_bk/` 与旧契约文档的内容。
 - 第一版业务目标只用 COMID 表达，不引入 `Waterbody`；通用水体抽象留给未来版本。
 - Domain model 禁止额外字段并采用浅层不可变；动态 JSON payload 在边界深拷贝，避免共享引用被原地修改。
 - 时间戳进入 Domain 时统一转为 UTC，用户日期和时间窗口按可配置 IANA timezone 解释，默认 `America/Chicago`。
@@ -806,7 +806,7 @@ port import test 验证所有协议可从 `app.ports` 导入，且不导入 infr
 6. 三种 outcome status 的结构约束有测试。
 7. DST、本地墙上时钟和重复本地时间测试通过。
 8. Domain dependency test 证明无 FastAPI/DB/LLM/外部 API 依赖。
-9. `backend/` 的生产代码、包配置和测试不依赖或引用 `backend_bk/` 与旧契约文档。
+9. `backend/` 的生产代码、包配置和测试不依赖或引用 `backend_bk/`、`frontend_bk/` 与旧契约文档。
 10. 未提前实现 M2-M9 运行时能力，也没有从旧后端归档引入兼容或特殊处理。
 11. macOS、Windows、Linux 的 CI 或等效干净环境均通过安装、测试和 health smoke test。
 
