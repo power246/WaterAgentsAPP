@@ -73,12 +73,15 @@ backend/app/
   api/
     http/
       analysis_sessions.py
+      errors.py
+      request_context.py
     schemas/
       analysis_sessions.py
     sse/
       encoder.py
       response.py
   application/
+    correlation.py
     analysis_sessions/
       models.py
       coordinator.py
@@ -96,6 +99,12 @@ backend/app/
 - `api/http/analysis_sessions.py`
   - HTTP 路由、header/path/body 校验、状态码和 response mapping。
   - 不直接修改 session 状态，不直接操作 workflow task。
+- `api/http/errors.py`
+  - application/HTTP/validation 错误映射、固定安全摘要、error ID 和统一 envelope；不复制原始异常文本或校验 input。
+- `api/http/request_context.py`
+  - 纯 ASGI request ID、response header 和请求上下文生命周期，不缓冲 SSE；未开始发送时接管未处理异常。
+- `application/correlation.py`
+  - request ID 的 ContextVar，供 HTTP 边界绑定以及 application 日志读取。
 - `api/schemas/analysis_sessions.py`
   - 对外 request、success response 和 error response。
   - API schema 与 application model 分离，但只做必要映射。
@@ -104,7 +113,7 @@ backend/app/
   - 编码函数保持纯函数并接受协议级单元测试。
 - `api/sse/response.py`
   - 在开始发送前完成 application 订阅校验，将已消费完的终态映射为 204，其余订阅编码为 StreamingResponse。
-  - response 拥有本次订阅及 frame generator，结束、断线或发送失败时关闭两者；统一错误 envelope 和正式路由在 Milestone 5 接入。
+  - response 拥有本次订阅及 frame generator，结束、断线或发送失败时关闭两者；统一错误 envelope 和正式路由由 `api/http` 接入。
 - `application/analysis_sessions/models.py`
   - `SessionStatus`、configuration snapshot、session snapshot、lifecycle event、公开错误等稳定。
 - `application/analysis_sessions/coordinator.py`
@@ -206,9 +215,9 @@ workflow quiesced event/flag
 
 可变 runtime 不使用 Pydantic，也不得通过 API 序列化。不同 session 不共享锁、事件列表、取消信号或 task handle。
 
-Application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建 pending snapshot/created event，在同一 map 临界区登记 workflow task handle 和 session，再返回捕获的 pending snapshot；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id, after_sequence=...)` 在返回 async generator 前完成 lookup、cursor 与终态校验；已消费完终态返回 `None`，否则在同一 condition 协议内读取已有事件和等待通知。generator 的 `None` item 表示 keepalive，LifecycleEvent item 复用原事件对象，终态事件发完后结束。Milestone 4 已提供纯 SSE encoder 和 response factory；正式路由及统一错误映射在 Milestone 5 接入。API 不获取 runtime、锁、task 或可变 event list。
+Application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建 pending snapshot/created event，在同一 map 临界区登记 workflow task handle 和 session，再返回捕获的 pending snapshot；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id, after_sequence=...)` 在返回 async generator 前完成 lookup、cursor 与终态校验；已消费完终态返回 `None`，否则在同一 condition 协议内读取已有事件和等待通知。generator 的 `None` item 表示 keepalive，LifecycleEvent item 复用原事件对象，终态事件发完后结束。纯 SSE encoder、response factory、正式 HTTP 路由及统一错误映射已接入。API 不获取 runtime、锁、task 或可变 event list。
 
-Lookup 接受 UUID 或 UUID 字符串；非法 UUID 产生 Pydantic validation error，合法但不存在的 UUID 产生 `SessionNotFoundError`。非法状态转换产生带当前 immutable `session` 和目标状态的 `InvalidSessionTransitionError`；终态竞争的失败方通过该 snapshot 得到胜出终态。重复 cancel 已 cancelled 的 session 返回同一 snapshot，不读取时钟、不追加事件。HTTP 错误映射由 Milestone 5 接入。
+Lookup 接受 UUID 或 UUID 字符串；非法 UUID 产生 Pydantic validation error，合法但不存在的 UUID 产生 `SessionNotFoundError`。非法状态转换产生带当前 immutable `session` 和目标状态的 `InvalidSessionTransitionError`；终态竞争的失败方通过该 snapshot 得到胜出终态。重复 cancel 已 cancelled 的 session 返回同一 snapshot，不读取时钟、不追加事件。HTTP handler 将这些错误映射到统一 envelope，非法 path UUID 在路由校验时返回 422。
 
 ## 5. 创建请求与响应
 
@@ -240,7 +249,7 @@ time_resolution: TimeResolution = 12h
 7. 返回创建时捕获的 pending snapshot
 ```
 
-注册 gate 保证 eager task factory 也只能在 task/session 登记完成、map 解锁后运行 workflow；task 创建失败不会留下可查询但没有 owner 的 session。该顺序已由 application 实现，request ID 与 HTTP 创建入口在 Milestone 5 接入。
+注册 gate 保证 eager task factory 也只能在 task/session 登记完成、map 解锁后运行 workflow；task 创建失败不会留下可查询但没有 owner 的 session。HTTP 创建入口调用该 application 顺序，返回 201 和创建时捕获的 pending snapshot；request ID 由外层 ASGI middleware 生成。
 
 即使后台 task 在 HTTP response 完成序列化前已经进入 running 或终态，POST 仍固定返回创建时的 `pending` snapshot。客户端通过 SSE 获得后续生命周期。
 
@@ -297,7 +306,7 @@ notify all subscribers
 
 `pending -> running` 没有公开 lifecycle event，只原子更新内部 snapshot 并记录一次结构化状态转换日志。
 
-Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。Logger/handler 异常不改变已提交状态，JSON formatter 与完整 request correlation 在 Milestone 5–6 接入。Milestone 3 的 task wrapper 在运行前提交 internal running；正常返回经过停止信号检查并通过同一状态转换入口提交 completed。取消或关闭获胜后，晚到返回和异常只记录 suppression，不覆盖终态。
+Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。Logger/handler 异常不改变已提交状态，request correlation 已接入；JSON formatter 与经 redaction 的完整异常诊断在 Milestone 6 接入。Milestone 3 的 task wrapper 在运行前提交 internal running；正常返回经过停止信号检查并通过同一状态转换入口提交 completed。取消或关闭获胜后，晚到返回和异常只记录 suppression，不覆盖终态。
 
 ### 6.3 completion/cancel 竞争
 
@@ -416,7 +425,7 @@ X-Request-ID: <request UUID>
 - 首次回放与注册等待必须在同一个同步协议中完成，不能在两者之间遗漏刚发布的事件。
 - `Last-Event-ID` 使用 ASCII 十进制非负整数，允许前导零；缺失表示 0，空字符串、符号、空白、小数和 Unicode 数字均为非法格式。非整数、负数或格式非法的 cursor 在开始 stream 前返回 HTTP 400。
 - application 的 `subscribe(session_id, after_sequence=...)` 同时接受缺省值、严格非负 int 或上述数字字符串。在同一个 condition 临界区校验最大 sequence 与终态；字符串先去前导零并与最大 sequence 比较，再转换为 int，避免超长合法整数被误判为格式错误。
-- `InvalidEventCursorError`、`EventCursorAheadError`、`SessionNotFoundError` 分别供 Milestone 5 映射 400/409/404；异常不保存原始 cursor 内容。已消费完终态返回 `None`，response factory 将其映射为无 body 的 204。
+- `InvalidEventCursorError`、`EventCursorAheadError`、`SessionNotFoundError` 由 HTTP handler 分别映射 400/409/404；异常不保存原始 cursor 内容。已消费完终态返回 `None`，response factory 将其映射为无 body 的 204。
 - cursor 大于当前最大 sequence 返回 HTTP 409，避免静默等待一个不可能的历史位置。
 - session 不存在返回 HTTP 404。
 - 如果 session 已终止且客户端 cursor 已消费最后一个 terminal event，返回 HTTP 204，阻止 EventSource 无意义地自动重连。
@@ -525,11 +534,15 @@ validation: typed field violations or empty
 - `request_id` 每个 HTTP 请求都有。
 - `session` 只在例如 cancel terminal conflict 时返回，复用正常 snapshot，不使用自由形态 details map。
 - validation error 只给出 field path、stable error type 和 safe message，不回显原始 input。
-- 所有非 2xx response 带 `X-Request-ID`。
+- 所有 response（包括 health、OpenAPI、SSE 握手、204 和错误）带服务端生成的 `X-Request-ID`；客户端同名 header 不参与 ID 选择。
+- 纯 ASGI request context middleware 将 UUID 放入 request state，并通过 ContextVar 供 application 日志使用；结束时恢复上下文。后台 workflow 保留创建请求的 ID，cancel 和订阅请求使用各自 ID。
+- request validation 仅保留安全 field path、已知错误 type 和固定摘要；未知 JSON key 映射为 `unknown_field`，不复制 `input`、`ctx`、原始 `msg` 或未知错误 type。
+- 未知路由返回 404 `not_found`，方法不支持返回 405 `method_not_allowed` 并保留 `Allow`；禁用自动尾斜杠重定向，使错误统一进入 envelope。已关闭的 coordinator 返回 503 `service_unavailable`，可重试。
+- middleware 在 headers 发出前将未处理异常映射为安全 500；headers 发出后不追加 HTTP JSON，也不更改 session 状态。
 
 API schema 使用 `AnalysisSessionResponse` 继承公开 snapshot 字段，`HttpPublicError` 继承 `PublicError` 并增加必填 UUID `request_id` 与可空 UUID `session_id`。`AnalysisSessionErrorResponse` 固定包含 `error`、`session`、`validation`；不适用时后两项分别为 null 和空数组。`ValidationViolation` 的字段为 `field`（字符串/整数路径数组）、`type`（stable snake_case error type）和 `message`（非空安全摘要），不包含原始 `input`、异常 `ctx` 或任意 details map。
 
-所有模型禁止 extra；公开错误的 `code` 与非空 `failed_stage` 使用小写 snake_case，`retryable` 只接受 bool。最小 `CorrelationContext` 包含可空 UUID `request_id/session_id/error_id` 和可空正整数 `event_sequence`。模型只校验结构；从异常生成安全 message、移除 validation input 和写日志前 redaction 由 Milestone 5–6 实现，不能以字符串类型校验代替脱敏。
+所有模型禁止 extra；公开错误的 `code` 与非空 `failed_stage` 使用小写 snake_case，`retryable` 只接受 bool。最小 `CorrelationContext` 包含可空 UUID `request_id/session_id/error_id` 和可空正整数 `event_sequence`。模型只校验结构；HTTP handler 已从固定安全 message 构造公开错误，去除 validation input/ctx/原始 msg 并隐藏未知 field key。写日志前的通用 redaction 仍由 Milestone 6 实现，不能以字符串类型校验代替脱敏。
 
 M2 稳定错误码至少包括：
 
@@ -541,6 +554,10 @@ session_not_found
 session_already_terminal
 workflow_failed
 internal_error
+not_found
+method_not_allowed
+service_unavailable
+http_error
 ```
 
 ### 11.3 SSE 中途失败
@@ -622,7 +639,7 @@ service_shutdown
 - 不逐条记录 keepalive。
 - 日志失败不得改变 session 结果。
 
-Milestone 3 已接入 `cancel_accepted`、`workflow_output_suppressed`、`workflow_quiesced`、`session_failed`、`service_shutdown` 和 wrapper 异常兜底 `workflow_task_error` 的结构化调用点。失败记录复用公开错误的 error ID，并保留 exception type；此阶段不记录原始 exception message、traceback、query 或 headers。JSON formatter、request correlation 和经 redaction 的异常诊断在 Milestone 5–6 接入，不能把当前字段级安全映射视为完整日志脱敏已完成。状态转换日志复用该次 timestamp，独立收敛日志通过 `ClockPort` 读取发生时间。
+Milestone 3 已接入 `cancel_accepted`、`workflow_output_suppressed`、`workflow_quiesced`、`session_failed`、`service_shutdown` 和 wrapper 异常兜底 `workflow_task_error` 的结构化调用点。失败记录复用公开错误的 error ID，并保留 exception type；此阶段不记录原始 exception message、traceback、query 或 headers。Milestone 5 通过 `request_id_context` 为 lifecycle log 关联创建/cancel 请求，并提供 `http_request_failed` 与 `http_request_completed` 调用点，记录安全 route template、method、status 和复用的公开错误。JSON formatter、duration_ms 和经 redaction 的完整异常诊断在 Milestone 6 接入，不能把当前字段级安全映射视为完整日志脱敏已完成。状态转换日志复用该次 timestamp，独立收敛日志通过 `ClockPort` 读取发生时间。
 
 ### 12.4 Transcript
 
