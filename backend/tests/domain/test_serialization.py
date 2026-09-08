@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -50,12 +51,30 @@ def test_json_payload_is_defensively_copied_at_input_and_dump_boundaries() -> No
     assert model.payload["series"][0]["value"] == 7.2
 
 
-def test_json_payload_preserves_whitespace_in_keys_and_values() -> None:
-    raw = '{"payload":{"x":1," x ":2,"text":" value "}}'
+@pytest.mark.parametrize(
+    "input_method",
+    ("constructor", "model_validate", "model_validate_json"),
+)
+def test_json_payload_preserves_whitespace_in_keys_and_values(
+    input_method: str,
+) -> None:
+    payload = {
+        "x": 1,
+        " x ": 2,
+        "text": " value ",
+        "nested": {"key": "plain", " key ": [" nested value "]},
+    }
+    builders = {
+        "constructor": lambda: PayloadModel(payload=payload),
+        "model_validate": lambda: PayloadModel.model_validate({"payload": payload}),
+        "model_validate_json": lambda: PayloadModel.model_validate_json(
+            json.dumps({"payload": payload})
+        ),
+    }
 
-    model = PayloadModel.model_validate_json(raw)
+    model = builders[input_method]()
 
-    assert model.payload == {"x": 1, " x ": 2, "text": " value "}
+    assert model.payload == payload
     assert PayloadModel.model_validate_json(model.model_dump_json()) == model
 
 
