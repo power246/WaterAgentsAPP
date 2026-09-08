@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncGenerator, Callable
 from datetime import datetime
 from math import isfinite
 from uuid import UUID, uuid4
@@ -65,6 +65,18 @@ class ServiceShuttingDownError(Exception):
     pass
 
 
+class InvalidEventCursorError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("The event cursor must be a non-negative decimal integer.")
+
+
+class EventCursorAheadError(Exception):
+    def __init__(self, session: AnalysisSessionSnapshot, last_sequence: int) -> None:
+        self.session = session
+        self.last_sequence = last_sequence
+        super().__init__("The event cursor is ahead of the latest session event.")
+
+
 class SessionCoordinator:
     def __init__(
         self,
@@ -74,9 +86,16 @@ class SessionCoordinator:
         logger: logging.Logger | None = None,
         workflow: AnalysisWorkflow | None = None,
         shutdown_grace_period: float = 1.0,
+        keepalive_interval: float = 15.0,
     ) -> None:
         if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
             raise ValueError("shutdown_grace_period must be finite and non-negative")
+        if (
+            isinstance(keepalive_interval, bool)
+            or not isfinite(keepalive_interval)
+            or keepalive_interval <= 0
+        ):
+            raise ValueError("keepalive_interval must be finite and positive")
         self._clock = clock
         self._id_factory = id_factory
         self._logger = (
@@ -88,6 +107,7 @@ class SessionCoordinator:
         self._shutdown_grace_period = shutdown_grace_period
         self._shutdown_lock = asyncio.Lock()
         self._closing = False
+        self._keepalive_interval = keepalive_interval
 
     async def create_session(
         self, query: str, configuration: AnalysisConfigurationSnapshot
@@ -272,8 +292,34 @@ class SessionCoordinator:
     async def cancel_session(self, session_id: UUID | str) -> AnalysisSessionSnapshot:
         return await self._transition(session_id, SessionStatus.CANCELLED)
 
-    async def subscribe(self, session_id: UUID | str) -> AsyncIterator[LifecycleEvent]:
-        return self._events(await self._lookup(session_id))
+    async def subscribe(
+        self, session_id: UUID | str, *, after_sequence: int | str | None = None
+    ) -> AsyncGenerator[LifecycleEvent | None, None] | None:
+        if after_sequence is None:
+            cursor = 0
+        elif type(after_sequence) is int and after_sequence >= 0:
+            cursor = after_sequence
+        elif (
+            isinstance(after_sequence, str)
+            and after_sequence.isascii()
+            and after_sequence.isdecimal()
+        ):
+            cursor = after_sequence.lstrip("0") or "0"
+        else:
+            raise InvalidEventCursorError()
+        runtime = await self._lookup(session_id)
+        async with runtime.condition:
+            last_sequence = len(runtime.events)
+            if isinstance(cursor, str):
+                limit = str(last_sequence)
+                if (len(cursor), cursor) > (len(limit), limit):
+                    raise EventCursorAheadError(runtime.snapshot, last_sequence)
+                cursor = int(cursor)
+            if cursor > last_sequence:
+                raise EventCursorAheadError(runtime.snapshot, last_sequence)
+            if cursor == last_sequence and runtime.snapshot.status not in _TRANSITIONS:
+                return None
+        return self._events(runtime, cursor)
 
     async def _lookup(self, session_id: UUID | str) -> SessionRuntime:
         key = _UUID.validate_python(session_id)
@@ -283,14 +329,20 @@ class SessionCoordinator:
             raise SessionNotFoundError(key)
         return runtime
 
-    async def _events(self, runtime: SessionRuntime) -> AsyncIterator[LifecycleEvent]:
-        cursor = 0
+    async def _events(
+        self, runtime: SessionRuntime, cursor: int
+    ) -> AsyncGenerator[LifecycleEvent | None, None]:
         while True:
             async with runtime.condition:
-                await runtime.condition.wait_for(
-                    lambda: len(runtime.events) > cursor
-                    or runtime.snapshot.status not in _TRANSITIONS
-                )
+                try:
+                    async with asyncio.timeout(self._keepalive_interval):
+                        await runtime.condition.wait_for(
+                            lambda: len(runtime.events) > cursor
+                            or runtime.snapshot.status not in _TRANSITIONS
+                        )
+                except TimeoutError:
+                    pass
+                # Recheck under the lock so a committed event wins over a simultaneous timeout.
                 batch = tuple(runtime.events[cursor:])
                 terminal = runtime.snapshot.status not in _TRANSITIONS
             for event in batch:
@@ -298,6 +350,8 @@ class SessionCoordinator:
                 yield event
             if terminal:
                 return
+            if not batch:
+                yield None
 
     async def _transition(
         self,

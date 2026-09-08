@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–3](m2_analysis_session_sse_implementation_todo.md#milestone-3fake-workflowcancel-与-lifespan)，包含 models/schemas、application-owned 内存 runtime、原子状态机、基础事件订阅、fake workflow task、协作式取消与 lifespan 收敛。本文 JSON/SSE data 示例已有模型校验测试；当前运行时 OpenAPI 仍只有 `/health`，session/SSE 路由、cursor/keepalive、SSE 编码及 HTTP 错误 handler 尚未接入。
+实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–4](m2_analysis_session_sse_implementation_todo.md#milestone-4sse-encoderreplay-与-keepalive)，包含 models/schemas、内存状态机、fake workflow、协作式取消、lifespan、SSE 编码、cursor/replay 和 keepalive。SSE response factory 已通过 ASGI 测试验证 stream、终态 204 与断线清理，文档 raw frame 与 encoder 逐字节一致；当前运行时 OpenAPI 仍只有 `/health`，正式 session/SSE 路由、request ID 和统一 HTTP 错误 handler 由 Milestone 5 接入。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -141,7 +141,7 @@ Raw frame：
 ```text
 id: 1
 event: session_created
-data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":1,"type":"session_created","occurred_at":"2026-09-08T03:20:00Z","payload":{"status":"pending","created_at":"2026-09-08T03:20:00Z","configuration":{"analysis_timezone":"America/Chicago","time_resolution":"12h","time_resolution_source":"frontend"}}}
+data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":1,"occurred_at":"2026-09-08T03:20:00Z","type":"session_created","payload":{"status":"pending","created_at":"2026-09-08T03:20:00Z","configuration":{"analysis_timezone":"America/Chicago","time_resolution":"12h","time_resolution_source":"frontend"}}}
 
 ```
 
@@ -150,7 +150,7 @@ data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","s
 ```text
 id: 2
 event: session_completed
-data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":2,"type":"session_completed","occurred_at":"2026-09-08T03:20:01Z","payload":{"status":"completed","completed_at":"2026-09-08T03:20:01Z"}}
+data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":2,"occurred_at":"2026-09-08T03:20:01Z","type":"session_completed","payload":{"status":"completed","completed_at":"2026-09-08T03:20:01Z"}}
 
 ```
 
@@ -161,7 +161,7 @@ M2 不返回 fake 水质结果。最终 result 由 M6/M7 定型。
 ```text
 id: 2
 event: session_failed
-data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":2,"type":"session_failed","occurred_at":"2026-09-08T03:20:01Z","payload":{"status":"failed","failed_at":"2026-09-08T03:20:01Z","error":{"error_id":"0463cd90-6d0f-47e9-9656-b4aa86352c61","code":"workflow_failed","message":"The analysis workflow failed.","failed_stage":"analysis_workflow","retryable":false}}}
+data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":2,"occurred_at":"2026-09-08T03:20:01Z","type":"session_failed","payload":{"status":"failed","failed_at":"2026-09-08T03:20:01Z","error":{"error_id":"0463cd90-6d0f-47e9-9656-b4aa86352c61","code":"workflow_failed","message":"The analysis workflow failed.","failed_stage":"analysis_workflow","retryable":false}}}
 
 ```
 
@@ -172,7 +172,7 @@ data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","s
 ```text
 id: 2
 event: session_cancelled
-data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":2,"type":"session_cancelled","occurred_at":"2026-09-08T03:20:01Z","payload":{"status":"cancelled","cancelled_at":"2026-09-08T03:20:01Z"}}
+data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","sequence":2,"occurred_at":"2026-09-08T03:20:01Z","type":"session_cancelled","payload":{"status":"cancelled","cancelled_at":"2026-09-08T03:20:01Z"}}
 
 ```
 
@@ -187,7 +187,7 @@ data: {"schema_version":1,"session_id":"10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c","s
 
 ```
 
-keepalive 没有 `id`、`event` 或 JSON `data`，不更新客户端 cursor，也不需要展示为日志。
+keepalive 没有 `id`、`event` 或 JSON `data`，不更新客户端 cursor，也不需要展示为日志。它不进入事件存储、session 时间更新或生命周期日志；超时与 lifecycle event 同时就绪时优先发送事件。生产默认 15 秒，测试通过 app factory 的 `keepalive_interval` 注入短间隔，HTTP request、settings 和环境变量没有此开关。
 
 ### 4.7 EventSource 示例
 
@@ -228,10 +228,13 @@ Last-Event-ID: 1
 边界：
 
 - header 缺失：从 sequence 1 开始。
-- header 非整数或为负数：HTTP 400 `invalid_event_cursor`。
+- header 使用 ASCII 十进制非负整数，允许前导零（如 `0001` 等于 `1`）；空字符串、符号、空白、小数或 Unicode 数字返回 HTTP 400 `invalid_event_cursor`。
+- 超长合法数字仍按大小判定，不因整数转换长度限制变成格式错误；超过当前最大 sequence 返回 `event_cursor_ahead`。
 - cursor 大于服务端当前最大 sequence：HTTP 409 `event_cursor_ahead`。
 - session 已终止且 cursor 已消费最后事件：HTTP 204，不再建立 stream。
 - session 已终止但 cursor 落后：回放缺失事件后关闭 stream。
+
+Milestone 4 的 `create_event_response` 会在构造 response 前完成这些检查：合法订阅构造 `200 text/event-stream`，已消费完终态构造无 body 的 204。非法／越界 cursor 和未知 session 产生分别对应 400／409／404 的 application 异常，最终 HTTP 错误 envelope 在 Milestone 5 接入。response 在正常结束、断线或写入失败时关闭自己的 frame 和 subscription generator，workflow 继续运行。
 
 ## 5. 取消 session
 

@@ -77,6 +77,7 @@ backend/app/
       analysis_sessions.py
     sse/
       encoder.py
+      response.py
   application/
     analysis_sessions/
       models.py
@@ -101,6 +102,9 @@ backend/app/
 - `api/sse/encoder.py`
   - 把一个 `LifecycleEvent` 编码成标准 SSE frame。
   - 编码函数保持纯函数并接受协议级单元测试。
+- `api/sse/response.py`
+  - 在开始发送前完成 application 订阅校验，将已消费完的终态映射为 204，其余订阅编码为 StreamingResponse。
+  - response 拥有本次订阅及 frame generator，结束、断线或发送失败时关闭两者；统一错误 envelope 和正式路由在 Milestone 5 接入。
 - `application/analysis_sessions/models.py`
   - `SessionStatus`、configuration snapshot、session snapshot、lifecycle event、公开错误等稳定。
 - `application/analysis_sessions/coordinator.py`
@@ -202,7 +206,7 @@ workflow quiesced event/flag
 
 可变 runtime 不使用 Pydantic，也不得通过 API 序列化。不同 session 不共享锁、事件列表、取消信号或 task handle。
 
-Application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建 pending snapshot/created event，在同一 map 临界区登记 workflow task handle 和 session，再返回捕获的 pending snapshot；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id)` 在返回 async iterator 前完成 lookup，iterator 在同一 condition 协议内读取已有事件和等待通知，终态事件发完后结束；cursor、keepalive 和 HTTP/SSE 编码在 Milestone 4–5 接入。API 不获取 runtime、锁、task 或可变 event list。
+Application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建 pending snapshot/created event，在同一 map 临界区登记 workflow task handle 和 session，再返回捕获的 pending snapshot；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id, after_sequence=...)` 在返回 async generator 前完成 lookup、cursor 与终态校验；已消费完终态返回 `None`，否则在同一 condition 协议内读取已有事件和等待通知。generator 的 `None` item 表示 keepalive，LifecycleEvent item 复用原事件对象，终态事件发完后结束。Milestone 4 已提供纯 SSE encoder 和 response factory；正式路由及统一错误映射在 Milestone 5 接入。API 不获取 runtime、锁、task 或可变 event list。
 
 Lookup 接受 UUID 或 UUID 字符串；非法 UUID 产生 Pydantic validation error，合法但不存在的 UUID 产生 `SessionNotFoundError`。非法状态转换产生带当前 immutable `session` 和目标状态的 `InvalidSessionTransitionError`；终态竞争的失败方通过该 snapshot 得到胜出终态。重复 cancel 已 cancelled 的 session 返回同一 snapshot，不读取时钟、不追加事件。HTTP 错误映射由 Milestone 5 接入。
 
@@ -410,7 +414,9 @@ X-Request-ID: <request UUID>
 - 没有 `Last-Event-ID` 时从 sequence 1 回放当前已有的全部事件，然后等待新事件。
 - 有合法 `Last-Event-ID=N` 时只发送 sequence 大于 N 的事件。
 - 首次回放与注册等待必须在同一个同步协议中完成，不能在两者之间遗漏刚发布的事件。
-- 非整数、负数或格式非法的 cursor 在开始 stream 前返回 HTTP 400。
+- `Last-Event-ID` 使用 ASCII 十进制非负整数，允许前导零；缺失表示 0，空字符串、符号、空白、小数和 Unicode 数字均为非法格式。非整数、负数或格式非法的 cursor 在开始 stream 前返回 HTTP 400。
+- application 的 `subscribe(session_id, after_sequence=...)` 同时接受缺省值、严格非负 int 或上述数字字符串。在同一个 condition 临界区校验最大 sequence 与终态；字符串先去前导零并与最大 sequence 比较，再转换为 int，避免超长合法整数被误判为格式错误。
+- `InvalidEventCursorError`、`EventCursorAheadError`、`SessionNotFoundError` 分别供 Milestone 5 映射 400/409/404；异常不保存原始 cursor 内容。已消费完终态返回 `None`，response factory 将其映射为无 body 的 204。
 - cursor 大于当前最大 sequence 返回 HTTP 409，避免静默等待一个不可能的历史位置。
 - session 不存在返回 HTTP 404。
 - 如果 session 已终止且客户端 cursor 已消费最后一个 terminal event，返回 HTTP 204，阻止 EventSource 无意义地自动重连。
@@ -419,7 +425,9 @@ X-Request-ID: <request UUID>
 ### 8.4 Keepalive
 
 - 当 15 秒内没有业务事件时发送 `: keepalive\n\n`。
-- interval 可以作为小型 runtime 配置或测试注入点；生产默认固定 15 秒。
+- coordinator 与 `create_app` 接受 keyword-only `keepalive_interval`，默认 15 秒，只允许有限正数；不增加环境变量或 request/settings 开关。
+- iterator 在 session condition 内使用 `asyncio.timeout` 等待事件，超时后持锁再次检查事件与终态；若两者同时就绪，优先发送 lifecycle event。空闲时 yield `None` 作为仅传输层可见的 keepalive 信号，由 encoder 层映射为 comment，不能作为 LifecycleEvent 保存或记录。
+- 等待、计时和取消都在当前订阅 task 内完成，不为每次心跳创建后台 task。订阅者停止读取时不启动独立定时器。
 - keepalive 无 event ID 和 JSON data。
 - keepalive 不进入 replay buffer、structured lifecycle log 或 transcript。
 

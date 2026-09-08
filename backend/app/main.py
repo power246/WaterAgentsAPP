@@ -21,6 +21,7 @@ def create_app(
     workflow: AnalysisWorkflow | None = None,
     id_factory: Callable[[], UUID] = uuid4,
     shutdown_grace_period: float = 1.0,
+    keepalive_interval: float = 15.0,
 ) -> FastAPI:
     resolved_settings = settings or AppSettings()
 
@@ -31,6 +32,7 @@ def create_app(
             workflow=workflow,
             id_factory=id_factory,
             shutdown_grace_period=shutdown_grace_period,
+            keepalive_interval=keepalive_interval,
         )
         application.state.session_coordinator = coordinator
         try:
