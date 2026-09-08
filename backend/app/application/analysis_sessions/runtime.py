@@ -15,6 +15,8 @@ class SessionRuntime:
     events: list[LifecycleEvent] = field(default_factory=list)
     condition: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
     cancel_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    stop_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    workflow_start: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     workflow_quiesced: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     workflow_task: asyncio.Task[None] | None = field(default=None, repr=False)
     last_error: PublicError | None = None

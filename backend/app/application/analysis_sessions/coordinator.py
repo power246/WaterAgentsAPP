@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
+from datetime import datetime
+from math import isfinite
 from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter
@@ -22,7 +24,14 @@ from app.application.analysis_sessions.models import (
     SessionStatus,
 )
 from app.application.analysis_sessions.runtime import SessionRuntime
-from app.domain.common import NonEmptyString
+from app.application.analysis_sessions.workflow import (
+    AnalysisWorkflow,
+    CancellationToken,
+    DefaultFakeWorkflow,
+    WorkflowContext,
+    WorkflowStopped,
+)
+from app.domain.common import NonEmptyString, normalize_utc_datetime
 from app.ports.clock import ClockPort
 
 _UUID = TypeAdapter(UUID)
@@ -52,6 +61,10 @@ class InvalidSessionTransitionError(Exception):
         super().__init__("The session cannot enter the requested state.")
 
 
+class ServiceShuttingDownError(Exception):
+    pass
+
+
 class SessionCoordinator:
     def __init__(
         self,
@@ -59,7 +72,11 @@ class SessionCoordinator:
         *,
         id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
+        workflow: AnalysisWorkflow | None = None,
+        shutdown_grace_period: float = 1.0,
     ) -> None:
+        if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
+            raise ValueError("shutdown_grace_period must be finite and non-negative")
         self._clock = clock
         self._id_factory = id_factory
         self._logger = (
@@ -67,6 +84,10 @@ class SessionCoordinator:
         )
         self._sessions: dict[UUID, SessionRuntime] = {}
         self._sessions_lock = asyncio.Lock()
+        self._workflow = workflow if workflow is not None else DefaultFakeWorkflow()
+        self._shutdown_grace_period = shutdown_grace_period
+        self._shutdown_lock = asyncio.Lock()
+        self._closing = False
 
     async def create_session(
         self, query: str, configuration: AnalysisConfigurationSnapshot
@@ -91,11 +112,144 @@ class SessionCoordinator:
         )
         runtime = SessionRuntime(snapshot=snapshot, query=query, events=[event])
         async with self._sessions_lock:
+            if self._closing:
+                raise ServiceShuttingDownError()
             if session_id in self._sessions:
                 raise ValueError("The generated session ID already exists.")
+            coroutine = self._run_workflow(runtime)
+            try:
+                task = asyncio.create_task(coroutine, name=f"analysis-session-{session_id}")
+            except BaseException:
+                coroutine.close()
+                raise
+            runtime.workflow_task = task
+            task.add_done_callback(lambda completed: self._workflow_done(runtime, completed))
             self._sessions[session_id] = runtime
         self._log_transition(None, snapshot, event)
+        runtime.workflow_start.set()
         return snapshot
+
+    async def shutdown(self) -> None:
+        async with self._shutdown_lock:
+            async with self._sessions_lock:
+                self._closing = True
+                active = [
+                    (runtime, runtime.snapshot.status, runtime.workflow_task)
+                    for runtime in self._sessions.values()
+                    if runtime.workflow_task is not None and not runtime.workflow_task.done()
+                ]
+                for runtime, _, _ in active:
+                    runtime.stop_requested.set()
+            if not active:
+                return
+            _, pending = await asyncio.wait(
+                [task for _, _, task in active], timeout=self._shutdown_grace_period
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*(task for _, _, task in active), return_exceptions=True)
+            for runtime, original_status, task in active:
+                self._log_activity(
+                    "service_shutdown",
+                    runtime,
+                    original_status=original_status,
+                    outcome="task_cancelled" if task.cancelled() else "quiesced",
+                )
+
+    async def _run_workflow(self, runtime: SessionRuntime) -> None:
+        token = CancellationToken(runtime.stop_requested)
+        try:
+            # Registration must finish before even an eager task factory runs the workflow.
+            await runtime.workflow_start.wait()
+            token.checkpoint()
+            running = await self.mark_running(runtime.snapshot.session_id)
+            await self._workflow.run(WorkflowContext(running, runtime.query, token))
+            token.checkpoint()
+            await self.complete_session(running.session_id)
+        except (WorkflowStopped, ServiceShuttingDownError) as error:
+            if token.is_requested():
+                self._log_activity("workflow_output_suppressed", runtime)
+            else:
+                await self._workflow_failed(runtime, error)
+        except InvalidSessionTransitionError as error:
+            if error.session.status not in _TRANSITIONS:
+                self._log_activity("workflow_output_suppressed", runtime)
+            else:
+                await self._workflow_failed(runtime, error)
+        except asyncio.CancelledError as error:
+            if not token.is_requested():
+                await self._workflow_failed(runtime, error)
+            raise
+        except Exception as error:
+            await self._workflow_failed(runtime, error)
+        finally:
+            self._mark_quiesced(runtime)
+
+    async def _workflow_failed(self, runtime: SessionRuntime, exception: BaseException) -> None:
+        if runtime.stop_requested.is_set() or runtime.snapshot.status not in _TRANSITIONS:
+            self._log_activity(
+                "workflow_output_suppressed", runtime, exception_type=type(exception).__name__
+            )
+            return
+        error = PublicError(
+            error_id=_UUID.validate_python(self._id_factory()),
+            code="workflow_failed",
+            message="The analysis workflow failed.",
+            failed_stage="analysis_workflow",
+            retryable=False,
+        )
+        try:
+            snapshot = await self.fail_session(runtime.snapshot.session_id, error)
+        except (InvalidSessionTransitionError, ServiceShuttingDownError):
+            self._log_activity("workflow_output_suppressed", runtime)
+        else:
+            self._log_activity(
+                "session_failed",
+                runtime,
+                timestamp=snapshot.updated_at,
+                exception_type=type(exception).__name__,
+            )
+
+    def _workflow_done(self, runtime: SessionRuntime, task: asyncio.Task[None]) -> None:
+        if not task.cancelled():
+            error = task.exception()
+            if error is not None:
+                self._log_activity(
+                    "workflow_task_error", runtime, exception_type=type(error).__name__
+                )
+        self._mark_quiesced(runtime)
+
+    def _mark_quiesced(self, runtime: SessionRuntime) -> None:
+        if not runtime.workflow_quiesced.is_set():
+            runtime.workflow_quiesced.set()
+            self._log_activity("workflow_quiesced", runtime)
+
+    def _log_activity(
+        self,
+        event_name: str,
+        runtime: SessionRuntime,
+        *,
+        timestamp: datetime | None = None,
+        **fields: object,
+    ) -> None:
+        try:
+            self._logger.info(
+                "Analysis workflow lifecycle.",
+                extra={
+                    "event_name": event_name,
+                    "timestamp": (
+                        timestamp if timestamp is not None
+                        else normalize_utc_datetime(self._clock.now())
+                    ),
+                    "correlation": CorrelationContext(
+                        session_id=runtime.snapshot.session_id,
+                        error_id=runtime.last_error.error_id if runtime.last_error else None,
+                    ),
+                    **fields,
+                },
+            )
+        except Exception:
+            pass
 
     async def get_snapshot(self, session_id: UUID | str) -> AnalysisSessionSnapshot:
         runtime = await self._lookup(session_id)
@@ -156,6 +310,8 @@ class SessionCoordinator:
             current = runtime.snapshot
             if current.status == target == SessionStatus.CANCELLED:
                 return current
+            if self._closing and target != SessionStatus.CANCELLED:
+                raise ServiceShuttingDownError()
             if target not in _TRANSITIONS.get(current.status, ()):
                 raise InvalidSessionTransitionError(current, target)
             snapshot = AnalysisSessionSnapshot(
@@ -172,8 +328,11 @@ class SessionCoordinator:
                 runtime.last_error = error
             if target == SessionStatus.CANCELLED:
                 runtime.cancel_requested.set()
+                runtime.stop_requested.set()
             runtime.condition.notify_all()
         self._log_transition(current.status, snapshot, event)
+        if target == SessionStatus.CANCELLED:
+            self._log_activity("cancel_accepted", runtime, timestamp=snapshot.updated_at)
         return snapshot
 
     def _terminal_event(
