@@ -88,7 +88,7 @@ Settings use the `WATERAGENTS_` environment variable prefix:
 | --- | --- |
 | `WATERAGENTS_APP_NAME` | `WaterAgents API` |
 | `WATERAGENTS_ENVIRONMENT` | `development` |
-| `WATERAGENTS_LOG_LEVEL` | `INFO` |
+| `WATERAGENTS_LOG_LEVEL` | `info` |
 | `WATERAGENTS_HOST` | `127.0.0.1` |
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |

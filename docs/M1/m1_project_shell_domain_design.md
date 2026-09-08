@@ -703,7 +703,7 @@ M1 不安装 LangGraph、LangChain、数据库 driver、HTTP retry/cache 库或 
 ```text
 app_name = "WaterAgents API"
 environment = "development"
-log_level = "INFO"
+log_level = "info"
 host = "127.0.0.1"
 port = 8000
 analysis_timezone = "America/Chicago"

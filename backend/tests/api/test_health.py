@@ -21,7 +21,7 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.model_dump() == {
         "app_name": "WaterAgents API",
         "environment": "development",
-        "log_level": "INFO",
+        "log_level": "info",
         "host": "127.0.0.1",
         "port": 8000,
         "analysis_timezone": "America/Chicago",
@@ -40,6 +40,27 @@ def test_settings_use_wateragents_environment_prefix(
 
     assert settings.app_name == "Configured API"
     assert settings.port == 9000
+
+
+@pytest.mark.parametrize(
+    "log_level",
+    ("trace", "debug", "info", "warning", "error", "critical"),
+)
+def test_settings_accept_supported_log_levels(log_level: str) -> None:
+    assert AppSettings(log_level=log_level).log_level == log_level
+
+
+def test_settings_normalize_log_level() -> None:
+    assert AppSettings(log_level=" WARNING ").log_level == "warning"
+
+
+def test_invalid_log_level_environment_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WATERAGENTS_LOG_LEVEL", "BOGUS")
+
+    with pytest.raises(ValidationError, match="log_level"):
+        AppSettings()
 
 
 def test_invalid_analysis_timezone_is_rejected() -> None:
