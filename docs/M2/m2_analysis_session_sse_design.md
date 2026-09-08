@@ -646,7 +646,7 @@ workflow_task_error
 - 不逐条记录 keepalive。
 - 日志失败不得改变 session 结果。
 
-App lifespan 用 `AppSettings.log_level` 配置 `wateragents` logger，向 stderr 输出单行 JSON。非 ASCII 字符使用 JSON Unicode 转义，避免 Windows 等非 UTF-8 控制台损坏 JSON。重复启动复用一个自有 handler，不向 root logger 传播，不改 Uvicorn/第三方 logger。配置为进程级；正常运行只有一个 app/worker，同进程测试中的多个 app 共享最近一次 lifespan 设置的日志级别。导入 app 或调用 factory 不安装 handler。
+App lifespan 用 `AppSettings.log_level` 配置 `wateragents` logger，向 stderr 输出单行 JSON。非 ASCII 字符使用 JSON Unicode 转义，避免 Windows 等非 UTF-8 控制台损坏 JSON。重复启动复用一个自有 handler，不向 root logger 传播。正式启动关闭 Uvicorn 默认 access log，避免完整 URL 中的凭据或私有 query 绕过应用脱敏；HTTP 访问记录使用已有的安全 route 模板和关联 ID。Uvicorn server/error 与第三方日志保留自身格式。配置为进程级；正常运行只有一个 app/worker，同进程测试中的多个 app 共享最近一次 lifespan 设置的日志级别。导入 app 或调用 factory 不安装 handler。
 
 `timestamp/level/event_name/message/component` 稳定存在；`component` 是 logger 名称。`CorrelationContext` 展平为非空 ID 字段，状态转换包含 `from_status/to_status`；创建时 `from_status=null`。公开事件统一记录为 `lifecycle_event_committed`，其 `lifecycle_event` 字段直接序列化 committed `LifecycleEvent`，`event_sequence` 与 SSE sequence 相同；不额外写一条 `session_created` 日志。状态转换使用同一次 timestamp，独立 activity/HTTP 日志通过 `ClockPort` 读取发生时间。
 
@@ -674,7 +674,7 @@ M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item�
 ### 13.1 单 worker 契约
 
 - 只支持单进程、单 Uvicorn worker。
-- `python -m app` 和 `wateragents` console entrypoint 显式传入 `workers=1`，不继承 `WEB_CONCURRENCY`。直接调用 Uvicorn 时必须使用 `--workers 1`。
+- `python -m app` 和 `wateragents` console entrypoint 显式传入 `workers=1`，不继承 `WEB_CONCURRENCY`。直接调用 Uvicorn 时必须保留 `--workers 1 --no-access-log --timeout-graceful-shutdown 2`，与正式入口的进程、日志和关闭行为一致。
 - 文档和启动命令不得建议 `--workers > 1`。
 - 多 worker 下 POST、SSE 和 cancel 可能命中不同进程，因此明确标为不支持，而不是依赖 sticky session 偶然工作。
 - M2 不增加数据库、Redis、消息队列或共享 pub/sub。
@@ -696,6 +696,7 @@ M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item�
 
 ### 13.4 Application shutdown
 
+- 正式启动固定 `timeout_graceful_shutdown=2`：Uvicorn 停止接收连接后，最多等待 2 秒让在途 HTTP/SSE 完成，然后取消仍活动的请求并进入 lifespan shutdown。SSE 可被传输层中断，不伪造业务终态；该等待与下述 workflow 的 1 秒协作式宽限期是两个阶段。
 - `create_app` 的 lifespan 启动时创建 coordinator，保存到 `application.state.session_coordinator`；每次 lifespan 使用独立的内存 runtime，模块导入与 app factory 不创建后台 task。
 - coordinator 持有全部 session 的 workflow task handle。shutdown 关闭创建入口，并在 map 锁内捕获仍活动 task 的 session 原状态，向它们发出 stop signal；包括已 cancelled 但尚未 quiesced 的 task。
 - 默认等待 1 秒协作式宽限期，再对尚未结束的 task 调用 `Task.cancel()` 并 await 全部任务完成清理；keyword-only `shutdown_grace_period` 可在组合时注入有限非负秒数，测试通过 gate 和零宽限期验证。此宽限期不承诺能强制终止忽略 cancellation 的任意 Python 代码。
@@ -808,6 +809,8 @@ Completed 场景使用默认 workflow，验证 pending response、created/comple
 `backend/tests/architecture/test_application_dependencies.py` 检查 API/application 的直接导入、别名和相对导入：application 只依赖标准库、Pydantic、domain、ports 和 application；API 使用 HTTP 框架、application 的公开入口与模型，不导入 infrastructure 或 runtime。`SessionRuntime` 只由 coordinator 引用。API 对外部对象的私有属性访问（包括常量属性名的 `getattr/setattr/delattr`）会报错，保留 transport 自身私有字段和 Python dunder 的正常用途。
 
 既有 domain 依赖门禁继续执行，`test_m2_project_metadata_preserves_the_m1_dependency_set` 固定 M1 的生产/开发依赖集合。`test_main_entrypoint_enforces_one_worker_despite_environment` 调用正式入口并检查真实 Uvicorn 配置，在 `WEB_CONCURRENCY=4` 或非法整数时均得到单 worker。
+
+`backend/tests/smoke/test_server_entrypoint.py` 捕获正式 `main()` 传给 Uvicorn 的参数，用该配置和真实 application import target 启动临时 loopback server；仅通过 factory 替换 workflow，并复用 smoke 的 readiness/无 signal 控制。`test_entrypoint_shutdown_finishes_with_an_open_sse_subscription` 保持客户端订阅开启直到 server 自行退出，验证 workflow 收到 stop、quiesced，且没有取消终态或残留 task；`test_entrypoint_logs_exclude_url_credentials_and_private_query` 检查完整 stdout/stderr 中没有 URL 测试凭据和私有 query，同时保留 200/404 的安全 HTTP JSON 记录。两项测试不重写正式入口的 `access_log` 或 `timeout_graceful_shutdown` 参数。
 
 ## 17. M2 验收标准
 

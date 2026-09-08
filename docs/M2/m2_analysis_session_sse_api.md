@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。588 项回归和真实 Uvicorn health/completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，远端运行结果尚未取得，M2 整体验收仍待该结果。
+实现状态（2026-09-08）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)及[审查修复记录](m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。590 项回归和真实 Uvicorn health/completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，远端运行结果尚未取得，M2 整体验收仍待该结果。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -18,7 +18,7 @@ http://127.0.0.1:8000
 
 M2 限制：
 
-- 单进程、单 Uvicorn worker。`python -m app` 和 `wateragents` 启动入口固定 `workers=1`，忽略 `WEB_CONCURRENCY`；直接调用 Uvicorn 时必须传入 `--workers 1`，见 [启动说明](../../backend/README.md)。
+- 单进程、单 Uvicorn worker。`python -m app` 和 `wateragents` 启动入口固定 `workers=1`，忽略 `WEB_CONCURRENCY`；直接调用 Uvicorn 时必须保留 `--workers 1 --no-access-log --timeout-graceful-shutdown 2`，见 [启动说明](../../backend/README.md)。
 - 同一 worker 内允许多个 session 并发。
 - session 和 event 只存在于当前进程；服务重启后不可恢复。
 - SSE 断开不会取消 session。
@@ -279,7 +279,7 @@ const body = await response.json();
 
 cancel response 表示取消已经被接受，不表示所有在途工作都已停止。后端使用同一 `session_id` 记录稍后的 `workflow_quiesced`。
 
-HTTP cancel 已验证上述时序、幂等和终态保护：cancel 不调用整个 task 的 `Task.cancel()`，晚到返回或异常不再提交 completed/failed，也不进入下游阶段。非 cancelled 终态返回 409 和当前 snapshot；unknown session 返回 404，非法 UUID 返回 422。应用 shutdown 使用独立的服务停止语义，宽限期后可取消并等待在途 task 清理，不生成 `session_cancelled`。
+HTTP cancel 已验证上述时序、幂等和终态保护：cancel 不调用整个 task 的 `Task.cancel()`，晚到返回或异常不再提交 completed/failed，也不进入下游阶段。非 cancelled 终态返回 409 和当前 snapshot；unknown session 返回 404，非法 UUID 返回 422。服务 shutdown 时，Uvicorn 最多等待 2 秒让 HTTP/SSE 结束，随后中断仍活动的请求并进入应用清理；客户端可能收到流中断。应用再发出独立的 stop signal，默认等待 1 秒协作式宽限期后取消并等待尚未结束的 workflow task，不生成 `session_cancelled`。这两个超时不保证能强制终止忽略 cancellation 的任意 Python 代码。
 
 ## 6. HTTP error
 
@@ -374,7 +374,7 @@ M2 不公开 `session_started`：
 
 ## 8. 排障 Runbook
 
-应用启动后，`wateragents.*` 日志以单行 JSON 写到 stderr，级别由 `WATERAGENTS_LOG_LEVEL` 控制（默认 info）。Uvicorn/第三方日志保持其自身格式；只将 WaterAgents 自有日志作为本节 JSON 查询对象。每行包含 `timestamp/level/event_name/message/component`，ID 按上下文出现。`http_request_completed` 包含 `method/route/status_code/duration_ms`，其中 route 是模板，duration 覆盖完整 SSE 订阅时间。UTC 时钟回拨时 duration 为 0。
+应用启动后，`wateragents.*` 日志以单行 JSON 写到 stderr，级别由 `WATERAGENTS_LOG_LEVEL` 控制（默认 info）。正式入口关闭 Uvicorn 默认 access log，避免 URL 中的凭据或私有 query 原样落盘；HTTP 访问使用应用的安全结构化记录。Uvicorn server/error 与第三方日志保持自身格式；只将 WaterAgents 自有日志作为本节 JSON 查询对象。每行包含 `timestamp/level/event_name/message/component`，ID 按上下文出现。`http_request_completed` 包含 `method/route/status_code/duration_ms`，其中 route 是模板，duration 覆盖完整 SSE 订阅时间。UTC 时钟回拨时 duration 为 0。
 
 异常日志的 `exception_type/exception_message/stack_trace` 包含脱敏后的调用位置和 cause/context chain，不含源码行或局部变量。不要把它们当作原始请求存档；query、request body、完整 headers 和凭据不会作为普通日志字段输出。`log_format_failed` 表示本条日志格式化/脱敏失败，其固定安全记录的 timestamp 为 null；业务结果不受影响。
 
@@ -450,5 +450,7 @@ python backend/scripts/session_sse_smoke.py
 Session/SSE smoke 成功时 stdout 为 `{"completed":"passed","cancelled":"passed"}`。Completed 使用默认 workflow；cancelled 通过 app factory 注入 gate，在收到 created/keepalive、断线重连后保持 gate 关闭并调用 cancel，验证立即且幂等的响应和唯一 cancelled event，然后释放 gate。两条路径均检查 terminal EOF、Last-Event-ID 续传和已消费完后的 204。
 
 脚本使用动态 loopback socket、真实 Uvicorn 和正式 HTTP routes，不调用 shell/进程信号、不使用固定端口或生产测试开关。HTTP 客户端忽略环境代理；成功、断言失败、调用 task 被取消和 startup 失败的服务器清理由测试覆盖。完整 tests 中的 smoke 清理测试同样需要允许本机 loopback bind。
+
+完整 tests 还使用正式启动配置验证：保持 SSE 订阅开启时服务能进入 application shutdown 并收敛 workflow；完整服务输出中不出现合成 URL 凭据、私有 query 或未匹配路径，而安全的 HTTP JSON 日志仍保留状态码和 request ID。
 
 `.github/workflows/backend-m1.yml`（显示名 `Backend M1-M2`）在 Ubuntu/macOS/Windows + Python 3.11 上配置 editable install、完整 tests、health 和 session/SSE 两项 smoke。两项 smoke 的 CI 步骤显式注入不可用代理来验证 `trust_env=False`。CI 是否通过以三平台实际运行结果为准。

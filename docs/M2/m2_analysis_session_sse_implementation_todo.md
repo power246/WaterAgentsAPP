@@ -4,7 +4,7 @@
 
 本清单用于执行 [M2 详细设计](m2_analysis_session_sse_design.md)。实现必须同时维护 [M2 API 与排障指南](m2_analysis_session_sse_api.md)，不能让代码、OpenAPI、SSE 示例和错误码漂移。
 
-当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口。Ubuntu/macOS/Windows + Python 3.11 的实际 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最终本地记录为当前状态。
+当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口，[审查修复记录](#milestone-8-审查修复记录2026-09-08)补充正式启动的关闭与日志回归。Ubuntu/macOS/Windows + Python 3.11 的实际 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最终本地记录为当前状态。
 
 ## 执行原则
 
@@ -977,6 +977,40 @@ Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`
 | Future：`FUTURE-C09`–`FUTURE-C13` | `SessionCoordinator` map/condition/cancel、`subscribe/_events`、lifespan、`RequestContextMiddleware`、`CorrelationContext` | 共享 store/pubsub 与跨进程 cancel 必须跨 worker 验证；retention/慢订阅者 backpressure/磁盘告警须有容量与失败测试；drain/resume/crash recovery 不损坏顺序或身份；认证/授权/租户/限流/审计覆盖隔离；tracing/metrics 保留 session/request/error ID。 |
 
 中心 register §13 已增加本地证据索引及本表链接；原 contract、归属和最终状态规则不变。**剩余验收只有已配置矩阵的 Ubuntu/macOS/Windows + Python 3.11 完整 tests 与两项 smoke 的实际结果**；取得结果后更新 Milestone 7/8 的 CI 勾选、M2 成功标准及中心最终承接记录。
+
+### Milestone 8 审查修复记录（2026-09-08）
+
+基于本地提交 `48decb0`，开始时工作区干净。本阶段修复正式 Uvicorn 启动的两处审查问题：活动 SSE 阻止 lifespan shutdown，以及默认 access log 原样记录完整 URL。新增两项真实 server 回归先在原入口失败：保持订阅时 5 秒内未退出，URL 中的合成凭据出现在 stdout；使用修复后的正式入口配置后通过。
+
+`backend/app/__main__.py:main` 固定 `access_log=False` 和 `timeout_graceful_shutdown=2`。Uvicorn 先有界等待 HTTP/SSE，再执行既有 application/workflow 清理，关闭过程不生成 cancelled 终态；HTTP 访问保留已有安全 JSON 日志。README 的直接启动命令与 API/设计同步三个必需选项。未改 HTTP/SSE schema、状态机、依赖、前端或后续 Milestone 归属。
+
+`backend/scripts/session_sse_smoke.py:SmokeServer` 接收 Uvicorn Config，复用已有 readiness、无 signal 和异常收尾控制。`backend/tests/smoke/test_server_entrypoint.py` 调用正式 `main()`，捕获其参数并用真实 `app.main:app` 入口启动 server，不重写访问日志与关闭超时；通过 app factory 注入协作式 workflow，保持 SSE 开启直到 server 退出，同时检查完整 stdout/stderr。测试结束恢复 logger 配置并关闭 client/server/socket，关闭回归还检查没有残留 task。
+
+Applicable contracts：`GLOBAL-C07`、`GLOBAL-C09`、`M2-C01`、`M2-C09`、`M2-C10`、`M2-C13`。其余 M2 基线由全量回归继续验证。
+
+| Contract | 实现与测试证据 | 文档 |
+|---|---|---|
+| `GLOBAL-C07`、`GLOBAL-C09`、`M2-C09` | 正式入口关闭默认 access log，复用已有安全 HTTP 日志；`test_entrypoint_logs_exclude_url_credentials_and_private_query` 验证完整输出无 URL/私有 query，200/404 的 route/status/request ID 仍存在。 | README Run/Configuration；设计 §12.3、§16.7；API §8、§10 |
+| `M2-C01`、`M2-C13` | 正式入口有界 drain，再进入已有 lifespan；`test_entrypoint_shutdown_finishes_with_an_open_sse_subscription` 验证客户端未主动断线时 server 退出、workflow quiesced、无 cancelled event；现有 cancel/disconnect/shutdown 回归全绿。 | README Run；设计 §13.4、§16.7；API §5、§10 |
+| `M2-C10` | `workers=1` 保留，既有环境变量单 worker 回归及两项真实 smoke 通过。 | README 启动命令；设计 §13.1；API §1 |
+
+从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/smoke backend/tests/api/test_health.py backend/tests/architecture -q --tb=short
+77 passed in 4.71s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+590 passed in 4.93s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+backend/.venv/bin/python backend/scripts/session_sse_smoke.py
+{"completed":"passed","cancelled":"passed"}
+```
+
+两项 smoke 均注入不可用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 和空 NO_PROXY；上述验证均退出 0。现有 CI 的完整 tests 会执行两项新增回归，不需要新增依赖或 CI 步骤。按 `MR-G04`、`MR-G07`、`MR-G08`、`MR-G09`、`MR-G11`、`MR-G12` 同步入口、真实 server 验收和文档；三平台远端实际结果仍待取得，不把本机修复通过标记为最终已承接。
 
 ## 实现顺序摘要
 
