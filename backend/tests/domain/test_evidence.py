@@ -150,6 +150,12 @@ def test_evidence_location_accepts_each_identity_and_round_trips(
             "station_id": None,
             "distance_to_target_km": float("nan"),
         },
+        {
+            "point": None,
+            "comid": "001234",
+            "station_id": None,
+            "distance_to_target_km": True,
+        },
     ],
 )
 def test_evidence_location_rejects_missing_identity_or_invalid_distance(
@@ -263,7 +269,7 @@ def test_empty_and_unavailable_remain_distinct_after_serialization() -> None:
 
 @pytest.mark.parametrize(
     "confidence_hint",
-    [-0.01, 1.01, float("nan"), float("inf")],
+    [-0.01, 1.01, float("nan"), float("inf"), True],
 )
 def test_evidence_fragment_rejects_invalid_confidence(
     confidence_hint: float,

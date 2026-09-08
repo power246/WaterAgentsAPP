@@ -157,6 +157,67 @@ def test_custom_start_rolls_forward_and_truncates_the_tail() -> None:
     assert_contiguous_coverage(windows, requested)
 
 
+def test_custom_start_shifts_nonexistent_boundary_without_grid_drift() -> None:
+    timezone_name = "America/Chicago"
+    requested = local_time_range(
+        timezone_name,
+        datetime(2026, 3, 7, 20, 30),
+        datetime(2026, 3, 8, 15),
+    )
+
+    windows = build_time_windows(
+        requested,
+        TimeResolution.SIX_HOURS,
+        timezone_name,
+    )
+
+    assert [
+        (
+            start.day,
+            start.hour,
+            start.minute,
+            end.day,
+            end.hour,
+            end.minute,
+        )
+        for start, end in local_bounds(windows, timezone_name)
+    ] == [
+        (7, 20, 30, 8, 3, 30),
+        (8, 3, 30, 8, 8, 30),
+        (8, 8, 30, 8, 14, 30),
+        (8, 14, 30, 8, 15, 0),
+    ]
+    assert_contiguous_coverage(windows, requested)
+
+
+def test_ambiguous_boundary_uses_first_occurrence_without_grid_drift() -> None:
+    timezone_name = "America/Chicago"
+    requested = local_time_range(
+        timezone_name,
+        datetime(2026, 10, 31, 19, 30),
+        datetime(2026, 11, 1, 14),
+    )
+
+    windows = build_time_windows(
+        requested,
+        TimeResolution.SIX_HOURS,
+        timezone_name,
+    )
+    bounds = local_bounds(windows, timezone_name)
+
+    assert (bounds[0][1].hour, bounds[0][1].minute, bounds[0][1].fold) == (
+        1,
+        30,
+        0,
+    )
+    assert [(end.hour, end.minute) for _, end in bounds[1:]] == [
+        (7, 30),
+        (13, 30),
+        (14, 0),
+    ]
+    assert_contiguous_coverage(windows, requested)
+
+
 def test_non_chicago_iana_timezone_is_used() -> None:
     timezone_name = "Europe/Berlin"
     requested = local_time_range(

@@ -32,16 +32,14 @@ def main() -> None:
     port = available_loopback_port()
     process_environment = os.environ.copy()
     process_environment["PYTHONIOENCODING"] = "utf-8"
+    process_environment["WATERAGENTS_HOST"] = "127.0.0.1"
+    process_environment["WATERAGENTS_PORT"] = str(port)
+    process_environment["WATERAGENTS_LOG_LEVEL"] = "INFO"
     process = subprocess.Popen(
         [
             sys.executable,
             "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
+            "app",
         ],
         cwd=BACKEND_ROOT,
         env=process_environment,

@@ -203,6 +203,7 @@ allow_inf_nan = false
 - 纬度范围 `[-90, 90]`，经度范围 `[-180, 180]`。
 - 距离、覆盖率等不能为负。
 - confidence 范围为 `[0, 1]`，M1 不添加状态相关硬约束。
+- Domain 浮点字段接受 `int` 并规范化为 `float`，拒绝 `bool` 和数字字符串。
 - NaN/Infinity 不代表缺失；缺失使用 `None` 和明确状态/质量标记。
 
 ## 5. 时间契约
@@ -251,7 +252,8 @@ build_time_windows(
 规则：
 
 - 从请求起点对应的本地墙上时间开始滚动 resolution。
-- 每次使用当地墙上时钟加 `6/12/24` 小时，再转换为 UTC 边界。
+- 从请求起点建立独立的当地墙上时钟名义网格，每次在名义网格上增加 `6/12/24` 小时，再解析为 UTC 边界；实际边界的 DST 调整不得改变后续名义网格。
+- 名义边界落入 spring-forward 不存在时段时，按真实 DST gap 向前移动；落入 fall-back 重复时段时选择第一次出现（`fold=0`）。
 - 不超过请求 end；最后不足一个完整墙上时钟窗口时返回截断窗口，由后续阶段标记 `partial_coverage`。
 - 第一版日期输入从 00:00 开始，因此自然得到固定本地网格。
 - 未来自定义时间例如 `03:20-17:40`，按 `03:20-09:20 / 09:20-15:20 / 15:20-17:40` 滚动；DST 仍按墙上时钟语义处理。
@@ -630,7 +632,7 @@ generated_at: UTC datetime
 - 每条 series 的 resolution/source 与 result 一致。
 - 每条 series 的 points 必须完整匹配 window plan。
 - time segments 有序、无重叠、无缺口并完整覆盖 time range。
-- mixed 必须同时包含 gap filling 和 prediction segment。
+- mixed 必须先包含一个或多个 gap filling segment，再包含一个或多个 prediction segment；只允许发生一次模式切换。
 - 每个 window 完整落在一个 segment 内。prediction segment 只接受 predicted source；gap filling 接受 observed/inferred source。
 - window、attribution 和 analysis step 的 evidence refs 都存在于 EvidenceChain。
 - observed 表示原样采用有效站点读数；Agent 对多站冲突值做加权、折中或综合后必须标为 inferred。
@@ -771,6 +773,7 @@ python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 - 重复本地时间转换后有两个不同 UTC instant，不发生 key 覆盖。
 - 没有 timezone transition 时，错误的 5/7 小时完整窗口不被接受。
 - 自定义时间预留行为：从 03:20 滚动，而不是对齐 06:00；尾窗可截断。
+- 自定义时间跨 spring-forward 时只前移不存在的边界，后续边界回到原始名义网格；跨 fall-back 时重复边界选择 `fold=0`。
 
 ### 9.3 架构
 

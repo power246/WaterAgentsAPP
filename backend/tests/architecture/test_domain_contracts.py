@@ -81,7 +81,7 @@ def test_domain_implementation_imports_leaf_modules_not_package_barrels() -> Non
     assert not violations, "\n".join(violations)
 
 
-def test_domain_uses_no_any_or_raw_datetime_model_fields() -> None:
+def test_domain_uses_no_any_or_raw_datetime_or_float_model_fields() -> None:
     violations: list[str] = []
 
     for source_path in domain_sources():
@@ -96,10 +96,12 @@ def test_domain_uses_no_any_or_raw_datetime_model_fields() -> None:
                 node for node in class_node.body if isinstance(node, ast.AnnAssign)
             ):
                 annotation = ast.unparse(field.annotation)
-                if re.search(r"\bdatetime\b", annotation):
-                    violations.append(
-                        f"{source_path}:{field.lineno}: raw datetime field {annotation}"
-                    )
+                for raw_type in ("datetime", "float"):
+                    if re.search(rf"\b{raw_type}\b", annotation):
+                        violations.append(
+                            f"{source_path}:{field.lineno}: "
+                            f"raw {raw_type} field {annotation}"
+                        )
 
     assert not violations, "\n".join(violations)
 

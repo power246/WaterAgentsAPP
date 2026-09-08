@@ -58,7 +58,7 @@ The equivalent explicit server command is:
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-From the repository root, the cross-platform smoke command starts Uvicorn on an available loopback port, verifies the exact health response, and stops the child process:
+From the repository root, the cross-platform smoke command starts the formal `python -m app` entry point on an available loopback port, verifies the exact health response, and stops the child process:
 
 ```text
 python backend/scripts/health_smoke.py
