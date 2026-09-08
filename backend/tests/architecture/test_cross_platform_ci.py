@@ -6,7 +6,7 @@ WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "backend-m1.yml"
 SMOKE_SCRIPT_PATH = REPOSITORY_ROOT / "backend" / "scripts" / "health_smoke.py"
 
 
-def test_ci_runs_install_tests_and_health_on_all_supported_operating_systems() -> None:
+def test_ci_runs_install_tests_and_both_smokes_on_all_supported_operating_systems() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
 
     for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
@@ -15,6 +15,7 @@ def test_ci_runs_install_tests_and_health_on_all_supported_operating_systems() -
     assert 'python -m pip install -e "./backend[dev]"' in workflow
     assert "python -m pytest backend/tests -q" in workflow
     assert "python backend/scripts/health_smoke.py" in workflow
+    assert "python backend/scripts/session_sse_smoke.py" in workflow
     assert "HTTP_PROXY: http://127.0.0.1:1" in workflow
     assert 'NO_PROXY: ""' in workflow
 
@@ -83,3 +84,26 @@ def test_health_smoke_uses_cross_platform_process_and_path_apis() -> None:
         and node.value.startswith(("/tmp/", "/Users/", "/home/"))
         for node in ast.walk(tree)
     )
+
+
+def test_session_smoke_uses_dynamic_socket_and_cooperative_server_control() -> None:
+    path = SMOKE_SCRIPT_PATH.with_name("session_sse_smoke.py")
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imports = {
+        name.name.split(".")[0]
+        for node in ast.walk(tree) if isinstance(node, ast.Import)
+        for name in node.names
+    } | {
+        (node.module or "").split(".")[0]
+        for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
+    }
+    assert not imports.intersection({"signal", "subprocess", "os", "threading"})
+    assert 'listener.bind(("127.0.0.1", 0))' in source
+    assert "server.serve(sockets=[listener])" in source
+    assert "server.ready.wait()" in source
+    assert "server.should_exit = True" in source
+    assert "await asyncio.gather(task, return_exceptions=True)" in source
+    assert "trust_env=False" in source
+    assert "workers=1" in source
+    assert "sleep(" not in source

@@ -64,7 +64,17 @@ From the repository root, the cross-platform smoke command starts the formal `py
 python backend/scripts/health_smoke.py
 ```
 
-The `Backend M1` GitHub Actions workflow runs editable installation, the complete test suite, and this smoke check with Python 3.11 on Ubuntu, macOS, and Windows.
+The session/SSE smoke runs the real application factory and Uvicorn on dynamic loopback sockets. It verifies completion, gated cancellation, keepalive, reconnection, terminal EOF, and a consumed cursor returning 204:
+
+```text
+python backend/scripts/session_sse_smoke.py
+```
+
+Expected stdout is `{"completed":"passed","cancelled":"passed"}`. The script controls startup/shutdown without a shell or process signals and cleans up the server before returning. Both smoke clients bypass environment proxies.
+
+Use one Uvicorn worker. Sessions and events stay in memory and are lost on restart. See the [M2 API guide](../docs/M2/m2_analysis_session_sse_api.md) for the session protocol and limits.
+
+The `Backend M1-M2` GitHub Actions workflow runs editable installation, the complete test suite, and both smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation.
 
 ## Test
 

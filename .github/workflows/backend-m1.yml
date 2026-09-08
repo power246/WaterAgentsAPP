@@ -1,4 +1,4 @@
-name: Backend M1
+name: Backend M1-M2
 
 on:
   push:
@@ -38,3 +38,10 @@ jobs:
           ALL_PROXY: http://127.0.0.1:1
           NO_PROXY: ""
         run: python backend/scripts/health_smoke.py
+      - name: Run Uvicorn session and SSE smoke test
+        env:
+          HTTP_PROXY: http://127.0.0.1:1
+          HTTPS_PROXY: http://127.0.0.1:1
+          ALL_PROXY: http://127.0.0.1:1
+          NO_PROXY: ""
+        run: python backend/scripts/session_sse_smoke.py
