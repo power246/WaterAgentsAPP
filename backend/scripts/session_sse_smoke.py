@@ -21,11 +21,8 @@ EVENT = TypeAdapter(LifecycleEvent)
 
 
 class SmokeServer(uvicorn.Server):
-    def __init__(self, app: FastAPI) -> None:
-        super().__init__(uvicorn.Config(
-            app, host="127.0.0.1", port=0, loop="asyncio", lifespan="on",
-            log_config=None, access_log=False, workers=1, timeout_graceful_shutdown=2,
-        ))
+    def __init__(self, config: uvicorn.Config) -> None:
+        super().__init__(config)
         self.ready = asyncio.Event()
 
     def capture_signals(self):
@@ -49,7 +46,10 @@ async def running_server(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
-        server = SmokeServer(app)
+        server = SmokeServer(uvicorn.Config(
+            app, host="127.0.0.1", port=0, loop="asyncio", lifespan="on",
+            log_config=None, access_log=False, workers=1, timeout_graceful_shutdown=2,
+        ))
         task = asyncio.create_task(server.serve(sockets=[listener]), name="m2-smoke-server")
         try:
             await asyncio.wait_for(server.ready.wait(), timeout=10)
