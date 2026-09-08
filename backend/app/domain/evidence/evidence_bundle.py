@@ -4,13 +4,10 @@ from pydantic import field_validator, model_validator
 
 from app.domain.common import DomainModel, NonEmptyString, ensure_unique_tuple
 from app.domain.evidence.evidence_fragment import EvidenceFragment
-from app.domain.hydrology import ParameterKey
-from app.domain.time import (
-    DEFAULT_TIME_RESOLUTION,
-    TimeRange,
-    TimeResolution,
-    TimeResolutionSource,
-)
+from app.domain.hydrology.parameter_key import ParameterKey
+from app.domain.time.time_range import TimeRange
+from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION, TimeResolution
+from app.domain.time.time_resolution_source import TimeResolutionSource
 from app.domain.time.timezone import get_iana_timezone
 
 

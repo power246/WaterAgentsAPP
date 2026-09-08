@@ -2,7 +2,7 @@ from typing import Self
 
 from pydantic import model_validator
 
-from app.domain.inference import InferenceMode
+from app.domain.inference.mode import InferenceMode
 from app.domain.time.time_range import TimeRange
 
 

@@ -3,13 +3,10 @@ from typing import Annotated, Self
 from pydantic import Field, model_validator
 
 from app.domain.common import DomainModel
-from app.domain.hydrology import WaterQualityParameter
+from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
 from app.domain.inference.time_window_result import TimeWindowResult
-from app.domain.time import (
-    DEFAULT_TIME_RESOLUTION,
-    TimeResolution,
-    TimeResolutionSource,
-)
+from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION, TimeResolution
+from app.domain.time.time_resolution_source import TimeResolutionSource
 
 
 class ParameterTimeSeries(DomainModel):

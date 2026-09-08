@@ -7,8 +7,8 @@ from app.domain.evidence.collection_status import CollectionStatus
 from app.domain.evidence.data_quality import DataQualityFlag
 from app.domain.evidence.evidence_location import EvidenceLocation
 from app.domain.evidence.provenance import Provenance
-from app.domain.hydrology import ParameterKey
-from app.domain.time import TimeRange
+from app.domain.hydrology.parameter_key import ParameterKey
+from app.domain.time.time_range import TimeRange
 
 
 class EvidenceFragment(DomainModel):
