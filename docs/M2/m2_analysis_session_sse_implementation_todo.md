@@ -373,50 +373,101 @@ Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`
 
 ### Workflow seam
 
-- [ ] 定义最小 async workflow Protocol/context。
-- [ ] 默认 fake 只驱动 lifecycle，不生成业务 result。
-- [ ] 提供 controlled completed fake。
-- [ ] 提供 controlled failed fake。
-- [ ] 提供 gate-based cancellable fake。
-- [ ] fake 不出现在 production request/settings/env 中。
+- [x] 定义最小 async workflow Protocol/context。
+- [x] 默认 fake 只驱动 lifecycle，不生成业务 result。
+- [x] 提供 controlled completed fake。
+- [x] 提供 controlled failed fake。
+- [x] 提供 gate-based cancellable fake。
+- [x] fake 不出现在 production request/settings/env 中。
 
 ### Task ownership
 
-- [ ] create use case 注册 task handle 后再返回成功。
-- [ ] task wrapper 在运行前提交 internal running。
-- [ ] 正常返回只在仍 running 时提交 completed。
-- [ ] 受控/非预期异常映射为唯一 session_failed。
-- [ ] task `finally` 总是标记 workflow_quiesced。
-- [ ] 消费 task exception，避免 `Task exception was never retrieved`。
+- [x] create use case 注册 task handle 后再返回成功。
+- [x] task wrapper 在运行前提交 internal running。
+- [x] 正常返回只在仍 running 时提交 completed。
+- [x] 受控/非预期异常映射为唯一 session_failed。
+- [x] task `finally` 总是标记 workflow_quiesced。
+- [x] 消费 task exception，避免 `Task exception was never retrieved`。
 
 ### Cancel
 
-- [ ] pending/running cancel 原子提交 cancelled event 并设置 token。
-- [ ] cancelled 重复 cancel 返回相同 snapshot，不追加事件。
-- [ ] 其他 terminal cancel 返回 409 和 current snapshot。
-- [ ] cancel response 不等待 workflow quiesced。
-- [ ] 晚到 output 记录 suppression 日志，不提交 completed/failed，不传播下游。
-- [ ] 用户 cancel 不无条件 hard-cancel 整个 task。
+- [x] pending/running cancel 原子提交 cancelled event 并设置 token。
+- [x] cancelled 重复 cancel 返回相同 snapshot，不追加事件。
+- [x] 其他 terminal cancel 产生携带 current snapshot 的冲突异常，供 Milestone 5 映射 HTTP 409。
+- [x] cancel response 不等待 workflow quiesced。
+- [x] 晚到 output 记录 suppression 日志，不提交 completed/failed，不传播下游。
+- [x] 用户 cancel 不无条件 hard-cancel 整个 task。
 
 ### Lifespan
 
-- [ ] app lifespan 跟踪所有 workflow tasks。
-- [ ] shutdown 向活动 task 发出 shutdown signal 并 best-effort 收敛。
-- [ ] shutdown 不发布 session_cancelled。
-- [ ] shutdown 记录活动 session 原状态与 task 收敛结果。
-- [ ] 测试结束没有泄漏 pending task。
+- [x] app lifespan 跟踪所有 workflow tasks。
+- [x] shutdown 向活动 task 发出 shutdown signal 并 best-effort 收敛。
+- [x] shutdown 不发布 session_cancelled。
+- [x] shutdown 记录活动 session 原状态与 task 收敛结果。
+- [x] 测试结束没有泄漏 pending task。
 
 ### Tests
 
-- [ ] completed/failed/cancelled controlled workflow tests。
-- [ ] cancel immediate response vs delayed quiesced test。
-- [ ] cancel output suppression test。
-- [ ] concurrent sessions isolation test。
-- [ ] application shutdown task cleanup test。
+- [x] completed/failed/cancelled controlled workflow tests。
+- [x] cancel immediate response vs delayed quiesced test。
+- [x] cancel output suppression test。
+- [x] concurrent sessions isolation test。
+- [x] application shutdown task cleanup test。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application/test_session_workflow.py -q`
+- [x] `python -m pytest backend/tests/application/test_session_workflow.py -q`
+
+### Milestone 3 完成记录（2026-09-08）
+
+本阶段完成 async workflow、后台 task ownership、协作式取消和 app lifespan 收敛。开始时工作区干净，基于本地 Milestone 2 提交 `9767c0f`；只修改新后端实现、application tests 和三份 M2 文档，无新增依赖、生产 fake outcome 开关或业务 result。
+
+#### 实现与验收
+
+- `backend/app/application/analysis_sessions/workflow.py`：最小 `AnalysisWorkflow` Protocol、frozen `WorkflowContext`、只读 `CancellationToken` 和默认 lifecycle-only fake。context 复用 running snapshot 与 configuration，query 不进入 repr；controlled/gated fake 仅在测试文件中定义。
+- `backend/app/application/analysis_sessions/coordinator.py`：创建时在 map 临界区登记 task/session，通过 registration gate 保证 eager task factory 也不会提前执行 workflow；task 创建失败不留下未被任务持有的 session。返回值始终是创建时的 pending snapshot。
+- wrapper 提交 internal running，正常返回只能从 running 提交 completed；`WorkflowFailed` 与非预期异常通过同一入口提交唯一 failed event。公开错误使用固定安全摘要，日志复用 error ID 并记录 exception type；不记录原始异常文本、query 或 headers。finally 标记 quiesced，done callback 消费异常并处理 task 首次执行前被取消的情况。
+- `cancel_session` 原子提交 cancelled/event 和取消信号，幂等且不等待 quiesced、不调用整个 task 的 `Task.cancel()`。通过 gate 验证晚到成功、失败和忽略 token 的返回均不会覆盖终态；阶段边界 checkpoint 阻止下游传播。
+- `backend/app/main.py:create_app` 在 lifespan 内创建并保存 coordinator，关闭时对活动 task 发出 stop signal，默认给予 1 秒协作式宽限期，再取消未结束的 task 并 await 清理。关闭后不能创建 session，重复 shutdown 幂等；只记录 `service_shutdown` 的原状态及 `quiesced/task_cancelled` 结果，不伪造 cancelled event。
+- `backend/tests/application/test_session_state_machine.py` 的 37 项回归通过真实创建路径注入等待型 workflow，统一在退出时 shutdown；继续验证原子时间/事件、通知、隔离、终态竞争和日志失败隔离。
+- `backend/tests/application/test_session_workflow.py` 新增 29 项测试，覆盖默认/eager task 注册、受控成功/失败、提前取消与延迟 quiesced、晚到输出、真实 workflow/cancel 竞争、多 session 隔离、创建/shutdown 竞争、协作式/兜底任务清理、重入 lifespan、task factory 与 wrapper 失败。时序使用 async gate，5 秒 timeout 仅作死锁保护；测试退出检查 task 完成和 quiesced。
+
+#### Verify
+
+从仓库根使用现有 Python 3.12.14 环境执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/application/test_session_workflow.py -q
+29 passed
+
+backend/.venv/bin/python -m pytest backend/tests/application/test_session_workflow.py backend/tests/application/test_session_state_machine.py -q
+66 passed in 0.54s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+393 passed in 1.05s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+git diff --check
+```
+
+命令均退出 0，diff check 无输出。Health smoke 使用现有脚本，沙箱禁止 loopback bind 后经执行权限审批成功运行临时本机 Uvicorn；它验证 app/lifespan 的启动、health 和退出，不替代 Milestone 7 的真实 session completed/cancel smoke。新增应用代码只依赖跨平台 asyncio/标准库；Python 3.11 不提供 eager task factory，该专项测试按能力跳过。未运行远端 Linux/macOS/Windows CI，不将本机通过视为三平台完成。
+
+#### Contract evidence 与后续接入
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C06`、`M2-C08`–`M2-C13`。按 `MR-G01`–`MR-G14` 记录阶段证据；未改变中心 register 的硬约束或归属，也不提前登记完整 M2 contract 已承接。
+
+| Contract | 当前实现与测试证据 | 文档与剩余验收 |
+|---|---|---|
+| `GLOBAL-C04`、`M2-C03`、`M2-C04` | wrapper 调用单一状态转换入口；state machine 原子时间/event 回归及 `test_real_workflow_and_cancel_race_commit_one_terminal`。 | 详细设计 §5–6；HTTP/SSE 集成和完整 smoke/CI 由 Milestone 4–7 验收。 |
+| `M2-C01`、`M2-C02`、`M2-C05`、`M2-C06` | `cancel_session`、token/checkpoint、输出抑制；`test_pending_cancel_does_not_enter_workflow`、`test_cancel_returns_before_quiescence_and_suppresses_late_output`，以及原有独立订阅/关闭回归。 | 详细设计 §9–10、API cancel 说明；Last-Event-ID、keepalive、SSE disconnect 和 HTTP 409 映射仍由 Milestone 4–5 接入。 |
+| `GLOBAL-C07`、`GLOBAL-C09`、`M2-C08`、`M2-C09` | 复用 snapshot/event/PublicError，失败公开摘要和 error ID；`test_controlled_outcomes_use_running_context_and_safe_unique_terminal` 注入含 secret 的 query/异常，验证公开 event 和结构化记录不含原文。 | 详细设计 §10–12、API 状态说明；request ID、JSON formatter、完整日志 redaction 和异常诊断由 Milestone 5–6 验收。 |
+| `M2-C10`、`M2-C11`、`M2-C12` | 每 lifespan 独立 runtime，task/session 保留，默认 fake 无业务结果；默认完成、多 session 隔离及重入 lifespan tests。 | 详细设计 §10、§13–14；真实 session smoke 与三平台 CI 在 Milestone 7 验收。 |
+| `M2-C13` | lifespan/shutdown 信号与显式 cancel 分离；协作式停止、硬取消后清理、取消未收敛 task、多 task 和创建/关闭竞争 tests。 | 详细设计 §13.4、API cancel 说明；M3 持久化遗留 `service_interrupted` 处理归属不变。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C10` | 新后端范围、依赖集合和旧系统隔离保持不变；fake 仅测试注入、完整 backend 回归及 architecture gates 通过。 | 三份 M2 文档同步；Milestone 8 全链路 sweep 与最终承接登记待完成。 |
+
+本阶段的 409 勾选明确指 application 冲突类型和 current snapshot；HTTP 路由/状态码尚未实现，OpenAPI 仍只有 `/health`。M2 总成功标准与 Milestone 4–8 保持未勾选；本阶段没有新增 deferred contract。
 
 ## Milestone 4：SSE encoder、replay 与 keepalive
 

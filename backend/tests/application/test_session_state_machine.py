@@ -19,6 +19,7 @@ from app.application.analysis_sessions.models import (
     PublicError,
     SessionStatus,
 )
+from app.application.analysis_sessions.workflow import WorkflowContext
 from app.infrastructure.runtime.system_clock import SystemClock
 
 ERROR = PublicError(
@@ -43,6 +44,40 @@ class StepClock:
         return self.instant + timedelta(seconds=self.calls)
 
 
+class WaitingWorkflow:
+    def __init__(self) -> None:
+        self.started: dict[UUID, asyncio.Event] = {}
+
+    async def run(self, context: WorkflowContext) -> None:
+        self.started.setdefault(context.session.session_id, asyncio.Event()).set()
+        await context.cancellation.wait()
+        context.cancellation.checkpoint()
+
+
+async def wait_running(coordinator: SessionCoordinator, session_id: UUID):
+    await coordinator._workflow.started.setdefault(session_id, asyncio.Event()).wait()
+    return await coordinator.get_snapshot(session_id)
+
+
+def run(exercise) -> None:
+    async def managed() -> None:
+        coordinators = []
+
+        def coordinator_factory(*args, **kwargs):
+            coordinator = SessionCoordinator(*args, workflow=WaitingWorkflow(), **kwargs)
+            coordinators.append(coordinator)
+            return coordinator
+
+        try:
+            await exercise(coordinator_factory)
+        finally:
+            for coordinator in coordinators:
+                await coordinator.shutdown()
+                assert all(runtime.workflow_task.done() for runtime in coordinator._sessions.values())
+
+    asyncio.run(asyncio.wait_for(managed(), timeout=5))
+
+
 class RecordingHandler(logging.Handler):
     def __init__(self, coordinator: SessionCoordinator, *, fail: bool = False) -> None:
         super().__init__()
@@ -54,6 +89,8 @@ class RecordingHandler(logging.Handler):
         self.status_matches: list[bool] = []
 
     def emit(self, record: logging.LogRecord) -> None:
+        if record.event_name not in {"lifecycle_event_committed", "session_status_changed"}:
+            return
         runtime = self.coordinator._sessions[record.correlation.session_id]
         self.records.append(record)
         self.lock_states.append(
@@ -76,9 +113,9 @@ async def invoke(coordinator: SessionCoordinator, operation: str, session_id):
 
 @pytest.mark.parametrize("operation", ["complete_session", "fail_session", "cancel_session"])
 def test_lifecycle_commits_one_timestamp_and_event_per_public_transition(operation: str) -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         created = await coordinator.create_session("  private query  ", CONFIGURATION)
         runtime = coordinator._sessions[created.session_id]
         stream = await coordinator.subscribe(str(created.session_id).upper())
@@ -93,10 +130,11 @@ def test_lifecycle_commits_one_timestamp_and_event_per_public_transition(operati
         assert "private query" not in repr(runtime)
         assert not runtime.cancel_requested.is_set()
         assert not runtime.workflow_quiesced.is_set()
-        assert runtime.workflow_task is None
+        assert runtime.workflow_task is not None
+        assert not runtime.workflow_task.done()
         assert clock.calls == 1
 
-        running = await coordinator.mark_running(created.session_id)
+        running = await wait_running(coordinator, created.session_id)
         assert running.status is SessionStatus.RUNNING
         assert running.updated_at > created.updated_at
         assert runtime.events == [created_event]
@@ -127,13 +165,13 @@ def test_lifecycle_commits_one_timestamp_and_event_per_public_transition(operati
         assert response.model_dump() == terminal.model_dump()
         assert "private query" not in response.model_dump_json()
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 def test_pending_cancel_is_atomic_and_idempotent() -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         created = await coordinator.create_session("query", CONFIGURATION)
         cancelled = await coordinator.cancel_session(created.session_id)
 
@@ -144,14 +182,14 @@ def test_pending_cancel_is_atomic_and_idempotent() -> None:
         assert events[-1].occurred_at == cancelled.updated_at
         assert coordinator._sessions[created.session_id].cancel_requested.is_set()
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 @pytest.mark.parametrize("operation", ["complete_session", "fail_session"])
 def test_pending_cannot_complete_or_fail_before_running(operation: str) -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         created = await coordinator.create_session("query", CONFIGURATION)
         with pytest.raises(InvalidSessionTransitionError) as error:
             await invoke(coordinator, operation, created.session_id)
@@ -160,21 +198,21 @@ def test_pending_cannot_complete_or_fail_before_running(operation: str) -> None:
         assert len(coordinator._sessions[created.session_id].events) == 1
         assert clock.calls == 1
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 def test_running_cannot_be_started_twice() -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         created = await coordinator.create_session("query", CONFIGURATION)
-        running = await coordinator.mark_running(created.session_id)
+        running = await wait_running(coordinator, created.session_id)
         with pytest.raises(InvalidSessionTransitionError) as error:
             await coordinator.mark_running(created.session_id)
         assert error.value.session is running
         assert clock.calls == 2
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 @pytest.mark.parametrize(
@@ -184,11 +222,11 @@ def test_running_cannot_be_started_twice() -> None:
     "operation", ["mark_running", "complete_session", "fail_session", "cancel_session"]
 )
 def test_terminal_states_cannot_be_overwritten(terminal_operation: str, operation: str) -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         created = await coordinator.create_session("query", CONFIGURATION)
-        await coordinator.mark_running(created.session_id)
+        await wait_running(coordinator, created.session_id)
         terminal = await invoke(coordinator, terminal_operation, created.session_id)
         runtime = coordinator._sessions[created.session_id]
         original_events = tuple(runtime.events)
@@ -206,17 +244,17 @@ def test_terminal_states_cannot_be_overwritten(terminal_operation: str, operatio
         assert runtime.cancel_requested.is_set() is (terminal_operation == "cancel_session")
         assert clock.calls == 3
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 @pytest.mark.parametrize("operation", ["complete_session", "fail_session"])
 @pytest.mark.parametrize("cancel_first", [False, True])
 def test_terminal_race_has_one_winner_and_one_terminal_event(operation, cancel_first) -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         created = await coordinator.create_session("query", CONFIGURATION)
-        await coordinator.mark_running(created.session_id)
+        await wait_running(coordinator, created.session_id)
         runtime = coordinator._sessions[created.session_id]
         operations = (
             ["cancel_session", operation] if cancel_first else [operation, "cancel_session"]
@@ -246,15 +284,16 @@ def test_terminal_race_has_one_winner_and_one_terminal_event(operation, cancel_f
         assert [event.sequence for event in events] == [1, 2]
         assert events[-1].payload.status == winner.status
         assert events[-1].occurred_at == winner.updated_at
-        assert clock.calls == 3
+        assert winner.updated_at == clock.instant + timedelta(seconds=3)
 
-    asyncio.run(asyncio.wait_for(exercise(), timeout=5))
+    run(exercise)
 
 
 def test_sessions_have_independent_locks_events_and_cancellation() -> None:
-    async def exercise() -> None:
-        coordinator = SessionCoordinator(StepClock())
+    async def exercise(coordinator_factory) -> None:
+        coordinator = coordinator_factory(StepClock())
         first = await coordinator.create_session("first", CONFIGURATION)
+        await wait_running(coordinator, first.session_id)
         first_runtime = coordinator._sessions[first.session_id]
         ready = asyncio.Event()
 
@@ -267,12 +306,12 @@ def test_sessions_have_independent_locks_events_and_cancellation() -> None:
             await ready.wait()
             assert not task.done()
             second = await coordinator.create_session("second", CONFIGURATION)
-            await coordinator.mark_running(second.session_id)
+            await wait_running(coordinator, second.session_id)
             completed = await coordinator.complete_session(second.session_id)
             second_runtime = coordinator._sessions[second.session_id]
             assert await coordinator.get_snapshot(second.session_id) is completed
             assert not second_runtime.cancel_requested.is_set()
-            for name in ("condition", "events", "cancel_requested", "workflow_quiesced"):
+            for name in ("condition", "events", "cancel_requested", "stop_requested", "workflow_quiesced", "workflow_task"):
                 assert getattr(first_runtime, name) is not getattr(second_runtime, name)
         cancelled = await task
 
@@ -284,12 +323,12 @@ def test_sessions_have_independent_locks_events_and_cancellation() -> None:
             assert all(event.session_id == snapshot.session_id for event in events)
         assert set(coordinator._sessions) == {first.session_id, second.session_id}
 
-    asyncio.run(asyncio.wait_for(exercise(), timeout=5))
+    run(exercise)
 
 
 def test_commit_notifies_all_waiting_subscribers_without_exposing_runtime(monkeypatch) -> None:
-    async def exercise() -> None:
-        coordinator = SessionCoordinator(StepClock())
+    async def exercise(coordinator_factory) -> None:
+        coordinator = coordinator_factory(StepClock())
         created = await coordinator.create_session("query", CONFIGURATION)
         runtime = coordinator._sessions[created.session_id]
         first = await coordinator.subscribe(created.session_id)
@@ -319,36 +358,36 @@ def test_commit_notifies_all_waiting_subscribers_without_exposing_runtime(monkey
             with pytest.raises(StopAsyncIteration):
                 await anext(stream)
 
-    asyncio.run(asyncio.wait_for(exercise(), timeout=5))
+    run(exercise)
 
 
 def test_closed_subscriber_does_not_cancel_session_or_affect_other_subscribers() -> None:
-    async def exercise() -> None:
-        coordinator = SessionCoordinator(StepClock())
+    async def exercise(coordinator_factory) -> None:
+        coordinator = coordinator_factory(StepClock())
         created = await coordinator.create_session("query", CONFIGURATION)
         first = await coordinator.subscribe(created.session_id)
         second = await coordinator.subscribe(created.session_id)
         await anext(first)
         await first.aclose()
 
-        await coordinator.mark_running(created.session_id)
+        await wait_running(coordinator, created.session_id)
         completed = await coordinator.complete_session(created.session_id)
         assert [event.sequence async for event in second] == [1, 2]
         assert completed.status is SessionStatus.COMPLETED
         assert not coordinator._sessions[created.session_id].cancel_requested.is_set()
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 @pytest.mark.parametrize("fail_logger", [False, True])
 def test_logging_runs_after_unlock_and_cannot_undo_committed_state(fail_logger: bool) -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         logger = logging.Logger("session-state-test", level=logging.INFO)
-        coordinator = SessionCoordinator(StepClock(), logger=logger)
+        coordinator = coordinator_factory(StepClock(), logger=logger)
         handler = RecordingHandler(coordinator, fail=fail_logger)
         logger.addHandler(handler)
         created = await coordinator.create_session("private query", CONFIGURATION)
-        await coordinator.mark_running(created.session_id)
+        await wait_running(coordinator, created.session_id)
         failed = await coordinator.fail_session(created.session_id, ERROR)
         events = [event async for event in await coordinator.subscribe(created.session_id)]
 
@@ -370,7 +409,7 @@ def test_logging_runs_after_unlock_and_cannot_undo_committed_state(fail_logger: 
         assert handler.records[-1].to_status is SessionStatus.FAILED
         assert "private query" not in repr([record.__dict__ for record in handler.records])
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 @pytest.mark.parametrize(
@@ -378,8 +417,8 @@ def test_logging_runs_after_unlock_and_cannot_undo_committed_state(fail_logger: 
     ["get_snapshot", "mark_running", "complete_session", "fail_session", "cancel_session", "subscribe"],
 )
 def test_lookup_distinguishes_invalid_uuid_and_unknown_session(operation: str) -> None:
-    async def exercise() -> None:
-        coordinator = SessionCoordinator(StepClock())
+    async def exercise(coordinator_factory) -> None:
+        coordinator = coordinator_factory(StepClock())
         with pytest.raises(ValidationError):
             await invoke(coordinator, operation, "not-a-uuid")
         missing = uuid4()
@@ -388,36 +427,36 @@ def test_lookup_distinguishes_invalid_uuid_and_unknown_session(operation: str) -
         assert error.value.session_id == missing
         assert coordinator._sessions == {}
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 def test_duplicate_or_invalid_generated_id_does_not_replace_an_existing_session() -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         session_id = uuid4()
-        coordinator = SessionCoordinator(StepClock(), id_factory=lambda: session_id)
+        coordinator = coordinator_factory(StepClock(), id_factory=lambda: session_id)
         original = await coordinator.create_session("original", CONFIGURATION)
         with pytest.raises(ValueError, match="already exists"):
             await coordinator.create_session("replacement", CONFIGURATION)
         assert await coordinator.get_snapshot(session_id) is original
         assert coordinator._sessions[session_id].query == "original"
-        invalid = SessionCoordinator(StepClock(), id_factory=lambda: "invalid")
+        invalid = coordinator_factory(StepClock(), id_factory=lambda: "invalid")
         with pytest.raises(ValidationError):
             await invalid.create_session("query", CONFIGURATION)
         assert invalid._sessions == {}
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 def test_failed_validation_never_partially_commits_or_consumes_event_sequence() -> None:
-    async def exercise() -> None:
+    async def exercise(coordinator_factory) -> None:
         clock = StepClock()
-        coordinator = SessionCoordinator(clock)
+        coordinator = coordinator_factory(clock)
         with pytest.raises(ValidationError):
             await coordinator.create_session("  ", CONFIGURATION)
         assert coordinator._sessions == {}
         assert clock.calls == 0
         created = await coordinator.create_session("query", CONFIGURATION)
-        running = await coordinator.mark_running(created.session_id)
+        running = await wait_running(coordinator, created.session_id)
         runtime = coordinator._sessions[created.session_id]
         with pytest.raises(ValidationError):
             await coordinator.fail_session(created.session_id, None)
@@ -432,16 +471,16 @@ def test_failed_validation_never_partially_commits_or_consumes_event_sequence() 
         await coordinator.complete_session(created.session_id)
         assert [event.sequence for event in runtime.events] == [1, 2]
 
-    asyncio.run(exercise())
+    run(exercise)
 
 
 def test_system_clock_can_drive_a_session_without_test_configuration() -> None:
-    async def exercise() -> None:
-        coordinator = SessionCoordinator(SystemClock())
+    async def exercise(coordinator_factory) -> None:
+        coordinator = coordinator_factory(SystemClock())
         created = await coordinator.create_session("query", CONFIGURATION)
-        await coordinator.mark_running(created.session_id)
+        await wait_running(coordinator, created.session_id)
         completed = await coordinator.complete_session(created.session_id)
         assert created.created_at.tzinfo is timezone.utc
         assert completed.updated_at.tzinfo is timezone.utc
 
-    asyncio.run(exercise())
+    run(exercise)

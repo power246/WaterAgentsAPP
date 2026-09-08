@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–2](m2_analysis_session_sse_implementation_todo.md#milestone-2in-memory-runtime-与状态机)，包含 models/schemas、application-owned 内存 runtime、原子状态机及基础事件订阅。本文 JSON/SSE data 示例已有模型校验测试；当前运行时 OpenAPI 仍只有 `/health`，workflow task、session/SSE 路由、cursor/keepalive、SSE 编码及错误 handler 尚未接入。
+实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–3](m2_analysis_session_sse_implementation_todo.md#milestone-3fake-workflowcancel-与-lifespan)，包含 models/schemas、application-owned 内存 runtime、原子状态机、基础事件订阅、fake workflow task、协作式取消与 lifespan 收敛。本文 JSON/SSE data 示例已有模型校验测试；当前运行时 OpenAPI 仍只有 `/health`，session/SSE 路由、cursor/keepalive、SSE 编码及 HTTP 错误 handler 尚未接入。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -273,6 +273,8 @@ const body = await response.json();
 - session 不存在：返回 404 `session_not_found`。
 
 cancel response 表示取消已经被接受，不表示所有在途工作都已停止。后端使用同一 `session_id` 记录稍后的 `workflow_quiesced`。
+
+Milestone 3 已在 application 路径验证上述取消时序、幂等和终态保护：cancel 不调用整个 task 的 `Task.cancel()`，晚到返回或异常不再提交 completed/failed，也不进入下游阶段。非 cancelled 终态返回带当前 snapshot 的内部冲突异常；HTTP 200/409/404/422 映射由 Milestone 5 接入。应用 shutdown 使用独立的服务停止语义，宽限期后可取消并等待在途 task 清理，不生成 `session_cancelled`。
 
 ## 6. HTTP error
 

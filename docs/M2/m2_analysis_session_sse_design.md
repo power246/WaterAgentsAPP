@@ -193,14 +193,16 @@ last_error, if any
 current immutable session state
 ordered lifecycle events
 asyncio.Condition or equivalent per-session synchronization
-cancellation event/token
+explicit cancel event
+stop event/token shared by user cancel and service shutdown
+workflow registration gate
 workflow task handle
 workflow quiesced event/flag
 ```
 
 可变 runtime 不使用 Pydantic，也不得通过 API 序列化。不同 session 不共享锁、事件列表、取消信号或 task handle。
 
-Milestone 2 的 application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建并保存 pending snapshot/created event；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id)` 在返回 async iterator 前完成 lookup，iterator 在同一 condition 协议内读取已有事件和等待通知，终态事件发完后结束；cursor、keepalive 和 HTTP/SSE 编码在 Milestone 4–5 接入。API 不获取 runtime、锁、task 或可变 event list。
+Application 入口为 `SessionCoordinator`：`create_session(query, configuration)` 创建 pending snapshot/created event，在同一 map 临界区登记 workflow task handle 和 session，再返回捕获的 pending snapshot；`mark_running`、`complete_session`、`fail_session`、`cancel_session` 是状态转换入口，`get_snapshot` 返回 immutable snapshot。`subscribe(session_id)` 在返回 async iterator 前完成 lookup，iterator 在同一 condition 协议内读取已有事件和等待通知，终态事件发完后结束；cursor、keepalive 和 HTTP/SSE 编码在 Milestone 4–5 接入。API 不获取 runtime、锁、task 或可变 event list。
 
 Lookup 接受 UUID 或 UUID 字符串；非法 UUID 产生 Pydantic validation error，合法但不存在的 UUID 产生 `SessionNotFoundError`。非法状态转换产生带当前 immutable `session` 和目标状态的 `InvalidSessionTransitionError`；终态竞争的失败方通过该 snapshot 得到胜出终态。重复 cancel 已 cancelled 的 session 返回同一 snapshot，不读取时钟、不追加事件。HTTP 错误映射由 Milestone 5 接入。
 
@@ -229,10 +231,12 @@ time_resolution: TimeResolution = 12h
 2. 生成 request_id 和 session_id
 3. 从 settings/request 构造 configuration snapshot
 4. 用同一个 UTC timestamp 构造 pending session 与 session_created event
-5. 原子保存 session + sequence 1 event
-6. 注册并调度 workflow task
+5. 在同一 map 临界区创建 task、登记 handle，并保存 session + sequence 1 event
+6. 解锁并记录 created 后释放 workflow registration gate
 7. 返回创建时捕获的 pending snapshot
 ```
+
+注册 gate 保证 eager task factory 也只能在 task/session 登记完成、map 解锁后运行 workflow；task 创建失败不会留下可查询但没有 owner 的 session。该顺序已由 application 实现，request ID 与 HTTP 创建入口在 Milestone 5 接入。
 
 即使后台 task 在 HTTP response 完成序列化前已经进入 running 或终态，POST 仍固定返回创建时的 `pending` snapshot。客户端通过 SSE 获得后续生命周期。
 
@@ -289,7 +293,7 @@ notify all subscribers
 
 `pending -> running` 没有公开 lifecycle event，只原子更新内部 snapshot 并记录一次结构化状态转换日志。
 
-Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。Logger/handler 异常不改变已提交状态，JSON formatter 与完整 request correlation 在 Milestone 5–6 接入。Milestone 2 创建尚不调度 workflow task，task ownership、quiesced 收敛及 lifespan 在 Milestone 3 接入。
+Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。Logger/handler 异常不改变已提交状态，JSON formatter 与完整 request correlation 在 Milestone 5–6 接入。Milestone 3 的 task wrapper 在运行前提交 internal running；正常返回经过停止信号检查并通过同一状态转换入口提交 completed。取消或关闭获胜后，晚到返回和异常只记录 suppression，不覆盖终态。
 
 ### 6.3 completion/cancel 竞争
 
@@ -465,14 +469,20 @@ cancel_accepted
 M2 定义一个最小、可替换的 async workflow seam：
 
 ```text
-run(session context, cancellation token) -> no business result
+AnalysisWorkflow.run(context: WorkflowContext) -> None
+WorkflowContext(session: AnalysisSessionSnapshot, query: str, cancellation: CancellationToken)
+CancellationToken.is_requested() / checkpoint() / await wait()
 ```
 
 约束：
 
 - 默认 fake 只完成生命周期，不生成 topology、evidence、水质或 attribution。
 - fake completed 正常返回，由 coordinator 提交 completed。
-- fake failed 抛出受控异常或返回受控失败，由 coordinator 映射到 `session_failed`。
+- fake failed 抛出 `WorkflowFailed`；它与非预期 `Exception` 都由 coordinator 映射到唯一 `session_failed`。公开错误固定为 `workflow_failed`、安全 message、`analysis_workflow` stage 和 `retryable=false`，不采用异常原文。
+- context 使用 frozen dataclass，复用已提交的 running snapshot；query 仅供 workflow 内部使用，不进入 repr 或公开 snapshot。
+- `checkpoint()` 在停止信号已设置时抛出 `WorkflowStopped`；wrapper 在开始前和返回后检查，workflow 在每个下游阶段开始前检查。用户 cancel 和 shutdown 均设置内部 stop signal，只有用户 cancel 设置 explicit cancel event 并提交 cancelled。
+- wrapper 的 `finally` 标记 `workflow_quiesced`；done callback 消费 task exception，并覆盖 task 首次执行前即被取消、未进入 finally 的收敛路径。
+- controlled completed/failed、gate-based cancellable 和晚到返回 fake 定义在 `backend/tests/application/test_session_workflow.py`；生产模块只保留默认 lifecycle fake。
 - fake cancelled 通过 gate 和 cancellation token 验证取消与 quiesced。
 - 测试 fake 使用 `asyncio.Event` 等 gate 控制时序，不依赖真实 sleep。
 - fake outcome 通过 `create_app` 的测试注入控制，不出现在生产 HTTP request、环境变量或用户设置中。
@@ -604,6 +614,8 @@ service_shutdown
 - 不逐条记录 keepalive。
 - 日志失败不得改变 session 结果。
 
+Milestone 3 已接入 `cancel_accepted`、`workflow_output_suppressed`、`workflow_quiesced`、`session_failed`、`service_shutdown` 和 wrapper 异常兜底 `workflow_task_error` 的结构化调用点。失败记录复用公开错误的 error ID，并保留 exception type；此阶段不记录原始 exception message、traceback、query 或 headers。JSON formatter、request correlation 和经 redaction 的异常诊断在 Milestone 5–6 接入，不能把当前字段级安全映射视为完整日志脱敏已完成。状态转换日志复用该次 timestamp，独立收敛日志通过 `ClockPort` 读取发生时间。
+
 ### 12.4 Transcript
 
 M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item，并记录 user request、取消上下文和业务错误。HTTP access log、keepalive 和纯传输异常不默认进入 transcript。
@@ -641,10 +653,12 @@ M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item�
 
 ### 13.4 Application shutdown
 
-- lifespan 跟踪所有 workflow tasks。
-- shutdown 时停止接收新请求，向活动 workflow 发出 shutdown signal，再做 best-effort cancellation/await。
+- `create_app` 的 lifespan 启动时创建 coordinator，保存到 `application.state.session_coordinator`；每次 lifespan 使用独立的内存 runtime，模块导入与 app factory 不创建后台 task。
+- coordinator 持有全部 session 的 workflow task handle。shutdown 关闭创建入口，并在 map 锁内捕获仍活动 task 的 session 原状态，向它们发出 stop signal；包括已 cancelled 但尚未 quiesced 的 task。
+- 默认等待 1 秒协作式宽限期，再对尚未结束的 task 调用 `Task.cancel()` 并 await 全部任务完成清理；keyword-only `shutdown_grace_period` 可在组合时注入有限非负秒数，测试通过 gate 和零宽限期验证。此宽限期不承诺能强制终止忽略 cancellation 的任意 Python 代码。
+- 关闭过程幂等并串行化；关闭后创建抛出内部 `ServiceShuttingDownError`，workflow 不能再提交 running/completed/failed。
 - shutdown 不是用户 cancel，不发布 `session_cancelled`。
-- M2 只记录结构化 `service_shutdown`，包含活动 session 原状态和 task 收敛结果。
+- M2 记录结构化 `service_shutdown`，包含 `session_id`、`original_status` 以及 `outcome=quiesced/task_cancelled`；保留 session 的原 snapshot 和 event list。
 - 不为内存数据增加关闭时持久化。
 - M3 在启动恢复时把持久化中遗留的 pending/running session 归档为 failed，错误码 `service_interrupted`，不自动恢复执行。
 
