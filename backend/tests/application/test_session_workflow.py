@@ -466,7 +466,6 @@ def test_lifespan_creates_fresh_runtime_on_each_start_without_import_time_tasks(
             assert second._sessions == {}
             assert len(first._sessions) == 1
             assert all(runtime.workflow_task.done() for runtime in first._sessions.values())
-        assert set(application.openapi()["paths"]) == {"/health"}
 
     run(exercise)
 

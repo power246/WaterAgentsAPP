@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–4](m2_analysis_session_sse_implementation_todo.md#milestone-4sse-encoderreplay-与-keepalive)，包含 models/schemas、内存状态机、fake workflow、协作式取消、lifespan、SSE 编码、cursor/replay 和 keepalive。SSE response factory 已通过 ASGI 测试验证 stream、终态 204 与断线清理，文档 raw frame 与 encoder 逐字节一致；当前运行时 OpenAPI 仍只有 `/health`，正式 session/SSE 路由、request ID 和统一 HTTP 错误 handler 由 Milestone 5 接入。
+实现状态（2026-09-08）：已完成 [Implementation TODO 中的 Milestone 0–5](m2_analysis_session_sse_implementation_todo.md#milestone-5http-routes-与统一错误)。正式创建、SSE 订阅与取消路由已接入，支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消。OpenAPI 已包含 `/health` 与三个 session 操作；接口、streaming、错误与文档 raw frame 均有测试。JSON 日志 formatter/完整 redaction 和正式 SSE server smoke/跨平台 CI 仍由 Milestone 6–7 完成。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -33,6 +33,8 @@ M2 限制：
 | `session_id` | 整次分析 | POST response、所有 lifecycle events、后端日志 | 串联完整 session 生命周期 |
 | `error_id` | 单次公开错误 | HTTP error 或 `session_failed`、后端异常日志 | 从前端错误回溯 traceback |
 | `sequence` | 单 session 公开事件 | SSE `id`、JSON event、后端生命周期日志 | 检查事件遗漏、重复和顺序 |
+
+所有 HTTP response（包括 `/health`、OpenAPI、204 与错误）都带 `X-Request-ID`。每次请求由服务端生成新 UUID，忽略客户端提供的同名 header。后台 workflow 日志关联创建请求的 ID；订阅与 cancel 请求拥有各自 ID，请求结束不会把 ID 留给下一次请求。
 
 排查时优先保留 `session_id`。如果失败响应或事件中有 `error_id`，它是查找具体异常日志的最短路径；HTTP 请求本身的问题再使用 `request_id`。
 
@@ -234,7 +236,7 @@ Last-Event-ID: 1
 - session 已终止且 cursor 已消费最后事件：HTTP 204，不再建立 stream。
 - session 已终止但 cursor 落后：回放缺失事件后关闭 stream。
 
-Milestone 4 的 `create_event_response` 会在构造 response 前完成这些检查：合法订阅构造 `200 text/event-stream`，已消费完终态构造无 body 的 204。非法／越界 cursor 和未知 session 产生分别对应 400／409／404 的 application 异常，最终 HTTP 错误 envelope 在 Milestone 5 接入。response 在正常结束、断线或写入失败时关闭自己的 frame 和 subscription generator，workflow 继续运行。
+GET events 在发送 headers 前完成这些检查：合法订阅返回 `200 text/event-stream`，已消费完终态返回无 body 的 204；非法／越界 cursor 和未知 session 返回 400／409／404 及统一 JSON 错误。response 在正常结束、断线或写入失败时关闭自己的 frame 和 subscription generator，workflow 继续运行。headers 发出后不再追加 HTTP 错误 JSON；workflow 失败仍通过 `session_failed` event 表达。
 
 ## 5. 取消 session
 
@@ -277,7 +279,7 @@ const body = await response.json();
 
 cancel response 表示取消已经被接受，不表示所有在途工作都已停止。后端使用同一 `session_id` 记录稍后的 `workflow_quiesced`。
 
-Milestone 3 已在 application 路径验证上述取消时序、幂等和终态保护：cancel 不调用整个 task 的 `Task.cancel()`，晚到返回或异常不再提交 completed/failed，也不进入下游阶段。非 cancelled 终态返回带当前 snapshot 的内部冲突异常；HTTP 200/409/404/422 映射由 Milestone 5 接入。应用 shutdown 使用独立的服务停止语义，宽限期后可取消并等待在途 task 清理，不生成 `session_cancelled`。
+HTTP cancel 已验证上述时序、幂等和终态保护：cancel 不调用整个 task 的 `Task.cancel()`，晚到返回或异常不再提交 completed/failed，也不进入下游阶段。非 cancelled 终态返回 409 和当前 snapshot；unknown session 返回 404，非法 UUID 返回 422。应用 shutdown 使用独立的服务停止语义，宽限期后可取消并等待在途 task 清理，不生成 `session_cancelled`。
 
 ## 6. HTTP error
 
@@ -335,18 +337,22 @@ Error envelope 固定包含 `error`、`session` 和 `validation`；没有 curren
 }
 ```
 
-`ValidationViolation.field` 是字符串/整数路径数组；`type` 是稳定 snake_case error type，`message` 是非空安全摘要。不包含原始 `input`、异常 `ctx` 或任意 details map。Milestone 1 已校验这些结构；实际 HTTP 422 映射和安全 message 构造由 Milestone 5 接入，日志脱敏由 Milestone 6 接入。
+`ValidationViolation.field` 是字符串/整数路径数组；`type` 是稳定 snake_case error type，`message` 是非空安全摘要。不包含原始 `input`、异常 `ctx`、原始 `msg` 或任意 details map。已知字段路径保留，任意未知 JSON key 用 `unknown_field` 代替，避免字段名本身携带敏感输入；不认识的校验 type 归一为 `invalid_value`。HTTP 422 与安全摘要已接入，通用日志 redaction 由 Milestone 6 接入。
 
 错误码：
 
 | HTTP | code | 含义 | 建议处理 |
 |---:|---|---|---|
 | 400 | `invalid_event_cursor` | Last-Event-ID 格式非法 | 清除本地 cursor 后重新订阅 |
+| 404 | `not_found` | HTTP 路由不存在 | 检查 URL；接口不自动重定向尾斜杠 |
+| 405 | `method_not_allowed` | HTTP 方法不支持，保留 `Allow` header | 使用文档约定的方法 |
 | 404 | `session_not_found` | 当前进程没有该 session | 检查 session_id；服务是否已重启 |
 | 409 | `event_cursor_ahead` | cursor 超过服务端最新 sequence | 检查客户端是否混用了 session/cursor |
 | 409 | `session_already_terminal` | 不能取消非 cancelled 终态 | 使用响应中的当前 snapshot 更新 UI |
 | 422 | `invalid_request` | body/path 校验失败 | 查看 validation，但不要重放相同非法输入 |
 | 500 | `internal_error` | 非预期服务错误 | 用 error_id 查询后端日志 |
+| 503 | `service_unavailable` | coordinator 已进入关闭阶段，`retryable=true` | 待服务可用后再创建 |
+| 其他 HTTP 错误 | `http_error` | 框架 HTTP 错误的安全兜底 | 根据 HTTP status 和 error_id 排查 |
 
 所有 error response 都带 `X-Request-ID`。公开 message 是安全摘要，不包含 traceback 或内部路径。
 

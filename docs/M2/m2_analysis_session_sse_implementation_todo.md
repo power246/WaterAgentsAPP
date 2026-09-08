@@ -570,42 +570,91 @@ Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`
 
 ### Request context
 
-- [ ] 每个 HTTP 请求生成 server-owned UUID request_id。
-- [ ] 所有 response 返回 `X-Request-ID`。
-- [ ] request_id 可通过 request state/context 传给 route、handler 和 logger。
-- [ ] 不信任或复用客户端伪造的 request ID。
+- [x] 每个 HTTP 请求生成 server-owned UUID request_id。
+- [x] 所有 response 返回 `X-Request-ID`。
+- [x] request_id 可通过 request state/context 传给 route、handler 和 logger。
+- [x] 不信任或复用客户端伪造的 request ID。
 
 ### Routes
 
-- [ ] 实现 POST create，成功为 201/pending。
-- [ ] 实现 GET events，正确返回 event-stream/204/error。
-- [ ] 实现 POST cancel，无 request body。
-- [ ] 不增加单 session GET/history endpoint。
-- [ ] `app.main.create_app(settings=None)` 继续可用并注册 router。
-- [ ] app composition 支持 clock、ID、workflow 和 keepalive test injection。
+- [x] 实现 POST create，成功为 201/pending。
+- [x] 实现 GET events，正确返回 event-stream/204/error。
+- [x] 实现 POST cancel，无 request body。
+- [x] 不增加单 session GET/history endpoint。
+- [x] `app.main.create_app(settings=None)` 继续可用并注册 router。
+- [x] app composition 支持 clock、ID、workflow 和 keepalive test injection。
 
 ### Errors
 
-- [ ] 统一处理 application errors、404、409、validation 和 unexpected exception。
-- [ ] 每个 non-2xx 有 error_id、request_id、stable code 和 safe message。
-- [ ] 409 terminal cancel response 附 current session snapshot。
-- [ ] validation response 不回显原始 input。
-- [ ] exception/traceback 不进入 HTTP 或 SSE。
-- [ ] stream 建立后的 workflow failure 使用 session_failed event。
-- [ ] 单 subscriber write failure 不把 session 标记 failed。
+- [x] 统一处理 application errors、404、409、validation 和 unexpected exception。
+- [x] 每个 non-2xx 有 error_id、request_id、stable code 和 safe message。
+- [x] 409 terminal cancel response 附 current session snapshot。
+- [x] validation response 不回显原始 input。
+- [x] exception/traceback 不进入 HTTP 或 SSE。
+- [x] stream 建立后的 workflow failure 使用 session_failed event。
+- [x] 单 subscriber write failure 不把 session 标记 failed。
 
 ### Tests
 
-- [ ] create exact status/schema/header tests。
-- [ ] cancel 200/idempotent/409/404/422 tests。
-- [ ] events content-type/cache/request-id tests。
-- [ ] uniform error envelope tests。
-- [ ] no query echo/no traceback exposure tests。
-- [ ] OpenAPI schema snapshot or focused assertions。
+- [x] create exact status/schema/header tests。
+- [x] cancel 200/idempotent/409/404/422 tests。
+- [x] events content-type/cache/request-id tests。
+- [x] uniform error envelope tests。
+- [x] no query echo/no traceback exposure tests。
+- [x] OpenAPI schema snapshot or focused assertions。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api -q`
+- [x] `python -m pytest backend/tests/api -q`
+
+### Milestone 5 完成记录（2026-09-08）
+
+本阶段接入正式 HTTP routes、server-owned request ID、统一错误 envelope 和 request/session/error 关联。开始时工作区干净，基于本地 Milestone 4 提交 `99233a7`，全量基线为 451 项通过。改动仅涉及新后端、相关 tests 和三份 M2 文档，无新增依赖、业务结果 DTO、前端或旧系统改动。
+
+#### 实现与验收
+
+- `backend/app/api/http/analysis_sessions.py` 注册 POST create、GET events 和 POST cancel；复用现有 request/response schema、coordinator 与 SSE response factory。create 固定返回 201/pending，按 request/settings 固化 timezone/resolution/source；cancel 无 body，成功立即返回 200，终态冲突返回 409/current snapshot。没有单 session detail/history GET。
+- `backend/app/api/http/request_context.py` 使用纯 ASGI middleware，不缓冲 streaming；每个 HTTP 请求生成新 UUID，写入 request state 并给 response 添加 `X-Request-ID`。忽略客户端伪造 header；header/validation/unknown route/500/204/health/OpenAPI 均覆盖。请求结束恢复 ContextVar，后台 workflow 继承创建请求 ID，独立订阅/cancel 使用各自 ID。
+- `backend/app/application/correlation.py` 提供 request ID ContextVar；coordinator 原有 lifecycle/activity log 继续使用同一 `CorrelationContext`、snapshot 和 event，并读取当前 request ID。没有新增第二套 request/session/error 事实模型。
+- `backend/app/api/http/errors.py` 将 application、HTTP、validation 和 headers 前的未处理异常映射为 `AnalysisSessionErrorResponse`。HTTP error ID、request ID 与日志一致；已知字段名保留，未知 key 映射为 `unknown_field`，不认识的校验 type 映射为 `invalid_value`。公开摘要使用固定安全消息，不复制 input、ctx、原始 msg、exception detail 或 traceback。
+- 支持 `session_not_found`、`invalid_event_cursor`、`event_cursor_ahead`、`session_already_terminal`、`invalid_request` 和 `internal_error`。额外明确未知路由 `not_found`、方法不支持 `method_not_allowed`、关闭中的 coordinator `service_unavailable`，以及框架 HTTP 错误兜底 `http_error`；保留 405 的 Allow，禁用自动尾斜杠重定向。
+- headers 发出后不再构造 HTTP 错误 JSON；workflow failure 通过 `session_failed` 发送。真实路由的 ASGI 测试验证 keepalive 期间仍可并发 cancel，disconnect/send failure 只结束本订阅，encoder 异常不会追加第二套 HTTP response 或改写 session 终态。
+- OpenAPI 明确 201/200/204、SSE media type、UUID path、Last-Event-ID、无 body 的 cancel、统一错误 schema 和 `X-Request-ID`。原有 workflow 测试中“OpenAPI 只有 health”的阶段性断言由 `test_openapi_describes_only_the_supported_routes_and_actual_envelopes` 的完整路由断言承接。
+
+#### Verify
+
+使用现有 Python 3.12.14 环境，从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/api -q
+168 passed in 0.91s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+502 passed in 1.62s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+git diff --check
+```
+
+命令均退出 0；diff check 无输出，新文件另检查行尾空白。新增 `backend/tests/api/test_analysis_sessions.py` 共 51 项测试，涵盖配置组合、创建/取消/续传、pending 与 running cancel、HTTP error/UUID/cursor、secret 输入、请求 ID 并发隔离、后台继承、日志失败、OpenAPI 和完整应用的 streaming 边界。fake 仅替换 workflow/clock/ID 或受控异常，测试使用真实 production routes，不新增测试路由/特殊请求参数。
+
+本机真实 Uvicorn health smoke 通过；正式 session completed/cancel server smoke 及 Linux/macOS/Windows CI 仍由 Milestone 7 验收。本阶段提供结构化日志调用点和关联 ID，不将其等同于 Milestone 6 的 JSON formatter、duration_ms、通用 redaction 与完整异常诊断。
+
+#### Contract evidence 与后续接入
+
+Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`，以及 `M2-C01`–`M2-C13`。按 `MR-G01`–`MR-G14` 记录本阶段证据，中心 register 硬约束和归属保持不变；完整 M2 承接仍等待 Milestone 6–8 的日志、smoke/CI 和最终 sweep。
+
+| Contract | 当前实现与测试证据 | 文档与剩余验收 |
+|---|---|---|
+| `GLOBAL-C04`、`GLOBAL-C09`、`M2-C03`、`M2-C04`、`M2-C08` | HTTP routes 复用配置/snapshot/event；`test_create_exact_pending_snapshot_and_configuration` 覆盖省略/显式 resolution 与两个 IANA timezone，terminal conflict 复用当前 snapshot；状态机回归保持原子性。 | 详细设计 §5、§9、§11，API schemas/示例/OpenAPI；Milestone 7 真实 session server smoke。 |
+| `M2-C01`、`M2-C02`、`M2-C05`、`M2-C06`、`M2-C07` | 真实 HTTP cancel/replay/204/cursor error；`test_cancel_is_immediate_idempotent_and_replays_one_terminal`、stream keepalive 并发取消、disconnect/send failure 测试，及原有晚到输出/竞争回归。 | API 订阅/取消说明；Milestone 6 日志层验收、Milestone 7 server/CI。 |
+| `GLOBAL-C07`、`M2-C09` | 固定安全错误、未知 field key 保护、server-owned request ID 与 ContextVar；validation/500/HTTPException detail/no-query/no-traceback、并发请求隔离、workflow failure error ID 关联和 logger failure tests。 | 详细设计 §11–12、API ID/error 表；Milestone 6 通用 JSON/redaction、duration_ms 和经脱敏的完整异常诊断。 |
+| `M2-C10`、`M2-C11`、`M2-C12`、`M2-C13` | 现有单 worker/app lifespan/task ownership 不变，不复用 Idempotency-Key、不生成业务 result；默认完成、重复创建、503 shutdown 和 workflow/lifespan 全量回归。 | API 限制和错误码说明；Milestone 7 跨平台及 server 验收，M3 持久化/遗留处理归属不变。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C10` | 新后端范围、现有依赖和真实入口保持；完整 OpenAPI routes 断言承接阶段性 health-only 断言，architecture gates 与全量回归通过。 | 三份 M2 文档同步；Milestone 8 最终 contract sweep/承接登记。 |
+
+Milestone 3–4 完成记录中待 HTTP 接入的 200/204/400/404/409/422 项已由本阶段真实路由测试承接。M2 总成功标准与 Milestone 6–8 保持未勾选；未新增 deferred contract，也未把本机测试当作完整跨平台验收。
 
 ## Milestone 6：结构化日志与 redaction
 

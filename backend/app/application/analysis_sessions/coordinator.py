@@ -31,6 +31,7 @@ from app.application.analysis_sessions.workflow import (
     WorkflowContext,
     WorkflowStopped,
 )
+from app.application.correlation import request_id_context
 from app.domain.common import NonEmptyString, normalize_utc_datetime
 from app.ports.clock import ClockPort
 
@@ -262,6 +263,7 @@ class SessionCoordinator:
                         else normalize_utc_datetime(self._clock.now())
                     ),
                     "correlation": CorrelationContext(
+                        request_id=request_id_context.get(),
                         session_id=runtime.snapshot.session_id,
                         error_id=runtime.last_error.error_id if runtime.last_error else None,
                     ),
@@ -435,6 +437,7 @@ class SessionCoordinator:
                     ),
                     "timestamp": snapshot.updated_at,
                     "correlation": CorrelationContext(
+                        request_id=request_id_context.get(),
                         session_id=snapshot.session_id,
                         event_sequence=event.sequence if event else None,
                         error_id=event.payload.error.error_id
