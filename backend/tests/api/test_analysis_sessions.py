@@ -198,7 +198,7 @@ def test_default_workflow_completes_and_idempotency_key_is_not_reused() -> None:
     {"query": SECRET, "time_resolution": SECRET}, {"query": SECRET, "fake_outcome": "failed"},
     {"query": SECRET, SECRET: SECRET}, [SECRET], None,
 ])
-def test_validation_uses_safe_envelope_and_creates_no_session(body, caplog) -> None:
+def test_validation_uses_safe_envelope_and_creates_no_session(body, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
 
     async def exercise() -> None:
@@ -210,7 +210,7 @@ def test_validation_uses_safe_envelope_and_creates_no_session(body, caplog) -> N
             assert envelope.error.failed_stage is None
             assert all(set(item) == {"field", "type", "message"} for item in response.json()["validation"])
             assert app.state.session_coordinator._sessions == {}
-            assert SECRET not in repr([record.__dict__ for record in caplog.records])
+            assert SECRET not in "".join(application_logs)
             if isinstance(body, dict) and SECRET in body:
                 assert ["body", "unknown_field"] in [item["field"] for item in response.json()["validation"]]
 
@@ -231,7 +231,7 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
 
 
 @pytest.mark.parametrize("running", [False, True])
-def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog) -> None:
+def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -342,7 +342,7 @@ def test_unknown_routes_and_methods_use_the_same_envelope(method, path, status, 
     run(exercise)
 
 
-def test_unexpected_failure_is_safe_and_correlates_to_logs(monkeypatch, caplog) -> None:
+def test_unexpected_failure_is_safe_and_correlates_to_logs(monkeypatch, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
 
     async def exercise() -> None:
@@ -360,7 +360,7 @@ def test_unexpected_failure_is_safe_and_correlates_to_logs(monkeypatch, caplog) 
             assert records[0].correlation.request_id == envelope.error.request_id
             assert records[0].correlation.error_id == envelope.error.error_id
             assert records[0].exception_type == "RuntimeError"
-            assert SECRET not in repr([record.__dict__ for record in caplog.records])
+            assert SECRET not in "".join(application_logs)
             completed = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_completed"]
             assert completed[-1].status_code == 500
             assert completed[-1].route == BASE
@@ -394,7 +394,7 @@ def test_closing_coordinator_returns_retryable_service_unavailable() -> None:
     run(exercise)
 
 
-def test_request_ids_are_server_owned_isolated_and_inherited_by_workflows(caplog) -> None:
+def test_request_ids_are_server_owned_isolated_and_inherited_by_workflows(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
 
     async def exercise() -> None:
@@ -425,12 +425,12 @@ def test_request_ids_are_server_owned_isolated_and_inherited_by_workflows(caplog
             assert UUID(health.headers["x-request-id"])
             schema = await client.get("/openapi.json")
             assert UUID(schema.headers["x-request-id"])
-            assert SECRET not in repr([record.__dict__ for record in caplog.records])
+            assert SECRET not in "".join(application_logs)
 
     run(exercise)
 
 
-def test_started_stream_receives_workflow_failure_with_correlated_error(caplog) -> None:
+def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
 
     async def exercise() -> None:
@@ -464,7 +464,7 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog) 
                 assert str(records[0].correlation.error_id) == error["error_id"]
                 assert str(records[0].correlation.request_id) == created.headers["x-request-id"]
                 assert SECRET not in repr(messages)
-                assert SECRET not in repr([record.__dict__ for record in caplog.records])
+                assert SECRET not in "".join(application_logs)
                 assert messages[-1]["more_body"] is False
             finally:
                 task.cancel()
@@ -544,7 +544,7 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
                     assert response["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisSessionErrorResponse")
 
 
-def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog) -> None:
+def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
 
     async def exercise() -> None:
@@ -584,7 +584,7 @@ def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog) 
     run(exercise)
 
 
-def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch) -> None:
+def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch, application_logs) -> None:
     from app.api.sse import response as response_module
 
     async def exercise() -> None:
@@ -597,7 +597,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch)
 
             def fail_terminal(event):
                 if event.sequence == 2:
-                    raise RuntimeError(SECRET)
+                    raise RuntimeError("encoder failure; api_key=" + SECRET)
                 return original_encode(event)
 
             monkeypatch.setattr(response_module, "encode_event", fail_terminal)
@@ -618,6 +618,13 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch)
                 assert [message["status"] for message in delivered if message["type"] == "http.response.start"] == [200]
                 assert [event["type"] for event in events_from(delivered)] == ["session_created"]
                 assert SECRET not in repr(delivered)
+                logs = [json.loads(line) for line in application_logs]
+                failure = next(row for row in logs if row["event_name"] == "http_stream_failed")
+                assert failure["exception_type"] == "RuntimeError"
+                assert failure["session_id"] == session_id
+                assert failure["request_id"] == dict(delivered[0]["headers"])[b"x-request-id"].decode()
+                assert failure["status_code"] == 200 and failure["level"] == "ERROR"
+                assert SECRET not in "".join(application_logs)
                 runtime = app.state.session_coordinator._sessions[UUID(session_id)]
                 assert runtime.snapshot.status is SessionStatus.COMPLETED
                 assert len(runtime.events) == 2

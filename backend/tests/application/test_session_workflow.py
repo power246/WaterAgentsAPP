@@ -139,7 +139,7 @@ def test_default_workflow_is_owned_before_pending_response_and_completes(eager) 
 
 
 @pytest.mark.parametrize("failure_type", [None, WorkflowFailed, RuntimeError])
-def test_controlled_outcomes_use_running_context_and_safe_unique_terminal(failure_type, caplog) -> None:
+def test_controlled_outcomes_use_running_context_and_safe_unique_terminal(failure_type, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -180,7 +180,7 @@ def test_controlled_outcomes_use_running_context_and_safe_unique_terminal(failur
             else:
                 assert workflow.downstream == [created.session_id]
             assert SECRET not in "".join(event.model_dump_json() for event in events)
-            assert SECRET not in repr([record.__dict__ for record in caplog.records])
+            assert SECRET not in "".join(application_logs)
             with pytest.raises(InvalidSessionTransitionError) as conflict:
                 await coordinator.cancel_session(created.session_id)
             assert conflict.value.session is snapshot
@@ -189,7 +189,7 @@ def test_controlled_outcomes_use_running_context_and_safe_unique_terminal(failur
     run(exercise)
 
 
-def test_pending_cancel_does_not_enter_workflow(caplog) -> None:
+def test_pending_cancel_does_not_enter_workflow(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -217,7 +217,7 @@ def test_pending_cancel_does_not_enter_workflow(caplog) -> None:
 
 @pytest.mark.parametrize("late_failure", [False, True])
 @pytest.mark.parametrize("workflow_type", [GatedWorkflow, LateReturningWorkflow])
-def test_cancel_returns_before_quiescence_and_suppresses_late_output(workflow_type, late_failure, caplog) -> None:
+def test_cancel_returns_before_quiescence_and_suppresses_late_output(workflow_type, late_failure, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -248,7 +248,7 @@ def test_cancel_returns_before_quiescence_and_suppresses_late_output(workflow_ty
             assert len(records_for(caplog, "workflow_quiesced")) == 1
             assert len(records_for(caplog, "cancel_accepted")) == 1
             assert not records_for(caplog, "session_failed")
-            assert SECRET not in repr([record.__dict__ for record in caplog.records])
+            assert SECRET not in "".join(application_logs)
 
     run(exercise)
 
@@ -324,7 +324,7 @@ def test_concurrent_workflows_have_independent_cancellation_and_completion() -> 
 
 
 @pytest.mark.parametrize("already_running", [False, True])
-def test_shutdown_signals_cooperative_workflow_without_fabricating_cancel(already_running, caplog) -> None:
+def test_shutdown_signals_cooperative_workflow_without_fabricating_cancel(already_running, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -357,7 +357,7 @@ def test_shutdown_signals_cooperative_workflow_without_fabricating_cancel(alread
     run(exercise)
 
 
-def test_lifespan_shutdown_cancels_blocked_tasks_and_awaits_their_cleanup(caplog) -> None:
+def test_lifespan_shutdown_cancels_blocked_tasks_and_awaits_their_cleanup(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -409,7 +409,7 @@ def test_lifespan_shutdown_cancels_blocked_tasks_and_awaits_their_cleanup(caplog
     run(exercise)
 
 
-def test_shutdown_handles_multiple_tasks_including_cancelled_but_not_quiesced(caplog) -> None:
+def test_shutdown_handles_multiple_tasks_including_cancelled_but_not_quiesced(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -490,7 +490,7 @@ def test_task_factory_failure_does_not_publish_unowned_session() -> None:
     run(exercise)
 
 
-def test_done_callback_consumes_unexpected_wrapper_failure_and_marks_quiesced(caplog) -> None:
+def test_done_callback_consumes_unexpected_wrapper_failure_and_marks_quiesced(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -525,7 +525,7 @@ def test_done_callback_consumes_unexpected_wrapper_failure_and_marks_quiesced(ca
             assert unhandled == []
             assert len(records_for(caplog, "workflow_task_error")) == 1
             assert len(records_for(caplog, "workflow_quiesced")) == 1
-            assert SECRET not in repr([record.__dict__ for record in caplog.records])
+            assert SECRET not in "".join(application_logs)
         finally:
             await coordinator.shutdown()
             loop.set_task_factory(original_factory)
@@ -579,7 +579,7 @@ def test_creation_and_shutdown_race_never_leaves_an_unowned_task(create_first) -
     run(exercise)
 
 
-def test_task_cancelled_before_first_step_still_reports_quiescence(caplog) -> None:
+def test_task_cancelled_before_first_step_still_reports_quiescence(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:

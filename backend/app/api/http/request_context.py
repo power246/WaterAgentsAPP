@@ -8,6 +8,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.api.http.errors import handle_error, log_http
 from app.application.correlation import request_id_context
+from app.domain.common import normalize_utc_datetime
 
 _UUID = TypeAdapter(UUID)
 
@@ -26,6 +27,10 @@ class RequestContextMiddleware:
         token = request_id_context.set(request_id)
         request = Request(scope, receive)
         status_code = None
+        try:
+            started_at = normalize_utc_datetime(request.app.state.clock.now())
+        except Exception:
+            started_at = None
 
         async def send_with_id(message: Message) -> None:
             nonlocal status_code
@@ -40,10 +45,14 @@ class RequestContextMiddleware:
                 await self.app(scope, receive, send_with_id)
             except Exception as error:
                 if status_code is not None:
+                    log_http(
+                        request, "http_stream_failed", status_code,
+                        exception_type=type(error).__name__, exception=error,
+                    )
                     raise
                 response = await handle_error(request, error)
                 await response(scope, receive, send_with_id)
         finally:
             if status_code is not None:
-                log_http(request, "http_request_completed", status_code)
+                log_http(request, "http_request_completed", status_code, started_at=started_at)
             request_id_context.reset(token)

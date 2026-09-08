@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import FastAPI, Request
@@ -60,14 +61,19 @@ def log_http(
     *,
     error: HttpPublicError | None = None,
     exception_type: str | None = None,
+    exception: BaseException | None = None,
+    started_at: datetime | None = None,
 ) -> None:
     try:
+        timestamp = normalize_utc_datetime(request.app.state.clock.now())
         logging.getLogger("wateragents.http").log(
-            logging.ERROR if status_code >= 500 else logging.INFO,
+            logging.ERROR if status_code >= 500 or exception is not None else logging.INFO,
             "HTTP request handled.",
+            exc_info=(type(exception), exception, exception.__traceback__)
+            if exception is not None else None,
             extra={
                 "event_name": event_name,
-                "timestamp": normalize_utc_datetime(request.app.state.clock.now()),
+                "timestamp": timestamp,
                 "correlation": CorrelationContext(
                     request_id=request.state.request_id,
                     session_id=request_session_id(request),
@@ -78,6 +84,10 @@ def log_http(
                 "status_code": status_code,
                 "public_error": error,
                 "exception_type": exception_type,
+                "redaction_values": (getattr(request.state, "log_private_query", ""),)
+                if exception is not None else (),
+                "duration_ms": max(0.0, (timestamp - started_at).total_seconds() * 1000)
+                if started_at is not None else None,
             },
         )
     except Exception:
@@ -151,7 +161,11 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     )
     envelope = AnalysisSessionErrorResponse(error=error, session=session, validation=validation)
     headers["X-Request-ID"] = str(error.request_id)
-    log_http(request, "http_request_failed", status, error=error, exception_type=type(exception).__name__)
+    log_http(
+        request, "http_request_failed", status, error=error,
+        exception_type=type(exception).__name__,
+        exception=exception if status >= 500 and not isinstance(exception, HTTPException) else None,
+    )
     return JSONResponse(envelope.model_dump(mode="json"), status_code=status, headers=headers)
 
 

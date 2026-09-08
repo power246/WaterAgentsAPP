@@ -90,6 +90,7 @@ backend/app/
   infrastructure/
     observability/
       json_logging.py
+      redaction.py
     runtime/
       system_clock.py
 ```
@@ -129,7 +130,9 @@ backend/app/
 - `system_clock.py`
   - `ClockPort` 的 UTC system clock 实现。
 - `json_logging.py`
-  - WaterAgents 自有日志的单行 JSON formatter、关联字段和 redaction helper。
+  - WaterAgents 自有日志的单行 JSON formatter、关联字段、异常诊断和容错输出 handler。
+- `redaction.py`
+  - JSON-like 值的递归脱敏，以及凭据文本和已知 query 的诊断脱敏。
 
 `app.main.create_app` 继续是 composition root。为了测试，可以增加少量 keyword-only 注入点或一个小型 frozen dependencies 对象；不得引入 service locator 或通用 DI framework。现有 `create_app(settings=None)` 调用保持可用。
 
@@ -306,7 +309,7 @@ notify all subscribers
 
 `pending -> running` 没有公开 lifecycle event，只原子更新内部 snapshot 并记录一次结构化状态转换日志。
 
-Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。Logger/handler 异常不改变已提交状态，request correlation 已接入；JSON formatter 与经 redaction 的完整异常诊断在 Milestone 6 接入。Milestone 3 的 task wrapper 在运行前提交 internal running；正常返回经过停止信号检查并通过同一状态转换入口提交 completed。取消或关闭获胜后，晚到返回和异常只记录 suppression，不覆盖终态。
+Coordinator 复用同步、无外部 I/O 的 `ClockPort.now()`，在通过当前状态校验后读取一次时间并构造完整 snapshot/event，再提交变更。condition 内不调用 logger；解锁后向标准库 logger 传入 committed `LifecycleEvent`、`CorrelationContext`、`from_status/to_status` 和该次转换 timestamp。JSON formatter 直接序列化同一事件，logger/handler 异常不改变已提交状态。Task wrapper 在运行前提交 internal running；正常返回经过停止信号检查并通过同一状态转换入口提交 completed。取消或关闭获胜后，晚到返回和异常只记录 suppression，不覆盖终态。
 
 ### 6.3 completion/cancel 竞争
 
@@ -542,7 +545,7 @@ validation: typed field violations or empty
 
 API schema 使用 `AnalysisSessionResponse` 继承公开 snapshot 字段，`HttpPublicError` 继承 `PublicError` 并增加必填 UUID `request_id` 与可空 UUID `session_id`。`AnalysisSessionErrorResponse` 固定包含 `error`、`session`、`validation`；不适用时后两项分别为 null 和空数组。`ValidationViolation` 的字段为 `field`（字符串/整数路径数组）、`type`（stable snake_case error type）和 `message`（非空安全摘要），不包含原始 `input`、异常 `ctx` 或任意 details map。
 
-所有模型禁止 extra；公开错误的 `code` 与非空 `failed_stage` 使用小写 snake_case，`retryable` 只接受 bool。最小 `CorrelationContext` 包含可空 UUID `request_id/session_id/error_id` 和可空正整数 `event_sequence`。模型只校验结构；HTTP handler 已从固定安全 message 构造公开错误，去除 validation input/ctx/原始 msg 并隐藏未知 field key。写日志前的通用 redaction 仍由 Milestone 6 实现，不能以字符串类型校验代替脱敏。
+所有模型禁止 extra；公开错误的 `code` 与非空 `failed_stage` 使用小写 snake_case，`retryable` 只接受 bool。最小 `CorrelationContext` 包含可空 UUID `request_id/session_id/error_id` 和可空正整数 `event_sequence`。模型只校验结构；HTTP handler 从固定安全 message 构造公开错误，去除 validation input/ctx/原始 msg 并隐藏未知 field key。日志输出边界统一执行 redaction，不能以字符串类型校验代替脱敏。
 
 M2 稳定错误码至少包括：
 
@@ -611,6 +614,9 @@ component
 operation
 from_status
 to_status
+method
+route
+status_code
 duration_ms
 exception_type
 exception_message
@@ -621,7 +627,8 @@ stack_trace
 
 ```text
 http_request_completed
-session_created
+http_request_failed
+http_stream_failed
 session_status_changed
 lifecycle_event_committed
 cancel_accepted
@@ -629,6 +636,7 @@ workflow_output_suppressed
 workflow_quiesced
 session_failed
 service_shutdown
+workflow_task_error
 ```
 
 要求：
@@ -639,7 +647,15 @@ service_shutdown
 - 不逐条记录 keepalive。
 - 日志失败不得改变 session 结果。
 
-Milestone 3 已接入 `cancel_accepted`、`workflow_output_suppressed`、`workflow_quiesced`、`session_failed`、`service_shutdown` 和 wrapper 异常兜底 `workflow_task_error` 的结构化调用点。失败记录复用公开错误的 error ID，并保留 exception type；此阶段不记录原始 exception message、traceback、query 或 headers。Milestone 5 通过 `request_id_context` 为 lifecycle log 关联创建/cancel 请求，并提供 `http_request_failed` 与 `http_request_completed` 调用点，记录安全 route template、method、status 和复用的公开错误。JSON formatter、duration_ms 和经 redaction 的完整异常诊断在 Milestone 6 接入，不能把当前字段级安全映射视为完整日志脱敏已完成。状态转换日志复用该次 timestamp，独立收敛日志通过 `ClockPort` 读取发生时间。
+App lifespan 用 `AppSettings.log_level` 配置 `wateragents` logger，向 stderr 输出单行 JSON。非 ASCII 字符使用 JSON Unicode 转义，避免 Windows 等非 UTF-8 控制台损坏 JSON。重复启动复用一个自有 handler，不向 root logger 传播，不改 Uvicorn/第三方 logger。配置为进程级；正常运行只有一个 app/worker，同进程测试中的多个 app 共享最近一次 lifespan 设置的日志级别。导入 app 或调用 factory 不安装 handler。
+
+`timestamp/level/event_name/message/component` 稳定存在；`component` 是 logger 名称。`CorrelationContext` 展平为非空 ID 字段，状态转换包含 `from_status/to_status`；创建时 `from_status=null`。公开事件统一记录为 `lifecycle_event_committed`，其 `lifecycle_event` 字段直接序列化 committed `LifecycleEvent`，`event_sequence` 与 SSE sequence 相同；不额外写一条 `session_created` 日志。状态转换使用同一次 timestamp，独立 activity/HTTP 日志通过 `ClockPort` 读取发生时间。
+
+HTTP completion 记录 `method/route/status_code/duration_ms`；route 为模板，不含实际 URL、path 参数或 query string，未匹配时省略。耗时为 `ClockPort` 的结束 UTC 时间减开始 UTC 时间，单位毫秒，时钟回拨时截断为 0；SSE 包含整个订阅持续时间。时钟故障时不影响请求，允许缺少 duration 或丢弃该条日志。
+
+`session_failed`、晚到异常的 `workflow_output_suppressed`、`workflow_task_error` 及未处理 HTTP/stream 异常记录 ERROR 级诊断：`exception_type/exception_message/stack_trace`。Stack trace 保留文件、行号、函数、异常消息以及标准 cause/context chain 和 exception group，省略源码行和局部变量。失败 session 使用同一公开 error ID；cancel/shutdown 后的晚到异常不生成新公开错误。HTTP validation 和已知 HTTPException 只记安全公开错误与异常类型，不格式化可能含 request body/detail 的原始异常。Headers 已发出的异常记 `http_stream_failed`，随后仍由传输层收尾，不追加错误 JSON，也不修改 session。
+
+Formatter 只选择上述字段及已有 `public_error/lifecycle_event/original_status/outcome`，不序列化整个 LogRecord。格式化、序列化或 redaction 失败时只输出固定安全 JSON：`event_name=log_format_failed`、`level=ERROR`、`timestamp=null` 和固定 message，不尝试 repr 原始对象。Handler 写入失败时丢弃该条日志，不调用会向 stderr 打印原始 record 的默认 logging error handler。调用点继续隔离 logger 异常，不回滚业务结果。
 
 ### 12.4 Transcript
 
@@ -649,6 +665,8 @@ M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item�
 
 - 不记录原始 Authorization、Cookie、Set-Cookie、API key 或 credential headers。
 - 对结构化 payload 按大小写不敏感的 secret key allow/deny policy 递归脱敏。
+- `redact` 返回新 JSON-like 结构，不修改输入；含 authorization、cookie、API/access key、token、secret、password/passwd、credential、private key 的 key，以及 query/request_body/headers，值统一替换为 `[REDACTED]`。保留安全的键、数组顺序与标量。
+- 诊断文本处理上述具名凭据赋值、Authorization/Cookie header、Bearer/Basic 和 URL 用户凭据。Workflow 使用内部 query、HTTP create 使用已校验 query 作为本条异常的私有脱敏值，同时屏蔽其原文、repr 和 JSON 转义形式。私有值只在格式化时使用，不输出到 JSON；不读取或缓存原始 request body/完整 headers。
 - 公开错误永远从安全 message 构造，不把异常字符串直接透传。
 - M2 没有 API key 输入；redaction helper 是后续 settings/transcript 可复用的最小能力，不扩展成通用 DLP 系统。
 

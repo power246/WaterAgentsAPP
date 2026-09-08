@@ -344,7 +344,7 @@ def test_published_event_wins_when_timeout_fires_while_waiting_for_the_lock(monk
     run(exercise)
 
 
-def test_keepalive_is_transport_only_and_does_not_change_replay_or_logs(caplog) -> None:
+def test_keepalive_is_transport_only_and_does_not_change_replay_or_logs(caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
 
     async def exercise() -> None:
@@ -355,6 +355,7 @@ def test_keepalive_is_transport_only_and_does_not_change_replay_or_logs(caplog) 
             snapshot = runtime.snapshot
             events = tuple(runtime.events)
             records = list(caplog.records)
+            json_lines = list(application_logs)
             calls = clock.calls
             response = await create_event_response(coordinator, created.session_id, last_event_id="1")
             received = []
@@ -381,6 +382,7 @@ def test_keepalive_is_transport_only_and_does_not_change_replay_or_logs(caplog) 
                 assert tuple(runtime.events) == events
                 assert clock.calls == calls
                 assert caplog.records == records
+                assert application_logs == json_lines
                 assert not context.cancellation.is_requested()
                 assert asyncio.all_tasks() - tasks_before == {task}
             finally:

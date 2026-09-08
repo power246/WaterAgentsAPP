@@ -94,3 +94,5 @@ Settings use the `WATERAGENTS_` environment variable prefix:
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
 
 Timezone names must be valid IANA identifiers. The project includes `tzdata` so this behaves consistently when the operating system does not provide an IANA timezone database.
+
+At application startup, `wateragents.*` logs use single-line JSON on stderr at `WATERAGENTS_LOG_LEVEL`. They include request/session/error IDs, HTTP duration, committed lifecycle events, and redacted exception diagnostics. Uvicorn and third-party log formats are unchanged. See the [M2 API troubleshooting guide](../docs/M2/m2_analysis_session_sse_api.md#8-排障-runbook) for fields and event names.
