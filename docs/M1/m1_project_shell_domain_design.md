@@ -2,7 +2,7 @@
 
 生成日期：2026-09-07
 
-本文把 `backend_refactor_milestones.md` 中的 M1 展开为可直接实现和验收的技术设计。它服从 `backend_architecture_skeleton.md` 的分层与依赖方向；`backend_refactor_contract.md` 只作为旧实现的数据链路参考，不构成兼容目标。
+本文把 `backend_refactor_milestones.md` 中的 M1 展开为可直接实现和验收的技术设计。它服从 `backend_architecture_skeleton.md` 的分层与依赖方向。`backend_bk/`、`frontend_bk/` 与 `backend_refactor_contract.md` 是独立的旧系统归档，不是 M1 或后续新系统的设计、实现、测试或验收输入。
 
 M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖的项目入口、领域语言、时间语义、数据不变量和 port 模块入口。
 
@@ -10,9 +10,10 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 
 ## 1. 核心决策
 
-- 使用 Python 3.11+、FastAPI、Pydantic v2 和 `pyproject.toml`。
+- 使用 Python 3.11+、FastAPI、Pydantic v2 和 `pyproject.toml`，支持 macOS、Windows 和 Linux。
+- 生产代码不硬编码 POSIX 路径、`/tmp`、shell 命令或 macOS 专用能力；路径处理使用 `pathlib`，运行入口使用 Python 模块调用。
 - Domain 允许直接依赖 Pydantic v2，但不依赖 FastAPI、数据库、LLM framework 或外部 API SDK。
-- 新代码只写入 `backend/`；`backend_bk/` 只作历史参考。
+- 新代码只写入 `backend/`；不读取、导入、复制、适配、枚举或测试 `backend_bk/`、`frontend_bk/` 与旧契约文档的内容。
 - 第一版业务目标只用 COMID 表达，不引入 `Waterbody`；通用水体抽象留给未来版本。
 - Domain model 禁止额外字段并采用浅层不可变；动态 JSON payload 在边界深拷贝，避免共享引用被原地修改。
 - 时间戳进入 Domain 时统一转为 UTC，用户日期和时间窗口按可配置 IANA timezone 解释，默认 `America/Chicago`。
@@ -25,7 +26,7 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 - evidence ID 只要求 session 内唯一；跨 session 的源记录通过 provenance 识别。
 - `InferenceResult` 只保存 evidence 引用和摘要，完整 evidence 与分析上下文由 transcript 保存并按需加载。
 - adapter 返回标准化 source record；Evidence Tool 负责构造 `EvidenceFragment` 和 evidence policy 字段。
-- 不兼容旧 `/analyze`、`/ws/hydro-analysis`、旧事件或旧前端数据结构，后续前端改用新 session + SSE 协议。
+- 新后端只实现本设计定义的 session + SSE 方向，不包含任何基于旧后端内容的兼容或特殊处理。
 
 ## 2. 范围
 
@@ -41,6 +42,7 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 - 时间窗口与 DST 语义测试。
 - Domain 依赖边界静态测试。
 - 启动与 health smoke test。
+- 跨平台 shell 约束测试，确保代码和配置不依赖当前开发机路径或操作系统专用行为。
 
 ### 2.2 M1 不包含
 
@@ -52,18 +54,22 @@ M1 的目的不是恢复旧后端功能，而是固定后续 M2-M9 共同依赖�
 - 多 Agent DAG 调度；属于 M7。
 - RAG 实现；属于 M8。
 - Settings/key/admin 产品接口和真实 adapter；属于 M9。
-- 旧 HTTP/WebSocket/前端结构的任何兼容 adapter。
+- 任何从旧后端归档推导或复制的 adapter、DTO、事件或兼容逻辑。
 
 ## 3. 目录和模块设计
 
-采用一类一文件：
+生产 Domain class 采用一类一文件；`common.py` 只保留共享 type alias、校验函数和兼容导入：
 
 ```text
+.github/
+  workflows/
+    backend-m1.yml
 backend/
   pyproject.toml
   README.md
   app/
     __init__.py
+    __main__.py
     main.py
     api/
       __init__.py
@@ -73,6 +79,8 @@ backend/
     domain/
       __init__.py
       common.py
+      domain_enum.py
+      domain_model.py
       hydrology/
         __init__.py
         location.py
@@ -131,12 +139,17 @@ backend/
       config/
         __init__.py
         settings.py
+  scripts/
+    health_smoke.py
   tests/
     api/
       test_health.py
     architecture/
+      test_cross_platform_ci.py
+      test_domain_contracts.py
       test_domain_dependencies.py
       test_port_imports.py
+      test_project_shell.py
     domain/
       test_hydrology.py
       test_time.py
@@ -174,6 +187,7 @@ allow_inf_nan = false
 - 不用裸 `dict[str, Any]` 表示核心业务结构。
 - 外部源尚未定型的 payload 使用递归 `JsonValue`，不能保存 Python 任意对象。
 - Pydantic frozen 是浅层不可变。动态 JSON payload 在构造时深拷贝，对外序列化返回新对象；M1 不引入 FrozenDict。
+- 通用 JSON payload 的键和值按原样保存，不继承业务字符串的空白裁剪规则；Python 与 JSON 输入都递归拒绝 NaN/Infinity。
 - 枚举继承 `str, Enum`，JSON 使用稳定小写值。
 - round-trip 标准为 `model_dump_json()` 后可由同类型 `model_validate_json()` 恢复为相等对象。
 
@@ -190,6 +204,7 @@ allow_inf_nan = false
 - 纬度范围 `[-90, 90]`，经度范围 `[-180, 180]`。
 - 距离、覆盖率等不能为负。
 - confidence 范围为 `[0, 1]`，M1 不添加状态相关硬约束。
+- Domain 浮点字段接受 `int` 并规范化为 `float`，拒绝 `bool` 和数字字符串。
 - NaN/Infinity 不代表缺失；缺失使用 `None` 和明确状态/质量标记。
 
 ## 5. 时间契约
@@ -238,7 +253,9 @@ build_time_windows(
 规则：
 
 - 从请求起点对应的本地墙上时间开始滚动 resolution。
-- 每次使用当地墙上时钟加 `6/12/24` 小时，再转换为 UTC 边界。
+- 从请求起点建立独立的当地墙上时钟名义网格，每次在名义网格上增加 `6/12/24` 小时，再解析为 UTC 边界；实际边界的 DST 调整不得改变后续名义网格。
+- 名义边界落入 spring-forward 不存在时段时，按真实 DST gap 向前移动；落入 fall-back 重复时段时选择第一次出现（`fold=0`）。
+- 时区发生整日跳变时，映射后没有沿 UTC 前进的名义边界直接跳过，后续名义网格继续计算。
 - 不超过请求 end；最后不足一个完整墙上时钟窗口时返回截断窗口，由后续阶段标记 `partial_coverage`。
 - 第一版日期输入从 00:00 开始，因此自然得到固定本地网格。
 - 未来自定义时间例如 `03:20-17:40`，按 `03:20-09:20 / 09:20-15:20 / 15:20-17:40` 滚动；DST 仍按墙上时钟语义处理。
@@ -617,7 +634,7 @@ generated_at: UTC datetime
 - 每条 series 的 resolution/source 与 result 一致。
 - 每条 series 的 points 必须完整匹配 window plan。
 - time segments 有序、无重叠、无缺口并完整覆盖 time range。
-- mixed 必须同时包含 gap filling 和 prediction segment。
+- mixed 必须先包含一个或多个 gap filling segment，再包含一个或多个 prediction segment；只允许发生一次模式切换。
 - 每个 window 完整落在一个 segment 内。prediction segment 只接受 predicted source；gap filling 接受 observed/inferred source。
 - window、attribution 和 analysis step 的 evidence refs 都存在于 EvidenceChain。
 - observed 表示原样采用有效站点读数；Agent 对多站冲突值做加权、折中或综合后必须标为 inferred。
@@ -677,18 +694,20 @@ empty 与 unavailable 不混淆；Application 在后续 milestone 决定 retry�
 
 ### 8.1 依赖
 
-生产依赖：FastAPI、Pydantic v2、pydantic-settings、Uvicorn。
+生产依赖：FastAPI、Pydantic v2、pydantic-settings、Uvicorn、tzdata。
 
 开发依赖：pytest、httpx。
 
-M1 不安装 LangGraph、LangChain、数据库 driver、HTTP retry/cache 库或 provider SDK。Python 最低版本为 3.11。
+M1 不安装 LangGraph、LangChain、数据库 driver、HTTP retry/cache 库或 provider SDK。Python 最低版本为 3.11。`tzdata` 用于保证 Windows 等未提供系统 IANA timezone database 的环境仍可解析 `America/Chicago`，不能仅依赖开发机的系统时区数据。
+
+仓库提交跨平台 `uv.lock` 以提供可复现的一命令环境同步与启动；`uv` 是可选的开发机工具，不是应用运行依赖。没有 `uv` 时仍可使用标准库 `venv` 和 `pip` 完成同一安装。
 
 ### 8.2 Settings
 
 ```text
 app_name = "WaterAgents API"
 environment = "development"
-log_level = "INFO"
+log_level = "info"
 host = "127.0.0.1"
 port = 8000
 analysis_timezone = "America/Chicago"
@@ -712,10 +731,20 @@ M1 health：
 从仓库根启动：
 
 ```bash
-uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 ```
 
 启动时不清空 memory/cache，不建数据库、不联网、不启动后台任务。
+
+### 8.4 跨平台约束
+
+- macOS、Windows 和 Linux 使用同一个 `pyproject.toml`、application factory 和模块启动入口。
+- 生产代码使用 `pathlib.Path` 和标准库 API 处理路径，不拼接 `/` 或 `\\`，不依赖当前工作目录解析资源。
+- 不调用 `bash`、`zsh`、PowerShell、`find`、`rm` 等系统 shell 命令实现应用功能。
+- 临时文件使用 `tempfile`，不硬编码 `/tmp`；编码显式使用 UTF-8，不能依赖平台默认编码。
+- M1 不依赖 `fork`、POSIX signal、Unix socket、文件权限位或大小写敏感文件系统语义。
+- README 分别说明 POSIX shell 与 Windows PowerShell 的虚拟环境激活方式；激活后统一使用 `python -m pip`、`python -m pytest` 和 `python -m uvicorn`。
+- 当前开发机的 bundled Python 路径只用于本地验证，不得写入生产代码、配置、测试或用户安装说明。
 
 ## 9. 测试设计
 
@@ -746,6 +775,8 @@ uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
 - 重复本地时间转换后有两个不同 UTC instant，不发生 key 覆盖。
 - 没有 timezone transition 时，错误的 5/7 小时完整窗口不被接受。
 - 自定义时间预留行为：从 03:20 滚动，而不是对齐 06:00；尾窗可截断。
+- 自定义时间跨 spring-forward 时只前移不存在的边界，后续边界回到原始名义网格；跨 fall-back 时重复边界选择 `fold=0`。
+- `Pacific/Apia` 整日跳变期间的 6h/12h/24h 窗口仍连续覆盖完整请求范围。
 
 ### 9.3 架构
 
@@ -761,10 +792,13 @@ port import test 验证所有协议可从 `app.ports` 导入，且不导入 infr
 - 无 `.env`、API key、网络和数据库时可构造 app。
 - `GET /health` 精确返回 HTTP 200 与 `{"status":"healthy"}`。
 - 导入 app.main 无文件清理、网络请求或后台线程副作用。
+- 静态检查与 shell 测试拒绝硬编码 `/tmp`、用户目录、盘符、POSIX-only subprocess 或 macOS-only import。
+- timezone 测试在不依赖系统 zoneinfo database 的前提下可使用 `tzdata`。
+- 最终验收需要保留 macOS、Windows、Linux CI 或等效干净环境中的安装、测试和 health smoke test 结果。
 
 ## 10. M1 验收标准
 
-1. `backend/` 是 Python 3.11+ 独立可安装工程。
+1. `backend/` 是 Python 3.11+ 独立可安装工程，同一份代码支持 macOS、Windows 和 Linux。
 2. Uvicorn 可启动，health 返回 200。
 3. M1 列出的 Domain 对象和 `build_time_windows` 有真实实现。
 4. 所有顶层 Domain 对象可 JSON round-trip。
@@ -772,16 +806,17 @@ port import test 验证所有协议可从 `app.ports` 导入，且不导入 infr
 6. 三种 outcome status 的结构约束有测试。
 7. DST、本地墙上时钟和重复本地时间测试通过。
 8. Domain dependency test 证明无 FastAPI/DB/LLM/外部 API 依赖。
-9. 未向 `backend_bk/` 写入代码。
-10. 未提前实现 M2-M9 运行时能力或旧接口兼容。
+9. `backend/` 的生产代码、包配置和测试不依赖或引用 `backend_bk/`、`frontend_bk/` 与旧契约文档。
+10. 未提前实现 M2-M9 运行时能力，也没有从旧后端归档引入兼容或特殊处理。
+11. macOS、Windows、Linux 的 CI 或等效干净环境均通过安装、测试和 health smoke test。
 
 建议命令：
 
 ```bash
 python -m pip install -e './backend[dev]'
-pytest backend/tests -q
-uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
-curl http://127.0.0.1:8000/health
+python -m pytest backend/tests -q
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+python -c "import httpx; response = httpx.get('http://127.0.0.1:8000/health'); response.raise_for_status(); print(response.json())"
 ```
 
 ## 11. 实现顺序
@@ -800,7 +835,7 @@ curl http://127.0.0.1:8000/health
    -> verify: stable/generic ports 可导入，无反向依赖
 
 5. architecture/full regression
-   -> verify: pytest backend/tests -q 全绿
+   -> verify: python -m pytest backend/tests -q 全绿
 ```
 
 ## 12. Deferred Contract Register
@@ -815,7 +850,7 @@ curl http://127.0.0.1:8000/health
 | M5 | 为 observation/weather/flow/facility/upstream 定义 source record DTO；adapter 返回 record，Evidence Tool 生成 EvidenceFragment；区分 empty/unavailable/invalid；可疑值原样保留，明确无效值不作为 observed result；建立 ParameterKey 到 canonical unit 的表和单位 tool；保留源单位与转换 provenance；确定性库/API 执行换算，未知换算不得猜测。 |
 | M6 | 设计 quantified/directional/indeterminate 生成规则；无证据仍输出 indeterminate；制定 confidence 评分和聚合规则但保留 Agent 判断空间；多站冲突由 Agent 判断并引用全部证据，综合结果标 inferred；Agent 选择目标单位但换算调用确定性 tool；归因输出 basis；当前有效观测优先于历史推理。 |
 | M8 | historical inference 保留原 session、原 confidence、schema version 和 RAG score；不得覆盖当前观测。 |
-| M9 | 动态修改默认 IANA timezone；单位自定义接口先通过 tool 和 Agent 校验，默认仅生成 session override；写入全局单位表必须由用户显式确认并保存版本记录；不提供任何旧 API/WebSocket 兼容层。 |
+| M9 | 动态修改默认 IANA timezone；单位自定义接口先通过 tool 和 Agent 校验，默认仅生成 session override；写入全局单位表必须由用户显式确认并保存版本记录；不从旧后端归档引入任何兼容层。 |
 | Future | 开放任意时分输入；窗口从请求起点按本地墙上时钟滚动，首尾可 partial；根据真实 IANA transition 接受 DST 时长变化。通用 Waterbody 抽象仅在出现非 COMID 水体需求时设计。 |
 
 ## 13. 设计取舍
@@ -829,4 +864,4 @@ curl http://127.0.0.1:8000/health
 - confidence 规则属于 M6 reasoning，不在 Domain 中过度硬编码。
 - evidence envelope 在 M1 稳定，具体 payload 在 M5 基于真实 source record 定型。
 - adapter 不掌握 evidence policy，Evidence Tool 是 EvidenceFragment 的构造责任层。
-- 旧后端结构只作为行为参考，不通过 Domain alias 或兼容 mapper 延续。
+- 旧后端归档不是新后端的行为参考；新设计不从中推导、复制或排除任何特定契约。
