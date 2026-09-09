@@ -49,7 +49,9 @@ class RequestContextMiddleware:
                         request, "http_stream_failed", status_code,
                         exception_type=type(error).__name__, exception=error,
                     )
-                    raise
+                    raise RuntimeError(
+                        f"HTTP response stream aborted; request_id={request_id}"
+                    ) from None
                 response = await handle_error(request, error)
                 await response(scope, receive, send_with_id)
         finally:

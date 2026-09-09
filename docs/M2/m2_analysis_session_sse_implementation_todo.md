@@ -4,7 +4,7 @@
 
 本清单用于执行 [M2 详细设计](m2_analysis_session_sse_design.md)。实现必须同时维护 [M2 API 与排障指南](m2_analysis_session_sse_api.md)，不能让代码、OpenAPI、SSE 示例和错误码漂移。
 
-当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口，[审查修复记录](#milestone-8-审查修复记录2026-09-08)补充正式启动的关闭与日志回归。Ubuntu/macOS/Windows + Python 3.11 的实际 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最终本地记录为当前状态。
+当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口，[启动审查修复](#milestone-8-审查修复记录2026-09-08)与[日志边界修复](#milestone-8-日志边界修复记录2026-09-09)补充关闭、异常传播和日志级别的回归。Ubuntu/macOS/Windows + Python 3.11 的实际 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最终本地记录为当前状态。
 
 ## 执行原则
 
@@ -1011,6 +1011,43 @@ backend/.venv/bin/python backend/scripts/session_sse_smoke.py
 ```
 
 两项 smoke 均注入不可用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 和空 NO_PROXY；上述验证均退出 0。现有 CI 的完整 tests 会执行两项新增回归，不需要新增依赖或 CI 步骤。按 `MR-G04`、`MR-G07`、`MR-G08`、`MR-G09`、`MR-G11`、`MR-G12` 同步入口、真实 server 验收和文档；三平台远端实际结果仍待取得，不把本机修复通过标记为最终已承接。
+
+### Milestone 8 日志边界修复记录（2026-09-09）
+
+基于本地提交 `b9cd8f0`，开始时工作区干净。本阶段完成 headers 后异常传播与应用 trace/Uvicorn trace 隔离的修复。仅修改新后端 middleware、正式启动入口、相关测试、README、M2 文档与中心 register；没有新增依赖、日志框架、HTTP/SSE 字段或配置项。
+
+- `backend/app/api/http/request_context.py`：原异常先交给已有 `log_http` 输出脱敏诊断，随后抛出固定 `HTTP response stream aborted; request_id=...` RuntimeError，使用 `from None` 抑制原异常链的标准 traceback 输出。Uvicorn 仍关闭不完整响应，`aclosing` 仍释放订阅，不追加 JSON 或修改 session；继续使用 `except Exception`，不改变 CancelledError/shutdown 语义。
+- `backend/app/__main__.py`：只有 `trace` 映射为 Uvicorn `debug`，其他级别不变；应用仍使用原 `AppSettings.log_level`。已有单 worker、禁用 access log、2 秒关闭等待保留。直接 Uvicorn 启动文档显式使用安全服务器级别，应用 trace 单独设置。
+- `backend/tests/smoke/test_server_entrypoint.py`：夹具接受 info/trace 参数并恢复 `uvicorn.asgi` logger 状态；真实日志回归检查完整 stdout/stderr，涵盖合成 Authorization、Cookie、URL query 和未知路径。新增一次性 encoder 异常及 cause chain 测试，验证异常后连接中断、订阅 generator 关闭、session 保持 completed、无取消信号、重连精确回放终态及 204，最终无残留 task；JSON 保留原异常类型、脱敏诊断和 request/session ID。
+- `backend/tests/api/test_analysis_sessions.py`：更新 headers 后异常及写失败的内部异常预期，验证安全消息、同一 request ID、`__suppress_context__` 与空 cause；保留原有无额外 HTTP JSON、session 终态和日志断言，移除不再使用的 ClientDisconnect import。
+
+新增回归先在修复前运行：info 下已有 URL 日志保护通过；trace URL 检查及 info/trace 的原异常泄漏检查共 3 项失败，完整服务输出中可见合成凭据。当前 Uvicorn 已对 headers 使用占位符，但仍会在 trace scope 中输出 query；headers 不泄漏继续作为回归约束。修复后全部通过。
+
+Applicable contracts：`GLOBAL-C07`、`GLOBAL-C09`、`M2-C01`、`M2-C08`、`M2-C09`、`M2-C13`。
+
+| Contract | 实现与测试证据 | 文档 |
+|---|---|---|
+| `GLOBAL-C07`、`M2-C09` | 正式入口级别映射及 middleware 安全异常；`test_entrypoint_logs_exclude_url_credentials_and_private_query` 与 `test_stream_failure_is_safe_in_full_server_output_and_can_replay` 均运行 info/trace，完整输出无合成凭据，原诊断与关联 ID 保留，应用 trace 可输出。 | README Configuration；设计 §12.3、§16.7；API §8、§10 |
+| `GLOBAL-C09`、`M2-C08` | 继续使用原 lifecycle event、HTTP/SSE envelope 和 JSON formatter；真实 stream 失败后从 sequence 1 重连仍得到同 session 的 sequence 2 completed，再重连得到 204。 | 设计 §11.3、§12.3；API §4、§8.3 |
+| `M2-C01`、`M2-C13` | `test_stream_disconnect_or_write_failure_does_not_cancel_workflow`、真实失败/replay 回归及既有 open-SSE shutdown 回归全绿；取消/关闭信号与业务终态语义保持。 | 设计 §13.4；API §5、§8.3 |
+
+从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/smoke/test_server_entrypoint.py backend/tests/api backend/tests/observability -q --tb=short
+240 passed in 4.38s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+593 passed in 5.87s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+backend/.venv/bin/python backend/scripts/session_sse_smoke.py
+{"completed":"passed","cancelled":"passed"}
+```
+
+两项 smoke 均注入不可用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 和空 NO_PROXY，均退出 0；health smoke 子进程按脚本使用 info，trace 行为由新增的正式配置服务器回归验收。按 `MR-G04`、`MR-G06`–`MR-G09` 同步调用点、测试预期、真实服务器日志、续传/清理和文档。没有新增 deferred contract；现有三平台 CI 配置会运行这些测试，远端实际结果仍待取得，中心最终承接状态保持未完成。
 
 ## 实现顺序摘要
 
