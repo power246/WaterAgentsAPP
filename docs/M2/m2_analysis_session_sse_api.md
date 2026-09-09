@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-09）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)、[启动审查修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)及[日志边界修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-日志边界修复记录2026-09-09)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。593 项回归和真实 Uvicorn health/completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，远端运行结果尚未取得，M2 整体验收仍待该结果。
+实现状态（2026-09-09）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)、[启动审查修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)、[日志边界修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-日志边界修复记录2026-09-09)及[跨平台 smoke 修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-跨平台-smoke-修复记录2026-09-09)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。602 项回归和真实 Uvicorn health/completed/cancel smoke 已在 macOS 本机通过。已收到 Windows CI 的关闭探测异常断言失败日志；修复后的三平台完整 tests 和两项 smoke 仍待远端通过，M2 整体验收保持待完成。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -452,6 +452,8 @@ python backend/scripts/session_sse_smoke.py
 Session/SSE smoke 成功时 stdout 为 `{"completed":"passed","cancelled":"passed"}`。Completed 使用默认 workflow；cancelled 通过 app factory 注入 gate，在收到 created/keepalive、断线重连后保持 gate 关闭并调用 cancel，验证立即且幂等的响应和唯一 cancelled event，然后释放 gate。两条路径均检查 terminal EOF、Last-Event-ID 续传和已消费完后的 204。
 
 脚本使用动态 loopback socket、真实 Uvicorn 和正式 HTTP routes，不调用 shell/进程信号、不使用固定端口或生产测试开关。HTTP 客户端忽略环境代理；成功、断言失败、调用 task 被取消和 startup 失败的服务器清理由测试覆盖。完整 tests 中的 smoke 清理测试同样需要允许本机 loopback bind。
+
+清理验收直接检查 socket、监听服务和 server task 的关闭状态，不依赖操作系统必须立即拒绝连接；额外网络探测允许 ConnectError 或 ConnectTimeout。SSE 故障测试同时覆盖实际中断和连接重置的客户端表现，读取超时仍会失败，订阅释放、状态及回放断言保持有效。
 
 完整 tests 还使用正式启动配置验证：保持 SSE 订阅开启时服务能进入 application shutdown 并收敛 workflow；完整服务输出中不出现合成 URL 凭据、私有 query 或未匹配路径，而安全的 HTTP JSON 日志仍保留状态码和 request ID。
 
