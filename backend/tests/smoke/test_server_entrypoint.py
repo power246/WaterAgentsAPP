@@ -12,19 +12,19 @@ import app.__main__ as entrypoint
 import app.main as application_module
 from app.application.analysis_sessions.models import SessionStatus
 from app.main import create_app
-from scripts.session_sse_smoke import BASE, SmokeServer, read_event
+from scripts.session_sse_smoke import BASE, GatedWorkflow, SmokeServer, read_event
 
 
 @pytest.fixture
-def running_entrypoint(monkeypatch):
+def running_entrypoint(monkeypatch, request):
     loggers = [logging.getLogger(name) for name in (
-        "wateragents", "uvicorn", "uvicorn.error", "uvicorn.access"
+        "wateragents", "uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi"
     )]
     original_logging = [
         (logger, logger.handlers[:], logger.level, logger.propagate, logger.disabled)
         for logger in loggers
     ]
-    monkeypatch.setenv("WATERAGENTS_LOG_LEVEL", "info")
+    monkeypatch.setenv("WATERAGENTS_LOG_LEVEL", getattr(request, "param", "info"))
     monkeypatch.setenv("WATERAGENTS_HOST", "127.0.0.1")
 
     @asynccontextmanager
@@ -111,23 +111,120 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(running_entr
     assert not any(row.get("lifecycle_event", {}).get("type") == "session_cancelled" for row in rows)
 
 
+@pytest.mark.parametrize("running_entrypoint", ["info", "trace"], indirect=True)
 def test_entrypoint_logs_exclude_url_credentials_and_private_query(running_entrypoint, capsys):
     secret = "REVIEW_SYNTHETIC_TOKEN"
     private_query = "REVIEW_PRIVATE_QUERY"
+    authorization = "REVIEW_AUTHORIZATION"
+    cookie = "REVIEW_COOKIE"
+    application = create_app()
 
     async def exercise():
-        async with running_entrypoint(create_app()) as (_, _, client):
-            healthy = await client.get("/health", params={"api_key": secret, "query": private_query})
+        async with running_entrypoint(application) as (_, _, client):
+            logging.getLogger("wateragents").log(5, "Application trace remains available.")
+            healthy = await client.get(
+                "/health", params={"api_key": secret, "query": private_query},
+                headers={"Authorization": f"Bearer {authorization}", "Cookie": f"sid={cookie}"},
+            )
             assert healthy.status_code == 200
             unknown = await client.get(f"/{secret}")
             assert unknown.status_code == 404
 
     asyncio.run(asyncio.wait_for(exercise(), timeout=15))
     output = capsys.readouterr()
-    assert secret not in output.out + output.err
-    assert private_query not in output.out + output.err
+    for private_value in (secret, private_query, authorization, cookie):
+        assert private_value not in output.out + output.err
     rows = [json.loads(line) for line in output.err.splitlines() if line.startswith("{")]
+    trace_rows = [row for row in rows if row["message"] == "Application trace remains available."]
+    assert bool(trace_rows) is (application.state.settings.log_level == "trace")
+    assert all(row["level"] == "TRACE" for row in trace_rows)
     completed = [row for row in rows if row["event_name"] == "http_request_completed"]
     assert [row["status_code"] for row in completed] == [200, 404]
     assert completed[0]["route"] == "/health"
     assert all(row["request_id"] for row in completed)
+
+
+@pytest.mark.parametrize("running_entrypoint", ["info", "trace"], indirect=True)
+def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
+    running_entrypoint, monkeypatch, capsys,
+):
+    from app.api.sse import response as response_module
+
+    secret = "STREAM_SYNTHETIC_KEY"
+    cause_secret = "STREAM_SYNTHETIC_CAUSE"
+    original_encode = response_module.encode_event
+    failed = False
+
+    def fail_once(event):
+        nonlocal failed
+        if event.sequence == 2 and not failed:
+            failed = True
+            try:
+                raise ValueError(f"upstream failure; access_token={cause_secret}")
+            except ValueError as cause:
+                raise RuntimeError(f"encoder failure; api_key={secret}") from cause
+        return original_encode(event)
+
+    monkeypatch.setattr(response_module, "encode_event", fail_once)
+
+    async def exercise():
+        before = asyncio.all_tasks()
+        workflow = GatedWorkflow()
+        application = create_app(workflow=workflow)
+        async with running_entrypoint(application) as (_, _, client):
+            coordinator = application.state.session_coordinator
+            original_subscribe = coordinator.subscribe
+            subscriptions = []
+
+            async def observe_subscription(*args, **options):
+                events = await original_subscribe(*args, **options)
+                if events is not None:
+                    subscriptions.append(events)
+                return events
+
+            monkeypatch.setattr(coordinator, "subscribe", observe_subscription)
+            created = await client.post(BASE, json={"query": "stream failure regression"})
+            assert created.status_code == 201
+            session_id = created.json()["session_id"]
+            await workflow.started.wait()
+            path = f"{BASE}/{session_id}/events"
+            try:
+                async with client.stream("GET", path) as stream:
+                    assert stream.status_code == 200
+                    request_id = stream.headers["x-request-id"]
+                    lines = stream.aiter_lines()
+                    assert (await read_event(lines)).type.value == "session_created"
+                    workflow.release.set()
+                    with pytest.raises(httpx.RemoteProtocolError):
+                        async for line in lines:
+                            pytest.fail(f"Unexpected data after stream failure: {line!r}")
+                assert subscriptions[0].ag_frame is None
+                assert (await coordinator.get_snapshot(session_id)).status is SessionStatus.COMPLETED
+                assert workflow.exited.is_set()
+                assert not workflow.context.cancellation.is_requested()
+                async with client.stream("GET", path, headers={"Last-Event-ID": "1"}) as replay:
+                    assert replay.status_code == 200
+                    lines = replay.aiter_lines()
+                    terminal = await read_event(lines)
+                    assert terminal.type.value == "session_completed" and terminal.sequence == 2
+                    assert str(terminal.session_id) == session_id
+                    assert await anext(lines, None) is None
+                assert (await client.get(path, headers={"Last-Event-ID": "2"})).status_code == 204
+            finally:
+                workflow.release.set()
+        assert all(events.ag_frame is None for events in subscriptions)
+        assert not asyncio.all_tasks() - before
+        return session_id, request_id
+
+    session_id, request_id = asyncio.run(asyncio.wait_for(exercise(), timeout=15))
+    output = capsys.readouterr()
+    assert secret not in output.out + output.err
+    assert cause_secret not in output.out + output.err
+    rows = [json.loads(line) for line in output.err.splitlines() if line.startswith("{")]
+    failure, = [row for row in rows if row["event_name"] == "http_stream_failed"]
+    assert failure["session_id"] == session_id and failure["request_id"] == request_id
+    assert failure["exception_type"] == "RuntimeError"
+    assert failure["exception_message"] == "encoder failure; api_key=[REDACTED]"
+    assert "ValueError" in failure["stack_trace"] and "direct cause" in failure["stack_trace"]
+    assert "access_token=[REDACTED]" in failure["stack_trace"]
+    assert f"HTTP response stream aborted; request_id={request_id}" in output.err

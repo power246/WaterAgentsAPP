@@ -2,7 +2,7 @@
 
 生成日期：2026-09-08
 
-实现状态（2026-09-08）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)及[审查修复记录](m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。590 项回归和真实 Uvicorn health/completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，远端运行结果尚未取得，M2 整体验收仍待该结果。
+实现状态（2026-09-09）：Milestone 0–8 的实现、契约检查与本机验收已完成，详见 [Milestone 8 验收与后续接力](m2_analysis_session_sse_implementation_todo.md#milestone-8-实现与本机验收记录2026-09-08)、[启动审查修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)及[日志边界修复](m2_analysis_session_sse_implementation_todo.md#milestone-8-日志边界修复记录2026-09-09)。正式创建、SSE 订阅与取消路由支持服务端 request ID、统一 HTTP 错误、SSE replay/keepalive/204 和协作式取消；WaterAgents 自有日志输出带关联 ID、请求耗时和脱敏异常诊断的单行 JSON。593 项回归和真实 Uvicorn health/completed/cancel smoke 已在本机通过。三平台 CI 已接入完整 tests 和两项 smoke，远端运行结果尚未取得，M2 整体验收仍待该结果。
 
 本文描述 M2 阶段对前端和调试客户端可见的 HTTP/SSE 契约。普通 HTTP schema 以运行时 OpenAPI 为可执行来源；本文重点补充 OpenAPI 无法完整表达的事件流、回放、keepalive、连接关闭和关联 ID 语义。
 
@@ -18,7 +18,7 @@ http://127.0.0.1:8000
 
 M2 限制：
 
-- 单进程、单 Uvicorn worker。`python -m app` 和 `wateragents` 启动入口固定 `workers=1`，忽略 `WEB_CONCURRENCY`；直接调用 Uvicorn 时必须保留 `--workers 1 --no-access-log --timeout-graceful-shutdown 2`，见 [启动说明](../../backend/README.md)。
+- 单进程、单 Uvicorn worker。`python -m app` 和 `wateragents` 启动入口固定 `workers=1`，忽略 `WEB_CONCURRENCY`；直接调用 Uvicorn 的默认命令保留 `--workers 1 --no-access-log --timeout-graceful-shutdown 2 --log-level info`，见 [启动说明](../../backend/README.md)。
 - 同一 worker 内允许多个 session 并发。
 - session 和 event 只存在于当前进程；服务重启后不可恢复。
 - SSE 断开不会取消 session。
@@ -376,6 +376,8 @@ M2 不公开 `session_started`：
 
 应用启动后，`wateragents.*` 日志以单行 JSON 写到 stderr，级别由 `WATERAGENTS_LOG_LEVEL` 控制（默认 info）。正式入口关闭 Uvicorn 默认 access log，避免 URL 中的凭据或私有 query 原样落盘；HTTP 访问使用应用的安全结构化记录。Uvicorn server/error 与第三方日志保持自身格式；只将 WaterAgents 自有日志作为本节 JSON 查询对象。每行包含 `timestamp/level/event_name/message/component`，ID 按上下文出现。`http_request_completed` 包含 `method/route/status_code/duration_ms`，其中 route 是模板，duration 覆盖完整 SSE 订阅时间。UTC 时钟回拨时 duration 为 0。
 
+`WATERAGENTS_LOG_LEVEL=trace` 只为应用开启 trace；正式入口将对应的 Uvicorn 级别设为 debug，避免 ASGI scope trace 输出私有请求信息。其他级别原样传递。直接启动 Uvicorn 时，服务器级别使用 debug/info/warning/error/critical，应用 trace 仍通过上述环境变量单独设置。
+
 异常日志的 `exception_type/exception_message/stack_trace` 包含脱敏后的调用位置和 cause/context chain，不含源码行或局部变量。不要把它们当作原始请求存档；query、request body、完整 headers 和凭据不会作为普通日志字段输出。`log_format_failed` 表示本条日志格式化/脱敏失败，其固定安全记录的 timestamp 为 null；业务结果不受影响。
 
 ### 8.1 POST 没有返回 session
@@ -400,7 +402,7 @@ M2 不公开 `session_started`：
 3. 检查代理是否 buffer `text/event-stream`。
 4. 检查客户端是否错误地把 keepalive 当作 JSON event。
 5. terminal 后服务端主动关闭是正常行为；客户端应关闭 EventSource。
-6. 若出现 `http_stream_failed`，用该订阅的 request_id 和 session_id 查传输异常；这不会将 session 改成 failed。
+6. 若出现 `http_stream_failed`，用该订阅的 request_id 和 session_id 查脱敏后的原异常及 cause chain。Uvicorn 只接收 `HTTP response stream aborted; request_id=...` 安全异常，原异常链不会被再次打印；连接仍会中断，且不追加 HTTP 错误 JSON，也不会将 session 改成 failed。故障消除后可按最后收到的 event ID 续传。
 
 ### 8.4 cancel 后仍有后台日志
 
@@ -452,5 +454,7 @@ Session/SSE smoke 成功时 stdout 为 `{"completed":"passed","cancelled":"passe
 脚本使用动态 loopback socket、真实 Uvicorn 和正式 HTTP routes，不调用 shell/进程信号、不使用固定端口或生产测试开关。HTTP 客户端忽略环境代理；成功、断言失败、调用 task 被取消和 startup 失败的服务器清理由测试覆盖。完整 tests 中的 smoke 清理测试同样需要允许本机 loopback bind。
 
 完整 tests 还使用正式启动配置验证：保持 SSE 订阅开启时服务能进入 application shutdown 并收敛 workflow；完整服务输出中不出现合成 URL 凭据、私有 query 或未匹配路径，而安全的 HTTP JSON 日志仍保留状态码和 request ID。
+
+日志安全回归分别运行 info/trace，覆盖敏感请求头和 URL、encoder 异常及 cause chain 的完整 stdout/stderr，以及异常后的订阅清理和 replay。测试同时验证应用 trace 输出与脱敏错误诊断仍然存在。
 
 `.github/workflows/backend-m1.yml`（显示名 `Backend M1-M2`）在 Ubuntu/macOS/Windows + Python 3.11 上配置 editable install、完整 tests、health 和 session/SSE 两项 smoke。两项 smoke 的 CI 步骤显式注入不可用代理来验证 `trust_env=False`。CI 是否通过以三平台实际运行结果为准。

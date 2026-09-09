@@ -652,7 +652,9 @@ App lifespan 用 `AppSettings.log_level` 配置 `wateragents` logger，向 stder
 
 HTTP completion 记录 `method/route/status_code/duration_ms`；route 为模板，不含实际 URL、path 参数或 query string，未匹配时省略。耗时为 `ClockPort` 的结束 UTC 时间减开始 UTC 时间，单位毫秒，时钟回拨时截断为 0；SSE 包含整个订阅持续时间。时钟故障时不影响请求，允许缺少 duration 或丢弃该条日志。
 
-`session_failed`、晚到异常的 `workflow_output_suppressed`、`workflow_task_error` 及未处理 HTTP/stream 异常记录 ERROR 级诊断：`exception_type/exception_message/stack_trace`。Stack trace 保留文件、行号、函数、异常消息以及标准 cause/context chain 和 exception group，省略源码行和局部变量。失败 session 使用同一公开 error ID；cancel/shutdown 后的晚到异常不生成新公开错误。HTTP validation 和已知 HTTPException 只记安全公开错误与异常类型，不格式化可能含 request body/detail 的原始异常。Headers 已发出的异常记 `http_stream_failed`，随后仍由传输层收尾，不追加错误 JSON，也不修改 session。
+`session_failed`、晚到异常的 `workflow_output_suppressed`、`workflow_task_error` 及未处理 HTTP/stream 异常记录 ERROR 级诊断：`exception_type/exception_message/stack_trace`。Stack trace 保留文件、行号、函数、异常消息以及标准 cause/context chain 和 exception group，省略源码行和局部变量。失败 session 使用同一公开 error ID；cancel/shutdown 后的晚到异常不生成新公开错误。HTTP validation 和已知 HTTPException 只记安全公开错误与异常类型，不格式化可能含 request body/detail 的原始异常。Headers 已发出的异常先记脱敏的 `http_stream_failed`，再抛出固定安全消息、带 request ID 的 RuntimeError，并通过 `from None` 抑制原异常链的标准 traceback 输出。Uvicorn 仍按异常路径关闭响应，订阅正常清理，不追加错误 JSON，也不修改 session。Middleware 继续只捕获 Exception，CancelledError 的关闭语义不变。
+
+`WATERAGENTS_LOG_LEVEL=trace` 保留 WaterAgents 应用日志的 trace 级别；正式入口将 Uvicorn 的 trace 映射为 debug，其他级别原样传递。该映射在 Uvicorn 加载应用前生效，使其不安装记录完整 ASGI scope 的 trace middleware。直接运行 Uvicorn 时服务器日志只使用 debug/info/warning/error/critical，应用 trace 单独通过上述环境变量设置。
 
 Formatter 只选择上述字段及已有 `public_error/lifecycle_event/original_status/outcome`，不序列化整个 LogRecord。格式化、序列化或 redaction 失败时只输出固定安全 JSON：`event_name=log_format_failed`、`level=ERROR`、`timestamp=null` 和固定 message，不尝试 repr 原始对象。Handler 写入失败时丢弃该条日志，不调用会向 stderr 打印原始 record 的默认 logging error handler。调用点继续隔离 logger 异常，不回滚业务结果。
 
@@ -674,7 +676,7 @@ M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item�
 ### 13.1 单 worker 契约
 
 - 只支持单进程、单 Uvicorn worker。
-- `python -m app` 和 `wateragents` console entrypoint 显式传入 `workers=1`，不继承 `WEB_CONCURRENCY`。直接调用 Uvicorn 时必须保留 `--workers 1 --no-access-log --timeout-graceful-shutdown 2`，与正式入口的进程、日志和关闭行为一致。
+- `python -m app` 和 `wateragents` console entrypoint 显式传入 `workers=1`，不继承 `WEB_CONCURRENCY`。直接调用 Uvicorn 的默认启动命令保留 `--workers 1 --no-access-log --timeout-graceful-shutdown 2 --log-level info`，与正式入口的进程、日志和关闭行为一致；应用 trace 与服务器日志级别按 §12.3 分别设置。
 - 文档和启动命令不得建议 `--workers > 1`。
 - 多 worker 下 POST、SSE 和 cancel 可能命中不同进程，因此明确标为不支持，而不是依赖 sticky session 偶然工作。
 - M2 不增加数据库、Redis、消息队列或共享 pub/sub。
@@ -811,6 +813,8 @@ Completed 场景使用默认 workflow，验证 pending response、created/comple
 既有 domain 依赖门禁继续执行，`test_m2_project_metadata_preserves_the_m1_dependency_set` 固定 M1 的生产/开发依赖集合。`test_main_entrypoint_enforces_one_worker_despite_environment` 调用正式入口并检查真实 Uvicorn 配置，在 `WEB_CONCURRENCY=4` 或非法整数时均得到单 worker。
 
 `backend/tests/smoke/test_server_entrypoint.py` 捕获正式 `main()` 传给 Uvicorn 的参数，用该配置和真实 application import target 启动临时 loopback server；仅通过 factory 替换 workflow，并复用 smoke 的 readiness/无 signal 控制。`test_entrypoint_shutdown_finishes_with_an_open_sse_subscription` 保持客户端订阅开启直到 server 自行退出，验证 workflow 收到 stop、quiesced，且没有取消终态或残留 task；`test_entrypoint_logs_exclude_url_credentials_and_private_query` 检查完整 stdout/stderr 中没有 URL 测试凭据和私有 query，同时保留 200/404 的安全 HTTP JSON 记录。两项测试不重写正式入口的 `access_log` 或 `timeout_graceful_shutdown` 参数。
+
+日志测试通过真实环境设置分别运行 info/trace，并验证 Authorization、Cookie、URL query/未知路径不进入完整服务输出，应用 trace 仍可输出。`test_stream_failure_is_safe_in_full_server_output_and_can_replay` 在这两个级别下让 encoder 抛出一次含合成凭据及 cause chain 的异常：原始诊断保留在脱敏 JSON 中，Uvicorn 只打印安全异常和 request ID；客户端收到流中断，订阅 generator 已关闭、session 保持 completed，故障消除后从原 cursor 精确续传并返回终态 204，无残留 task。API 测试同步断言安全异常及抑制原异常链，而非要求原始 secret 继续向服务器传播。
 
 ## 17. M2 验收标准
 

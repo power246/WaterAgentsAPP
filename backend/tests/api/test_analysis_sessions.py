@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 from fastapi import HTTPException
-from starlette.requests import ClientDisconnect
 
 from app.api.schemas.analysis_sessions import AnalysisSessionErrorResponse, AnalysisSessionResponse
 from app.application.analysis_sessions.models import SessionStatus
@@ -513,7 +512,7 @@ def test_stream_disconnect_or_write_failure_does_not_cancel_workflow(disconnect_
                     disconnect.set()
                     await task
                 else:
-                    with pytest.raises(ClientDisconnect):
+                    with pytest.raises(RuntimeError, match="HTTP response stream aborted; request_id="):
                         await task
                 runtime = app.state.session_coordinator._sessions[UUID(session_id)]
                 assert runtime.snapshot.status is SessionStatus.RUNNING
@@ -650,8 +649,11 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
             try:
                 await first_event.wait()
                 release.set()
-                with pytest.raises(RuntimeError, match=SECRET):
+                with pytest.raises(RuntimeError, match="HTTP response stream aborted; request_id=") as raised:
                     await task
+                assert SECRET not in str(raised.value)
+                assert raised.value.__suppress_context__ is True
+                assert raised.value.__cause__ is None
                 assert [message["status"] for message in delivered if message["type"] == "http.response.start"] == [200]
                 assert [event["type"] for event in events_from(delivered)] == ["session_created"]
                 assert SECRET not in repr(delivered)
@@ -660,6 +662,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
                 assert failure["exception_type"] == "RuntimeError"
                 assert failure["session_id"] == session_id
                 assert failure["request_id"] == dict(delivered[0]["headers"])[b"x-request-id"].decode()
+                assert str(raised.value) == f"HTTP response stream aborted; request_id={failure['request_id']}"
                 assert failure["status_code"] == 200 and failure["level"] == "ERROR"
                 assert SECRET not in "".join(application_logs)
                 runtime = app.state.session_coordinator._sessions[UUID(session_id)]
