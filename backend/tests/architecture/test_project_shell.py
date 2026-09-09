@@ -11,7 +11,7 @@ def _requirement_name(requirement: str) -> str:
     return re.split(r"[<>=!~\[]", requirement, maxsplit=1)[0].lower()
 
 
-def test_project_metadata_has_only_m1_dependencies() -> None:
+def test_m2_project_metadata_preserves_the_m1_dependency_set() -> None:
     with (BACKEND_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
 

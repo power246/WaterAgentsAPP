@@ -11,7 +11,10 @@ def main() -> None:
         "app.main:app",
         host=settings.host,
         port=settings.port,
-        log_level=settings.log_level,
+        log_level="debug" if settings.log_level == "trace" else settings.log_level,
+        workers=1,
+        access_log=False,
+        timeout_graceful_shutdown=2,
     )
 
 

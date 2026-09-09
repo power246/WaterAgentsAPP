@@ -29,18 +29,24 @@
    - 后续 agent 应该能基于上一阶段的产物继续实现，不需要重推架构。
    - 如果后续实现发现阶段性 DTO、fake adapter 或测试入口需要调整，可以直接更新，但必须同步更新相关文档和测试。
 
-3. 第一版优先端到端跑通。
+3. MR 范围不必严格等同于 milestone 边界。
+   - Milestone 是工作组织和接力参考，不是 MR 的硬性改动范围。
+   - 如果设计、实现或测试时发现必须跨 milestone 才能让功能闭环或验证成立，可以在同一个 MR 中超出原 milestone 范围。
+   - 跨范围改动需要在 MR 说明或相关文档中记录原因、影响范围和验证方式，方便后续 agent 接力。
+   - 这个规则只允许在新后端设计范围内跨 milestone 工作，不允许把归档目录中的代码或契约引入新后端。
+
+4. 第一版优先端到端跑通。
    - 复杂 replay、accuracy benchmark、暂停/恢复、大对象外置存储先后置。
 
-4. 可以使用 fake/mock 实现通过验收。
+5. 可以使用 fake/mock 实现通过验收。
    - 例如 LLM、NLDI、NWIS、NOAA、EPA、RAG 都可以先用 fake adapter。
    - 但 fake adapter 产出的结构必须和本阶段已经定义的 port 一致；若后续 milestone 收敛 port，必须同步更新相关 fake adapter、文档和测试。
 
-5. 延后设计必须显式登记。
+6. 延后设计必须显式登记。
    - 如果某个 port DTO、policy 或产品接口缺少真实上下文，不在早期 milestone 用 `Any` 或猜测结构强行定型。
    - 延后项必须记录所属 milestone、必须保留的约束和阶段自测入口。
 
-6. macOS、Windows 和 Linux 是同等支持的运行平台。
+7. macOS、Windows 和 Linux 是同等支持的运行平台。
    - 生产代码和默认配置不得依赖 POSIX 路径、shell、`/tmp` 或 macOS 专用能力。
    - 每个 milestone 的安装、启动和测试入口应保持平台无关；平台专用 adapter 必须隔离并提供等价实现或明确能力检测。
 
@@ -117,6 +123,12 @@ M9  Settings/keys/admin + demo closure
 
 ## 4. M2: Analysis Session + SSE Shell
 
+详细设计、API 文档与执行清单：
+
+- [M2 详细设计](M2/m2_analysis_session_sse_design.md)
+- [M2 API 与排障指南](M2/m2_analysis_session_sse_api.md)
+- [M2 Implementation TODO](M2/m2_analysis_session_sse_implementation_todo.md)
+
 目标：
 
 - 跑通 session + SSE 的外部协议骨架。
@@ -146,11 +158,14 @@ M9  Settings/keys/admin + demo closure
 
 阶段自测验收：
 
-- 创建 session 后立即返回 `session_id` 和初始状态。
-- SSE 订阅能收到 session 生命周期事件。
-- cancel API 能把 session 标记为 `cancelled`。
-- cancel 后 session 不再继续向下游 workflow 传播。
+- 创建 session 后立即返回 HTTP 201、`session_id` 和 pending snapshot。
+- 首次 SSE 订阅能回放 `session_created`；`Last-Event-ID` 重连无遗漏和重复。
+- SSE disconnect 不取消 session，多订阅者互不影响。
+- cancel API 立即、幂等地把 active session 标记为 `cancelled`，并在终态竞争中只产生一个 terminal event。
+- cancel 后 session 不再向前端或下游 workflow 传播，workflow 后续进入 quiesced。
 - 可以用 fake workflow 模拟 completed/failed/cancelled 三种终态。
+- HTTP/SSE 错误可以通过 request/session/error ID 回溯结构化日志。
+- M2 明确使用单进程、单 worker，但允许多个 session 并发且互相隔离。
 
 ## 5. M3: Transcript Store + History APIs
 
@@ -164,6 +179,9 @@ M9  Settings/keys/admin + demo closure
 - `LiveTranscriptBuffer`
 - `TranscriptStore`
 - append-only transcript item 写入能力
+- session、request、LifecycleEvent、error 和 final result 的持久化
+- 持久化 `Idempotency-Key`
+- persistence-confirmed/workflow-quiesced/grace-period 驱动的 live-state cleanup
 - `GET /api/analysis/sessions`
 - `GET /api/analysis/sessions/{session_id}`
 - transcript item 基础字段：
@@ -186,19 +204,20 @@ M9  Settings/keys/admin + demo closure
   - `created_at`
   - `updated_at`
   - `query`
-  - `target_comid`
-  - `location`
-  - `time_range`
-  - `mode`
-  - `parameters`
-  - `final_confidence`
-- 历史详情默认返回最终结果摘要，并能展开 transcript timeline。
+  - `configuration` snapshot
+- `target_comid/location/time_range/mode/parameters` 由 M4 基于持久化 AnalysisContext 扩展；`final_confidence` 由 M6 基于持久化 result 扩展。M3 不为尚未产生的字段伪造 placeholder。
+- 历史详情返回 session、可展开的 transcript timeline，以及存在时的已持久化 final-result projection；M6 定型 final-result schema 前不生成 fake 业务摘要。
 - transcript 写入保持 append-only，不修改旧 item。
 - API keys 不进入 transcript 内容。
 - transcript content 使用 `content_type + content_schema_version` 版本化 envelope。
 - session 历史固化分析时区，后续全局设置变化不改变历史窗口语义。
 - transcript 写入前强制移除 API key、Authorization、Cookie 等 secret。
 - analysis detail 可以引用完整 tool/prompt/raw output timeline；大 payload 采用预览加引用，按需加载。
+- 相同幂等 key 和相同规范化请求在服务重启后仍返回原 session；相同 key 搭配不同请求返回 409。
+- cancelled session 的晚到内容可以写 transcript，但不再进入 SSE 或下游，也不增加 after-cancel 冗余字段。
+- 分析成功但持久化失败时进入 `completed_with_persistence_error`，发布带安全 warning/error_id 的 `session_completed`。
+- live state 只有在持久化确认、workflow quiesced 和 grace period 全部满足后才清理；cleanup 幂等且失败不修改业务终态。
+- 启动时发现遗留 pending/running session，将其归档为 failed/service_interrupted，不自动恢复执行。
 
 ## 6. M4: Query Understanding + Hydrology Topology
 
@@ -275,6 +294,7 @@ M9  Settings/keys/admin + demo closure
   - 源单位、别名和转换 provenance
   - 可调用确定性 Python 库或 API 执行量纲校验与换算
   - 未知换算不得由 Agent 猜测
+- M5 可以定型 upstream-result/RAG evidence tool 的槽位和 unavailable 语义；真实 upstream producer 由 M7 接入，真实 transcript-RAG producer 由 M8 接入，不在 M5 production path 中用 hidden fake 冒充完成。
 
 阶段自测验收：
 
@@ -364,7 +384,9 @@ M9  Settings/keys/admin + demo closure
   - `upstream_uncertainty`
 - 下游把上游结果作为 current-session evidence。
 - 支持 `gap_filling / prediction / mixed`。
-- 支持 session cancel 的高层语义。
+- 在真实阶段边界检查 cancellation token；cancel 后不启动新 agent/tool，也不传播晚到结果。
+- 使用 session 为根的 agent/tool/operation ID 关联 SSE、日志和 transcript。
+- 基于真实 topology/workload 明确并发上限、排队或保持无限制的策略。
 
 阶段自测验收：
 
@@ -373,6 +395,7 @@ M9  Settings/keys/admin + demo closure
 - 每个 agent 的 start/completed event 顺序符合拓扑。
 - cancel 后 session 标记为 `cancelled`，并停止继续传播后续结果。
 - 已完成 agent 的结果和 transcript item 保留。
+- 无法强杀的在途调用返回后只进入 cancelled transcript/日志，不触发前端 result；workflow 最终记录 quiesced。
 
 ## 10. M8: Memory/RAG from Transcript
 
@@ -439,6 +462,8 @@ M9  Settings/keys/admin + demo closure
   - evidence cache
 - 清理接口不删除 API keys。
 - 端到端 session 能从创建跑到完成或 cancel。
+- 前端按最终 OpenAPI/SSE 契约独立重构，不迁移旧前端字段、事件或交互。
+- demo 启动说明明确单进程、单 worker，不暗示支持共享状态或跨进程 cancel。
 
 阶段自测验收：
 
@@ -454,20 +479,23 @@ M9  Settings/keys/admin + demo closure
   - transcript 落库
   - 历史详情查询
 - demo 输出包含 quantified、directional 或 indeterminate 结果，以及证据链、置信度和归因总结。
+- 最终前端、OpenAPI、SSE raw frame、错误码、smoke 和后端实现使用同一字段与事件名称。
 
 ## 12. 跨 Milestone 延后契约登记
 
-以下事项不在 M1 强行实现，但后续不得遗漏：
+以下事项不在 M1 强行实现，但后续不得遗漏。M2 及之后的完整硬约束、稳定 contract ID、MR 合规门禁和验收重点统一以 [deferred_milestone_contracts.md](deferred_milestone_contracts.md) 为准；本节只保留归属索引。后续设计或实现 MR 必须列出适用 contract ID、实现位置、测试证据和文档状态。
 
-| 归属 | 延后事项与约束 |
+| 归属 | 功能域 |
 |---|---|
-| M3 | Transcript schema version、session timezone、完整折叠 timeline、secret redaction、大 payload lazy load。 |
-| M4 | 日期范围 mapper、结束日期包含整天、IANA timezone 转 UTC、自动粒度规则、ParameterKey 参数解析。 |
-| M5 | Source record DTO、Evidence Tool 构造权、collection status、有效/可疑/无效观测分类、canonical unit 表及确定性单位 tool。 |
-| M6 | 三态结果策略、confidence 评分与聚合、结构化空判断、多站冲突的 Agent 决策、attribution basis。 |
-| M8 | Historical inference 保留原 session、原 confidence、schema version 和 RAG score，且不得覆盖当前有效观测。 |
-| M9 | 动态时区配置；自定义单位的 session override；用户确认并版本化的全局单位表更新；不从旧后端归档引入兼容逻辑。 |
-| Future | 任意时分输入从请求起点按本地墙上时钟滚动，首尾允许 partial；真实 DST offset transition 可造成 elapsed duration ±1h。只有出现非 COMID 水体需求时才设计 Waterbody。 |
+| M2 | Session/SSE 生命周期、取消、续传、可观察性和单 worker baseline。 |
+| M3 | Transcript、持久化与历史 API。 |
+| M4 | Query understanding、日期/时区转换、参数解析与 topology。 |
+| M5 | Source record、Evidence Tool、质量/聚合与单位系统。 |
+| M6 | 单 Agent reasoning、三态结果、confidence 与 attribution。 |
+| M7 | Topology-driven 多 Agent workflow。 |
+| M8 | Transcript RAG 与历史证据约束。 |
+| M9 | Settings/keys/admin、动态时区、自定义单位与 demo closure。 |
+| Future | 自定义时间、非 COMID 扩展和第二版候选功能。 |
 
 ## 13. 第二版候选 Milestones
 
