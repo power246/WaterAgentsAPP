@@ -67,7 +67,9 @@ def running_entrypoint(monkeypatch, request):
             logger.disabled = disabled
 
 
-def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(running_entrypoint, capsys):
+def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(
+    running_entrypoint, reset_stream_disconnect, capsys,
+):
     class CooperativeWorkflow:
         def __init__(self):
             self.started = asyncio.Event()
@@ -99,7 +101,7 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(running_entr
                 try:
                     async for line in lines:
                         assert not line.startswith("event:")
-                except httpx.RemoteProtocolError:
+                except (httpx.RemoteProtocolError, httpx.ReadError):
                     pass
         assert not asyncio.all_tasks() - before
 
@@ -146,7 +148,7 @@ def test_entrypoint_logs_exclude_url_credentials_and_private_query(running_entry
 
 @pytest.mark.parametrize("running_entrypoint", ["info", "trace"], indirect=True)
 def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
-    running_entrypoint, monkeypatch, capsys,
+    running_entrypoint, reset_stream_disconnect, monkeypatch, capsys,
 ):
     from app.api.sse import response as response_module
 
@@ -195,7 +197,7 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
                     lines = stream.aiter_lines()
                     assert (await read_event(lines)).type.value == "session_created"
                     workflow.release.set()
-                    with pytest.raises(httpx.RemoteProtocolError):
+                    with pytest.raises((httpx.RemoteProtocolError, httpx.ReadError)):
                         async for line in lines:
                             pytest.fail(f"Unexpected data after stream failure: {line!r}")
                 assert subscriptions[0].ag_frame is None

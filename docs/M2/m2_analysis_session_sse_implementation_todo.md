@@ -4,7 +4,7 @@
 
 本清单用于执行 [M2 详细设计](m2_analysis_session_sse_design.md)。实现必须同时维护 [M2 API 与排障指南](m2_analysis_session_sse_api.md)，不能让代码、OpenAPI、SSE 示例和错误码漂移。
 
-当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口，[启动审查修复](#milestone-8-审查修复记录2026-09-08)与[日志边界修复](#milestone-8-日志边界修复记录2026-09-09)补充关闭、异常传播和日志级别的回归。Ubuntu/macOS/Windows + Python 3.11 的实际 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最终本地记录为当前状态。
+当前状态：Milestone 0–8 的实现与本机验收已完成；[最终本地记录](#milestone-8-实现与本机验收记录2026-09-08)汇总契约证据和接力入口，[启动审查修复](#milestone-8-审查修复记录2026-09-08)、[日志边界修复](#milestone-8-日志边界修复记录2026-09-09)与[跨平台 smoke 修复](#milestone-8-跨平台-smoke-修复记录2026-09-09)补充关闭、异常传播、日志级别和跨平台网络异常回归。已收到 Windows CI 的 3 项关闭探测失败；本机修复后 602 项通过，Ubuntu/macOS/Windows + Python 3.11 的修复后 CI 仍待通过，M2 整体验收与中心登记的最终承接保持待完成。各阶段记录保留当时的验收范围，以本段和最新修复记录为当前状态。
 
 ## 执行原则
 
@@ -1048,6 +1048,44 @@ backend/.venv/bin/python backend/scripts/session_sse_smoke.py
 ```
 
 两项 smoke 均注入不可用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 和空 NO_PROXY，均退出 0；health smoke 子进程按脚本使用 info，trace 行为由新增的正式配置服务器回归验收。按 `MR-G04`、`MR-G06`–`MR-G09` 同步调用点、测试预期、真实服务器日志、续传/清理和文档。没有新增 deferred contract；现有三平台 CI 配置会运行这些测试，远端实际结果仍待取得，中心最终承接状态保持未完成。
+
+### Milestone 8 跨平台 smoke 修复记录（2026-09-09）
+
+基于已推送提交 `73ad133`，开始时工作区干净。用户提供的 Windows + Python 3.11.9 CI 输出为 `3 failed, 589 passed, 1 skipped`：正常退出、客户端失败、调用 task 被取消三种场景均在关闭后的连接探测失败，预期 ConnectError，实际为 ConnectTimeout；之前的 workflow 退出与无残留任务断言已通过。Python 3.11 的 eager task factory 用例按能力检测跳过。修复仅涉及 smoke 测试及文档，不修改生产代码、超时配置、依赖、CI 矩阵或 HTTP/SSE 契约。
+
+- `backend/tests/smoke/conftest.py`：观察真实 SmokeServer 的 task 和传入 socket；所有 smoke 测试结束时验证 descriptor 为 -1、asyncio listener 不再监听且 socket 集合为空、server task 已结束且未被强制取消、Uvicorn 连接及请求 task 集合为空。另提供客户端断连表现注入，仅在真实 SSE 读取已经中断后将错误映射为 ReadError，不提前伪造断连。
+- `test_server_cleanup_closes_socket_and_workflow_on_client_exit`：三种退出场景分别运行真实连接探测、注入 ConnectError、注入 ConnectTimeout；关闭探测仅接受这两类连接建立失败，保留 workflow 和 task 清理断言。
+- `test_entrypoint_shutdown_finishes_with_an_open_sse_subscription` 与 `test_stream_failure_is_safe_in_full_server_output_and_can_replay`：覆盖原生中断与连接重置，接受 RemoteProtocolError 或 ReadError。读取超时、额外事件、状态错误、订阅未释放、回放错误和日志泄漏仍导致失败。
+
+同类检查覆盖 backend tests/scripts 中的连接异常、SSE 读取、计时/等待、进程控制、动态端口、路径和平台分支。Health smoke 已捕获连接错误及超时，并使用 monotonic deadline、sys.executable、subprocess 生命周期和显式 UTF-8；其余相关时序由 event/gate 控制，未发现需要修改的同类断言。
+
+回归先保持旧异常预期运行：关闭测试的连接超时注入得到 `3 failed, 7 passed`；SSE 连接重置注入得到 `3 failed, 5 deselected`。两组失败均由预期异常类型过窄导致，新增资源清理检查通过。修正预期后，从仓库根执行：
+
+```text
+backend/.venv/bin/python -m pytest backend/tests/smoke backend/tests/architecture/test_cross_platform_ci.py -q --tb=short
+22 passed in 7.67s
+
+backend/.venv/bin/python -m pytest backend/tests -q
+602 passed in 10.39s
+
+backend/.venv/bin/python backend/scripts/health_smoke.py
+{"status":"healthy"}
+
+backend/.venv/bin/python backend/scripts/session_sse_smoke.py
+{"completed":"passed","cancelled":"passed"}
+```
+
+两项 smoke 均注入不可用 HTTP_PROXY/HTTPS_PROXY/ALL_PROXY 和空 NO_PROXY。上述结果来自 macOS + Python 3.12 本机，异常注入不等同于 Windows 原生验证；修复后的三平台 CI 仍需通过。
+
+Applicable contracts：`GLOBAL-C07`、`M2-C01`、`M2-C09`、`M2-C13`；相关门禁为 `MR-G05`、`MR-G07`、`MR-G08`、`MR-G11`、`MR-G12`。
+
+| Contract | 实现与测试证据 | 文档 |
+|---|---|---|
+| `M2-C13` | `check_server_cleanup` 直接检查真实 server/task/socket；三种退出场景及 startup 失败保持资源释放；正式入口活动 SSE shutdown 不伪造取消事件。 | 设计 §16.6；API §10；本记录 |
+| `M2-C01` | 原生中断与连接重置下保持 completed、取消信号未触发、订阅已释放，重连精确回放终态并返回 204。 | 设计 §16.7；API §4、§10 |
+| `GLOBAL-C07`、`M2-C09` | info/trace 的真实流失败回归继续验证完整 stdout/stderr 脱敏、安全服务器异常及 request/session ID。 | 设计 §16.7；API §8、§10 |
+
+没有新增 deferred contract，未将本机通过写成三平台 CI 通过；中心登记最终承接仍待完成。
 
 ## 实现顺序摘要
 

@@ -804,6 +804,8 @@ keepalive interval
 
 Completed 场景使用默认 workflow，验证 pending response、created/completed 帧、终态 EOF、从 sequence 1 续传及消费完后的 204。Cancelled 场景通过 factory 注入 gate workflow，在真实 stream 收到 created/keepalive 后断开并重连，确认 disconnect 不取消；保持 gate 关闭时调用正式 cancel API，验证立即/幂等响应、唯一 cancelled 帧和 EOF，再释放 gate 并验证停止信号。短 keepalive 仅在 smoke factory 注入，不用 sleep 决定取消竞争。
 
+真实服务器测试直接检查传入 socket 的 descriptor 已关闭、asyncio listener 不再监听且不持有 socket、server task 已结束且未被强制取消，以及 Uvicorn 不再持有连接和请求任务。关闭后的网络探测允许连接被拒绝或连接超时；正常退出、客户端失败和调用 task 被取消均覆盖真实探测及两种异常注入。SSE 异常中断允许不完整响应的协议错误或连接重置的读取错误，仍保留无额外事件、订阅释放、session 状态、终态回放及日志安全断言；读取超时不能作为中断成功。
+
 现有 CI workflow 继续在 Ubuntu/macOS/Windows + Python 3.11 执行 editable install、完整 tests、health smoke，并增加 session/SSE smoke。实际三平台运行结果单独登记，不把本机成功或 YAML 配置存在视为远端 CI 通过。
 
 ### 16.7 架构与启动门禁

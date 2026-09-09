@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-09-08
+更新日期：2026-09-09
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -277,11 +277,11 @@ cancelled
 
 ### M2 待验收索引
 
-本节只索引本地实现证据，不属于上表的最终承接记录。当前分支为 `codex/m2-analysis-session-sse`；Milestone 8 基于本地 Milestone 7 提交 `b3cd6d1`，正式启动审查修复基于 `48decb0`，日志边界修复基于 `b9cd8f0`。没有发布远端 MR，也未取得 Ubuntu/macOS/Windows + Python 3.11 的实际 CI 结果，因此 `M2-C01`–`M2-C13` 保持未最终承接。
+本节只索引本地实现证据，不属于上表的最终承接记录。当前分支为 `codex/m2-analysis-session-sse`；Milestone 8 基于本地 Milestone 7 提交 `b3cd6d1`，正式启动审查修复基于 `48decb0`，日志边界修复基于 `b9cd8f0`，跨平台 smoke 修复基于已推送提交 `73ad133`。已收到 Windows + Python 3.11 CI 的关闭探测断言失败日志；修复后的 Ubuntu/macOS/Windows 完整 tests 与两项 smoke 仍待远端通过，因此 `M2-C01`–`M2-C13` 保持未最终承接。
 
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
-| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`；`M2-C01`–`M2-C13` | [M2 最终本地 contract evidence](M2/m2_analysis_session_sse_implementation_todo.md#m2-contract-evidence)、[正式启动审查修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)、[日志边界修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-日志边界修复记录2026-09-09)、[详细设计](M2/m2_analysis_session_sse_design.md)、[API/runbook](M2/m2_analysis_session_sse_api.md)。593 项回归、health 和 completed/cancel 真实 Uvicorn smoke 通过；包含架构门禁、单 worker、活动 SSE 关闭及info/trace 下完整服务输出的请求/异常脱敏边界及流中断后 replay 回归。 | 三平台完整 tests 和两项 smoke 的实际 CI 结果；通过后在最终承接表追加实现位置、测试结果和提交/MR 引用。 |
+| `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`；`M2-C01`–`M2-C13` | [M2 最终本地 contract evidence](M2/m2_analysis_session_sse_implementation_todo.md#m2-contract-evidence)、[正式启动审查修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)、[日志边界修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-日志边界修复记录2026-09-09)、[跨平台 smoke 修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-跨平台-smoke-修复记录2026-09-09)、[详细设计](M2/m2_analysis_session_sse_design.md)、[API/runbook](M2/m2_analysis_session_sse_api.md)。602 项回归、health 和 completed/cancel 真实 Uvicorn smoke 在 macOS 本机通过；包含真实资源关闭检查、连接超时/重置注入、架构门禁、单 worker、活动 SSE 关闭、info/trace 下完整服务输出脱敏及流中断后 replay 回归。 | 修复后三平台完整 tests 和两项 smoke 的实际 CI 结果；通过后在最终承接表追加实现位置、测试结果和提交/MR 引用。 |
 | M3–M9 / Future 接力 | [后续接力入口与验收](M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)给出当前代码入口、保留约束与可观察验收。 | 各所属 Milestone 按原 ID 实现；本次只登记接力，不将未来能力计为已实现。 |
 
 未新增、拆分、替换或取消 contract。CI 待验收仍属于 M2 的 Milestone 7/8，不转移为新的 deferred contract。

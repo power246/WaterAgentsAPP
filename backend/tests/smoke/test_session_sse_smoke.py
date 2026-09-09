@@ -10,7 +10,13 @@ from scripts.session_sse_smoke import GatedWorkflow, running_server
 
 
 @pytest.mark.parametrize("exit_mode", ["normal", "failure", "cancelled"])
-def test_server_cleanup_closes_socket_and_workflow_on_client_exit(exit_mode, application_logs):
+@pytest.mark.parametrize(
+    "probe_failure", [None, httpx.ConnectError, httpx.ConnectTimeout],
+    ids=["real-socket", "connection-refused", "connection-timeout"],
+)
+def test_server_cleanup_closes_socket_and_workflow_on_client_exit(
+    exit_mode, probe_failure, application_logs,
+):
     async def exercise():
         before = asyncio.all_tasks()
         entered = asyncio.Event()
@@ -49,8 +55,13 @@ def test_server_cleanup_closes_socket_and_workflow_on_client_exit(exit_mode, app
                 assert isinstance(result, asyncio.CancelledError)
             assert workflow.exited.is_set()
             assert not asyncio.all_tasks() - before
-            async with httpx.AsyncClient(timeout=1, trust_env=False) as client:
-                with pytest.raises(httpx.ConnectError):
+
+            def fail_probe(request):
+                raise probe_failure("Closed-port connection probe failed.", request=request)
+
+            transport = httpx.MockTransport(fail_probe) if probe_failure else None
+            async with httpx.AsyncClient(timeout=1, trust_env=False, transport=transport) as client:
+                with pytest.raises((httpx.ConnectError, httpx.ConnectTimeout)):
                     await client.get(address)
         finally:
             workflow.release.set()
