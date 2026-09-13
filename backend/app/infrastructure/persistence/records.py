@@ -3,6 +3,10 @@ from uuid import UUID
 
 from pydantic import field_validator, model_validator
 
+from app.application.transcripts.models import (
+    StoredTranscriptContent as PersistedTranscriptContentRecord,
+    StoredTranscriptItem as PersistedTranscriptItemRecord,
+)
 from app.domain.common import JsonValue, NonEmptyString, UtcDatetime
 from app.domain.domain_model import DomainModel
 
@@ -106,50 +110,6 @@ class PersistedSessionRecord(DomainModel):
         ):
             raise ValueError("terminal_item_id must match terminal session status")
         return self
-
-
-class PersistedTranscriptItemRecord(DomainModel):
-    item_id: UUID
-    run_id: UUID
-    session_id: UUID | None = None
-    transcript_sequence: int
-    created_at: UtcDatetime
-    content_type: str
-    content_schema_version: int
-    request_id: UUID | None = None
-    operation_id: UUID | None = None
-    tags: tuple[str, ...] = ()
-    rag_eligible: bool = False
-    inline_body: str | None = None
-    preview_head: str | None = None
-    preview_tail: str | None = None
-    content_bytes: int
-
-    @model_validator(mode="after")
-    def validate_item_invariants(self) -> "PersistedTranscriptItemRecord":
-        if self.transcript_sequence <= 0:
-            raise ValueError("transcript_sequence must be positive")
-        if self.content_schema_version <= 0:
-            raise ValueError("content_schema_version must be positive")
-        if not self.content_type.strip():
-            raise ValueError("content_type must not be blank")
-        if self.content_bytes < 0:
-            raise ValueError("content_bytes must be non-negative")
-        is_inline = self.inline_body is not None
-        has_both_previews = self.preview_head is not None and self.preview_tail is not None
-        if is_inline == has_both_previews:
-            raise ValueError("item must contain either inline body or both previews")
-        if not is_inline and (self.preview_head is None or self.preview_tail is None):
-            raise ValueError("external item requires both previews")
-        if is_inline and len(self.inline_body.encode("utf-8")) != self.content_bytes:
-            raise ValueError("inline content_bytes must match UTF-8 body size")
-        return self
-
-
-class PersistedTranscriptContentRecord(DomainModel):
-    item_id: UUID
-    body: str
-    created_at: UtcDatetime
 
 
 class PersistenceBatch(DomainModel):

@@ -39,7 +39,6 @@ router = APIRouter(
     responses={**error_responses(400), 201: {"headers": REQUEST_ID_HEADERS}},
 )
 async def create_run(request: Request, body: CreateAnalysisRunRequest) -> AnalysisRunSnapshot:
-    request.state.log_private_query = body.query
     configuration = body.to_configuration_snapshot(request.app.state.settings.analysis_timezone)
     snapshot = await request.app.state.run_coordinator.create_run(body.query, configuration)
     request.state.run_id = snapshot.run_id

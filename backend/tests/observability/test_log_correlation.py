@@ -110,7 +110,7 @@ def test_failure_error_id_diagnostics_and_request_context_survive_concurrent_req
             calls = [await workflow.calls.get() for _ in created]
             for _, release in calls:
                 release.set()
-            for response in created:
+            for index, response in enumerate(created):
                 run_id = response.json()["run_id"]
                 stream = await client.get(f"{BASE}/{run_id}/events")
                 event = json.loads(next(line[6:] for line in stream.text.splitlines() if line.startswith("data: ") and '"run_failed"' in line))
@@ -120,13 +120,13 @@ def test_failure_error_id_diagnostics_and_request_context_survive_concurrent_req
                 assert row["request_id"] != stream.headers["x-request-id"]
                 assert row["level"] == "ERROR"
                 assert row["exception_type"] == "RuntimeError"
-                assert row["exception_message"] == "analysis failed for [REDACTED]"
+                assert row["exception_message"] == f"analysis failed for {QUERY} {index}"
                 assert "OSError" in row["stack_trace"] and "direct cause" in row["stack_trace"]
                 assert "provider timed out" in row["stack_trace"]
                 assert "raise OSError" not in row["stack_trace"]
                 assert "stack_trace" not in stream.text and "test_log_correlation.py" not in stream.text
             assert SECRET not in "".join(application_logs)
-            assert "private-location" not in "".join(application_logs)
+            assert "private-location" in "".join(application_logs)
 
     run(exercise)
 
@@ -154,7 +154,8 @@ def test_http_duration_uses_clock_and_server_errors_keep_safe_diagnostics(monkey
             assert "service failure" in error["exception_message"]
             assert "test_log_correlation.py" in error["stack_trace"]
             assert SECRET not in "".join(application_logs) + response.text
-            assert "private-location" not in "".join(application_logs) + response.text
+            assert "private-location" in "".join(application_logs)
+            assert "private-location" not in response.text
             assert "test_log_correlation.py" not in response.text
 
     run(exercise)
@@ -195,7 +196,7 @@ def test_cancelled_late_exception_keeps_diagnostics_without_a_failed_event(appli
             assert len(parsed(application_logs, "workflow_quiesced")) == 1
             assert not parsed(application_logs, "run_failed")
             assert SECRET not in "".join(application_logs)
-            assert "private-location" not in "".join(application_logs)
+            assert "private-location" in "".join(application_logs)
 
     run(exercise)
 

@@ -407,9 +407,6 @@ class RunCoordinator:
                     "exception_type": (
                         type(exception).__name__ if exception is not None else None
                     ),
-                    "redaction_values": (
-                        (runtime.query,) if exception is not None else ()
-                    ),
                     **fields,
                 },
             )

@@ -84,8 +84,6 @@ def log_http(
                 "status_code": status_code,
                 "public_error": error,
                 "exception_type": exception_type,
-                "redaction_values": (getattr(request.state, "log_private_query", ""),)
-                if exception is not None else (),
                 "duration_ms": max(0.0, (timestamp - started_at).total_seconds() * 1000)
                 if started_at is not None else None,
             },

@@ -221,31 +221,36 @@ git diff --check
 
 ### 工作
 
-- [ ] 完成 immutable transcript、storage batch/read model、严格 registry 和统一 UTF-8 编码。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)；[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
-- [ ] 生产注册 analysis_request v1、lifecycle_event v2、error v1、runtime_fact v1；runtime_fact 使用明确 fact 联合。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
-- [ ] 生命周期命名区分 run/session，配置只在 run_created，保留 v1 历史解析与原版本/序号/时间。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
-- [ ] 已附于原事件的配置或错误不再复制同义 item；tags/RAG 单源，confidence/provenance 按正文适用层级提取。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)；[设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)）
-- [ ] 为所有已知类型实现唯一引用提取器，验证同 run/跨 session、目标存在或同批；保留 AnalysisDetail/AnalysisStep 原引用。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
-- [ ] 完成 64 KiB 默认阈值、首尾总 2 KiB Unicode 安全预览和 run/item 全文定位。（[设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)；[API §4.4](m3_transcript_history_api.md#44-全文)）
-- [ ] 新写严格验证；未知历史版本/已知损坏分别处理，不静默删记录或伪装正常业务结果。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)）
-- [ ] 脱敏先于可读 live/SSE，再由持久化出口复核；日志保留普通 query。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [ ] 完成流式凭据过滤器的私有缓冲、遮蔽状态及安全收尾，不把原始 secret 保留成另一个可读副本。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [ ] 测试专用 fixture_message 注入通用消息适配器，不将假 LLM/水体结果注册进生产。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)；[设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)）
+- [x] 完成 immutable transcript、storage batch/read model、严格 registry 和统一 UTF-8 编码。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)；[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
+- [x] 生产注册 analysis_request v1、lifecycle_event v2、error v1、runtime_fact v1；runtime_fact 使用明确 fact 联合。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
+- [x] 生命周期命名区分 run/session，配置只在 run_created，保留 v1 历史解析与原版本/序号/时间。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
+- [x] 已附于原事件的配置或错误不再复制同义 item；tags/RAG 单源，confidence/provenance 按正文适用层级提取。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)；[设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)）
+- [x] 为所有已知类型实现唯一引用提取器，验证同 run/跨 session、目标存在或同批；保留 AnalysisDetail/AnalysisStep 原引用。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
+- [x] 完成 64 KiB 默认阈值、首尾总 2 KiB Unicode 安全预览和 run/item 全文定位。（[设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)；[API §4.4](m3_transcript_history_api.md#44-全文)）
+- [x] 新写严格验证；未知历史版本/已知损坏分别处理，不静默删记录或伪装正常业务结果。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)）
+- [x] 脱敏先于可读 live/SSE，再由持久化出口复核；日志保留普通 query。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] 完成流式凭据过滤器的私有缓冲、遮蔽状态及安全收尾，不把原始 secret 保留成另一个可读副本。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] 测试专用 fixture_message 注入通用消息适配器，不将假 LLM/水体结果注册进生产。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)；[设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)）
 
 ### Tests
 
-- [ ] typed round-trip、未知/非法版本、错误归类、正常邻近 item 保留。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)；[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)）
-- [ ] UTF-8 65535/65536/65537 字节、预览 head/tail 各上限、自定义阈值、多字节字符。（[设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)）
-- [ ] 同文独立事实不同 ID，公共内容只存原 item，refs 跨 session 合法/跨 run 拒绝。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
-- [ ] 生成中引用依赖等待，已保存/同批目标合法，非法目标整批失败。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
-- [ ] 所有合成凭据切分点、普通 query、异常 repr/JSON 转义、URL/Authorization/Cookie、取消边界与最终正文。（[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [ ] 正常文本持续增量，不能等全文结束才实现表面“安全流式”。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] typed round-trip、未知/非法版本、错误归类、正常邻近 item 保留。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)；[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)）
+- [x] UTF-8 65535/65536/65537 字节、预览 head/tail 各上限、自定义阈值、多字节字符。（[设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)）
+- [x] 同文独立事实不同 ID，公共内容只存原 item，refs 跨 session 合法/跨 run 拒绝。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
+- [x] 生成中引用依赖等待，已保存/同批目标合法，非法目标整批失败。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
+- [x] 所有合成凭据切分点、普通 query、异常 repr/JSON 转义、URL/Authorization/Cookie、取消边界与最终正文。（[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] 正常文本持续增量，不能等全文结束才实现表面“安全流式”。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application backend/tests/observability backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] `python -m pytest backend/tests/application backend/tests/observability backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：一份安全原正文贯穿 live、存储和读取模型；registry 为后续生产方提供明确接入点。
+
+实际验证：
+
+- `backend/.venv/bin/python -m pytest backend/tests/application backend/tests/observability backend/tests/persistence -q`：283 passed，5 skipped；跳过项为需要外部 PostgreSQL 的既有集成测试。
+- `backend/.venv/bin/python -m pytest backend/tests -q`：691 passed，5 skipped；真实 socket smoke 在允许本机回环端口的环境执行并通过。
 
 ## Milestone 4：创建原子事务、幂等和所有权收敛
 

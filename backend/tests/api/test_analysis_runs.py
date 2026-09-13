@@ -405,7 +405,7 @@ def test_unexpected_failure_is_safe_and_correlates_to_logs(monkeypatch, caplog, 
             assert records[0].correlation.request_id == envelope.error.request_id
             assert records[0].correlation.error_id == envelope.error.error_id
             assert records[0].exception_type == "RuntimeError"
-            assert SECRET not in "".join(application_logs)
+            assert SECRET in "".join(application_logs)
             completed = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_completed"]
             assert completed[-1].status_code == 500
             assert completed[-1].route == BASE
@@ -509,7 +509,7 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
                 assert str(records[0].correlation.error_id) == error["error_id"]
                 assert str(records[0].correlation.request_id) == created.headers["x-request-id"]
                 assert SECRET not in repr(messages)
-                assert SECRET not in "".join(application_logs)
+                assert SECRET in "".join(application_logs)
                 assert messages[-1]["more_body"] is False
             finally:
                 task.cancel()
