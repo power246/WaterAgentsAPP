@@ -21,6 +21,15 @@ from app.application.analysis_runs.coordinator import (
     ServiceShuttingDownError,
     RunNotFoundError,
 )
+from app.application.analysis_runs.creation import (
+    CreationCommitUnconfirmedError,
+    CreationPersistenceUnavailableError,
+    CreationRolledBackError,
+    IdempotencyKeyConflictError,
+    IdempotencyWaitTimeoutError,
+    InvalidIdempotencyKeyError,
+    InvalidSubmissionEncodingError,
+)
 from app.application.analysis_runs.models import CorrelationContext, RunStatus
 from app.domain.common import normalize_utc_datetime
 
@@ -117,6 +126,37 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     if isinstance(exception, RequestValidationError):
         status, code, message = 422, "invalid_request", "The request is invalid."
         validation = validation_violations(exception)
+    elif isinstance(exception, InvalidIdempotencyKeyError):
+        status, code, message = 422, "invalid_request", "The request is invalid."
+        validation = (
+            ValidationViolation(
+                field=("header", "idempotency-key"),
+                type="uuid_parsing",
+                message="Expected a valid UUID v4.",
+            ),
+        )
+    elif isinstance(exception, InvalidSubmissionEncodingError):
+        status, code, message = 400, "invalid_request", "The request is invalid."
+    elif isinstance(exception, IdempotencyKeyConflictError):
+        status, code = 409, "idempotency_key_conflict"
+        message = "The idempotency key was already used with a different request body."
+        stage = "create_run"
+    elif isinstance(exception, IdempotencyWaitTimeoutError):
+        status, code = 503, "idempotency_wait_timeout"
+        message = "The original run creation is still in progress."
+        stage, retryable = "create_run", True
+    elif isinstance(exception, CreationCommitUnconfirmedError):
+        request.state.run_id = exception.run_id
+        status, code = 503, "creation_commit_unconfirmed"
+        message = "The run creation commit has not been confirmed."
+        stage, retryable = "create_run", True
+    elif isinstance(
+        exception,
+        (CreationPersistenceUnavailableError, CreationRolledBackError),
+    ):
+        status, code = 503, "database_unavailable"
+        message = "The database is unavailable."
+        stage, retryable = "create_run", True
     elif isinstance(exception, RunNotFoundError):
         status, code, message = 404, "run_not_found", "The run was not found."
     elif isinstance(exception, InvalidEventCursorError):
@@ -171,5 +211,9 @@ def register_error_handlers(application: FastAPI) -> None:
     for exception_type in (
         RequestValidationError, HTTPException, RunNotFoundError, InvalidEventCursorError,
         EventCursorAheadError, InvalidRunTransitionError, ServiceShuttingDownError,
+        InvalidIdempotencyKeyError, InvalidSubmissionEncodingError,
+        IdempotencyKeyConflictError, IdempotencyWaitTimeoutError,
+        CreationCommitUnconfirmedError, CreationPersistenceUnavailableError,
+        CreationRolledBackError,
     ):
         application.add_exception_handler(exception_type, handle_error)

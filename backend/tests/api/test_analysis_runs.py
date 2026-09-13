@@ -14,6 +14,7 @@ from app.application.analysis_runs.models import RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
 from app.application.correlation import request_id_context
 from app.infrastructure.config import AppSettings
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
 
 BASE = "/api/analysis/runs"
@@ -26,10 +27,14 @@ SUPPORTED_ERRORS = {
     (404, "run_not_found"),
     (405, "method_not_allowed"),
     (409, "event_cursor_ahead"),
+    (409, "idempotency_key_conflict"),
     (409, "run_already_terminal"),
     (422, "invalid_request"),
     (500, "internal_error"),
     (503, "service_unavailable"),
+    (503, "creation_commit_unconfirmed"),
+    (503, "database_unavailable"),
+    (503, "idempotency_wait_timeout"),
 }
 
 
@@ -63,6 +68,7 @@ class GatedWorkflow:
 
 @asynccontextmanager
 async def http_application(*, workflow=None, settings=None, **options):
+    options.setdefault("transcript_store", InMemoryTranscriptStore())
     application = create_app(
         settings, clock=FixedClock(), workflow=workflow, shutdown_grace_period=0, **options
     )
@@ -210,10 +216,10 @@ def test_application_forwards_the_record_identity_factory() -> None:
     run(exercise)
 
 
-def test_default_workflow_completes_and_idempotency_key_is_not_reused() -> None:
+def test_default_workflow_completes_and_requests_without_a_key_are_independent() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
-            responses = [await client.post(BASE, json={"query": "query"}, headers={"Idempotency-Key": "same"}) for _ in range(2)]
+            responses = [await client.post(BASE, json={"query": "query"}) for _ in range(2)]
             ids = [response.json()["run_id"] for response in responses]
             assert len(set(ids)) == 2
             assert all(response.json()["status"] == "pending" for response in responses)
@@ -229,6 +235,149 @@ def test_default_workflow_completes_and_idempotency_key_is_not_reused() -> None:
                 assert consumed.content == b""
                 assert UUID(consumed.headers["x-request-id"])
             assert len(app.state.run_coordinator._runs) == 2
+
+    run(exercise)
+
+
+def test_same_key_and_exact_body_return_original_receipt_with_new_request_id() -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        key = str(uuid4())
+        raw_body = b'{"query":"lake","time_resolution":"6h"}'
+        headers = {"Content-Type": "application/json", "Idempotency-Key": key}
+        async with http_application(workflow=workflow) as (app, client):
+            first = await client.post(BASE, content=raw_body, headers=headers)
+            second = await client.post(BASE, content=raw_body, headers=headers)
+            assert first.status_code == second.status_code == 201
+            assert first.json() == second.json()
+            assert first.headers["x-request-id"] != second.headers["x-request-id"]
+            _, release, _ = await workflow.started.get()
+            assert workflow.started.empty()
+            assert len(app.state.run_coordinator._runs) == 1
+            release.set()
+
+    run(exercise)
+
+
+@pytest.mark.parametrize(
+    "changed_body",
+    [
+        b'{ "query":"lake","time_resolution":"6h"}',
+        b'{"time_resolution":"6h","query":"lake"}',
+        b'{"query":"l\\u0061ke","time_resolution":"6h"}',
+        b'{"query":"river","time_resolution":"6h"}',
+        b'{"query":"lake"}',
+    ],
+)
+def test_same_key_rejects_every_raw_body_change(changed_body: bytes) -> None:
+    async def exercise() -> None:
+        key = str(uuid4())
+        headers = {"Content-Type": "application/json", "Idempotency-Key": key}
+        async with http_application() as (app, client):
+            first = await client.post(
+                BASE,
+                content=b'{"query":"lake","time_resolution":"6h"}',
+                headers=headers,
+            )
+            assert first.status_code == 201
+            conflict = await client.post(BASE, content=changed_body, headers=headers)
+            envelope = assert_error(conflict, 409, "idempotency_key_conflict")
+            assert envelope.error.retryable is False
+            assert envelope.error.failed_stage == "create_run"
+            assert len(app.state.run_coordinator._runs) == 1
+
+    run(exercise)
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["not-a-uuid", str(UUID(int=0)), "6ba7b810-9dad-11d1-80b4-00c04fd430c8"],
+)
+def test_idempotency_key_must_be_uuid_v4(key: str) -> None:
+    async def exercise() -> None:
+        async with http_application() as (app, client):
+            response = await client.post(
+                BASE,
+                json={"query": "lake"},
+                headers={"Idempotency-Key": key},
+            )
+            envelope = assert_error(response, 422, "invalid_request")
+            assert envelope.validation[0].field == ("header", "idempotency-key")
+            assert app.state.run_coordinator._runs == {}
+
+    run(exercise)
+
+
+def test_different_keys_and_missing_keys_do_not_deduplicate_equal_bodies() -> None:
+    async def exercise() -> None:
+        raw_body = b'{"query":"lake"}'
+        async with http_application() as (app, client):
+            requests = [
+                await client.post(
+                    BASE,
+                    content=raw_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Idempotency-Key": str(uuid4()),
+                    },
+                ),
+                await client.post(
+                    BASE,
+                    content=raw_body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Idempotency-Key": str(uuid4()),
+                    },
+                ),
+                await client.post(
+                    BASE,
+                    content=raw_body,
+                    headers={"Content-Type": "application/json"},
+                ),
+            ]
+            assert all(response.status_code == 201 for response in requests)
+            assert len({response.json()["run_id"] for response in requests}) == 3
+            assert len(app.state.run_coordinator._runs) == 3
+
+    run(exercise)
+
+
+def test_receipt_survives_terminal_state_live_removal_restart_and_new_defaults() -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = GatedWorkflow()
+        key = str(uuid4())
+        raw_body = b'{"query":"lake"}'
+        headers = {"Content-Type": "application/json", "Idempotency-Key": key}
+        first_settings = AppSettings(analysis_timezone="America/Chicago")
+        async with http_application(
+            workflow=workflow,
+            settings=first_settings,
+            transcript_store=store,
+        ) as (app, client):
+            first = await client.post(BASE, content=raw_body, headers=headers)
+            _, release, _ = await workflow.started.get()
+            release.set()
+            runtime = app.state.run_coordinator._runs[UUID(first.json()["run_id"])]
+            await runtime.workflow_quiesced.wait()
+            app.state.run_coordinator._runs.pop(runtime.snapshot.run_id)
+            after_cleanup = await client.post(BASE, content=raw_body, headers=headers)
+            assert after_cleanup.json() == first.json()
+            assert after_cleanup.headers["x-request-id"] != first.headers["x-request-id"]
+
+        second_workflow = GatedWorkflow()
+        second_settings = AppSettings(analysis_timezone="Asia/Shanghai")
+        async with http_application(
+            workflow=second_workflow,
+            settings=second_settings,
+            transcript_store=store,
+        ) as (app, client):
+            replay = await client.post(BASE, content=raw_body, headers=headers)
+            assert replay.status_code == 201
+            assert replay.json() == first.json()
+            assert replay.json()["configuration"]["analysis_timezone"] == "America/Chicago"
+            assert app.state.run_coordinator._runs == {}
+            assert second_workflow.started.empty()
 
     run(exercise)
 

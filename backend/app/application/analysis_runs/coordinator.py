@@ -1,13 +1,28 @@
 import asyncio
+import hashlib
+import json
 import logging
 from collections.abc import AsyncGenerator, Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import datetime
 from math import isfinite
-from typing import TypeVar
+from typing import Coroutine, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter
 
+from app.application.analysis_runs.creation import (
+    CreationCommitUnconfirmedError,
+    CreationPersistenceUnavailableError,
+    CreationRolledBackError,
+    CreationVerificationUnavailableError,
+    IdempotencyKeyConflictError,
+    IdempotencyWaitTimeoutError,
+    InvalidSubmissionEncodingError,
+    RunCreationCandidate,
+    RunCreationDisposition,
+    RunCreationResult,
+)
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -49,8 +64,17 @@ from app.application.analysis_runs.workflow import (
     WorkflowStopped,
 )
 from app.application.correlation import request_id_context
+from app.application.transcripts.buffer import TranscriptBuffer
+from app.application.transcripts.models import AnalysisRequestV1
+from app.application.transcripts.registry import (
+    TranscriptRegistry,
+    create_production_registry,
+)
 from app.domain.common import NonEmptyString, normalize_utc_datetime
+from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION
+from app.domain.time.time_resolution_source import TimeResolutionSource
 from app.ports.clock import ClockPort
+from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
 _QUERY = TypeAdapter(NonEmptyString)
@@ -82,6 +106,22 @@ _SESSION_TRANSITIONS = {
     },
 }
 StatusT = TypeVar("StatusT", RunStatus, AgentSessionStatus)
+WorkflowTaskFactory = Callable[[Coroutine[object, object, None], str], asyncio.Task[None]]
+
+
+@dataclass
+class _PreparedCreation:
+    candidate: RunCreationCandidate
+    runtime: RunRuntime
+    event: RunCreatedEvent
+
+
+@dataclass
+class _CreationOwner:
+    fingerprint: bytes
+    prepared: _PreparedCreation
+    task: asyncio.Task[AnalysisRunSnapshot] | None = None
+    commit_unconfirmed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 def _resolve_transition_target(
@@ -152,12 +192,22 @@ class RunCoordinator:
         self,
         clock: ClockPort,
         *,
+        transcript_store: TranscriptStorePort[
+            RunCreationCandidate,
+            RunCreationResult,
+        ],
+        analysis_timezone: str = "America/Chicago",
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
         workflow: AnalysisWorkflow | None = None,
         shutdown_grace_period: float = 1.0,
         keepalive_interval: float = 15.0,
+        idempotency_wait_timeout: float = 5.0,
+        inline_content_bytes: int = 65536,
+        preview_bytes: int = 1024,
+        workflow_task_factory: WorkflowTaskFactory | None = None,
+        verification_retry_interval: float = 0.05,
     ) -> None:
         if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
             raise ValueError("shutdown_grace_period must be finite and non-negative")
@@ -167,7 +217,13 @@ class RunCoordinator:
             or keepalive_interval <= 0
         ):
             raise ValueError("keepalive_interval must be finite and positive")
+        if not isfinite(idempotency_wait_timeout) or idempotency_wait_timeout <= 0:
+            raise ValueError("idempotency_wait_timeout must be finite and positive")
+        if not isfinite(verification_retry_interval) or verification_retry_interval <= 0:
+            raise ValueError("verification_retry_interval must be finite and positive")
         self._clock = clock
+        self._transcript_store = transcript_store
+        self._analysis_timezone = analysis_timezone
         self._id_factory = id_factory
         self._record_id_factory = record_id_factory
         self._logger = (
@@ -176,21 +232,185 @@ class RunCoordinator:
             else logging.getLogger("wateragents.analysis_runs")
         )
         self._runs: dict[UUID, RunRuntime] = {}
+        self._creation_owners: dict[UUID, _CreationOwner] = {}
+        self._creation_by_run: dict[UUID, _CreationOwner] = {}
+        self._creation_tasks: set[asyncio.Task[AnalysisRunSnapshot]] = set()
         self._runs_lock = asyncio.Lock()
         self._workflow = workflow if workflow is not None else DefaultFakeWorkflow()
         self._shutdown_grace_period = shutdown_grace_period
         self._shutdown_lock = asyncio.Lock()
         self._closing = False
         self._keepalive_interval = keepalive_interval
+        self._idempotency_wait_timeout = idempotency_wait_timeout
+        self._inline_content_bytes = inline_content_bytes
+        self._preview_bytes = preview_bytes
+        self._registry = create_production_registry()
+        self._workflow_task_factory = (
+            workflow_task_factory
+            if workflow_task_factory is not None
+            else lambda coroutine, name: asyncio.create_task(coroutine, name=name)
+        )
+        self._verification_retry_interval = verification_retry_interval
 
     async def create_run(
         self,
-        query: str,
-        configuration: AnalysisConfigurationSnapshot,
+        body: bytes | str,
+        configuration: AnalysisConfigurationSnapshot | None = None,
+        *,
+        idempotency_key: UUID | None = None,
     ) -> AnalysisRunSnapshot:
-        query = _QUERY.validate_python(query)
-        configuration = AnalysisConfigurationSnapshot.model_validate(configuration)
+        raw_body, configuration_override = self._submission_bytes(body, configuration)
+        fingerprint = hashlib.sha256(raw_body).digest()
+        deadline = asyncio.get_running_loop().time() + self._idempotency_wait_timeout
+        while True:
+            if idempotency_key is not None:
+                owner = await self._current_owner(idempotency_key)
+                if owner is not None:
+                    self._require_same_fingerprint(owner.fingerprint, fingerprint)
+                    try:
+                        return await self._await_creation(
+                            owner,
+                            deadline,
+                            initial=False,
+                        )
+                    except CreationRolledBackError:
+                        if asyncio.get_running_loop().time() >= deadline:
+                            raise IdempotencyWaitTimeoutError() from None
+                        continue
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    raise IdempotencyWaitTimeoutError()
+                try:
+                    async with asyncio.timeout(remaining):
+                        existing = await self._transcript_store.get_creation(
+                            idempotency_key
+                        )
+                except TimeoutError:
+                    raise IdempotencyWaitTimeoutError() from None
+                except Exception as error:
+                    raise CreationPersistenceUnavailableError() from error
+                if existing is not None:
+                    self._require_same_fingerprint(
+                        existing.creation.request_fingerprint,
+                        fingerprint,
+                    )
+                    return existing.creation.receipt_snapshot()
+
+            async with self._runs_lock:
+                if self._closing:
+                    raise ServiceShuttingDownError()
+                if idempotency_key is not None:
+                    owner = self._creation_owners.get(idempotency_key)
+                    if owner is not None:
+                        self._require_same_fingerprint(owner.fingerprint, fingerprint)
+                        initial = False
+                    else:
+                        owner = self._start_creation_owner(
+                            raw_body,
+                            fingerprint,
+                            idempotency_key,
+                            configuration_override,
+                        )
+                        initial = True
+                else:
+                    owner = self._start_creation_owner(
+                        raw_body,
+                        fingerprint,
+                        None,
+                        configuration_override,
+                    )
+                    initial = True
+            try:
+                return await self._await_creation(owner, deadline, initial=initial)
+            except CreationRolledBackError:
+                if initial or idempotency_key is None:
+                    raise
+                if asyncio.get_running_loop().time() >= deadline:
+                    raise IdempotencyWaitTimeoutError() from None
+
+    def _submission_bytes(
+        self,
+        body: bytes | str,
+        configuration: AnalysisConfigurationSnapshot | None,
+    ) -> tuple[bytes, AnalysisConfigurationSnapshot | None]:
+        if configuration is None:
+            if not isinstance(body, bytes):
+                raise TypeError("raw run creation body must be bytes")
+            return body, None
+        query = _QUERY.validate_python(body)
+        checked = AnalysisConfigurationSnapshot.model_validate(configuration)
+        payload: dict[str, str] = {"query": query}
+        if checked.time_resolution_source is TimeResolutionSource.FRONTEND:
+            payload["time_resolution"] = checked.time_resolution.value
+        return (
+            json.dumps(
+                payload,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+            ).encode("utf-8"),
+            checked,
+        )
+
+    async def _current_owner(self, idempotency_key: UUID) -> _CreationOwner | None:
+        async with self._runs_lock:
+            return self._creation_owners.get(idempotency_key)
+
+    def _start_creation_owner(
+        self,
+        raw_body: bytes,
+        fingerprint: bytes,
+        idempotency_key: UUID | None,
+        configuration_override: AnalysisConfigurationSnapshot | None,
+    ) -> _CreationOwner:
+        prepared = self._prepare_creation(
+            raw_body,
+            fingerprint,
+            idempotency_key,
+            configuration_override,
+        )
+        owner = _CreationOwner(fingerprint=fingerprint, prepared=prepared)
+        coroutine = self._own_creation(owner)
+        try:
+            task = asyncio.create_task(
+                coroutine,
+                name=f"analysis-run-create-{prepared.candidate.snapshot.run_id}",
+            )
+        except BaseException:
+            coroutine.close()
+            raise
+        owner.task = task
+        self._creation_tasks.add(task)
+        self._creation_by_run[prepared.candidate.snapshot.run_id] = owner
+        if idempotency_key is not None:
+            self._creation_owners[idempotency_key] = owner
+        task.add_done_callback(self._creation_task_done)
+        return owner
+
+    def _prepare_creation(
+        self,
+        raw_body: bytes,
+        fingerprint: bytes,
+        idempotency_key: UUID | None,
+        configuration_override: AnalysisConfigurationSnapshot | None,
+    ) -> _PreparedCreation:
+        try:
+            raw_body.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise InvalidSubmissionEncodingError() from error
+        request = AnalysisRequestV1.model_validate_json(raw_body)
+        configuration = configuration_override or AnalysisConfigurationSnapshot(
+            analysis_timezone=self._analysis_timezone,
+            time_resolution=request.time_resolution or DEFAULT_TIME_RESOLUTION,
+            time_resolution_source=(
+                TimeResolutionSource.FRONTEND
+                if "time_resolution" in request.model_fields_set
+                else TimeResolutionSource.DEFAULT
+            ),
+        )
         run_id = self._new_id()
+        if run_id in self._runs:
+            raise ValueError("The generated run ID already exists.")
         timestamp = self._clock.now()
         snapshot = AnalysisRunSnapshot(
             run_id=run_id,
@@ -199,9 +419,14 @@ class RunCoordinator:
             updated_at=timestamp,
             configuration=configuration,
         )
-        runtime = RunRuntime(snapshot=snapshot, query=query)
+        transcript_buffer = TranscriptBuffer(self._registry)
+        runtime = RunRuntime(
+            snapshot=snapshot,
+            transcript_buffer=transcript_buffer,
+            query=request.query,
+        )
         request_id = request_id_context.get()
-        self._reserve_transcript_item_locked(
+        request_item = self._reserve_transcript_item_locked(
             runtime,
             session_id=None,
             request_id=request_id,
@@ -223,6 +448,18 @@ class RunCoordinator:
                 configuration=configuration,
             ),
         )
+        transcript_buffer.append(
+            request_item,
+            "analysis_request",
+            1,
+            request,
+        )
+        transcript_buffer.append(
+            created_item,
+            "lifecycle_event",
+            2,
+            event,
+        )
         runtime.events.append(event)
         runtime.state_mutations.append(
             RunStateMutation(
@@ -232,30 +469,215 @@ class RunCoordinator:
                 transcript_item=created_item,
             )
         )
-        async with self._runs_lock:
+        storage = transcript_buffer.to_storage_batch(
+            inline_content_bytes=self._inline_content_bytes,
+            preview_bytes=self._preview_bytes,
+        )
+        safe_request = AnalysisRequestV1.model_validate_json(
+            transcript_buffer.items[0].content.safe_body
+        )
+        candidate = RunCreationCandidate(
+            snapshot=snapshot,
+            query=safe_request.query,
+            idempotency_key=idempotency_key,
+            request_fingerprint=fingerprint if idempotency_key is not None else None,
+            creation_receipt=snapshot.model_dump(mode="json"),
+            request_item_id=request_item.item_id,
+            created_item_id=created_item.item_id,
+            transcript=storage,
+        )
+        return _PreparedCreation(candidate=candidate, runtime=runtime, event=event)
+
+    async def _own_creation(self, owner: _CreationOwner) -> AnalysisRunSnapshot:
+        candidate = owner.prepared.candidate
+        try:
+            try:
+                result = await self._transcript_store.create_run(candidate)
+            except TimeoutError:
+                owner.commit_unconfirmed.set()
+                result = await self._verify_unknown_creation(candidate)
+            except IdempotencyKeyConflictError:
+                raise
+            except Exception as error:
+                raise CreationPersistenceUnavailableError() from error
+            if result.disposition is RunCreationDisposition.CREATED:
+                if result.creation.run_id != candidate.snapshot.run_id:
+                    raise CreationPersistenceUnavailableError()
+                await self._register_committed_creation(owner.prepared)
+                return candidate.snapshot
+            return result.creation.receipt_snapshot()
+        finally:
+            async with self._runs_lock:
+                if candidate.idempotency_key is not None:
+                    current = self._creation_owners.get(candidate.idempotency_key)
+                    if current is owner:
+                        self._creation_owners.pop(candidate.idempotency_key, None)
+                if self._creation_by_run.get(candidate.snapshot.run_id) is owner:
+                    self._creation_by_run.pop(candidate.snapshot.run_id, None)
+
+    async def _verify_unknown_creation(
+        self,
+        candidate: RunCreationCandidate,
+    ) -> RunCreationResult:
+        while True:
             if self._closing:
-                raise ServiceShuttingDownError()
+                raise CreationCommitUnconfirmedError(candidate.snapshot.run_id)
+            try:
+                result = await self._transcript_store.verify_creation(candidate)
+            except CreationVerificationUnavailableError:
+                await asyncio.sleep(self._verification_retry_interval)
+                continue
+            except Exception as error:
+                raise CreationPersistenceUnavailableError() from error
+            if result is None:
+                raise CreationRolledBackError()
+            return result
+
+    async def _register_committed_creation(
+        self,
+        prepared: _PreparedCreation,
+    ) -> None:
+        runtime = prepared.runtime
+        run_id = runtime.snapshot.run_id
+        async with self._runs_lock:
             if run_id in self._runs:
                 raise ValueError("The generated run ID already exists.")
-            coroutine = self._run_workflow(runtime)
-            try:
-                task = asyncio.create_task(coroutine, name=f"analysis-run-{run_id}")
-            except BaseException:
-                coroutine.close()
-                raise
-            runtime.workflow_task = task
-            task.add_done_callback(
-                lambda completed: self._workflow_done(runtime, completed)
-            )
             self._runs[run_id] = runtime
-        self._log_run_transition(None, snapshot, event)
-        runtime.workflow_start.set()
+            closing = self._closing
+        self._log_run_transition(None, runtime.snapshot, prepared.event)
+        if closing:
+            self._mark_quiesced(runtime)
+            return
+        coroutine = self._run_workflow(runtime)
+        try:
+            task = self._workflow_task_factory(coroutine, f"analysis-run-{run_id}")
+        except BaseException as exception:
+            coroutine.close()
+            self._mark_quiesced(runtime)
+            error = PublicError(
+                error_id=self._new_id(),
+                code="workflow_start_failed",
+                message="The analysis workflow could not be started.",
+                failed_stage="workflow_start",
+                retryable=False,
+            )
+            try:
+                await self.fail_run(run_id, error)
+            except InvalidRunTransitionError:
+                pass
+            self._log_activity(
+                "workflow_start_failed",
+                runtime,
+                exception=exception,
+            )
+            return
+        runtime.workflow_task = task
+        task.add_done_callback(lambda completed: self._workflow_done(runtime, completed))
+
+    async def _await_creation(
+        self,
+        owner: _CreationOwner,
+        deadline: float,
+        *,
+        initial: bool,
+    ) -> AnalysisRunSnapshot:
+        try:
+            snapshot = await self._wait_for_owner(owner, deadline, initial=initial)
+        except BaseException:
+            if initial and owner.task is not None:
+                owner.task.add_done_callback(
+                    lambda completed: self._release_owner_workflow(owner, completed)
+                )
+            raise
+        self._release_owner_workflow(owner, owner.task)
         return snapshot
+
+    def _release_owner_workflow(
+        self,
+        owner: _CreationOwner,
+        completed: asyncio.Task[AnalysisRunSnapshot] | None,
+    ) -> None:
+        if completed is None or completed.cancelled():
+            return
+        try:
+            completed.result()
+        except Exception:
+            return
+        runtime = owner.prepared.runtime
+        if self._runs.get(runtime.snapshot.run_id) is runtime:
+            runtime.workflow_start.set()
+
+    async def _wait_for_owner(
+        self,
+        owner: _CreationOwner,
+        deadline: float,
+        *,
+        initial: bool,
+    ) -> AnalysisRunSnapshot:
+        if owner.task is None:
+            raise RuntimeError("creation owner task was not started")
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise IdempotencyWaitTimeoutError()
+        if not initial:
+            try:
+                async with asyncio.timeout(remaining):
+                    return await asyncio.shield(owner.task)
+            except TimeoutError:
+                if owner.commit_unconfirmed.is_set():
+                    raise CreationCommitUnconfirmedError(
+                        owner.prepared.candidate.snapshot.run_id
+                    ) from None
+                raise IdempotencyWaitTimeoutError() from None
+        unknown_wait = asyncio.create_task(owner.commit_unconfirmed.wait())
+        try:
+            done, _ = await asyncio.wait(
+                (owner.task, unknown_wait),
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if owner.task in done:
+                return owner.task.result()
+            if unknown_wait in done and owner.commit_unconfirmed.is_set():
+                raise CreationCommitUnconfirmedError(
+                    owner.prepared.candidate.snapshot.run_id
+                )
+            if initial:
+                raise CreationCommitUnconfirmedError(
+                    owner.prepared.candidate.snapshot.run_id
+                )
+            raise IdempotencyWaitTimeoutError()
+        finally:
+            unknown_wait.cancel()
+            await asyncio.gather(unknown_wait, return_exceptions=True)
+
+    @staticmethod
+    def _require_same_fingerprint(actual: bytes | None, expected: bytes) -> None:
+        if actual != expected:
+            raise IdempotencyKeyConflictError()
+
+    def _creation_task_done(self, task: asyncio.Task[AnalysisRunSnapshot]) -> None:
+        self._creation_tasks.discard(task)
+        if task.cancelled():
+            return
+        task.exception()
 
     async def shutdown(self) -> None:
         async with self._shutdown_lock:
             async with self._runs_lock:
                 self._closing = True
+                creation_tasks = tuple(
+                    task for task in self._creation_tasks if not task.done()
+                )
+            if creation_tasks:
+                _, pending_creations = await asyncio.wait(
+                    creation_tasks,
+                    timeout=self._shutdown_grace_period,
+                )
+                for task in pending_creations:
+                    task.cancel()
+                await asyncio.gather(*creation_tasks, return_exceptions=True)
+            async with self._runs_lock:
                 active = [
                     (runtime, runtime.snapshot.status, runtime.workflow_task)
                     for runtime in self._runs.values()
@@ -306,7 +728,7 @@ class RunCoordinator:
             else:
                 await self._workflow_failed(runtime, error)
         except asyncio.CancelledError as error:
-            if not token.is_requested():
+            if runtime.snapshot.status is not RunStatus.PENDING and not token.is_requested():
                 await self._workflow_failed(runtime, error)
             raise
         except Exception as error:
@@ -490,6 +912,12 @@ class RunCoordinator:
                 request_id=request_id_context.get(),
                 operation_id=None,
                 created_at=timestamp,
+            )
+            runtime.transcript_buffer.append(
+                item,
+                "lifecycle_event",
+                2,
+                event,
             )
             agent_runtime = AgentSessionRuntime(summary=summary, events=[event])
             runtime.agent_sessions[summary.session_id] = agent_runtime
@@ -725,6 +1153,17 @@ class RunCoordinator:
         key = _UUID.validate_python(run_id)
         async with self._runs_lock:
             runtime = self._runs.get(key)
+            owner = self._creation_by_run.get(key)
+        if runtime is None and owner is not None and owner.task is not None:
+            try:
+                async with asyncio.timeout(self._idempotency_wait_timeout):
+                    await asyncio.shield(owner.task)
+            except TimeoutError:
+                raise CreationCommitUnconfirmedError(key) from None
+            except (CreationRolledBackError, IdempotencyKeyConflictError):
+                pass
+            async with self._runs_lock:
+                runtime = self._runs.get(key)
         if runtime is None:
             raise RunNotFoundError(key)
         return runtime
@@ -801,6 +1240,12 @@ class RunCoordinator:
                     request_id=request_id_context.get(),
                     operation_id=None,
                     created_at=timestamp,
+                )
+                runtime.transcript_buffer.append(
+                    item,
+                    "lifecycle_event",
+                    2,
+                    event,
                 )
             runtime.snapshot = snapshot
             if event is not None:
@@ -932,6 +1377,12 @@ class RunCoordinator:
                 request_id=request_id_context.get(),
                 operation_id=None,
                 created_at=timestamp,
+            )
+            runtime.transcript_buffer.append(
+                item,
+                "lifecycle_event",
+                2,
+                event,
             )
             session_runtime.events.append(event)
             session_runtime.last_error = (

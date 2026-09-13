@@ -11,6 +11,7 @@ import uvicorn
 import app.__main__ as entrypoint
 import app.main as application_module
 from app.application.analysis_runs.models import RunStatus
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
 from scripts.run_sse_smoke import BASE, GatedWorkflow, SmokeServer, read_event
 
@@ -85,7 +86,10 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(
     async def exercise():
         before = asyncio.all_tasks()
         workflow = CooperativeWorkflow()
-        application = create_app(workflow=workflow)
+        application = create_app(
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+        )
         async with running_entrypoint(application) as (server, task, client):
             created = await client.post(BASE, json={"query": "shutdown regression"})
             assert created.status_code == 201
@@ -120,7 +124,7 @@ def test_entrypoint_logs_exclude_url_credentials_and_private_query(running_entry
     private_query = "REVIEW_PRIVATE_QUERY"
     authorization = "REVIEW_AUTHORIZATION"
     cookie = "REVIEW_COOKIE"
-    application = create_app()
+    application = create_app(transcript_store=InMemoryTranscriptStore())
 
     async def exercise():
         async with running_entrypoint(application) as (_, _, client):
@@ -173,7 +177,10 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
     async def exercise():
         before = asyncio.all_tasks()
         workflow = GatedWorkflow()
-        application = create_app(workflow=workflow)
+        application = create_app(
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+        )
         async with running_entrypoint(application) as (_, _, client):
             coordinator = application.state.run_coordinator
             original_subscribe = coordinator.subscribe

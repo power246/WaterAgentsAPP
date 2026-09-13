@@ -5,6 +5,7 @@ import httpx
 import pytest
 
 from app.infrastructure.config import AppSettings
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
 from scripts.run_sse_smoke import GatedWorkflow, running_server
 
@@ -23,7 +24,8 @@ def test_server_cleanup_closes_socket_and_workflow_on_client_exit(
         hold_client = asyncio.Event()
         workflow = GatedWorkflow()
         app = create_app(
-            AppSettings(log_level="warning"), workflow=workflow, shutdown_grace_period=0
+            AppSettings(log_level="warning"), workflow=workflow, shutdown_grace_period=0,
+            transcript_store=InMemoryTranscriptStore(),
         )
         address = None
 
@@ -79,7 +81,7 @@ def test_lifespan_startup_failure_is_reported_without_orphan_tasks(application_l
 
     async def exercise():
         before = asyncio.all_tasks()
-        app = create_app()
+        app = create_app(transcript_store=InMemoryTranscriptStore())
         app.router.lifespan_context = fail_startup
         with pytest.raises(RuntimeError, match="could not start"):
             async with running_server(app):

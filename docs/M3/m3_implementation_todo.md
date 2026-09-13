@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–2 已于 2026-09-13 完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 3–10 待实施与验证。** 三个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于 transcript workflow 已接入持久化、完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
+**当前状态：Milestone 0–4 已于 2026-09-13 完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 5–10 待实施与验证。** 五个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于增量 transcript writer、完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
 
 ## 阶段与设计导航
 
@@ -256,31 +256,40 @@ git diff --check
 
 ### 工作
 
-- [ ] HTTP body 只读一次，SHA-256 在业务解析/默认值/trim 前计算；不保存未脱敏 raw bytes。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
-- [ ] 首次事务包含 run、原请求、run_created 配置、key/fingerprint/小型原回执及引用，确认后才允许执行。（[设计 §4.1](m3_transcript_history_implementation_design.md#41-analysis_runs)；[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] 同 key 先读原指纹/回执；不因当前默认配置或请求 DTO 的后来变化改写已接受响应。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] 用 DB UNIQUE 裁决竞争；内存 owner 只负责当前创建任务/注册窗口，不作为幂等权威。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] 等待者共享默认 5 秒 deadline，确认回滚才接手，超时不取消 owner 或伪称回滚。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] HTTP 断开后 owner 仍完成实际提交核实/注册；读取与 SSE 不把提交后注册前窗口误判 410。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
-- [ ] 未知提交保留原身份，通过原事务收尾和同 run 事务级 advisory lock 后的新查询核实结果；未确认不执行、不重建 run，幂等竞争仍受 DB UNIQUE 约束。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] task 启动失败保持原 201，追加一次 workflow_start_failed 终态；取消若先胜出则保持取消。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] 原回执与 key 无自动过期；当前保存状态/HTTP request_id 不进入不可变 receipt。（[设计 §4.1](m3_transcript_history_implementation_design.md#41-analysis_runs)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] HTTP body 只读一次，SHA-256 在业务解析/默认值/trim 前计算；不保存未脱敏 raw bytes。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] 首次事务包含 run、原请求、run_created 配置、key/fingerprint/小型原回执及引用，确认后才允许执行。（[设计 §4.1](m3_transcript_history_implementation_design.md#41-analysis_runs)；[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] 同 key 先读原指纹/回执；不因当前默认配置或请求 DTO 的后来变化改写已接受响应。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] 用 DB UNIQUE 裁决竞争；内存 owner 只负责当前创建任务/注册窗口，不作为幂等权威。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] 等待者共享默认 5 秒 deadline，确认回滚才接手，超时不取消 owner 或伪称回滚。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] HTTP 断开后 owner 仍完成实际提交核实/注册；读取与 SSE 不把提交后注册前窗口误判 410。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
+- [x] 未知提交保留原身份，通过原事务收尾和同 run 事务级 advisory lock 后的新查询核实结果；未确认不执行、不重建 run，幂等竞争仍受 DB UNIQUE 约束。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] task 启动失败保持原 201，追加一次 workflow_start_failed 终态；取消若先胜出则保持取消。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] 原回执与 key 无自动过期；当前保存状态/HTTP request_id 不进入不可变 receipt。（[设计 §4.1](m3_transcript_history_implementation_design.md#41-analysis_runs)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
 
 ### Tests
 
-- [ ] 同 key 同 body 串行/并发均同 run、201、同回执与一次执行。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
-- [ ] JSON 空白、顺序、转义、值及字段有无改变返回 409；非法 key 422。（[API §2](m3_transcript_history_api.md#2-创建与幂等)）
-- [ ] 不同 key 相同 body、不带 key 的独立提交各建新 run。（[API §2](m3_transcript_history_api.md#2-创建与幂等)）
-- [ ] 终态、默认设置变化、重启和 live 清理后原 receipt 保持，HTTP request_id 每次不同。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
-- [ ] 创建回滚无执行；提交响应丢失可核实；SELECT 暂时无行不能误认回滚。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 等待超时、客户端断开、注册窗口和启动失败/取消竞争。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] 缺失 key 的网络重发不被文档误称为可去重。（[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] 同 key 同 body 串行/并发均同 run、201、同回执与一次执行。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] JSON 空白、顺序、转义、值及字段有无改变返回 409；非法 key 422。（[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] 不同 key 相同 body、不带 key 的独立提交各建新 run。（[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] 终态、默认设置变化、重启和 live 清理后原 receipt 保持，HTTP request_id 每次不同。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §2](m3_transcript_history_api.md#2-创建与幂等)）
+- [x] 创建回滚无执行；提交响应丢失可核实；SELECT 暂时无行不能误认回滚。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 等待超时、客户端断开、注册窗口和启动失败/取消竞争。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] 缺失 key 的网络重发不被文档误称为可去重。（[API §2](m3_transcript_history_api.md#2-创建与幂等)）
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] `python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：创建路由的持久化保证成立，测试证明数据库唯一性和一次执行，不能仅依赖内存 map。
+
+#### Milestone 4 完成记录（2026-09-13）
+
+- 代码状态：`codex/m3-milestone` 分支上的未提交 Milestone 4 diff；保留此前 Milestone 0–3 提交，未改动归档代码或无关目录。
+- 实现位置：创建候选/不可变回执与错误位于 `application/analysis_runs/creation.py`；协调、未知提交核实、注册窗口和 workflow gate 位于 `application/analysis_runs/coordinator.py`；PostgreSQL 原子创建、事务级 advisory lock 与真实唯一约束裁决位于 `infrastructure/persistence/store.py`；HTTP 单次读 body、UUID v4、错误映射和生产 store 装配位于 `api/http/analysis_runs.py`、`api/http/errors.py` 与 `main.py`。`infrastructure/persistence/memory_store.py` 仅作为确定性测试 fake，并非生产幂等权威。
+- 环境：Darwin 25.6.0 arm64、Python 3.12.14、PostgreSQL 17.10、SQLAlchemy 2.0.52、psycopg 3.3.5、Alembic 1.20.0；schema revision `20260913_01`。
+- 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55433 ... backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：417 passed，真实 PostgreSQL 测试未跳过。
+- 完整回归：`WATERAGENTS_TEST_POSTGRES_PORT=55433 ... backend/.venv/bin/python -m pytest backend/tests -q`：721 passed。
+- 契约结论：Milestone 4 的创建事务、原 bytes 幂等、DB UNIQUE 竞争、未知提交收敛、断连/超时所有权和一次执行在本机真实 PostgreSQL 上满足；无 key 请求的网络重发明确不保证去重。增量 writer、统一历史读取、两层 SSE、启动遗留修复和三平台远端证据仍分别归 Milestone 5–10。
 
 ## Milestone 5：串行写入、确认集合与有限补写
 
@@ -487,4 +496,4 @@ git diff --check
 | 契约结论 | 已满足、partial 或未满足，缺少的具体证据。 |
 | 后续接力 | 所属 Milestone/contract、入口、未实现业务边界。 |
 
-当前只有 Milestone 0 的本机基线与契约盘点记录；它不构成 M3 运行能力实现或业务契约验收。Milestone 1–10 的实施、测试和跨平台证据仍保持未勾选。
+当前已有 Milestone 0–4 的本机实现与适用验证记录；Milestone 2 的三平台实际 CI 证据仍为 partial，不能由本机结果替代。Milestone 5–10 的实施、测试和相应跨平台证据仍保持未勾选。

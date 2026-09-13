@@ -20,6 +20,7 @@ from app.application.analysis_runs.coordinator import (
 )
 from app.application.analysis_runs.models import RunLifecycleEvent, RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
 
 RUN_ID = "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"
@@ -79,6 +80,7 @@ class GatedWorkflow:
 async def run_runtime(**options):
     workflow = GatedWorkflow()
     clock = CountingClock()
+    options.setdefault("transcript_store", InMemoryTranscriptStore())
     application = create_app(
         clock=clock, workflow=workflow, shutdown_grace_period=0, **options
     )
@@ -471,7 +473,11 @@ def test_disconnect_or_write_failure_closes_only_its_subscription(disconnect, mo
 @pytest.mark.parametrize("interval", [0, -1, float("inf"), float("nan"), True])
 def test_keepalive_interval_must_be_finite_and_positive(interval) -> None:
     with pytest.raises(ValueError, match="finite and positive"):
-        RunCoordinator(CountingClock(), keepalive_interval=interval)
+        RunCoordinator(
+            CountingClock(),
+            transcript_store=InMemoryTranscriptStore(),
+            keepalive_interval=interval,
+        )
 
 
 def test_default_interval_drives_the_real_subscription_wait(monkeypatch) -> None:

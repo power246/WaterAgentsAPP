@@ -11,6 +11,7 @@ from app.application.analysis_runs.models import (
     StateMutation,
     TranscriptItemIdentity,
 )
+from app.application.transcripts.buffer import TranscriptBuffer
 
 
 @dataclass
@@ -25,6 +26,7 @@ class AgentSessionRuntime:
 @dataclass
 class RunRuntime:
     snapshot: AnalysisRunSnapshot
+    transcript_buffer: TranscriptBuffer
     query: str = field(repr=False)
     events: list[RunLifecycleEvent] = field(default_factory=list)
     transcript_items: list[TranscriptItemIdentity] = field(default_factory=list)

@@ -11,6 +11,9 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from app.application.analysis_runs.coordinator import RunCoordinator
+from app.application.analysis_runs.creation import IdempotencyKeyConflictError
+from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -307,6 +310,72 @@ def test_database_rejects_duplicate_key_sequence_and_agent_identity(
                     ),
                 ),
             )
+
+    asyncio.run(exercise())
+
+
+def test_concurrent_coordinators_use_database_key_authority_and_execute_once(
+    postgres_settings: AppSettings,
+) -> None:
+    class Clock:
+        def now(self) -> datetime:
+            return datetime.now(UTC)
+
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: list[WorkflowContext] = []
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.append(context)
+            self.started.set()
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise() -> None:
+        engine = create_database_engine(postgres_settings)
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        workflow = Workflow()
+        coordinators = [
+            RunCoordinator(
+                Clock(),
+                transcript_store=store,
+                workflow=workflow,
+                shutdown_grace_period=0,
+            )
+            for _ in range(2)
+        ]
+        key = uuid4()
+        body = b'{"query":"database race"}'
+        try:
+            receipts = await asyncio.gather(
+                *(
+                    coordinator.create_run(body, idempotency_key=key)
+                    for coordinator in coordinators
+                )
+            )
+            assert receipts[0] == receipts[1]
+            await workflow.started.wait()
+            assert len(workflow.calls) == 1
+            assert sum(len(coordinator._runs) for coordinator in coordinators) == 1
+            stored = await store.get_creation(key)
+            assert stored is not None
+            assert stored.creation.receipt_snapshot() == receipts[0]
+            with pytest.raises(IdempotencyKeyConflictError):
+                await coordinators[0].create_run(
+                    b'{ "query":"database race"}',
+                    idempotency_key=key,
+                )
+        finally:
+            workflow.release.set()
+            await asyncio.gather(
+                *(coordinator.shutdown() for coordinator in coordinators)
+            )
+            await engine.dispose()
 
     asyncio.run(exercise())
 

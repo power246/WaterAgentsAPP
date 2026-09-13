@@ -20,6 +20,7 @@ from app.application.analysis_runs.models import (
     RunStatus,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
 
 ERROR = PublicError(
@@ -64,7 +65,12 @@ def run(exercise) -> None:
         coordinators = []
 
         def coordinator_factory(*args, **kwargs):
-            coordinator = RunCoordinator(*args, workflow=WaitingWorkflow(), **kwargs)
+            coordinator = RunCoordinator(
+                *args,
+                transcript_store=InMemoryTranscriptStore(),
+                workflow=WaitingWorkflow(),
+                **kwargs,
+            )
             coordinators.append(coordinator)
             return coordinator
 

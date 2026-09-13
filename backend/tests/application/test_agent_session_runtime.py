@@ -20,6 +20,7 @@ from app.application.analysis_runs.models import (
     SessionStateMutation,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 
 CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
     "America/Chicago"
@@ -67,6 +68,7 @@ async def make_running_coordinator():
     workflow = HoldingWorkflow()
     coordinator = RunCoordinator(
         clock,
+        transcript_store=InMemoryTranscriptStore(),
         workflow=workflow,
         record_id_factory=SequentialIds(),
     )

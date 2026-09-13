@@ -11,6 +11,7 @@ from app.application.analysis_runs.models import RunStatus
 from app.application.correlation import request_id_context
 from app.infrastructure.observability import json_logging
 from app.infrastructure.observability.json_logging import JsonFormatter
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
 
 BASE = "/api/analysis/runs"
@@ -42,7 +43,10 @@ class Workflow:
 
 @asynccontextmanager
 async def application(*, workflow=None, clock=None):
-    app = create_app(clock=clock or Clock(), workflow=workflow, shutdown_grace_period=0)
+    app = create_app(
+        clock=clock or Clock(), workflow=workflow, shutdown_grace_period=0,
+        transcript_store=InMemoryTranscriptStore(),
+    )
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             yield app, client
@@ -136,7 +140,7 @@ def test_http_duration_uses_clock_and_server_errors_keep_safe_diagnostics(monkey
     async def exercise():
         clock = Clock()
         async with application(clock=clock) as (app, client):
-            async def fail(*args):
+            async def fail(*args, **kwargs):
                 clock.instant += timedelta(milliseconds=elapsed_ms)
                 raise RuntimeError(f"service failure {QUERY}; API_KEY={SECRET}")
 

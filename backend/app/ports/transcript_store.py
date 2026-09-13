@@ -1,11 +1,21 @@
 from typing import Protocol, TypeVar
+from uuid import UUID
 
-ItemT = TypeVar("ItemT")
+CreationCandidateT = TypeVar("CreationCandidateT")
+CreationResultT = TypeVar("CreationResultT")
 
 
-class TranscriptStorePort(Protocol[ItemT]):
-    """An empty list result means the run has no items, not unavailable."""
+class TranscriptStorePort(Protocol[CreationCandidateT, CreationResultT]):
+    """Persistence boundary for atomic run creation and later transcript writes."""
 
-    async def append(self, run_id: str, item: ItemT) -> None: ...
+    async def get_creation(
+        self,
+        idempotency_key: UUID,
+    ) -> CreationResultT | None: ...
 
-    async def list_for_run(self, run_id: str) -> tuple[ItemT, ...]: ...
+    async def create_run(self, candidate: CreationCandidateT) -> CreationResultT: ...
+
+    async def verify_creation(
+        self,
+        candidate: CreationCandidateT,
+    ) -> CreationResultT | None: ...

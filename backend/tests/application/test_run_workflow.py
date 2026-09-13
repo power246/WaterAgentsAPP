@@ -16,6 +16,7 @@ from app.application.analysis_runs.coordinator import (
 from app.application.analysis_runs.models import RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
 from app.infrastructure.config import AppSettings
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
 
 CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
@@ -77,14 +78,19 @@ class CooperativeWorkflow:
 @asynccontextmanager
 async def application_runtime(workflow=None, *, shutdown_grace_period=0):
     application = create_app(
-        clock=FixedClock(), workflow=workflow, shutdown_grace_period=shutdown_grace_period
+        clock=FixedClock(), workflow=workflow, shutdown_grace_period=shutdown_grace_period,
+        transcript_store=InMemoryTranscriptStore(),
     )
     async with application.router.lifespan_context(application):
         coordinator = application.state.run_coordinator
         try:
             yield coordinator
         finally:
-            owned = [runtime.workflow_task for runtime in coordinator._runs.values()]
+            owned = [
+                runtime.workflow_task
+                for runtime in coordinator._runs.values()
+                if runtime.workflow_task is not None
+            ]
     assert all(task.done() for task in owned)
     assert not set(owned).intersection(asyncio.all_tasks())
     assert all(runtime.workflow_quiesced.is_set() for runtime in coordinator._runs.values())
@@ -374,7 +380,10 @@ def test_lifespan_shutdown_cancels_blocked_tasks_and_awaits_their_cleanup(caplog
                     cleaned.set()
 
         workflow = CleaningWorkflow()
-        application = create_app(clock=FixedClock(), workflow=workflow, shutdown_grace_period=0)
+        application = create_app(
+            clock=FixedClock(), workflow=workflow, shutdown_grace_period=0,
+            transcript_store=InMemoryTranscriptStore(),
+        )
         lifespan = application.router.lifespan_context(application)
         await lifespan.__aenter__()
         coordinator = application.state.run_coordinator
@@ -452,7 +461,10 @@ def test_lifespan_creates_fresh_runtime_on_each_start_without_import_time_tasks(
     async def exercise() -> None:
         settings = AppSettings()
         workflow = CooperativeWorkflow()
-        application = create_app(settings, clock=FixedClock(), workflow=workflow)
+        application = create_app(
+            settings, clock=FixedClock(), workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+        )
         assert application.state.settings is settings
         assert not hasattr(application.state, "run_coordinator")
         async with application.router.lifespan_context(application):
@@ -508,7 +520,10 @@ def test_done_callback_consumes_unexpected_wrapper_failure_and_marks_quiesced(ca
         loop.set_exception_handler(lambda loop, context: unhandled.append(context))
         identifiers = iter([uuid4()])
         coordinator = RunCoordinator(
-            FixedClock(), workflow=GatedWorkflow(), id_factory=lambda: next(identifiers)
+            FixedClock(),
+            transcript_store=InMemoryTranscriptStore(),
+            workflow=GatedWorkflow(),
+            id_factory=lambda: next(identifiers),
         )
         try:
             created = await coordinator.create_run("query", CONFIGURATION)
@@ -536,7 +551,11 @@ def test_done_callback_consumes_unexpected_wrapper_failure_and_marks_quiesced(ca
 @pytest.mark.parametrize("grace", [-1, float("inf"), float("nan")])
 def test_shutdown_grace_period_rejects_unbounded_or_negative_values(grace) -> None:
     with pytest.raises(ValueError, match="finite and non-negative"):
-        RunCoordinator(FixedClock(), shutdown_grace_period=grace)
+        RunCoordinator(
+            FixedClock(),
+            transcript_store=InMemoryTranscriptStore(),
+            shutdown_grace_period=grace,
+        )
 
 
 @pytest.mark.parametrize("create_first", [False, True])
@@ -567,7 +586,7 @@ def test_creation_and_shutdown_race_never_leaves_an_unowned_task(create_first) -
             if create_first:
                 assert result.status is RunStatus.PENDING
                 runtime = coordinator._runs[result.run_id]
-                assert runtime.workflow_task.done()
+                assert runtime.workflow_task is None
                 assert runtime.workflow_quiesced.is_set()
                 assert not runtime.cancel_requested.is_set()
                 assert len(runtime.events) == 1
