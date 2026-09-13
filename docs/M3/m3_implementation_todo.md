@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 均待实施与验证。** 本轮完成工程文档整理，没有实现数据库、路由、迁移、配置文件或测试。下列命令是后续实施时的 Verify 目标，不是本轮运行证据。M2 原验收记录保留原义，不能当作 M3 基线或三平台通过结果。
+**当前状态：Milestone 0 已于 2026-09-13 完成本机基线与契约盘点；Milestone 1–10 待实施与验证。** Milestone 0 的实际命令、环境和影响面记录见本节完成记录；它不等同于数据库、路由、迁移、配置或 M3 业务契约已经实现。后续阶段中的命令仍是 Verify 目标，不是本轮运行证据。M2 原验收记录保留原义，不能当作 M3 三平台通过结果。
 
 ## 阶段与设计导航
 
@@ -60,22 +60,66 @@
 
 ### 工作
 
-- [ ] 记录分支/HEAD、git status、已有改动和 Python/依赖版本；保留 M2 原有文档改动。（[证据记录格式](#实际证据记录格式)）
-- [ ] 阅读 M1/M2 设计、实现、API 与当前测试，确认整体协调器、ClockPort、PublicError、CorrelationContext、SSE encoder/response、redaction 和 factory/lifespan 入口。（[M1 详细设计](../M1/m1_project_shell_domain_design.md)；[M2 接力与验收](../M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)）
-- [ ] 核实现有 TranscriptStorePort 及架构导入约束，列出所有调用方、测试替身与将迁移的旧名称。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
-- [ ] 核对中心 GLOBAL、M3-C01–C20、M3-A01–A12 与 M2 接力；记录仍未取得的 M2 三平台证据，不猜测通过。（[契约 §2](../deferred_milestone_contracts.md#2-跨-milestone-硬约束)；[M2 接力与验收](../M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)）
-- [ ] 列出目标目录和依赖改动；保持前端实现、真实业务 Agents 与无关 refactor 在范围外。（[设计 §1.2](m3_transcript_history_implementation_design.md#12-后续阶段承接)；[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
-- [ ] 确认参考代码仅作为只读设计依据，交付文档不包含内部名字。（[决策记录 §1](m3_transcript_history_design.md#1-依据与当前基线)）
+- [x] 记录分支/HEAD、git status、已有改动和 Python/依赖版本；保留 M2 原有文档改动。（[证据记录格式](#实际证据记录格式)）
+- [x] 阅读 M1/M2 设计、实现、API 与当前测试，确认整体协调器、ClockPort、PublicError、CorrelationContext、SSE encoder/response、redaction 和 factory/lifespan 入口。（[M1 详细设计](../M1/m1_project_shell_domain_design.md)；[M2 接力与验收](../M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)）
+- [x] 核实现有 TranscriptStorePort 及架构导入约束，列出所有调用方、测试替身与将迁移的旧名称。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
+- [x] 核对中心 GLOBAL、M3-C01–C20、M3-A01–A12 与 M2 接力；记录仍未取得的 M2 三平台证据，不猜测通过。（[契约 §2](../deferred_milestone_contracts.md#2-跨-milestone-硬约束)；[M2 接力与验收](../M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)）
+- [x] 列出目标目录和依赖改动；保持前端实现、真实业务 Agents 与无关 refactor 在范围外。（[设计 §1.2](m3_transcript_history_implementation_design.md#12-后续阶段承接)；[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
+- [x] 确认参考代码仅作为只读设计依据，交付文档不包含内部名字。（[决策记录 §1](m3_transcript_history_design.md#1-依据与当前基线)）
 
 ### Tests / Verify
 
-- [ ] 在现有可用环境运行基线：`python -m pytest backend/tests -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
-- [ ] `git diff --check`；记录本机基线结果及确实存在的失败。（[证据记录格式](#实际证据记录格式)）
-- [ ] 对照架构测试确认 ports 不反向依赖 application/infrastructure。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
+- [x] 在现有可用环境运行基线：`python -m pytest backend/tests -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] `git diff --check`；记录本机基线结果及确实存在的失败。（[证据记录格式](#实际证据记录格式)）
+- [x] 对照架构测试确认 ports 不反向依赖 application/infrastructure。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
 
 ### 阶段出口与记录
 
-待填写：基线命令、版本、结果、已有改动保护范围及适用契约。基线失败先区分已有问题与本阶段修改，不将未知 CI 状态标记已完成。
+#### Milestone 0 完成记录（2026-09-13）
+
+开始时位于 `codex/m3-transcript-history`，跟踪 `origin/m3-transcript-history`，工作区和 index 均无改动；从该 HEAD 新建 `codex/m3-milestone-0`。基线提交为 `de6606b25be6af5a5bf6b18b6a155b5a098f9d04`。本阶段仅修改本清单，M1/M2 实现、M2 历史文档、归档目录和前端均未改动，也没有需要合并或覆盖的用户未提交内容。
+
+本机环境：macOS 26.6.2（arm64），uv 0.11.23，锁定环境 Python 3.12.14。`backend/pyproject.toml` 要求 Python >=3.11；本次解析的直接依赖为 FastAPI 0.141.1、Pydantic 2.13.5、pydantic-settings 2.15.0、tzdata 2026.3、Uvicorn 0.52.4，开发依赖为 HTTPX 0.28.1、pytest 9.1.1；Starlette 1.6.0 为本次相关传递依赖。当前 shell 没有独立的 `python` 命令，因此实际通过锁定 uv 环境执行同一 `python -m pytest` 入口，没有修改依赖或 lockfile。
+
+#### 当前实现入口与迁移清单
+
+| 边界 | 当前真实入口 | M3 承接结论 |
+|---|---|---|
+| 整体协调与状态 | `backend/app/application/analysis_sessions/coordinator.py:SessionCoordinator`、`runtime.py:SessionRuntime`、`workflow.py:AnalysisWorkflow/WorkflowContext` | 当前对象代表整次分析，迁为 run 级 coordinator/runtime/workflow；真实 Agent session 新建独立 runtime 与五态。原短临界区、取消竞争、task ownership 和 quiesced 语义保留。 |
+| 时间与公开事实 | `backend/app/ports/clock.py:ClockPort`、`infrastructure/runtime/system_clock.py:SystemClock`、`application/analysis_sessions/models.py:PublicError/CorrelationContext/LifecycleEvent` | 继续以 ClockPort 产生 UTC 时间；PublicError 与关联模型扩展 run/session 身份。M2 lifecycle v1 只保留历史解析，新写使用区分 run/session 的 v2。 |
+| HTTP 与 SSE | `api/http/analysis_sessions.py`、`api/schemas/analysis_sessions.py`、`api/sse/encoder.py`、`api/sse/response.py`、`api/http/errors.py`、`api/http/request_context.py` | 旧 `/api/analysis/sessions` 三路由直接替换为 M3 十路由；复用安全错误与 request ID 边界，SSE 扩展为 run snapshot 与 session process 两层且以 `stream_end` 取代旧 204。 |
+| 脱敏与日志 | `infrastructure/observability/redaction.py`、`json_logging.py` | 保留 Authorization/Cookie/URL/已知凭据保护；M3-C19 调整当前整段隐藏 query 的行为，使普通 query 可诊断而其中凭据仍被移除，并增加流式跨片段边界。 |
+| Composition/lifespan | `backend/app/main.py:create_app`、lifespan 与 `backend/app/__main__.py:main` | 保留 clock/workflow/id factory 注入和单 worker；后续按连接、schema、遗留修复、coordinator 的顺序接入 PostgreSQL，并在关闭时收敛 writer/engine。 |
+| 测试替身 | `backend/tests/application/test_session_workflow.py` 的 controlled/gate workflows、各测试的 FixedClock/Clock/id factory，以及 `create_app` 注入 | 继续只替换外部能力与确定性时序；不把 fixture outcome、假水质结果或 test-only switch 引入生产。 |
+
+`TranscriptStorePort` 的完整引用盘点只有三处：`backend/app/ports/transcript_store.py` 定义、`backend/app/ports/__init__.py` 导出、`backend/tests/architecture/test_port_imports.py` 的协议/签名/依赖测试。当前没有 production/application 调用方、adapter 或 fake；旧方法为 `append(session_id, item)` 与 `list_for_session(session_id)`。M3 可直接用 ports 层的有界 storage command/query DTO 和 `create_run/commit_batch/verify_batch/list_runs/read_run/read_session/list_items/load_contents/repair_interrupted` 收敛它，不保留逐条 append 兼容入口。该端口必须继续只依赖 stdlib、Domain/Ports；不得反向导入 application、infrastructure、FastAPI、SQLAlchemy 或 adapter。
+
+需要迁移的旧整体 session 表面包括：`application/analysis_sessions` 包与 `AnalysisSessionSnapshot`、`SessionCoordinator`、`SessionRuntime`、`AnalysisWorkflow`、`WorkflowContext`、`SessionStatus`；API schema/response/error 名；`application.state.session_coordinator`、HTTP request state 和日志关联中的旧整体 `session_id`；`/api/analysis/sessions` 路径；`session_sse_smoke.py`；以及 `backend/tests/api/test_analysis_events.py`、`test_analysis_schemas.py`、`test_analysis_sessions.py`，`backend/tests/application/test_session_models.py`、`test_session_state_machine.py`、`test_session_workflow.py`，相关 architecture/observability/smoke 测试。M3 将旧整体身份迁为 run_id，同时为实际 Agent 保留新的 session_id；operation_id 继续表示单次调用。旧 M2 v1 事件作为历史解析事实保留，不保留旧 HTTP 路径兼容别名。
+
+#### 后续目标目录、依赖与范围
+
+生产目标为 `application/analysis_runs/`、`application/transcripts/`、收敛后的 `ports/transcript_store.py`、`infrastructure/persistence/`、`api/http|schemas/analysis_runs.py`、现有 `api/sse/`、`infrastructure/config/settings.py`、`infrastructure/observability/redaction.py`、`main.py`/lifespan，以及 `migrations/`、`alembic.ini`、`compose.yaml`、`.env.example`、`tests/persistence/` 和 `scripts/run_history_smoke.py`。依赖目标为 SQLAlchemy 2.0 asyncio、psycopg 3 binary（>=3.2,<4）和 Alembic（>=1.13,<2），由 Milestone 2 同批更新 `pyproject.toml` 与 `uv.lock`；Milestone 0 未提前安装或修改它们。
+
+范围外保持为：归档后端/前端和旧契约、当前前端实现、真实 query parser/水体 Agent/LLM/tool/skill/hook 生产方、M4 BFS、M6 综合指标、M7 DAG 策略、M8 跨 run RAG、M9 地图与删除策略，以及无关重构。设计参考只作为只读依据；本阶段未读取或复用归档实现，交付记录不加入内部参考工程名称、私有路径或专有实现标识。
+
+#### 验证与契约结论
+
+从仓库根执行：
+
+```text
+uv run --project backend --locked python -m pytest backend/tests -q
+602 passed in 11.28s
+
+uv run --project backend --locked python -m pytest backend/tests/architecture -q
+55 passed in 0.98s
+
+git diff --check
+退出 0
+```
+
+架构专项中的 `test_port_modules_have_no_forbidden_dependencies_or_placeholder_payloads` 与 `test_port_package_contains_only_protocols_and_errors` 证明当前 Ports 不反向依赖 application/infrastructure，application/API runtime ownership 门禁也保持通过。完整回归没有已知基线失败。
+
+已逐项核对 `GLOBAL-C01`–`GLOBAL-C11`、`M2-C01`–`M2-C13`、`M3-C01`–`M3-C20` 和 `M3-A01`–`M3-A12`。Milestone 0 只建立这些约束的适用基线和后续实现位置，不将任何 M3 业务 contract 标记为 implemented/partial。M2 文档记录的修复后 Ubuntu/macOS/Windows + Python 3.11 完整 tests 与 health/session SSE 两项 smoke 的实际 CI 结果仍未取得；本次 macOS/arm64/Python 3.12 本机 602 项通过不能替代该三平台证据。真实 PostgreSQL、schema、迁移、路由、持久化及跨系统同库切换证据仍归后续 Milestone，状态保持待办。
 
 ## Milestone 1：Run / Agent session 模型和统一状态入口
 
@@ -405,4 +449,4 @@
 | 契约结论 | 已满足、partial 或未满足，缺少的具体证据。 |
 | 后续接力 | 所属 Milestone/contract、入口、未实现业务边界。 |
 
-当前没有 M3 实现或运行验收完成记录；本清单全部实施复选项保持未勾选。
+当前只有 Milestone 0 的本机基线与契约盘点记录；它不构成 M3 运行能力实现或业务契约验收。Milestone 1–10 的实施、测试和跨平台证据仍保持未勾选。
