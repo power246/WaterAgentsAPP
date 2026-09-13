@@ -40,6 +40,7 @@ SUPPORTED_ERRORS = {
     (503, "idempotency_wait_timeout"),
     (409, "persistence_retry_unavailable"),
     (409, "run_not_live"),
+    (410, "live_state_gone"),
     (500, "transcript_content_unreadable"),
 }
 
@@ -188,7 +189,9 @@ def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> No
             replay = await client.get(f"{BASE}/{expected['run_id']}/events")
             assert replay.status_code == 200
             assert "private query" not in replay.text
-            assert '"analysis_timezone":"' + zone + '"' in replay.text
+            assert "event: run_snapshot" in replay.text
+            assert "event: stream_end" in replay.text
+            assert '"configuration"' not in replay.text
 
     run(exercise)
 
@@ -235,12 +238,16 @@ def test_default_workflow_completes_and_requests_without_a_key_are_independent()
                 assert replay.status_code == 200
                 assert replay.headers["content-type"] == "text/event-stream; charset=utf-8"
                 assert replay.headers["cache-control"] == "no-cache"
-                assert "run_created" in replay.text and "run_completed" in replay.text
-                assert "session_started" not in replay.text
-                consumed = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": "2"})
-                assert consumed.status_code == 204
-                assert consumed.content == b""
-                assert UUID(consumed.headers["x-request-id"])
+                assert "event: run_snapshot" in replay.text
+                assert '"status":"completed"' in replay.text
+                assert "event: stream_end" in replay.text
+                reconnect = await client.get(
+                    f"{BASE}/{run_id}/events",
+                    headers={"Last-Event-ID": "2"},
+                )
+                assert reconnect.status_code == 200
+                assert reconnect.text == replay.text
+                assert UUID(reconnect.headers["x-request-id"])
             assert len(app.state.run_coordinator._runs) == 2
 
     run(exercise)
@@ -470,8 +477,9 @@ def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog
                 release.set()
             await runtime.workflow_quiesced.wait()
             stream = await client.get(f"{BASE}/{run_id}/events")
-            assert "run_cancelled" in stream.text
-            assert "run_completed" not in stream.text
+            assert "event: run_snapshot" in stream.text
+            assert '"status":"cancelled"' in stream.text
+            assert "event: stream_end" in stream.text
             assert len(runtime.events) == 2
             logs = [record for record in caplog.records if getattr(record, "event_name", None) == "cancel_accepted"]
             assert len(logs) == 1
@@ -525,17 +533,16 @@ def test_run_lookup_errors_have_uniform_uuid_and_not_found_responses(endpoint, m
     run(exercise)
 
 
-@pytest.mark.parametrize("cursor,status,code", [("", 400, "invalid_event_cursor"), ("-1", 400, "invalid_event_cursor"), (SECRET, 400, "invalid_event_cursor"), ("3", 409, "event_cursor_ahead")])
-def test_cursor_errors_are_json_before_stream_start(cursor, status, code) -> None:
+@pytest.mark.parametrize("cursor", ["", "-1", SECRET, "3"])
+def test_run_stream_ignores_last_event_id(cursor) -> None:
     async def exercise() -> None:
         async with http_application() as (_, client):
             created = await client.post(BASE, json={"query": "query"})
             run_id = created.json()["run_id"]
             response = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": cursor})
-            envelope = assert_error(response, status, code, run_id=run_id)
-            assert envelope.run is None
-            assert envelope.validation == ()
-            assert envelope.error.failed_stage == "subscribe_events"
+            assert response.status_code == 200
+            assert "event: run_snapshot" in response.text
+            assert "event: stream_end" in response.text
 
     run(exercise)
 
@@ -660,7 +667,7 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
             first_event = asyncio.Event()
 
             async def observe(message):
-                if b"run_created" in message.get("body", b""):
+                if b"event: run_snapshot" in message.get("body", b""):
                     first_event.set()
 
             task = asyncio.create_task(call_stream(app, f"{BASE}/{run_id}/events", send_hook=observe))
@@ -674,11 +681,11 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
                 assert UUID(headers[b"x-request-id"].decode())
                 assert headers[b"x-request-id"].decode() != created.headers["x-request-id"]
                 events = events_from(messages)
-                assert [event["type"] for event in events] == ["run_created", "run_failed"]
-                error = events[-1]["payload"]["error"]
+                assert [event.get("status") for event in events[:-1]] == ["running", "failed"]
+                assert events[-1]["stream"] == "run"
                 records = [record for record in caplog.records if getattr(record, "event_name", None) == "run_failed"]
                 assert len(records) == 1
-                assert str(records[0].correlation.error_id) == error["error_id"]
+                assert records[0].correlation.error_id is not None
                 assert str(records[0].correlation.request_id) == created.headers["x-request-id"]
                 assert SECRET not in repr(messages)
                 assert SECRET in "".join(application_logs)
@@ -702,7 +709,7 @@ def test_stream_disconnect_or_write_failure_does_not_cancel_workflow(disconnect_
             disconnect = asyncio.Event()
 
             async def observe(message):
-                if b"run_created" in message.get("body", b""):
+                if b"event: run_snapshot" in message.get("body", b""):
                     first_event.set()
                     if disconnect_mode == "write_failure":
                         raise OSError("connection closed")
@@ -725,8 +732,8 @@ def test_stream_disconnect_or_write_failure_does_not_cancel_workflow(disconnect_
                 assert runtime.workflow_task.cancelling() == 0
                 release.set()
                 replay = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": "1"})
-                assert "run_completed" in replay.text
-                assert "run_created" not in replay.text
+                assert '"status":"completed"' in replay.text
+                assert "event: stream_end" in replay.text
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -744,6 +751,7 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         BASE + "/{run_id}/sessions/{session_id}/transcript": {"get"},
         BASE + "/{run_id}/transcript/{item_id}/content": {"get"},
         BASE + "/{run_id}/events": {"get"},
+        BASE + "/{run_id}/sessions/{session_id}/events": {"get"},
         BASE + "/{run_id}/cancel": {"post"},
         BASE + "/{run_id}/persistence/retry": {"post"},
     }
@@ -774,11 +782,15 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     events = paths[BASE + "/{run_id}/events"]["get"]
     assert "run" in events["description"]
     assert set(events["responses"]["200"]["content"]) == {"text/event-stream"}
-    assert "content" not in events["responses"]["204"]
-    assert any(parameter["in"] == "header" and parameter["name"] == "Last-Event-ID" for parameter in events["parameters"])
+    assert "204" not in events["responses"]
+    assert all(parameter["name"] != "Last-Event-ID" for parameter in events["parameters"])
     assert set(schema["components"]["schemas"]["CreateAnalysisRunRequest"]["properties"]) == {"query", "time_resolution"}
     assert "HTTPValidationError" not in schema["components"]["schemas"]
-    assert BASE + "/{run_id}/sessions/{session_id}/events" not in paths
+    session_events = paths[BASE + "/{run_id}/sessions/{session_id}/events"]["get"]
+    assert any(
+        parameter["in"] == "header" and parameter["name"] == "Last-Event-ID"
+        for parameter in session_events["parameters"]
+    )
     assert "/api/analysis/sessions" not in paths
     for path in paths.values():
         for operation in path.values():
@@ -811,11 +823,16 @@ def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, 
                 await comment_received.wait()
                 cancelled = await client.post(f"{BASE}/{run_id}/cancel")
                 assert cancelled.status_code == 200
-                messages = await task
                 release.set()
+                messages = await task
                 header_id = dict(messages[0]["headers"])[b"x-request-id"].decode()
                 assert len({header_id, cancelled.headers["x-request-id"], created.headers["x-request-id"]}) == 3
-                assert [event["type"] for event in events_from(messages)] == ["run_cancelled"]
+                delivered = events_from(messages)
+                assert [event.get("status") for event in delivered[:-1]] == [
+                    "running",
+                    "cancelled",
+                ]
+                assert delivered[-1]["stream"] == "run"
                 assert b": keepalive\n\n" in frames_from(messages)
                 completed = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_completed"]
                 assert len(completed) == 3
@@ -839,10 +856,10 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
             _, release, _ = await workflow.started.get()
             original_encode = response_module.encode_event
 
-            def fail_terminal(event):
-                if event.sequence == 2:
+            def fail_terminal(event_name, event, *, event_id=None):
+                if event_name == "run_snapshot" and event.status is RunStatus.COMPLETED:
                     raise RuntimeError("encoder failure; api_key=" + SECRET)
-                return original_encode(event)
+                return original_encode(event_name, event, event_id=event_id)
 
             monkeypatch.setattr(response_module, "encode_event", fail_terminal)
             first_event = asyncio.Event()
@@ -863,7 +880,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
                 assert raised.value.__suppress_context__ is True
                 assert raised.value.__cause__ is None
                 assert [message["status"] for message in delivered if message["type"] == "http.response.start"] == [200]
-                assert [event["type"] for event in events_from(delivered)] == ["run_created"]
+                assert [event.get("status") for event in events_from(delivered)] == ["running"]
                 assert SECRET not in repr(delivered)
                 logs = [json.loads(line) for line in application_logs]
                 failure = next(row for row in logs if row["event_name"] == "http_stream_failed")

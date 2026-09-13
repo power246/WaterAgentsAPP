@@ -17,6 +17,7 @@ from app.application.transcripts.models import (
     ReadTranscriptItem,
     StoredTranscriptContent,
     StoredTranscriptItem,
+    TranscriptItem,
 )
 from app.application.transcripts.read_models import (
     HistoryCursorPosition,
@@ -293,6 +294,40 @@ class TranscriptReader:
             updated_at=run.updated_at,
             persistence=None,
         )
+
+    def present_live_item(
+        self,
+        item: TranscriptItem,
+        session: SessionSummary | None,
+    ) -> TranscriptItemView:
+        location = locate_content(
+            item.content.safe_body,
+            inline_content_bytes=self._inline_content_bytes,
+            preview_bytes=self._preview_bytes,
+        )
+        stored = StoredTranscriptItem(
+            item_id=item.item_id,
+            run_id=item.run_id,
+            session_id=item.session_id,
+            transcript_sequence=item.transcript_sequence,
+            created_at=item.created_at,
+            request_id=item.request_id,
+            operation_id=item.operation_id,
+            content_type=item.content.content_type,
+            content_schema_version=item.content.content_schema_version,
+            tags=item.content.metadata.tags,
+            rag_eligible=item.content.metadata.rag_eligible,
+            inline_body=location.inline_body,
+            preview_head=location.preview_head,
+            preview_tail=location.preview_tail,
+            content_bytes=item.content.content_bytes,
+        )
+        read = self._registry.parse(
+            stored,
+            item.content.safe_body,
+            error_id_factory=self._error_id_factory,
+        )
+        return self._item_view(read, (session,) if session is not None else ())
 
     async def _select(self, run_id: UUID, view: ReadView) -> _SelectedRun:
         if view is ReadView.AUTO:

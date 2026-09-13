@@ -71,16 +71,24 @@ def test_completed_lifecycle_json_matches_sse_and_original_objects(application_l
             created = await client.post(BASE, json={"query": QUERY}, headers={"Authorization": SECRET, "Cookie": SECRET})
             run_id = created.json()["run_id"]
             stream = await client.get(f"{BASE}/{run_id}/events")
-            events = [json.loads(line[6:]) for line in stream.text.splitlines() if line.startswith("data: ")]
-            assert [event["type"] for event in events] == ["run_created", "run_completed"]
+            sse_events = [json.loads(line[6:]) for line in stream.text.splitlines() if line.startswith("data: ")]
+            assert sse_events[-2]["status"] == "completed"
+            assert sse_events[-1]["stream"] == "run"
             logs = parsed(application_logs, "lifecycle_event_committed")
-            assert [row["lifecycle_event"] for row in logs] == events
+            events = app.state.run_coordinator._runs[UUID(run_id)].events
+            assert [row["lifecycle_event"] for row in logs] == [
+                event.model_dump(mode="json") for event in events
+            ]
             assert [row["event_sequence"] for row in logs] == [1, 2]
-            assert [row["timestamp"] for row in logs] == [event["occurred_at"] for event in events]
+            assert [row["timestamp"] for row in logs] == [
+                event.occurred_at.isoformat().replace("+00:00", "Z") for event in events
+            ]
             assert all(row["request_id"] == created.headers["x-request-id"] for row in logs)
             assert all(row["run_id"] == run_id for row in logs)
             records = [record for record in caplog.records if getattr(record, "lifecycle_event", None)]
-            assert [record.lifecycle_event.model_dump(mode="json") for record in records] == events
+            assert [record.lifecycle_event.model_dump(mode="json") for record in records] == [
+                event.model_dump(mode="json") for event in events
+            ]
             committed = app.state.run_coordinator._runs[UUID(run_id)].events
             assert all(record.lifecycle_event is event for record, event in zip(records, committed, strict=True))
             states = [row for row in parsed(application_logs) if "to_status" in row]
@@ -107,7 +115,7 @@ def test_completed_lifecycle_json_matches_sse_and_original_objects(application_l
 def test_failure_error_id_diagnostics_and_request_context_survive_concurrent_requests(application_logs):
     async def exercise():
         workflow = Workflow()
-        async with application(workflow=workflow) as (_, client):
+        async with application(workflow=workflow) as (app, client):
             created = await asyncio.gather(*[
                 client.post(BASE, json={"query": f"{QUERY} {index}"}) for index in range(2)
             ])
@@ -117,9 +125,10 @@ def test_failure_error_id_diagnostics_and_request_context_survive_concurrent_req
             for index, response in enumerate(created):
                 run_id = response.json()["run_id"]
                 stream = await client.get(f"{BASE}/{run_id}/events")
-                event = json.loads(next(line[6:] for line in stream.text.splitlines() if line.startswith("data: ") and '"run_failed"' in line))
+                assert '"status":"failed"' in stream.text
                 row = next(row for row in parsed(application_logs, "run_failed") if row["run_id"] == run_id)
-                assert row["error_id"] == event["payload"]["error"]["error_id"]
+                runtime = app.state.run_coordinator._runs[UUID(run_id)]
+                assert row["error_id"] == str(runtime.last_error.error_id)
                 assert row["request_id"] == response.headers["x-request-id"]
                 assert row["request_id"] != stream.headers["x-request-id"]
                 assert row["level"] == "ERROR"
@@ -191,7 +200,8 @@ def test_cancelled_late_exception_keeps_diagnostics_without_a_failed_event(appli
             runtime = app.state.run_coordinator._runs[UUID(run_id)]
             await runtime.workflow_quiesced.wait()
             stream = await client.get(f"{BASE}/{run_id}/events")
-            assert "run_cancelled" in stream.text and "run_failed" not in stream.text
+            assert '"status":"cancelled"' in stream.text
+            assert '"status":"failed"' not in stream.text
             suppressed = parsed(application_logs, "workflow_output_suppressed")[-1]
             assert suppressed["exception_type"] == "RuntimeError"
             assert "error_id" not in suppressed
@@ -235,7 +245,7 @@ def test_observability_failure_does_not_change_http_or_run_outcomes(monkeypatch,
                 release.set()
             stream = await client.get(f"{BASE}/{run_id}/events")
             assert stream.status_code == 200
-            assert f'"run_{outcome}"' in stream.text
+            assert f'"status":"{outcome}"' in stream.text
             runtime = app.state.run_coordinator._runs[UUID(run_id)]
             await runtime.workflow_quiesced.wait()
             assert runtime.snapshot.status is RunStatus(outcome)

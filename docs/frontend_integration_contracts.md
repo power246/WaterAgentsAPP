@@ -4,14 +4,14 @@
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
-M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–6 的 HTTP 路径和 DTO 已由运行时 OpenAPI 验证；两层 SSE 仍须等待 Milestone 7 完成后接入。
+M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–7 的 HTTP 路径、DTO 与两层 SSE 后端契约已由运行时 OpenAPI、事件 fixture 和 smoke 验证；正式前端消费仍由 M9 实现。
 
 **领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
-| M3 transcript/history/idempotency | Milestone 0–6 已完成本机实现与验证；两层 SSE 待 Milestone 7 | HTTP 以运行时 OpenAPI 和 M3 API 指南为准；暂不调用 session SSE。 |
+| M3 transcript/history/idempotency/SSE | Milestone 0–7 已完成本机实现与验证 | HTTP 与两层 SSE 以运行时 OpenAPI、M3 API 指南和 raw frame fixture 为准；正式消费由 M9 接入。 |
 | M4–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -20,7 +20,7 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 
 按 [M3 D66](M3/m3_transcript_history_design.md#d66分析中按水体实时观察用户可取消整个-run)，整次分析尚未结束时，用户也可以选中水体，实时观看对应 Agent session 的上报过程，不必等待最终预测出现。只展示已经产生的可见内容，沿用完整过程与语义折叠规则；未创建 session 的水体不补造空会话。
 
-用户不能给 Agent 追加消息，但可以通过 POST /api/analysis/runs/{run_id}/cancel 停止整个 run；停止范围不取决于当前查看或订阅了哪些水体。关闭或切换查看连接不会取消分析。按 [D67](M3/m3_transcript_history_design.md#d67只公开-run-取消由后端传递到各-session)，前端只调用一次 run cancel，由后端阻止后续调度并通过内部能力取消所有已创建的未终态 session；首版不公开单独 Agent cancel HTTP 接口，前端不遍历会话取消。受理取消不代表在途调用已立即停止，各 session 原终态保留，晚到输出遵守既有可见性限制。D69 已确认两层 SSE 与路径，关闭时机按 D70，事件、续传及握手协议见 M3 API 指南，下文 M2 已实现流契约不等于新的两层流已实现。
+用户不能给 Agent 追加消息，但可以通过 POST /api/analysis/runs/{run_id}/cancel 停止整个 run；停止范围不取决于当前查看或订阅了哪些水体。关闭或切换查看连接不会取消分析。按 [D67](M3/m3_transcript_history_design.md#d67只公开-run-取消由后端传递到各-session)，前端只调用一次 run cancel，由后端阻止后续调度并通过内部能力取消所有已创建的未终态 session；首版不公开单独 Agent cancel HTTP 接口，前端不遍历会话取消。受理取消不代表在途调用已立即停止，各 session 原终态保留，晚到输出遵守既有可见性限制。D69 两层 SSE 的路径、事件、续传、握手与关闭协议已由 Milestone 7 实现，见 M3 API 指南；下文 M2 契约只作为历史基线。
 
 按 [D68](M3/m3_transcript_history_design.md#d68按查看需要订阅水体-session已结束与历史使用统一读取)，打开水体实时过程时才订阅对应 session，切换水体时关闭旧订阅，关闭过程视图也关闭连接；进入 run 页面不自动订阅所有 Agent。后台执行及保存不依赖查看连接。Agent 已结束或正在查阅历史时，使用统一读取接口取得完整记录；当前读取保留 auto 和持久化警告，严格历史保持 view=history。打开前已经产生的全部可见过程也必须可读，不能仅展示连接后的消息；已有过程与实时上报的衔接按后续协议实现。
 
@@ -168,7 +168,7 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 
 ## 4. M3 接入约定与分阶段状态
 
-本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–6 已实现创建、统一 HTTP 读取、历史分页、取消和手动补写；实时两层 SSE、关闭/清理及后续能力仍按各自 Milestone 状态接入。已确认行为的变更须同步运行时 schema、对应设计与契约。
+本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–7 已实现创建、统一 HTTP 读取、历史分页、取消、手动补写与实时两层 SSE；取消边界、启动修复、live 清理及后续能力仍按各自 Milestone 状态接入。已确认行为的变更须同步运行时 schema、对应设计与契约。
 
 ### 4.1 创建分析：Idempotency-Key
 
@@ -214,15 +214,15 @@ M3 的幂等记录不自动过期，随 run 历史保留。分析结束、服务
 
 - 页面刷新后的客户端 key 保存方式；格式与唯一范围已按 D34 确认。
 - 创建提交结果不确定、HTTP 中断的处理，以及前端 HTTP 重试次数和退避策略；同 key 等待上限及错误码已按 D35 确认。后端数据库补写的重试预算不等于前端 HTTP 重试预算。
-- M3 历史与实时 HTTP 读取 DTO 已在 Milestone 6 冻结；水体按 D64 定位、路径按 D65，列表仅支持 limit/cursor。重启后 SSE 的 `410` 错误码与 history_url 由 Milestone 7/8 完成，见 4.6。基于 fetch 的统一客户端由 M9 实现，见 4.7。
+- M3 历史与实时 HTTP 读取 DTO 已在 Milestone 6 冻结；水体按 D64 定位、路径按 D65，列表仅支持 limit/cursor。Milestone 7 已实现 live 不存在时的 `410 live_state_gone` 与 history_url；Milestone 8 再实现正常 live 清理，见 4.6。基于 fetch 的统一客户端由 M9 实现，见 4.7。
 
-后续设计确认应同时更新本文与 M3 详细设计。已实现 HTTP 行为以运行时 OpenAPI 为准；尚未完成的 SSE 仍不能仅凭设计文档视为上线。
+后续设计确认应同时更新本文与 M3 详细设计。已实现 HTTP 行为以运行时 OpenAPI 为准，两层 SSE 的帧与时序另以 M3 API 指南和可执行 fixture 为准。
 
 ### 4.4 History 与 transcript
 
 M3 提供 run 历史列表、run 详情、Agent 详情与结果、Agent 完整过程及原 item 全文读取。产品入口仍按“选择历史 run → 地图水体 → 预测与总结 → 推理上下文”组织；当前与历史按 D42/D43 共用路径，不增加 /current 路由。
 
-以下路径按 [D65](M3/m3_transcript_history_design.md#d65接口以-runs-为根嵌套读取独立-session) 已实现，并已直接替换旧整体 session 路径。完整 HTTP DTO 见 M3 API 指南与运行时 OpenAPI；SSE 事件仍由 Milestone 7 定型实现。
+以下路径按 [D65](M3/m3_transcript_history_design.md#d65接口以-runs-为根嵌套读取独立-session) 已实现，并已直接替换旧整体 session 路径。完整 HTTP DTO 与两层 SSE 事件见 M3 API 指南、运行时 OpenAPI 和事件 fixture。
 
 | GET 路径 | 行为 |
 |---|---|
@@ -232,7 +232,7 @@ M3 提供 run 历史列表、run 详情、Agent 详情与结果、Agent 完整�
 | /api/analysis/runs/{run_id}/sessions/{session_id}/transcript | 一次返回所选 session 的完整有序过程及显式公共引用，不分页。 |
 | /api/analysis/runs/{run_id}/transcript/{item_id}/content | 原 item 全文，覆盖内联/独立大正文及 run/session 两类归属。 |
 
-创建、取消和手动补写已分别使用 POST /api/analysis/runs、POST /api/analysis/runs/{run_id}/cancel 与 POST /api/analysis/runs/{run_id}/persistence/retry。D69 的两层 SSE 目标路径不变，但 session SSE 和新的 run snapshot 语义由 Milestone 7 实现；此前整次分析的 session_id 已映射为 run_id，独立 Agent 的 session_id 保留，不维护旧 HTTP 路径兼容别名。
+创建、取消和手动补写已分别使用 POST /api/analysis/runs、POST /api/analysis/runs/{run_id}/cancel 与 POST /api/analysis/runs/{run_id}/persistence/retry。D69 的两层 SSE 已实现为 run 完整轻量快照与 session 可续传过程流；此前整次分析的 session_id 已映射为 run_id，独立 Agent 的 session_id 保留，不维护旧 HTTP 路径兼容别名。
 
 query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历史列表按创建顺序游标分页)：limit 省略为 50，允许整数 1–200，非法值返回 422。首次不传 cursor，后续原样传回 next_cursor；返回 items 与 next_cursor，不返回总条数。next_cursor=null 表示本次已到末尾，无记录时 items=[]；数据库失败显示错误，不能显示成正常末页。状态/updated_at 更新不改变创建顺序，新分析通过刷新首页查看。
 
@@ -272,7 +272,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 - 未知 content type/version 应保留 item identity、时间、类型和版本并显示“不支持”，不能当作正常结果；已知版本损坏时显示安全错误和 `error_id`，其余 timeline 继续可读。
 - 数据库整体读取失败是错误，不能渲染成“暂无历史”。M3 尚未产生的业务字段也不能由前端从 query 猜测或填充 placeholder。
 
-统一路径及默认自动行为按 D42，严格历史模式按 D43，过程完整列表按 D45，query 历史列表分页与参数范围按 D47–D49，均已在 Milestone 6 实现并由 OpenAPI/测试验证。前端仍不得调用 Milestone 7 才提供的 session SSE。
+统一路径及默认自动行为按 D42，严格历史模式按 D43，过程完整列表按 D45，query 历史列表分页与参数范围按 D47–D49，均已在 Milestone 6 实现并由 OpenAPI/测试验证。Milestone 7 已提供 session SSE 后端契约，正式前端客户端仍按计划由 M9 接入。
 
 ### 4.5 持久化异常与取消后的内容
 
@@ -320,7 +320,7 @@ persistence.warning 使用已有安全 PublicError 结构；正常等待时为 n
 
 按 [D70](M3/m3_transcript_history_design.md#d70两层-sse-分别结束run-流等待收敛与保存完成)，session 流在 Agent 结束并发完可见过程后关闭；run 流在业务已终态、执行已收敛、必需内容及状态全部保存后关闭，不额外等待 60 秒保留期。业务结果按原交付窗口展示，不等通知流结束。保存为 pending 或 retry_exhausted 时继续接收 run 通知，后续补写只更新保存情况，不改写业务终态；用户离开页面可关闭连接，后台执行和保存不受影响。
 
-已确认设计来源：[M3 D17](M3/m3_transcript_history_design.md#d17live-sse-保持进程内续传重启或清理后转历史) 及 D69 两层 SSE，尚未实现。正常关闭时机按 D70，成功握手按 D77 统一 200 SSE，不保留原单流 204 分支，以下不存在、数据库故障及转历史的边界保留。
+已确认设计来源：[M3 D17](M3/m3_transcript_history_design.md#d17live-sse-保持进程内续传重启或清理后转历史) 及 D69 两层 SSE，并已由 Milestone 7 实现。正常关闭时机按 D70，成功握手按 D77 统一 200 SSE，不保留原单流 204 分支，以下不存在、数据库故障及转历史的边界保留。
 
 | 场景 | 响应与前端动作 |
 |---|---|
@@ -350,7 +350,7 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 按 [D76](M3/m3_transcript_history_design.md#d76两类-sse-用-stream_end-明确通知正常结束)，两类流满足各自 D70 条件后都先发送 `stream_end` 再关闭，收到后停止该订阅的重连；未收到即意外断开，按中断处理。用户主动关闭查看仍释放连接，不自动恢复该订阅。`stream_end` 表示流正常结束，不表示分析成功，也不以 session 流结束推断整次 run 已保存完整；业务状态、结果和保存情况仍读原事实。该通知不新增数据库记录或业务终态，已结束时的成功握手按 D77，具体 payload 见 M3 API 指南。
 
-成功握手按 [D77](M3/m3_transcript_history_design.md#d77live-sse-统一返回-200通过-stream_end-结束)：请求合法且 live state 保留时，两类流统一返回 200 SSE。session 已结束仍先补齐未消费的可见记录，再发 stream_end；没有待补记录则直接发 stream_end。run 先发最新完整轻量快照，满足 D70 全部条件时再发 stream_end，否则继续通知。M3 目标路径不保留旧 204 分支；第 3 节中的 204 仅说明当前 M2 基线。清理后仍按 410 转严格历史，错误响应不能当作正常结束。
+成功握手按 [D77](M3/m3_transcript_history_design.md#d77live-sse-统一返回-200通过-stream_end-结束)：请求合法且 live state 保留时，两类流统一返回 200 SSE。session 已结束仍先补齐未消费的可见记录，再发 stream_end；没有待补记录则直接发 stream_end。run 先发最新完整轻量快照，满足 D70 全部条件时再发 stream_end，否则继续通知。M3 目标路径不保留旧 204 分支；第 3 节中的 204 仅说明历史 M2 基线。清理后仍按 410 转严格历史，错误响应不能当作正常结束。
 
 过程游标按 [D78](M3/m3_transcript_history_design.md#d78session-过程使用整数游标控制通知不编号)：每个 session 的过程事件从 1 递增作为 SSE id，重发保留原号，重连原样回传最后已消费编号到 Last-Event-ID。首次省略请求头，0 也表示起点；格式非法返回 400 / invalid_event_cursor，超过该 session 已产生的末条事件返回 409 / event_cursor_ahead，服务端不静默重置或跳过。按 run/session 分别管理游标；run 通知、stream_end 和心跳没有 SSE id，不更新过程游标，也不引入快照版本号。历史列表游标和 transcript_sequence 不用于此请求头。
 

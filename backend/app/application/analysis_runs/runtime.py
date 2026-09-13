@@ -16,12 +16,14 @@ from app.application.analysis_runs.persistence import (
     PersistenceWriteBatch,
 )
 from app.application.transcripts.buffer import TranscriptBuffer
+from app.application.transcripts.stream_models import SessionProcessRecord, StreamingMessage
 
 
 @dataclass
 class AgentSessionRuntime:
     summary: SessionSummary
     events: list[SessionLifecycleEvent] = field(default_factory=list)
+    process_events: list[SessionProcessRecord] = field(default_factory=list)
     stop_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     execution_claimed: bool = False
     last_error: PublicError | None = None
@@ -38,6 +40,8 @@ class RunRuntime:
     agent_sessions: dict[UUID, AgentSessionRuntime] = field(default_factory=dict)
     query_parser_session_id: UUID | None = None
     waterbody_session_ids: dict[str, UUID] = field(default_factory=dict)
+    waterbody_participation: dict[str, bool] = field(default_factory=dict)
+    streaming_messages: dict[UUID, StreamingMessage] = field(default_factory=dict)
     next_transcript_sequence: int = 1
     condition: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
     cancel_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)

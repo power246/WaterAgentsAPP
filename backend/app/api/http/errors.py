@@ -15,12 +15,14 @@ from app.api.schemas.analysis_runs import (
     ValidationViolation,
 )
 from app.application.analysis_runs.coordinator import (
+    AgentSessionNotFoundError,
     EventCursorAheadError,
     InvalidEventCursorError,
     InvalidRunTransitionError,
     ServiceShuttingDownError,
     RunNotFoundError,
 )
+from app.api.sse.response import LiveStreamReleasedError
 from app.application.analysis_runs.creation import (
     CreationCommitUnconfirmedError,
     CreationPersistenceUnavailableError,
@@ -157,6 +159,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     run = None
     validation = ()
     headers = {}
+    history_url = None
     if isinstance(exception, RequestValidationError):
         status, code, message = 422, "validation_error", "The request is invalid."
         validation = validation_violations(exception)
@@ -203,6 +206,17 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         stage, retryable = "create_run", True
     elif isinstance(exception, RunNotFoundError):
         status, code, message = 404, "run_not_found", "The run was not found."
+    elif isinstance(exception, AgentSessionNotFoundError):
+        request.state.run_id = exception.run_id
+        request.state.session_id = exception.session_id
+        status, code, message = 404, "session_not_found", "The Agent session was not found."
+    elif isinstance(exception, LiveStreamReleasedError):
+        request.state.run_id = exception.run_id
+        request.state.session_id = exception.session_id
+        status, code = 410, "live_state_gone"
+        message = "The live event stream has been released; read saved history instead."
+        stage = "subscribe_events"
+        history_url = exception.history_url
     elif isinstance(exception, TranscriptRunNotFoundError):
         status, code, message = 404, "run_not_found", "The run was not found."
     elif isinstance(exception, TranscriptSessionNotFoundError):
@@ -227,7 +241,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         stage = "subscribe_events"
     elif isinstance(exception, EventCursorAheadError):
         status, code = 409, "event_cursor_ahead"
-        message = "The event cursor is ahead of the latest run event."
+        message = "The event cursor is ahead of the latest session event."
         stage = "subscribe_events"
     elif (
         isinstance(exception, InvalidRunTransitionError)
@@ -282,7 +296,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         error=error,
         run=run,
         validation=validation,
-        history_url=None,
+        history_url=history_url,
     )
     headers["X-Request-ID"] = str(error.request_id)
     log_http(
@@ -295,7 +309,8 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
 
 def register_error_handlers(application: FastAPI) -> None:
     for exception_type in (
-        RequestValidationError, HTTPException, RunNotFoundError, InvalidEventCursorError,
+        RequestValidationError, HTTPException, RunNotFoundError, AgentSessionNotFoundError,
+        LiveStreamReleasedError, InvalidEventCursorError,
         EventCursorAheadError, InvalidRunTransitionError, ServiceShuttingDownError,
         UnknownQueryParametersError, InvalidHistoryCursorError,
         TranscriptRunNotFoundError, TranscriptSessionNotFoundError,

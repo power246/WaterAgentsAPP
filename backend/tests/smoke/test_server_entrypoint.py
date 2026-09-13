@@ -98,7 +98,9 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(
             async with client.stream("GET", f"{BASE}/{run_id}/events") as response:
                 assert response.status_code == 200
                 lines = response.aiter_lines()
-                assert (await read_event(lines)).type.value == "run_created"
+                name, data, event_id = await read_event(lines)
+                assert name == "run_snapshot" and data["status"] == "running"
+                assert event_id is None
                 server.should_exit = True
                 await asyncio.wait_for(asyncio.shield(task), timeout=5)
                 assert workflow.stopped.is_set()
@@ -162,15 +164,19 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
     original_encode = response_module.encode_event
     failed = False
 
-    def fail_once(event):
+    def fail_once(event_name, event, *, event_id=None):
         nonlocal failed
-        if event.sequence == 2 and not failed:
+        if (
+            event_name == "run_snapshot"
+            and getattr(event, "status", None) is RunStatus.COMPLETED
+            and not failed
+        ):
             failed = True
             try:
                 raise ValueError(f"upstream failure; access_token={cause_secret}")
             except ValueError as cause:
                 raise RuntimeError(f"encoder failure; api_key={secret}") from cause
-        return original_encode(event)
+        return original_encode(event_name, event, event_id=event_id)
 
     monkeypatch.setattr(response_module, "encode_event", fail_once)
 
@@ -183,7 +189,7 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
         )
         async with running_entrypoint(application) as (_, _, client):
             coordinator = application.state.run_coordinator
-            original_subscribe = coordinator.subscribe
+            original_subscribe = coordinator.subscribe_run
             subscriptions = []
 
             async def observe_subscription(*args, **options):
@@ -192,7 +198,7 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
                     subscriptions.append(events)
                 return events
 
-            monkeypatch.setattr(coordinator, "subscribe", observe_subscription)
+            monkeypatch.setattr(coordinator, "subscribe_run", observe_subscription)
             created = await client.post(BASE, json={"query": "stream failure regression"})
             assert created.status_code == 201
             run_id = created.json()["run_id"]
@@ -203,7 +209,9 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
                     assert stream.status_code == 200
                     request_id = stream.headers["x-request-id"]
                     lines = stream.aiter_lines()
-                    assert (await read_event(lines)).type.value == "run_created"
+                    name, data, event_id = await read_event(lines)
+                    assert name == "run_snapshot" and data["status"] == "running"
+                    assert event_id is None
                     workflow.release.set()
                     with pytest.raises((httpx.RemoteProtocolError, httpx.ReadError)):
                         async for line in lines:
@@ -215,11 +223,14 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
                 async with client.stream("GET", path, headers={"Last-Event-ID": "1"}) as replay:
                     assert replay.status_code == 200
                     lines = replay.aiter_lines()
-                    terminal = await read_event(lines)
-                    assert terminal.type.value == "run_completed" and terminal.sequence == 2
-                    assert str(terminal.run_id) == run_id
+                    name, terminal, event_id = await read_event(lines)
+                    assert name == "run_snapshot" and terminal["status"] == "completed"
+                    assert terminal["run_id"] == run_id and event_id is None
+                    name, end, event_id = await read_event(lines)
+                    assert name == "stream_end" and end["stream"] == "run"
+                    assert event_id is None
                     assert await anext(lines, None) is None
-                assert (await client.get(path, headers={"Last-Event-ID": "2"})).status_code == 204
+                assert (await client.get(path, headers={"Last-Event-ID": "2"})).status_code == 200
             finally:
                 workflow.release.set()
         assert all(events.ag_frame is None for events in subscriptions)

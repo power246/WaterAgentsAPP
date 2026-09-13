@@ -78,14 +78,34 @@ from app.application.transcripts.buffer import (
 )
 from app.application.transcripts.models import (
     AnalysisRequestV1,
+    ContentVisibility,
+    GenerationStatus,
     PersistenceRecoveredFact,
     TranscriptContentRef,
+    TranscriptItem,
 )
 from app.application.transcripts.registry import (
     TranscriptRegistry,
     create_production_registry,
 )
-from app.application.transcripts.read_models import LiveRunRead
+from app.application.transcripts.read_models import (
+    LiveRunRead,
+    TranscriptCorrelation,
+    TranscriptScope,
+)
+from app.application.transcripts.stream_models import (
+    MessageDeltaProcessRecord,
+    MessageFinalizedProcessRecord,
+    MessageStartedProcessRecord,
+    RunSnapshotEvent,
+    RunWaterbodySummary,
+    SessionProcessRecord,
+    StreamingMessage,
+    TranscriptItemHeader,
+    TranscriptItemProcessRecord,
+    snapshot_from_state,
+)
+from app.application.transcripts.streaming import StreamingCredentialFilter
 from app.domain.common import NonEmptyString, normalize_utc_datetime
 from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION
 from app.domain.time.time_resolution_source import TimeResolutionSource
@@ -611,14 +631,14 @@ class RunCoordinator:
         self._start_run_writer(runtime)
         self._log_run_transition(None, runtime.snapshot, prepared.event)
         if closing:
-            self._mark_quiesced(runtime)
+            await self._mark_quiesced(runtime)
             return
         coroutine = self._run_workflow(runtime)
         try:
             task = self._workflow_task_factory(coroutine, f"analysis-run-{run_id}")
         except BaseException as exception:
             coroutine.close()
-            self._mark_quiesced(runtime)
+            await self._mark_quiesced(runtime)
             error = PublicError(
                 error_id=self._new_id(),
                 code="workflow_start_failed",
@@ -1214,7 +1234,7 @@ class RunCoordinator:
         except Exception as error:
             await self._workflow_failed(runtime, error)
         finally:
-            self._mark_quiesced(runtime)
+            await self._mark_quiesced(runtime)
 
     async def _workflow_failed(
         self,
@@ -1267,12 +1287,14 @@ class RunCoordinator:
             error = task.exception()
             if error is not None:
                 self._log_activity("workflow_task_error", runtime, exception=error)
-        self._mark_quiesced(runtime)
 
-    def _mark_quiesced(self, runtime: RunRuntime) -> None:
-        if not runtime.workflow_quiesced.is_set():
+    async def _mark_quiesced(self, runtime: RunRuntime) -> None:
+        async with runtime.condition:
+            if runtime.workflow_quiesced.is_set():
+                return
             runtime.workflow_quiesced.set()
-            self._log_activity("workflow_quiesced", runtime)
+            runtime.condition.notify_all()
+        self._log_activity("workflow_quiesced", runtime)
 
     def _log_activity(
         self,
@@ -1419,7 +1441,7 @@ class RunCoordinator:
                 operation_id=None,
                 created_at=timestamp,
             )
-            runtime.transcript_buffer.append(
+            finalized = runtime.transcript_buffer.append(
                 item,
                 "lifecycle_event",
                 2,
@@ -1427,6 +1449,7 @@ class RunCoordinator:
             )
             agent_runtime = AgentSessionRuntime(summary=summary, events=[event])
             runtime.agent_sessions[summary.session_id] = agent_runtime
+            self._append_transcript_process_locked(runtime, finalized, timestamp)
             if role is AgentRole.QUERY_PARSER:
                 runtime.query_parser_session_id = summary.session_id
             else:
@@ -1572,12 +1595,17 @@ class RunCoordinator:
             )
             if identity is None:
                 raise ValueError("transcript item identity is not reserved in this run")
-            runtime.transcript_buffer.append(
+            finalized = runtime.transcript_buffer.append(
                 identity,
                 content_type,
                 content_schema_version,
                 body,
                 private_values=private_values,
+            )
+            self._append_transcript_process_locked(
+                runtime,
+                finalized,
+                self._clock.now(),
             )
             self._enqueue_persistence_group_locked(
                 runtime,
@@ -1585,6 +1613,236 @@ class RunCoordinator:
             )
             runtime.condition.notify_all()
             return identity
+
+    async def start_transcript_message(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        content_type: str,
+        content_schema_version: int,
+        *,
+        request_id: UUID | str | None = None,
+        operation_id: UUID | str | None = None,
+        tags: tuple[str, ...] = (),
+        rag_eligible: bool = False,
+        private_values: tuple[str, ...] = (),
+    ) -> TranscriptItemIdentity:
+        if not self._registry.is_message_type(
+            content_type,
+            content_schema_version,
+        ):
+            raise ValueError("streamed transcript content must be a registered message")
+        runtime = await self._lookup(run_id)
+        session_key = _UUID.validate_python(session_id)
+        request_key = _UUID.validate_python(request_id) if request_id is not None else None
+        operation_key = (
+            _UUID.validate_python(operation_id) if operation_id is not None else None
+        )
+        async with runtime.condition:
+            session_runtime = self._lookup_agent_session_locked(runtime, session_key)
+            if session_runtime.summary.status not in _SESSION_TRANSITIONS:
+                raise InvalidAgentSessionTransitionError(
+                    session_runtime.summary,
+                    session_runtime.summary.status,
+                )
+            timestamp = self._clock.now()
+            identity = self._reserve_transcript_item_locked(
+                runtime,
+                session_id=session_key,
+                request_id=request_key,
+                operation_id=operation_key,
+                created_at=timestamp,
+            )
+            header = TranscriptItemHeader(
+                item_id=identity.item_id,
+                run_id=identity.run_id,
+                transcript_sequence=identity.transcript_sequence,
+                occurred_at=identity.created_at,
+                content_type=content_type,
+                content_schema_version=content_schema_version,
+                scope=TranscriptScope(
+                    session_id=session_key,
+                    agent_role=session_runtime.summary.agent_role,
+                    target_comid=session_runtime.summary.target_comid,
+                ),
+                correlation=TranscriptCorrelation(
+                    request_id=request_key,
+                    operation_id=operation_key,
+                ),
+                tags=tags,
+                rag_eligible=rag_eligible,
+            )
+            runtime.streaming_messages[identity.item_id] = StreamingMessage(
+                item_id=identity.item_id,
+                session_id=session_key,
+                content_type=content_type,
+                content_schema_version=content_schema_version,
+                filter=StreamingCredentialFilter(private_values),
+                private_values=private_values,
+            )
+            session_runtime.process_events.append(MessageStartedProcessRecord(
+                sequence=len(session_runtime.process_events) + 1,
+                occurred_at=timestamp,
+                header=header,
+            ))
+            runtime.condition.notify_all()
+            return identity
+
+    async def append_transcript_message_delta(
+        self,
+        run_id: UUID | str,
+        item_id: UUID | str,
+        text: str,
+    ) -> str:
+        runtime = await self._lookup(run_id)
+        item_key = _UUID.validate_python(item_id)
+        async with runtime.condition:
+            message = runtime.streaming_messages.get(item_key)
+            if message is None:
+                raise ValueError("streamed transcript message is not active")
+            safe_text = message.filter.feed(text)
+            if safe_text:
+                self._append_message_delta_locked(runtime, message, safe_text)
+                runtime.condition.notify_all()
+            return safe_text
+
+    async def finalize_transcript_message(
+        self,
+        run_id: UUID | str,
+        item_id: UUID | str,
+        body: object,
+    ) -> TranscriptItemIdentity:
+        runtime = await self._lookup(run_id)
+        item_key = _UUID.validate_python(item_id)
+        async with runtime.condition:
+            message = runtime.streaming_messages.get(item_key)
+            if message is None:
+                raise ValueError("streamed transcript message is not active")
+            identity = next(
+                item for item in runtime.transcript_items if item.item_id == item_key
+            )
+            encoded = self._registry.encode(
+                message.content_type,
+                message.content_schema_version,
+                body,
+                private_values=message.private_values,
+            )
+            projection = self._registry.message_projection(
+                message.content_type,
+                message.content_schema_version,
+                encoded.safe_body,
+            )
+            if projection.generation_status is GenerationStatus.GENERATING:
+                raise ValueError("a finalized transcript message cannot be generating")
+            safe_tail = message.filter.finish()
+            if safe_tail:
+                self._append_message_delta_locked(runtime, message, safe_tail)
+            mismatch = not projection.text.startswith(message.safe_text)
+            if projection.text.startswith(message.safe_text):
+                suffix = projection.text[len(message.safe_text):]
+                if suffix:
+                    self._append_message_delta_locked(runtime, message, suffix)
+            finalized = runtime.transcript_buffer.append(
+                identity,
+                message.content_type,
+                message.content_schema_version,
+                body,
+                private_values=message.private_values,
+            )
+            session_runtime = self._lookup_agent_session_locked(
+                runtime,
+                message.session_id,
+            )
+            timestamp = self._clock.now()
+            session_runtime.process_events.append(MessageFinalizedProcessRecord(
+                sequence=len(session_runtime.process_events) + 1,
+                occurred_at=timestamp,
+                item=finalized,
+                generation_status=projection.generation_status,
+            ))
+            persistence_item_ids = [identity.item_id]
+            if mismatch:
+                diagnostic_identity = self._reserve_transcript_item_locked(
+                    runtime,
+                    session_id=message.session_id,
+                    request_id=identity.request_id,
+                    operation_id=identity.operation_id,
+                    created_at=self._clock.now(),
+                )
+                diagnostic = runtime.transcript_buffer.append(
+                    diagnostic_identity,
+                    "error",
+                    1,
+                    PublicError(
+                        error_id=self._new_record_id(),
+                        code="message_content_mismatch",
+                        message="The finalized message did not match its streamed text.",
+                        failed_stage="message_finalize",
+                        retryable=False,
+                    ),
+                )
+                self._append_transcript_process_locked(
+                    runtime,
+                    diagnostic,
+                    diagnostic.created_at,
+                )
+                persistence_item_ids.append(diagnostic.item_id)
+            runtime.streaming_messages.pop(item_key)
+            self._enqueue_persistence_group_locked(
+                runtime,
+                item_ids=tuple(persistence_item_ids),
+            )
+            runtime.condition.notify_all()
+            return identity
+
+    def _append_message_delta_locked(
+        self,
+        runtime: RunRuntime,
+        message: StreamingMessage,
+        safe_text: str,
+    ) -> None:
+        session_runtime = self._lookup_agent_session_locked(
+            runtime,
+            message.session_id,
+        )
+        message.safe_text += safe_text
+        session_runtime.process_events.append(MessageDeltaProcessRecord(
+            sequence=len(session_runtime.process_events) + 1,
+            occurred_at=self._clock.now(),
+            item_id=message.item_id,
+            text=safe_text,
+        ))
+
+    async def set_waterbody_participation(
+        self,
+        run_id: UUID | str,
+        participation: Mapping[str, bool],
+    ) -> None:
+        runtime = await self._lookup(run_id)
+        if any(type(value) is not bool for value in participation.values()):
+            raise TypeError("waterbody participation values must be booleans")
+        validated = {
+            _COMID.validate_python(comid): value
+            for comid, value in participation.items()
+        }
+        async with runtime.condition:
+            runtime.waterbody_participation = validated
+            runtime.condition.notify_all()
+
+    def _append_transcript_process_locked(
+        self,
+        runtime: RunRuntime,
+        item: TranscriptItem,
+        occurred_at: datetime,
+    ) -> None:
+        if item.session_id is None or item.content.visibility is not ContentVisibility.AUTO:
+            return
+        session_runtime = self._lookup_agent_session_locked(runtime, item.session_id)
+        session_runtime.process_events.append(TranscriptItemProcessRecord(
+            sequence=len(session_runtime.process_events) + 1,
+            occurred_at=occurred_at,
+            item=item,
+        ))
 
     async def get_persistence_info(
         self,
@@ -1707,6 +1965,162 @@ class RunCoordinator:
                 runtime.cancel_requested.clear()
                 runtime.stop_requested.clear()
             raise
+
+    async def subscribe_run(
+        self,
+        run_id: UUID | str,
+    ) -> AsyncGenerator[RunSnapshotEvent | None, None]:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            initial = self._run_snapshot_locked(runtime)
+        return self._run_snapshots(runtime, initial)
+
+    async def subscribe_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        *,
+        after_sequence: int | str | None = None,
+    ) -> AsyncGenerator[SessionProcessRecord | None, None]:
+        cursor = self._event_cursor(after_sequence)
+        runtime = await self._lookup(run_id)
+        session_key = _UUID.validate_python(session_id)
+        async with runtime.condition:
+            session_runtime = self._lookup_agent_session_locked(runtime, session_key)
+            last_sequence = len(session_runtime.process_events)
+            if isinstance(cursor, str):
+                limit = str(last_sequence)
+                if (len(cursor), cursor) > (len(limit), limit):
+                    raise EventCursorAheadError(runtime.snapshot, last_sequence)
+                cursor = int(cursor)
+            if cursor > last_sequence:
+                raise EventCursorAheadError(runtime.snapshot, last_sequence)
+        return self._session_process_events(runtime, session_key, cursor)
+
+    @staticmethod
+    def _event_cursor(after_sequence: int | str | None) -> int | str:
+        if after_sequence is None:
+            return 0
+        if type(after_sequence) is int and after_sequence >= 0:
+            return after_sequence
+        if (
+            isinstance(after_sequence, str)
+            and after_sequence.isascii()
+            and after_sequence.isdecimal()
+        ):
+            return after_sequence.lstrip("0") or "0"
+        raise InvalidEventCursorError()
+
+    def _run_snapshot_locked(self, runtime: RunRuntime) -> RunSnapshotEvent:
+        sessions = tuple(
+            item.summary
+            for item in sorted(
+                runtime.agent_sessions.values(),
+                key=lambda value: (value.summary.created_at, value.summary.session_id),
+            )
+        )
+        participation = dict(runtime.waterbody_participation)
+        participation.update({comid: True for comid in runtime.waterbody_session_ids})
+        waterbodies = tuple(
+            RunWaterbodySummary(
+                target_comid=comid,
+                participating=participating,
+                session_id=runtime.waterbody_session_ids.get(comid),
+                session_status=(
+                    runtime.agent_sessions[runtime.waterbody_session_ids[comid]].summary.status
+                    if comid in runtime.waterbody_session_ids
+                    else None
+                ),
+            )
+            for comid, participating in sorted(participation.items())
+        )
+        return snapshot_from_state(
+            runtime.snapshot,
+            sessions,
+            waterbodies,
+            self._persistence_info_locked(runtime),
+        )
+
+    def _run_stream_closed_locked(self, runtime: RunRuntime) -> bool:
+        return bool(
+            runtime.snapshot.status not in _RUN_TRANSITIONS
+            and runtime.workflow_quiesced.is_set()
+            and self._persistence_info_locked(runtime).state is PersistenceState.UP_TO_DATE
+        )
+
+    async def _run_snapshots(
+        self,
+        runtime: RunRuntime,
+        initial: RunSnapshotEvent,
+    ) -> AsyncGenerator[RunSnapshotEvent | None, None]:
+        current = initial
+        yield current
+        while True:
+            async with runtime.condition:
+                if self._run_stream_closed_locked(runtime):
+                    return
+                try:
+                    async with asyncio.timeout(self._keepalive_interval):
+                        await runtime.condition.wait_for(
+                            lambda: self._run_snapshot_locked(runtime) != current
+                            or self._run_stream_closed_locked(runtime)
+                        )
+                except TimeoutError:
+                    pass
+                updated = self._run_snapshot_locked(runtime)
+                closed = self._run_stream_closed_locked(runtime)
+            changed = updated != current
+            if changed:
+                current = updated
+                yield updated
+            if closed:
+                return
+            if not changed:
+                yield None
+
+    async def _session_process_events(
+        self,
+        runtime: RunRuntime,
+        session_id: UUID,
+        cursor: int,
+    ) -> AsyncGenerator[SessionProcessRecord | None, None]:
+        while True:
+            async with runtime.condition:
+                session_runtime = self._lookup_agent_session_locked(runtime, session_id)
+                terminal = session_runtime.summary.status not in _SESSION_TRANSITIONS
+                message_active = any(
+                    item.session_id == session_id
+                    for item in runtime.streaming_messages.values()
+                )
+                if cursor == len(session_runtime.process_events) and terminal and not message_active:
+                    return
+                try:
+                    async with asyncio.timeout(self._keepalive_interval):
+                        await runtime.condition.wait_for(
+                            lambda: len(session_runtime.process_events) > cursor
+                            or (
+                                session_runtime.summary.status not in _SESSION_TRANSITIONS
+                                and not any(
+                                    item.session_id == session_id
+                                    for item in runtime.streaming_messages.values()
+                                )
+                            )
+                        )
+                except TimeoutError:
+                    pass
+                batch = tuple(session_runtime.process_events[cursor:])
+                terminal = session_runtime.summary.status not in _SESSION_TRANSITIONS
+                message_active = any(
+                    item.session_id == session_id
+                    for item in runtime.streaming_messages.values()
+                )
+            for event in batch:
+                cursor = event.sequence
+                yield event
+            if terminal and not message_active and cursor == len(session_runtime.process_events):
+                return
+            if not batch:
+                yield None
 
     async def subscribe(
         self,
@@ -1973,12 +2387,13 @@ class RunCoordinator:
                 operation_id=None,
                 created_at=timestamp,
             )
-            runtime.transcript_buffer.append(
+            finalized = runtime.transcript_buffer.append(
                 item,
                 "lifecycle_event",
                 2,
                 event,
             )
+            self._append_transcript_process_locked(runtime, finalized, timestamp)
             session_runtime.events.append(event)
             session_runtime.last_error = (
                 error if resolved is AgentSessionStatus.FAILED else None

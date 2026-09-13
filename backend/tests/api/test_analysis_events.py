@@ -1,99 +1,93 @@
 import asyncio
 import json
-import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from uuid import uuid4
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
 
+import httpx
 import pytest
-from pydantic import TypeAdapter, ValidationError
-from starlette.requests import ClientDisconnect
 
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.api.sse.encoder import KEEPALIVE_FRAME, encode_event
-from app.api.sse.response import create_event_response
+from app.api.sse.response import (
+    LiveStreamReleasedError,
+    create_run_event_response,
+    create_session_event_response,
+)
 from app.application.analysis_runs.coordinator import (
     EventCursorAheadError,
     InvalidEventCursorError,
     RunCoordinator,
     RunNotFoundError,
 )
-from app.application.analysis_runs.models import RunLifecycleEvent, RunStatus
-from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
+from app.application.analysis_runs.models import AgentRole, RunStatus
+from app.application.analysis_runs.workflow import WorkflowContext
+from app.application.transcripts.models import FixtureMessageV1, GenerationStatus
+from app.application.transcripts.registry import (
+    create_production_registry,
+    fixture_message_registration,
+)
+from app.application.transcripts.stream_models import (
+    MessageDeltaProcessRecord,
+    MessageFinalizedProcessRecord,
+    MessageStartedProcessRecord,
+    RunSnapshotEvent,
+    TranscriptItemProcessRecord,
+)
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.config import AppSettings
 from app.main import create_app
 
-RUN_ID = "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"
-TIMESTAMP = "2026-09-08T03:20:00Z"
 CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
     "America/Chicago"
 )
-EVENT_ADAPTER = TypeAdapter(RunLifecycleEvent)
-PAYLOAD_JSON = {
-    "created": '{"status":"pending","created_at":"2026-09-08T03:20:00Z",'
-    '"configuration":{"analysis_timezone":"America/Chicago","time_resolution":"12h",'
-    '"time_resolution_source":"default"}}',
-    "completed": '{"status":"completed","completed_at":"2026-09-08T03:20:00Z",'
-    '"warning":null}',
-    "cancelled": '{"status":"cancelled","cancelled_at":"2026-09-08T03:20:00Z"}',
-    "failed": '{"status":"failed","failed_at":"2026-09-08T03:20:00Z","error":'
-    '{"error_id":"0463cd90-6d0f-47e9-9656-b4aa86352c61","code":"workflow_failed",'
-    '"message":"The analysis workflow failed.","failed_stage":"analysis_workflow",'
-    '"retryable":false}}',
-}
 
 
-def event_json(kind):
-    sequence = 1 if kind == "created" else 2
-    return (
-        '{"schema_version":2,"run_id":"' + RUN_ID + '","sequence":'
-        + str(sequence) + ',"occurred_at":"' + TIMESTAMP
-        + '","session_id":null,"type":"run_'
-        + kind + '","payload":' + PAYLOAD_JSON[kind] + '}'
-    )
-
-
-class CountingClock:
+class TickingClock:
     def __init__(self) -> None:
-        self.calls = 0
+        self.value = datetime(2026, 9, 13, 3, 20, tzinfo=UTC)
 
     def now(self) -> datetime:
-        self.calls += 1
-        return datetime(2026, 9, 8, 3, 20, tzinfo=timezone.utc)
+        value = self.value
+        self.value += timedelta(microseconds=1)
+        return value
 
 
 class GatedWorkflow:
     def __init__(self) -> None:
         self.calls: asyncio.Queue[tuple[WorkflowContext, asyncio.Event]] = asyncio.Queue()
-        self.error: Exception | None = None
 
     async def run(self, context: WorkflowContext) -> None:
         release = asyncio.Event()
         self.calls.put_nowait((context, release))
         await release.wait()
         context.cancellation.checkpoint()
-        if self.error is not None:
-            raise self.error
 
 
 @asynccontextmanager
-async def run_runtime(**options):
+async def run_runtime(*, message_registry: bool = False, **options):
     workflow = GatedWorkflow()
-    clock = CountingClock()
-    options.setdefault("transcript_store", InMemoryTranscriptStore())
+    store = options.pop("transcript_store", InMemoryTranscriptStore())
+    registry = create_production_registry()
+    if message_registry:
+        registry = registry.copy_with(fixture_message_registration())
     application = create_app(
-        clock=clock, workflow=workflow, shutdown_grace_period=0, **options
+        clock=TickingClock(),
+        workflow=workflow,
+        transcript_store=store,
+        transcript_registry=registry,
+        shutdown_grace_period=0,
+        **options,
     )
     async with application.router.lifespan_context(application):
         coordinator = application.state.run_coordinator
         created = await coordinator.create_run("private query", CONFIGURATION)
         context, release = await workflow.calls.get()
-        yield coordinator, created, context, release, workflow, clock
-    assert all(runtime.workflow_task.done() for runtime in coordinator._runs.values())
+        yield application, coordinator, created, context, release, store
 
 
 def run(exercise) -> None:
-    asyncio.run(asyncio.wait_for(exercise(), timeout=5))
+    asyncio.run(asyncio.wait_for(exercise(), timeout=15))
 
 
 async def collect_response(response):
@@ -109,363 +103,631 @@ async def collect_response(response):
     return messages
 
 
-def observe_wait(monkeypatch, runtime):
-    waiting = asyncio.Event()
-    original_wait = runtime.condition.wait
-
-    async def wait():
-        waiting.set()
-        return await original_wait()
-
-    monkeypatch.setattr(runtime.condition, "wait", wait)
-    return waiting
+def frames(messages) -> list[str]:
+    return [
+        message["body"].decode("utf-8")
+        for message in messages
+        if message.get("body")
+    ]
 
 
-@pytest.mark.parametrize("kind", ["created", "completed", "failed", "cancelled"])
-def test_exact_lifecycle_frame(kind) -> None:
-    sequence = 1 if kind == "created" else 2
-    serialized = event_json(kind)
-    event = EVENT_ADAPTER.validate_json(serialized)
-    before = event.model_dump()
-    assert encode_event(event) == (
-        f"id: {sequence}\nevent: run_{kind}\ndata: {serialized}\n\n"
-    ).encode("utf-8")
-    assert event.model_dump() == before
+def decoded_frames(messages) -> list[tuple[str, int | None, dict[str, object]]]:
+    decoded = []
+    for frame in frames(messages):
+        lines = frame.splitlines()
+        event_id = int(lines[0][4:]) if lines[0].startswith("id: ") else None
+        offset = 1 if event_id is not None else 0
+        decoded.append((
+            lines[offset].removeprefix("event: "),
+            event_id,
+            json.loads(lines[offset + 1].removeprefix("data: ")),
+        ))
+    return decoded
 
 
-def test_json_escaping_keeps_special_characters_inside_one_data_line() -> None:
-    data = json.loads(event_json("failed"))
-    message = '河流💧 "quoted" \\ slash\r\nnext\tcolumn\x00end'
-    data["payload"]["error"]["message"] = message
-    event = EVENT_ADAPTER.validate_python(data)
-    frame = encode_event(event)
-    assert frame.count(b"\n") == 4
-    assert b"\r" not in frame
-    assert b"\x00" not in frame
-    assert "河流💧".encode("utf-8") in frame
-    assert b'\\r\\n' in frame
-    assert b'\\t' in frame
-    assert b'\\u0000' in frame
-    data_line = frame.decode("utf-8").split("\n")[2]
-    assert json.loads(data_line.removeprefix("data: "))["payload"]["error"]["message"] == message
-    assert EVENT_ADAPTER.validate_json(data_line.removeprefix("data: ")) == event
+def test_encoder_uses_optional_integer_id_and_one_json_data_line() -> None:
+    event = RunSnapshotEvent(
+        run_id=UUID("10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"),
+        status=RunStatus.RUNNING,
+        created_at="2026-09-13T03:20:00Z",
+        updated_at="2026-09-13T03:20:00.000001Z",
+        persistence={"state": "pending", "warning": None},
+    )
+    without_id = encode_event("run_snapshot", event)
+    with_id = encode_event("fixture", event, event_id=3)
+    assert without_id.startswith(b"event: run_snapshot\ndata: {")
+    assert b"\nid:" not in without_id
+    assert with_id.startswith(b"id: 3\nevent: fixture\ndata: {")
+    assert without_id.count(b"\n") == 3
+    assert KEEPALIVE_FRAME == b": keepalive\n\n"
+    json.loads(without_id.decode().splitlines()[1].removeprefix("data: "))
 
 
-@pytest.mark.parametrize("outcome", ["completed", "failed", "cancelled"])
-@pytest.mark.parametrize("cursor", [None, "0", "1", "2"])
-def test_terminal_replay_and_consumed_cursor_response(outcome, cursor) -> None:
+def test_run_subscription_assembles_latest_real_state_without_notification_log() -> None:
     async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, release, workflow, _):
-            runtime = coordinator._runs[created.run_id]
-            if outcome == "cancelled":
-                await coordinator.cancel_run(created.run_id)
-            elif outcome == "failed":
-                workflow.error = WorkflowFailed("private diagnostic")
-            release.set()
-            await runtime.workflow_quiesced.wait()
-            response = await create_event_response(coordinator, created.run_id, last_event_id=cursor)
-            messages = await collect_response(response)
-            assert messages[0]["status"] == (204 if cursor == "2" else 200)
-            frames = [message["body"] for message in messages[1:] if message.get("body")]
-            if cursor == "2":
-                assert frames == []
-                assert response.body == b""
-                assert "content-type" not in response.headers
-            else:
-                expected = runtime.events[int(cursor or 0):]
-                assert frames == [encode_event(event) for event in expected]
-                assert messages[-1] == {"type": "http.response.body", "body": b"", "more_body": False}
-                assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
-                assert response.headers["cache-control"] == "no-cache"
-                assert "content-length" not in response.headers
-                assert response._events.ag_frame is None
-                assert response._frames.ag_frame is None
-            assert len(runtime.events) == 2
-            assert runtime.snapshot.status.value == outcome
-            assert "private" not in repr(frames)
+        async with run_runtime() as (_, coordinator, created, _, _, _):
+            await coordinator.set_waterbody_participation(
+                created.run_id,
+                {"101": False, "202": True},
+            )
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="202",
+            )
+            lifecycle_events = tuple(coordinator._runs[created.run_id].events)
+            stream = await coordinator.subscribe_run(created.run_id)
+            snapshot = await anext(stream)
+            await stream.aclose()
+            assert snapshot.sessions == (session,)
+            assert [item.model_dump(mode="json") for item in snapshot.waterbodies] == [
+                {
+                    "target_comid": "101",
+                    "participating": False,
+                    "session_id": None,
+                    "session_status": None,
+                },
+                {
+                    "target_comid": "202",
+                    "participating": True,
+                    "session_id": str(session.session_id),
+                    "session_status": "pending",
+                },
+            ]
+            assert tuple(coordinator._runs[created.run_id].events) == lifecycle_events
+            assert "private query" not in snapshot.model_dump_json()
 
     run(exercise)
 
 
-@pytest.mark.parametrize("cursor", ["", "-1", "+1", " 1", "1 ", "1\n", "1.0", "1e0", "0x1", "１", "١", "1_0", "a", "1,2"])
-def test_invalid_header_is_rejected_before_response_creation(cursor) -> None:
+def test_run_reconnect_starts_with_one_current_snapshot_and_ignores_header_at_http() -> None:
     async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, _, _, _):
-            with pytest.raises(InvalidEventCursorError) as error:
-                await create_event_response(coordinator, created.run_id, last_event_id=cursor)
-            assert str(error.value) == "The event cursor must be a non-negative decimal integer."
-            assert (await coordinator.get_snapshot(created.run_id)).status is RunStatus.RUNNING
+        async with run_runtime() as (app, coordinator, created, _, _, _):
+            first = await coordinator.subscribe_run(created.run_id)
+            await anext(first)
+            await first.aclose()
+            await coordinator.set_waterbody_participation(created.run_id, {"303": True})
+            reconnect = await coordinator.subscribe_run(created.run_id)
+            latest = await anext(reconnect)
+            await reconnect.aclose()
+            assert [item.target_comid for item in latest.waterbodies] == ["303"]
+            operation = app.openapi()["paths"][f"/api/analysis/runs/{{run_id}}/events"]["get"]
+            assert all(item["name"] != "Last-Event-ID" for item in operation["parameters"])
 
     run(exercise)
 
 
-@pytest.mark.parametrize("cursor", [-1, True, False, 1.0, b"1", [], {}])
-def test_application_cursor_rejects_coercible_or_wrong_types(cursor) -> None:
+def test_session_log_exists_without_subscribers_and_preserves_phase_order() -> None:
     async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, _, _, _):
-            with pytest.raises(InvalidEventCursorError):
-                await coordinator.subscribe(created.run_id, after_sequence=cursor)
-
-    run(exercise)
-
-
-def test_leading_zero_and_large_cursors_have_consistent_range_semantics() -> None:
-    async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, _, _, _):
-            for cursor in (0, "0000", "0" * 5000):
-                stream = await coordinator.subscribe(created.run_id, after_sequence=cursor)
-                assert (await anext(stream)).sequence == 1
-                await stream.aclose()
-            for cursor in (2, "0002", "9" * 5000, 10 ** 5000):
-                with pytest.raises(EventCursorAheadError) as error:
-                    await coordinator.subscribe(created.run_id, after_sequence=cursor)
-                assert error.value.run.run_id == created.run_id
-                assert error.value.last_sequence == 1
-                assert str(error.value) == "The event cursor is ahead of the latest run event."
-
-    run(exercise)
-
-
-def test_missing_run_and_invalid_uuid_fail_before_response_creation() -> None:
-    async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, _, _, _):
-            with pytest.raises(RunNotFoundError) as error:
-                await create_event_response(coordinator, str(uuid4()), last_event_id="0")
-            assert error.value.run_id != created.run_id
-            with pytest.raises(ValidationError):
-                await create_event_response(coordinator, "not-a-uuid", last_event_id="0")
-            assert len(coordinator._runs) == 1
-
-    run(exercise)
-
-
-def test_active_cursor_at_latest_waits_then_sends_only_new_event(monkeypatch) -> None:
-    async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, release, _, _):
-            runtime = coordinator._runs[created.run_id]
-            waiting = observe_wait(monkeypatch, runtime)
-            response = await create_event_response(coordinator, created.run_id, last_event_id="0001")
-            task = asyncio.create_task(collect_response(response))
-            try:
-                await waiting.wait()
-                assert not task.done()
-                release.set()
-                messages = await task
-                assert [message["body"] for message in messages[1:] if message.get("body")] == [
-                    encode_event(runtime.events[-1])
-                ]
-            finally:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-
-    run(exercise)
-
-
-@pytest.mark.parametrize("publish_at", ["before_first_read", "between_reads", "while_waiting"])
-def test_replay_to_wait_has_no_gap_or_duplicate(publish_at, monkeypatch) -> None:
-    async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, release, _, _):
-            runtime = coordinator._runs[created.run_id]
-            stream = await coordinator.subscribe(created.run_id)
-            if publish_at == "before_first_read":
-                release.set()
-                await runtime.workflow_quiesced.wait()
-            first = await anext(stream)
-            assert first is runtime.events[0]
-            if publish_at == "while_waiting":
-                waiting = observe_wait(monkeypatch, runtime)
-                next_event = asyncio.create_task(anext(stream))
-                await waiting.wait()
-                release.set()
-                second = await next_event
-            else:
-                release.set()
-                await runtime.workflow_quiesced.wait()
-                second = await anext(stream)
-            assert second is runtime.events[1]
-            assert [first.sequence, second.sequence] == [1, 2]
-            with pytest.raises(StopAsyncIteration):
-                await anext(stream)
-
-    run(exercise)
-
-
-def test_published_event_wins_when_timeout_fires_while_waiting_for_the_lock(monkeypatch) -> None:
-    async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, _, _, _):
-            runtime = coordinator._runs[created.run_id]
-            waiting = observe_wait(monkeypatch, runtime)
-            original_timeout = asyncio.timeout
-            timeouts = []
-
-            def timeout(interval):
-                timer = original_timeout(interval)
-                timeouts.append(timer)
-                return timer
-
-            monkeypatch.setattr(asyncio, "timeout", timeout)
-            stream = await coordinator.subscribe(created.run_id, after_sequence=1)
-            subscriber = asyncio.create_task(anext(stream))
-            await waiting.wait()
-            publishing = asyncio.Event()
-
-            async def publish():
-                publishing.set()
-                return await coordinator.cancel_run(created.run_id)
-
-            async with runtime.condition:
-                publisher = asyncio.create_task(publish())
-                await publishing.wait()
-                loop = asyncio.get_running_loop()
-                timeouts[0].reschedule(loop.time())
-                timer_fired = asyncio.Event()
-                loop.call_soon(timer_fired.set)
-                await timer_fired.wait()
-                assert subscriber.cancelling() == 1
-                assert not subscriber.done()
-            cancelled = await publisher
-            event = await subscriber
-            assert timeouts[0].expired()
-            assert event is runtime.events[-1]
-            assert event.payload.status is cancelled.status
-            assert event.sequence == 2
-            with pytest.raises(StopAsyncIteration):
-                await anext(stream)
-
-    run(exercise)
-
-
-def test_keepalive_is_transport_only_and_does_not_change_replay_or_logs(caplog, application_logs) -> None:
-    caplog.set_level(logging.INFO, logger="wateragents.analysis_runs")
-
-    async def exercise() -> None:
-        async with run_runtime(keepalive_interval=0.000001) as (
-            coordinator, created, context, release, _, clock
+        async with run_runtime(message_registry=True) as (
+            _, coordinator, created, _, _, store,
         ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(created.run_id, session.session_id)
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                "first ",
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text="first answer",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(created.run_id, session.session_id)
+            records = coordinator._runs[created.run_id].agent_sessions[
+                session.session_id
+            ].process_events
+            assert [type(item) for item in records] == [
+                TranscriptItemProcessRecord,
+                MessageStartedProcessRecord,
+                MessageDeltaProcessRecord,
+                MessageDeltaProcessRecord,
+                MessageFinalizedProcessRecord,
+                TranscriptItemProcessRecord,
+            ]
+            assert [item.sequence for item in records] == [1, 2, 3, 4, 5, 6]
+            assert (
+                records[1].header.item_id
+                == records[2].item_id
+                == records[3].item_id
+                == records[4].item.item_id
+            )
+            assert records[1].header.transcript_sequence == message.transcript_sequence
+            assert records[1].header.occurred_at == message.created_at
+            assert records[2].text + records[3].text == "first answer"
+            await coordinator._wait_for_writer_drain(coordinator._runs[created.run_id])
+            stored = await store.read_run(created.run_id)
+            assert sum(item.item_id == message.item_id for item in stored.items) == 1
+            assert all(
+                item.content_type not in {
+                    "transcript_item",
+                    "message_started",
+                    "message_delta",
+                    "message_finalized",
+                    "stream_end",
+                    "run_snapshot",
+                }
+                for item in stored.items
+            )
+
+    run(exercise)
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    ["", "-1", "+1", " 1", "1 ", "1\n", "1.0", "1e0", "0x1", "１", "١", "1_0", "a"],
+)
+def test_session_cursor_rejects_non_ascii_nonnegative_decimal(cursor) -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (_, coordinator, created, _, _, _):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            with pytest.raises(InvalidEventCursorError):
+                await coordinator.subscribe_session(
+                    created.run_id,
+                    session.session_id,
+                    after_sequence=cursor,
+                )
+
+    run(exercise)
+
+
+def test_session_cursor_replays_only_greater_ids_and_rejects_ahead() -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (_, coordinator, created, _, _, _):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(created.run_id, session.session_id)
+            await coordinator.complete_agent_session(created.run_id, session.session_id)
+            stream = await coordinator.subscribe_session(
+                created.run_id,
+                session.session_id,
+                after_sequence="1",
+            )
+            assert [item.sequence async for item in stream] == [2]
+            consumed = await coordinator.subscribe_session(
+                created.run_id,
+                session.session_id,
+                after_sequence="2",
+            )
+            assert [item async for item in consumed] == []
+            with pytest.raises(EventCursorAheadError):
+                await coordinator.subscribe_session(
+                    created.run_id,
+                    session.session_id,
+                    after_sequence="3",
+                )
+            with pytest.raises(EventCursorAheadError):
+                await coordinator.subscribe_session(
+                    created.run_id,
+                    session.session_id,
+                    after_sequence="9" * 5_000,
+                )
+
+    run(exercise)
+
+
+def test_session_first_read_handoff_and_multiple_subscribers_have_no_gap() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (
+            _, coordinator, created, context, _, _,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            first = await coordinator.subscribe_session(created.run_id, session.session_id)
+            second = await coordinator.subscribe_session(created.run_id, session.session_id)
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            assert [
+                (await anext(first)).sequence,
+                (await anext(first)).sequence,
+            ] == [1, 2]
+            assert [
+                (await anext(second)).sequence,
+                (await anext(second)).sequence,
+            ] == [1, 2]
+            await first.aclose()
+            await second.aclose()
+            assert not context.cancellation.is_requested()
+            assert message.item_id in coordinator._runs[created.run_id].streaming_messages
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text="",
+                    generation_status=GenerationStatus.INCOMPLETE,
+                ),
+            )
+
+    run(exercise)
+
+
+def test_session_http_handshake_reports_cursor_and_identity_errors() -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (app, coordinator, created, _, _, _):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            path = (
+                f"/api/analysis/runs/{created.run_id}/sessions/"
+                f"{session.session_id}/events"
+            )
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                invalid = await client.get(path, headers={"Last-Event-ID": "-1"})
+                assert invalid.status_code == 400
+                assert invalid.json()["error"]["code"] == "invalid_event_cursor"
+                ahead = await client.get(path, headers={"Last-Event-ID": "2"})
+                assert ahead.status_code == 409
+                assert ahead.json()["error"]["code"] == "event_cursor_ahead"
+                missing = await client.get(
+                    path.replace(str(session.session_id), str(uuid4()))
+                )
+                assert missing.status_code == 404
+                assert missing.json()["error"]["code"] == "session_not_found"
+
+    run(exercise)
+
+
+def test_streaming_redaction_is_cross_chunk_and_final_body_is_stored_once() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (
+            _, coordinator, created, _, _, _,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id, message.item_id, "Authorization: Be"
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id, message.item_id, "arer secret-token\nanswer"
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text="Authorization: Bearer secret-token\nanswer",
+                    generation_status=GenerationStatus.INCOMPLETE,
+                ),
+            )
             runtime = coordinator._runs[created.run_id]
-            snapshot = runtime.snapshot
-            events = tuple(runtime.events)
-            records = list(caplog.records)
-            json_lines = list(application_logs)
-            calls = clock.calls
-            response = await create_event_response(coordinator, created.run_id, last_event_id="1")
-            received = []
-            two_comments = asyncio.Event()
-            hold_send = asyncio.Event()
-            tasks_before = asyncio.all_tasks()
+            records = runtime.agent_sessions[session.session_id].process_events
+            deltas = "".join(
+                item.text for item in records if isinstance(item, MessageDeltaProcessRecord)
+            )
+            assert deltas == "Authorization: [REDACTED]\nanswer"
+            assert "secret-token" not in deltas
+            assert sum(item.item_id == message.item_id for item in runtime.transcript_buffer.items) == 1
+            finalized = next(
+                item for item in records if isinstance(item, MessageFinalizedProcessRecord)
+            )
+            assert finalized.generation_status is GenerationStatus.INCOMPLETE
 
-            async def send(message):
-                if message.get("body"):
-                    received.append(message["body"])
-                    if len(received) == 2:
-                        two_comments.set()
-                        await hold_send.wait()
+    run(exercise)
 
-            async def receive():
-                await asyncio.Event().wait()
 
-            task = asyncio.create_task(response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send))
-            try:
-                await two_comments.wait()
-                assert received == [b": keepalive\n\n"] * 2
-                assert KEEPALIVE_FRAME == b": keepalive\n\n"
-                assert runtime.snapshot is snapshot
-                assert tuple(runtime.events) == events
-                assert clock.calls == calls
-                assert caplog.records == records
-                assert application_logs == json_lines
-                assert not context.cancellation.is_requested()
-                assert asyncio.all_tasks() - tasks_before == {task}
-            finally:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-            assert response._events.ag_frame is None
-            assert response._frames.ag_frame is None
-            release.set()
-            await runtime.workflow_quiesced.wait()
-            reconnect = await create_event_response(coordinator, created.run_id, last_event_id="1")
-            replay = await collect_response(reconnect)
-            assert [message["body"] for message in replay[1:] if message.get("body")] == [
-                encode_event(runtime.events[-1])
+def test_two_streaming_messages_can_interleave_without_mixing_identity() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (
+            _, coordinator, created, _, _, _,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            first = await coordinator.start_transcript_message(
+                created.run_id, session.session_id, "fixture_message", 1
+            )
+            second = await coordinator.start_transcript_message(
+                created.run_id, session.session_id, "fixture_message", 1
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id, first.item_id, "first"
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id, second.item_id, "second"
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                second.item_id,
+                FixtureMessageV1(
+                    text="second done",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                first.item_id,
+                FixtureMessageV1(
+                    text="first done",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            records = coordinator._runs[created.run_id].agent_sessions[
+                session.session_id
+            ].process_events
+            message_records = records[1:]
+            assert [type(item) for item in message_records] == [
+                MessageStartedProcessRecord,
+                MessageStartedProcessRecord,
+                MessageDeltaProcessRecord,
+                MessageDeltaProcessRecord,
+                MessageFinalizedProcessRecord,
+                MessageDeltaProcessRecord,
+                MessageDeltaProcessRecord,
+                MessageFinalizedProcessRecord,
+            ]
+            assert [
+                item.item_id
+                if isinstance(item, MessageDeltaProcessRecord)
+                else item.item.item_id
+                for item in message_records[2:]
+            ] == [
+                second.item_id,
+                second.item_id,
+                second.item_id,
+                first.item_id,
+                first.item_id,
+                first.item_id,
             ]
 
     run(exercise)
 
 
-def test_multiple_subscribers_share_events_with_independent_cursors(monkeypatch) -> None:
+def test_streamed_and_final_text_mismatch_records_visible_diagnostic() -> None:
     async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, context, release, _, _):
+        async with run_runtime(message_registry=True) as (
+            _, coordinator, created, _, _, _,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                "streamed text",
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text="different final text",
+                    generation_status=GenerationStatus.INCOMPLETE,
+                ),
+            )
             runtime = coordinator._runs[created.run_id]
-            slow = await coordinator.subscribe(created.run_id)
-            fast = await coordinator.subscribe(created.run_id, after_sequence=1)
-            closed = await coordinator.subscribe(created.run_id)
-            assert await anext(closed) is runtime.events[0]
-            await closed.aclose()
-            waiting = observe_wait(monkeypatch, runtime)
-            task = asyncio.create_task(anext(fast))
-            await waiting.wait()
-            assert not context.cancellation.is_requested()
-            release.set()
-            terminal = await task
-            assert terminal is runtime.events[-1]
-            assert [event async for event in slow] == runtime.events
-            with pytest.raises(StopAsyncIteration):
-                await anext(fast)
-            assert runtime.snapshot.status is RunStatus.COMPLETED
+            records = runtime.agent_sessions[session.session_id].process_events
+            assert [type(item) for item in records[-2:]] == [
+                MessageFinalizedProcessRecord,
+                TranscriptItemProcessRecord,
+            ]
+            assert records[-1].item.content.content_type == "error"
+            assert sum(
+                item.item_id == message.item_id
+                for item in runtime.transcript_buffer.items
+            ) == 1
 
     run(exercise)
 
 
-@pytest.mark.parametrize("disconnect", ["receive", "cancel_task", "send_start", "send_body"])
-def test_disconnect_or_write_failure_closes_only_its_subscription(disconnect, monkeypatch) -> None:
+def test_terminal_session_returns_200_then_unnumbered_stream_end() -> None:
     async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, context, release, _, _):
+        async with run_runtime() as (app, coordinator, created, _, _, _):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(created.run_id, session.session_id)
+            await coordinator.complete_agent_session(created.run_id, session.session_id)
+            response = await create_session_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+                session.session_id,
+                last_event_id="2",
+            )
+            messages = await collect_response(response)
+            assert messages[0]["status"] == 200
+            assert len(frames(messages)) == 1
+            assert frames(messages)[0].startswith("event: stream_end\ndata: {")
+            assert "id:" not in frames(messages)[0]
+
+    run(exercise)
+
+
+def test_session_response_encodes_all_phases_and_large_final_as_reference() -> None:
+    async def exercise() -> None:
+        async with run_runtime(
+            message_registry=True,
+            settings=AppSettings(
+                transcript_inline_max_bytes=256,
+                transcript_preview_bytes=64,
+            ),
+        ) as (
+            app, coordinator, created, _, release, _,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(created.run_id, session.session_id)
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            text = "水" * 100
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                text,
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text=text,
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(created.run_id, session.session_id)
+            response = await create_session_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+                session.session_id,
+            )
+            events = decoded_frames(await collect_response(response))
+            names = [name for name, _, _ in events]
+            assert names[:2] == ["transcript_item", "message_started"]
+            assert names[2:-3] and set(names[2:-3]) == {"message_delta"}
+            assert names[-3:] == ["message_finalized", "transcript_item", "stream_end"]
+            assert [event_id for _, event_id, _ in events[:-1]] == list(
+                range(1, len(events))
+            )
+            assert events[-1][1] is None
+            started = events[1][2]
+            deltas = [data for name, _, data in events if name == "message_delta"]
+            finalized = next(data for name, _, data in events if name == "message_finalized")
+            assert started["payload"]["item"]["item_id"] == str(message.item_id)
+            assert "".join(delta["payload"]["text"] for delta in deltas) == text
+            assert all(
+                delta["payload"]["item_id"] == str(message.item_id) for delta in deltas
+            )
+            assert finalized["payload"]["item"]["item_id"] == str(message.item_id)
+            assert finalized["payload"]["generation_status"] == "completed"
+            assert finalized["payload"]["item"]["content"]["kind"] == "reference"
+            assert finalized["payload"]["item"]["content_ref"] == {
+                "run_id": str(created.run_id),
+                "item_id": str(message.item_id),
+            }
+            assert started["occurred_at"] != deltas[0]["occurred_at"]
+            assert deltas[-1]["occurred_at"] != finalized["occurred_at"]
+            release.set()
+
+    run(exercise)
+
+
+def test_session_ends_without_waiting_for_run_and_run_ends_after_quiescence() -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (app, coordinator, created, _, release, store):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(created.run_id, session.session_id)
+            await coordinator.complete_agent_session(created.run_id, session.session_id)
+            session_response = await create_session_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+                session.session_id,
+                last_event_id="2",
+            )
+            assert len(frames(await collect_response(session_response))) == 1
+            assert (await coordinator.get_snapshot(created.run_id)).status is RunStatus.RUNNING
+            release.set()
+            await coordinator._runs[created.run_id].workflow_quiesced.wait()
+            run_response = await create_run_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+            )
+            sent = await collect_response(run_response)
+            assert frames(sent)[0].startswith("event: run_snapshot\n")
+            assert frames(sent)[-1].startswith("event: stream_end\n")
+            assert all("id:" not in frame for frame in frames(sent))
+
+    run(exercise)
+
+
+def test_released_live_stream_returns_history_location_but_missing_is_404() -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (app, coordinator, created, _, release, store):
+            release.set()
             runtime = coordinator._runs[created.run_id]
-            waiting = observe_wait(monkeypatch, runtime)
-            other = await coordinator.subscribe(created.run_id, after_sequence=1)
-            response = await create_event_response(coordinator, created.run_id)
-            disconnected = asyncio.Event()
+            await runtime.workflow_quiesced.wait()
+            await coordinator._wait_for_writer_drain(runtime)
+            coordinator._runs.pop(created.run_id)
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                released = await client.get(
+                    f"/api/analysis/runs/{created.run_id}/events"
+                )
+                assert released.status_code == 410
+                assert released.json()["error"]["code"] == "live_state_gone"
+                assert released.json()["history_url"].endswith(
+                    f"/{created.run_id}?view=history"
+                )
+                original_read = store.read_run
 
-            async def send(message):
-                if disconnect == "send_start" and message["type"] == "http.response.start":
-                    raise OSError("client disconnected")
-                if disconnect == "send_body" and message.get("body"):
-                    raise OSError("client disconnected")
+                async def fail_read(run_id):
+                    raise OSError("database unavailable")
 
-            async def receive():
-                await disconnected.wait()
-                return {"type": "http.disconnect"}
-
-            scope = {"type": "http", "asgi": {"spec_version": "2.3" if disconnect == "receive" else "2.4"}}
-            task = asyncio.create_task(response(scope, receive, send))
-            try:
-                if disconnect in {"receive", "cancel_task"}:
-                    await waiting.wait()
-                    if disconnect == "receive":
-                        disconnected.set()
-                        await task
-                    else:
-                        task.cancel()
-                        with pytest.raises(asyncio.CancelledError):
-                            await task
-                else:
-                    with pytest.raises(ClientDisconnect):
-                        await task
-                assert response._events.ag_frame is None
-                assert response._frames.ag_frame is None
-                assert runtime.snapshot.status is RunStatus.RUNNING
-                assert not context.cancellation.is_requested()
-                assert runtime.workflow_task.cancelling() == 0
-                assert not runtime.workflow_task.done()
-                assert len(runtime.events) == 1
-                release.set()
-                terminal = await anext(other)
-                assert terminal.type.value == "run_completed"
-                assert terminal is runtime.events[-1]
-                await other.aclose()
-            finally:
-                task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
+                store.read_run = fail_read
+                unavailable = await client.get(
+                    f"/api/analysis/runs/{uuid4()}/events"
+                )
+                assert unavailable.status_code == 503
+                assert unavailable.json()["error"]["code"] == "database_unavailable"
+                store.read_run = original_read
+            with pytest.raises(LiveStreamReleasedError) as error:
+                await create_run_event_response(
+                    coordinator,
+                    app.state.transcript_reader,
+                    created.run_id,
+                )
+            assert error.value.history_url.endswith(f"/{created.run_id}?view=history")
+            with pytest.raises(RunNotFoundError):
+                await create_run_event_response(
+                    coordinator,
+                    app.state.transcript_reader,
+                    uuid4(),
+                )
 
     run(exercise)
 
@@ -474,30 +736,7 @@ def test_disconnect_or_write_failure_closes_only_its_subscription(disconnect, mo
 def test_keepalive_interval_must_be_finite_and_positive(interval) -> None:
     with pytest.raises(ValueError, match="finite and positive"):
         RunCoordinator(
-            CountingClock(),
+            TickingClock(),
             transcript_store=InMemoryTranscriptStore(),
             keepalive_interval=interval,
         )
-
-
-def test_default_interval_drives_the_real_subscription_wait(monkeypatch) -> None:
-    async def exercise() -> None:
-        async with run_runtime() as (coordinator, created, _, release, _, _):
-            waiting = observe_wait(monkeypatch, coordinator._runs[created.run_id])
-            original_timeout = asyncio.timeout
-            intervals = []
-
-            def timeout(interval):
-                intervals.append(interval)
-                return original_timeout(interval)
-
-            monkeypatch.setattr(asyncio, "timeout", timeout)
-            stream = await coordinator.subscribe(created.run_id, after_sequence=1)
-            task = asyncio.create_task(anext(stream))
-            await waiting.wait()
-            release.set()
-            assert (await task).sequence == 2
-            await stream.aclose()
-            assert intervals[0] == 15.0
-
-    run(exercise)

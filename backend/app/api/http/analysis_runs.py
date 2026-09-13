@@ -19,7 +19,10 @@ from app.api.schemas.analysis_runs import (
     TranscriptContentResponse,
 )
 from app.api.http.errors import UnknownQueryParametersError
-from app.api.sse.response import create_event_response
+from app.api.sse.response import (
+    create_run_event_response,
+    create_session_event_response,
+)
 from app.application.analysis_runs.models import AnalysisRunSnapshot, RunStatus
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.creation import InvalidIdempotencyKeyError
@@ -235,29 +238,63 @@ async def get_transcript_content(
 @router.get(
     "/{run_id}/events", response_class=Response,
     description=(
-        "Replays lifecycle events after Last-Event-ID, then streams new events and "
-        "unnumbered comment keepalives. The stream closes after its terminal event; "
-        "a consumed terminal cursor returns 204. Disconnecting does not cancel the run."
+        "Sends the latest complete lightweight run snapshot, then replacement snapshots "
+        "when source state changes. Last-Event-ID is ignored. Normal completion emits "
+        "stream_end; disconnecting does not cancel the run."
     ),
     responses={
-        **error_responses(400, 404, 409),
+        **error_responses(404, 410),
         200: {
-            "description": "Lifecycle SSE stream with comment keepalive.",
+            "description": "Run snapshot SSE stream with comment keepalive.",
             "content": {"text/event-stream": {"schema": {"type": "string"}}},
             "headers": REQUEST_ID_HEADERS,
         },
-        204: {"description": "The terminal event has already been consumed.", "headers": REQUEST_ID_HEADERS},
     },
 )
 async def subscribe_events(
     request: Request,
     run_id: UUID,
+) -> Response:
+    _reject_unknown_query_parameters(request, set())
+    request.state.run_id = run_id
+    return await create_run_event_response(
+        request.app.state.run_coordinator,
+        request.app.state.transcript_reader,
+        run_id,
+    )
+
+
+@router.get(
+    "/{run_id}/sessions/{session_id}/events",
+    response_class=Response,
+    description=(
+        "Replays visible Agent-session process events after the session-scoped integer "
+        "Last-Event-ID, then streams new events. Normal completion emits stream_end."
+    ),
+    responses={
+        **error_responses(400, 404, 409, 410),
+        200: {
+            "description": "Session process SSE stream with comment keepalive.",
+            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            "headers": REQUEST_ID_HEADERS,
+        },
+    },
+)
+async def subscribe_session_events(
+    request: Request,
+    run_id: UUID,
+    session_id: UUID,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> Response:
     _reject_unknown_query_parameters(request, set())
     request.state.run_id = run_id
-    return await create_event_response(
-        request.app.state.run_coordinator, run_id, last_event_id=last_event_id
+    request.state.session_id = session_id
+    return await create_session_event_response(
+        request.app.state.run_coordinator,
+        request.app.state.transcript_reader,
+        run_id,
+        session_id,
+        last_event_id=last_event_id,
     )
 
 

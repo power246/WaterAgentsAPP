@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–6 已完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 7–10 待实施与验证。** 七个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
+**当前状态：Milestone 0–7 已完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 8–10 待实施与验证。** 八个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于取消晚到审计、启动遗留修复、live 清理或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
 
 ## 阶段与设计导航
 
@@ -51,7 +51,7 @@
 - [ ] 有限补写、第三次失败后两秒的完成交付窗口、手动恢复和唯一业务终态相互独立。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
 - [ ] 当前读取与严格历史共享 DTO/解析/全文实现；PG 故障时 live 可读，history 不混入内存。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
 - [ ] 只有 run 历史列表分页，任一实际 session 的完整过程与显式公共全文都可读取。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)）
-- [ ] 两层 SSE、首次完整过程、整数续传、三阶段消息和明确 stream_end/410 成立；正文不逐帧重复落库。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
+- [x] 两层 SSE、首次完整过程、整数续传、三阶段消息和明确 stream_end/410 成立；正文不逐帧重复落库。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
 - [ ] 取消即固定原生成中正文，晚到审计仅历史可见；凭据跨片段、取消边界和日志均不泄漏。（[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
 - [ ] 只有终态、执行收敛、全部实际保存和完整 grace 后清理；重启不自动恢复 Agent 或补造未保存内容。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
 - [ ] 中心全部适用契约有实现位置和验证证据，未完成的跨平台验证或业务后续项准确登记。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)；[契约覆盖矩阵](#契约覆盖矩阵)）
@@ -378,34 +378,45 @@ git diff --check
 
 ### 工作
 
-- [ ] run_snapshot 从原状态装配完整轻量通知，不持久化通知或复制完整消息。（[设计 §8.1](m3_transcript_history_implementation_design.md#81-run-通知)；[API §5.2](m3_transcript_history_api.md#52-run_snapshot)）
-- [ ] actual session 目录与水体参与状态按原事实生成；M3 无拓扑时不伪造，测试覆盖有拓扑情形。（[设计 §8.1](m3_transcript_history_implementation_design.md#81-run-通知)）
-- [ ] session process 先记录稳定整数 ID，再唤醒订阅者；无订阅也保留续传日志。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
-- [ ] 完成 transcript_item、message_started、message_delta、message_finalized 和 stream_end 编码。（[API §5.3](m3_transcript_history_api.md#53-session-过程与三个消息事件)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
-- [ ] 消息开始固定原身份/顺序/时间，delta 只传新增安全文本，finalized 只更新原消息、从正文派生结束状态。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
-- [ ] 消息定稿不等 DB，不再生成同义 transcript item；大正文统一 preview/ref。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)）
-- [ ] 初订阅先全部已有后新增，重连补大于 cursor 的事件，锁内交接无缺口。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
-- [ ] session Last-Event-ID ASCII 整数/0/缺省、400/409；run 通知不编号也不复用过程 cursor。（[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
-- [ ] live 合法握手统一 200，已结束先补齐再 end；移除旧 204 行为与相关 smoke 断言。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
-- [ ] session 与 run 各自满足关闭条件后 stream_end；异常断开不发成功结束，keepalive 无编号。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)；[API §5.1](m3_transcript_history_api.md#51-公共传输)）
-- [ ] live 释放的 410/history_url、完全不存在 404、DB 失败 503 和创建注册窗口收敛正确。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
+- [x] run_snapshot 从原状态装配完整轻量通知，不持久化通知或复制完整消息。（[设计 §8.1](m3_transcript_history_implementation_design.md#81-run-通知)；[API §5.2](m3_transcript_history_api.md#52-run_snapshot)）
+- [x] actual session 目录与水体参与状态按原事实生成；M3 无拓扑时不伪造，测试覆盖有拓扑情形。（[设计 §8.1](m3_transcript_history_implementation_design.md#81-run-通知)）
+- [x] session process 先记录稳定整数 ID，再唤醒订阅者；无订阅也保留续传日志。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
+- [x] 完成 transcript_item、message_started、message_delta、message_finalized 和 stream_end 编码。（[API §5.3](m3_transcript_history_api.md#53-session-过程与三个消息事件)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
+- [x] 消息开始固定原身份/顺序/时间，delta 只传新增安全文本，finalized 只更新原消息、从正文派生结束状态。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
+- [x] 消息定稿不等 DB，不再生成同义 transcript item；大正文统一 preview/ref。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)）
+- [x] 初订阅先全部已有后新增，重连补大于 cursor 的事件，锁内交接无缺口。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
+- [x] session Last-Event-ID ASCII 整数/0/缺省、400/409；run 通知不编号也不复用过程 cursor。（[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
+- [x] live 合法握手统一 200，已结束先补齐再 end；移除旧 204 行为与相关 smoke 断言。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
+- [x] session 与 run 各自满足关闭条件后 stream_end；异常断开不发成功结束，keepalive 无编号。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)；[API §5.1](m3_transcript_history_api.md#51-公共传输)）
+- [x] live 释放的 410/history_url、完全不存在 404、DB 失败 503 和创建注册窗口收敛正确。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
 
 ### Tests
 
-- [ ] run 首次/重连只最新完整快照，状态变化不产生第二套 DB 通知。（[设计 §8.1](m3_transcript_history_implementation_design.md#81-run-通知)）
-- [ ] 无订阅已有内容、首次发送期间新增、多订阅者、重连及重复帧消费。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
-- [ ] 三阶段顺序、同消息原 ID、跨消息交错、最终累计文本不重复拼接、大小正文表示。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
-- [ ] 较早生成时间保留，SSE sequence、lifecycle sequence、transcript_sequence 不混淆。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
-- [ ] session 结束不等待 run 保存；run 保存中/耗尽继续通知，最终全保存先快照再 end。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
-- [ ] 200 空补齐后 end、400/409、410、意外 EOF、客户端关闭不取消执行。（[API §5.1](m3_transcript_history_api.md#51-公共传输)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
-- [ ] 逐切分凭据推送安全与正常文本持续输出。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] run 首次/重连只最新完整快照，状态变化不产生第二套 DB 通知。（[设计 §8.1](m3_transcript_history_implementation_design.md#81-run-通知)）
+- [x] 无订阅已有内容、首次发送期间新增、多订阅者、重连及重复帧消费。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
+- [x] 三阶段顺序、同消息原 ID、跨消息交错、最终累计文本不重复拼接、大小正文表示。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
+- [x] 较早生成时间保留，SSE sequence、lifecycle sequence、transcript_sequence 不混淆。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
+- [x] session 结束不等待 run 保存；run 保存中/耗尽继续通知，最终全保存先快照再 end。（[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
+- [x] 200 空补齐后 end、400/409、410、意外 EOF、客户端关闭不取消执行。（[API §5.1](m3_transcript_history_api.md#51-公共传输)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
+- [x] 逐切分凭据推送安全与正常文本持续输出。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api backend/tests/application backend/tests/observability -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
-- [ ] 可执行 fixture 对照 API 中每个事件名、wrapper、id、结束与错误示例。（[API §5](m3_transcript_history_api.md#5-两层-sse)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
+- [x] `python -m pytest backend/tests/api backend/tests/application backend/tests/observability -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 可执行 fixture 对照 API 中每个事件名、wrapper、id、结束与错误示例。（[API §5](m3_transcript_history_api.md#5-两层-sse)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
 
 阶段出口：原过程一份、live 事件可续传，数据库不按 token/frame 增长，实时查看不改变执行。
+
+#### Milestone 7 完成记录（2026-09-14）
+
+- 代码状态：`codex/m3-milestone` 分支、基线 `23f0745` 上的 Milestone 7 工作区改动；保留此前 Milestone 0–6 本地提交，本阶段尚未提交或推送。
+- 实现位置：`application/transcripts/stream_models.py` 定义 run 快照、session 过程和消息三阶段模型；`RunCoordinator` 从原 run/session/水体/保存事实装配快照，在锁内先记录 session 过程序号再通知，并以原消息身份完成跨片段脱敏、增量与定稿；`api/sse` 分离 run/session 响应，HTTP 增加嵌套 session SSE 路由及 400/409/410 分类。
+- 流与存储边界：run 重连只取得最新完整轻量快照且无编号；session 首订阅回放全部已有可见过程，重连仅补大于自身整数 cursor 的记录。控制通知、增量帧和定稿帧不新增数据库行，定稿消息只保存一份原正文；不一致正文另产生安全诊断而不静默改写已展示前缀。
+- 关闭与错误：合法 live 握手统一 200，run/session 在各自条件满足后发送无编号 `stream_end`；keepalive 无编号，异常 EOF 与客户端关闭不伪装正常结束或取消执行。释放后返回 410/`live_state_gone` 和 `history_url`，不存在为 404，必要历史读取失败为 503。
+- 指定验证：`backend/.venv/bin/python -m pytest -q backend/tests/api backend/tests/application backend/tests/observability`：447 passed；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
+- 完整回归：macOS、Python 3.12.14、隔离 PostgreSQL 17.10 下，通过 `WATERAGENTS_TEST_POSTGRES_*` 运行 `backend/.venv/bin/python -m pytest -q backend/tests`：729 passed，无 skip。
+- 可执行 smoke：同一隔离 PostgreSQL 完成迁移后运行 `backend/.venv/bin/python backend/scripts/run_sse_smoke.py`，输出 `{"completed":"passed","cancelled":"passed"}`；覆盖动态 loopback Uvicorn、完整快照、keepalive、重连、取消、最终保存快照、`stream_end` 与 EOF。
+- 契约结论：M7 两层 SSE、过程续传、消息生命周期、凭据安全与 200/400/409/410/503 边界均有可执行证据；取消定稿/晚到审计、启动遗留修复和 live grace 清理继续由 Milestone 8 承接，三平台实际 CI 仍保持 partial。
 
 ## Milestone 8：取消、遗留修复、关闭与 live 清理
 

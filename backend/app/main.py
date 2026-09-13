@@ -22,7 +22,7 @@ from app.application.analysis_runs.persistence import (
 )
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.transcripts.reader import TranscriptReader
-from app.application.transcripts.registry import create_production_registry
+from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
 from app.infrastructure.config import AppSettings
 from app.infrastructure.observability.json_logging import configure_logging
 from app.infrastructure.persistence.database import create_database_engine
@@ -47,6 +47,7 @@ def create_app(
         PersistenceWriteBatch,
         BatchVerification,
     ] | None = None,
+    transcript_registry: TranscriptRegistry | None = None,
     workflow_task_factory: Callable[
         [Coroutine[object, object, None], str],
         asyncio.Task[None],
@@ -68,7 +69,7 @@ def create_app(
                     resolved_settings.db_operation_timeout_seconds
                 ),
             )
-        transcript_registry = create_production_registry()
+        active_registry = transcript_registry or create_production_registry()
         coordinator = RunCoordinator(
             resolved_clock,
             transcript_store=active_store,
@@ -91,12 +92,12 @@ def create_app(
                 resolved_settings.db_operation_timeout_seconds
             ),
             workflow_task_factory=workflow_task_factory,
-            transcript_registry=transcript_registry,
+            transcript_registry=active_registry,
         )
         transcript_reader = TranscriptReader(
             coordinator,
             active_store,
-            transcript_registry,
+            active_registry,
             error_id_factory=id_factory,
             inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
             preview_bytes=resolved_settings.transcript_preview_bytes // 2,
