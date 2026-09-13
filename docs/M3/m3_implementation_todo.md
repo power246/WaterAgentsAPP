@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0 已于 2026-09-13 完成本机基线与契约盘点；Milestone 1–10 待实施与验证。** Milestone 0 的实际命令、环境和影响面记录见本节完成记录；它不等同于数据库、路由、迁移、配置或 M3 业务契约已经实现。后续阶段中的命令仍是 Verify 目标，不是本轮运行证据。M2 原验收记录保留原义，不能当作 M3 三平台通过结果。
+**当前状态：Milestone 0–1 已于 2026-09-13 完成本机基线、契约盘点以及 Run / Agent session 模型和统一状态入口；Milestone 2–10 待实施与验证。** 两个已完成阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于数据库持久化、完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。后续阶段中的命令仍是 Verify 目标，不是本轮运行证据。M2 原验收记录保留原义，不能当作 M3 三平台通过结果。
 
 ## 阶段与设计导航
 
@@ -125,28 +125,44 @@ git diff --check
 
 ### 工作
 
-- [ ] 将旧整体 AnalysisSession/SessionCoordinator/Workflow 的职责迁为 run，迁移关联 ID 与调用方。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
-- [ ] 新增 AgentSessionRuntime 与 SessionSummary，明确 query_parser/null COMID 和 waterbody/有效 COMID。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[API §3.2](m3_transcript_history_api.md#32-runsummary-与-sessionsummary)）
-- [ ] run 六态、session 五态、不可变终态及取消优先竞争沿用统一状态机，禁止第二套状态推演逻辑。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
-- [ ] 实现准备执行时创建 session；parser 每 run 一次、水体每 run/COMID 一次，不为等待/排除节点创建上下文。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)）
-- [ ] 原请求/创建/BFS 等归 run，Agent 消息归具体 session；operation_id 对一次调用稳定。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §4.3](m3_transcript_history_implementation_design.md#43-transcript_items)）
-- [ ] 统一分配原 item_id、run transcript_sequence 和 created_at；生成开始时可先分配草稿身份。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §3.3](m3_transcript_history_implementation_design.md#33-时间)）
-- [ ] 建立短临界区内的事实/状态 mutation 入口，DB/网络等待留在锁外；running 无公开事件也有必需状态变更。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
-- [ ] 明确 mutable created_at/updated_at 与 immutable created_at，API occurred_at 同源；真实业务时间保留。（[设计 §3.3](m3_transcript_history_implementation_design.md#33-时间)）
+- [x] 将旧整体 AnalysisSession/SessionCoordinator/Workflow 的职责迁为 run，迁移关联 ID 与调用方。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
+- [x] 新增 AgentSessionRuntime 与 SessionSummary，明确 query_parser/null COMID 和 waterbody/有效 COMID。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[API §3.2](m3_transcript_history_api.md#32-runsummary-与-sessionsummary)）
+- [x] run 六态、session 五态、不可变终态及取消优先竞争沿用统一状态机，禁止第二套状态推演逻辑。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
+- [x] 实现准备执行时创建 session；parser 每 run 一次、水体每 run/COMID 一次，不为等待/排除节点创建上下文。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)）
+- [x] 原请求/创建/BFS 等归 run，Agent 消息归具体 session；operation_id 对一次调用稳定。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §4.3](m3_transcript_history_implementation_design.md#43-transcript_items)）
+- [x] 统一分配原 item_id、run transcript_sequence 和 created_at；生成开始时可先分配草稿身份。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §3.3](m3_transcript_history_implementation_design.md#33-时间)）
+- [x] 建立短临界区内的事实/状态 mutation 入口，DB/网络等待留在锁外；running 无公开事件也有必需状态变更。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
+- [x] 明确 mutable created_at/updated_at 与 immutable created_at，API occurred_at 同源；真实业务时间保留。（[设计 §3.3](m3_transcript_history_implementation_design.md#33-时间)）
 
 ### Tests
 
-- [ ] 两层状态转换、准备失败、取消、终态不可改及已完成子 session 保持完成。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
-- [ ] 一个 run 多 session 的上下文隔离、所有上游 gate 后只创建/执行一次。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
-- [ ] run-root/session 归属、UUID/COMID、UTC、并发序号与过滤后的缺口。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)）
-- [ ] 读取/重试/确认不刷新时间；生成完成不重新分配 ID/序号/时间。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §3.3](m3_transcript_history_implementation_design.md#33-时间)）
-- [ ] 新 factory 与 fakes 的导入/依赖方向检查。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
+- [x] 两层状态转换、准备失败、取消、终态不可改及已完成子 session 保持完成。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
+- [x] 一个 run 多 session 的上下文隔离、所有上游 gate 后只创建/执行一次。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
+- [x] run-root/session 归属、UUID/COMID、UTC、并发序号与过滤后的缺口。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)）
+- [x] 读取/重试/确认不刷新时间；生成完成不重新分配 ID/序号/时间。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §3.3](m3_transcript_history_implementation_design.md#33-时间)）
+- [x] 新 factory 与 fakes 的导入/依赖方向检查。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)）
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/domain backend/tests/application backend/tests/architecture -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] `python -m pytest backend/tests/domain backend/tests/application backend/tests/architecture -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：模型和统一状态入口可独立测试，M1 领域不变；本阶段不宣称具备数据库持久化。
+
+#### Milestone 1 完成记录（2026-09-13）
+
+本阶段在 `codex/m3-milestone-0` 上完成。旧整体 analysis session 的应用包、HTTP schema/路由、运行时、测试、smoke、CI 命令和当前 README 已整体迁为 run 命名，旧 `/api/analysis/sessions` 未保留兼容别名；M1/M2 历史文档保持原事实，不回写为 M3 已完成协议。`AnalysisRunSnapshot`/`RunCoordinator`/`RunRuntime` 保留原整体 workflow ownership，并新增独立的 `SessionSummary` 与 `AgentSessionRuntime`。
+
+统一状态入口覆盖 run 六态、Agent session 五态、pending 准备失败、终态不可改、取消优先和 run 取消时保留已完成/失败子 session。Agent session 只在准备执行边界创建；query parser 按 run、水体按 run + COMID 去重，上游 gate 测试确认 gate 全部打开前不创建，打开后并发调用只创建一次且只领取一次执行。原请求、run lifecycle 与 BFS 使用 run scope，Agent lifecycle/消息使用 session scope；统一入口在短 live 临界区内分配稳定 `item_id`、run 级 `transcript_sequence`、`created_at`、operation/session 身份和状态 mutation，日志在解锁后执行，未引入 DB 或网络等待。
+
+时间继续只由 `ClockPort` 生成并规范为 UTC。run/session 可变快照只在真实状态变化时更新 `updated_at`；item 身份只有原 `created_at`，生命周期 `occurred_at` 与原变化同源。读取、过滤、重复准备、确认式读取和终态拒绝均不重新取时间或重分配身份；session 筛选保留 run 序号缺口。`record_id_factory` 已从 `create_app` 传入 coordinator，测试 fake 与应用/API/Ports 的依赖门禁保持通过。
+
+本机锁定 uv 环境（macOS arm64、Python 3.12.14）实际执行：
+
+- `python -m pytest backend/tests/domain backend/tests/application backend/tests/architecture -q`：374 passed。
+- `python -m pytest backend/tests -q`：625 passed。
+- `git diff --check`：通过。
+
+阶段出口已满足：模型和统一状态入口可独立测试，`backend/app/domain` 未改动。本阶段没有新增数据库依赖、schema、adapter 或持久化成功声明；这些内容继续由 Milestone 2 及后续阶段承接。
 
 ## Milestone 2：PostgreSQL、四表 schema 与可复现环境
 

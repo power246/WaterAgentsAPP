@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
-RUNTIME = "app.application.analysis_sessions.runtime"
+RUNTIME = "app.application.analysis_runs.runtime"
 
 
 def in_package(name: str, package: str) -> bool:
@@ -38,7 +38,7 @@ def dependency_violations(app_root: Path) -> list[str]:
                         or any(in_package(name, item) for item in packages)
                     )
                     if in_package(name, RUNTIME):
-                        allowed = relative.as_posix() == "application/analysis_sessions/coordinator.py"
+                        allowed = relative.as_posix() == "application/analysis_runs/coordinator.py"
                     if not allowed:
                         violations.append(f"{relative}:{node.lineno}: forbidden import {name}")
                 if layer != "api":
@@ -70,16 +70,16 @@ def test_api_and_application_respect_dependency_and_runtime_boundaries() -> None
     ("application/service.py", "from fastapi import Request as RequestAlias", False),
     ("application/service.py", "import starlette.responses as responses", False),
     ("application/service.py", "from app.infrastructure.config import AppSettings", False),
-    ("application/service.py", "from app.api.schemas import analysis_sessions", False),
-    ("application/analysis_sessions/workflow.py", "from .runtime import SessionRuntime", False),
-    ("api/http/route.py", "from ...application.analysis_sessions import runtime as state", False),
+    ("application/service.py", "from app.api.schemas import analysis_runs", False),
+    ("application/analysis_runs/workflow.py", "from .runtime import RunRuntime", False),
+    ("api/http/route.py", "from ...application.analysis_runs import runtime as state", False),
     ("api/http/route.py", "from app.infrastructure.runtime.system_clock import SystemClock", False),
-    ("api/http/route.py", "session = coordinator._sessions[session_id]", False),
-    ("api/http/route.py", "getattr(coordinator, '_lookup')(session_id)", False),
-    ("api/http/route.py", "self._coordinator._sessions.clear()", False),
+    ("api/http/route.py", "run = coordinator._runs[run_id]", False),
+    ("api/http/route.py", "getattr(coordinator, '_lookup')(run_id)", False),
+    ("api/http/route.py", "self._coordinator._runs.clear()", False),
     ("application/service.py", "from app.ports.clock import ClockPort\nfrom pydantic import TypeAdapter", True),
-    ("api/http/route.py", "from ...application.analysis_sessions.models import LifecycleEvent\nself._frames.close()", True),
-    ("api/http/route.py", "getattr(request.state, 'session_id', None)\nerror.__traceback__", True),
+    ("api/http/route.py", "from ...application.analysis_runs.models import LifecycleEvent\nself._frames.close()", True),
+    ("api/http/route.py", "getattr(request.state, 'run_id', None)\nerror.__traceback__", True),
 ])
 def test_dependency_gate_detects_aliases_relative_imports_and_private_access(tmp_path, path, source, allowed):
     app_root = tmp_path / "app"

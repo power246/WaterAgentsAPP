@@ -6,12 +6,12 @@ from starlette.responses import Response, StreamingResponse
 from starlette.types import Receive, Scope, Send
 
 from app.api.sse.encoder import KEEPALIVE_FRAME, encode_event
-from app.application.analysis_sessions.coordinator import SessionCoordinator
-from app.application.analysis_sessions.models import LifecycleEvent
+from app.application.analysis_runs.coordinator import RunCoordinator
+from app.application.analysis_runs.models import RunLifecycleEvent
 
 
 class _EventStreamingResponse(StreamingResponse):
-    def __init__(self, events: AsyncGenerator[LifecycleEvent | None, None]) -> None:
+    def __init__(self, events: AsyncGenerator[RunLifecycleEvent | None, None]) -> None:
         self._events = events
         self._frames = self._encode_frames()
         super().__init__(
@@ -28,12 +28,12 @@ class _EventStreamingResponse(StreamingResponse):
 
 
 async def create_event_response(
-    coordinator: SessionCoordinator,
-    session_id: UUID | str,
+    coordinator: RunCoordinator,
+    run_id: UUID | str,
     *,
     last_event_id: str | None = None,
 ) -> Response:
-    events = await coordinator.subscribe(session_id, after_sequence=last_event_id)
+    events = await coordinator.subscribe(run_id, after_sequence=last_event_id)
     if events is None:
         return Response(status_code=204)
     return _EventStreamingResponse(events)

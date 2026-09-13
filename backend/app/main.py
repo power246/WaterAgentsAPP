@@ -6,13 +6,13 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI
 
-from app.api.http.analysis_sessions import REQUEST_ID_HEADERS, error_responses
-from app.api.http.analysis_sessions import router as analysis_sessions_router
+from app.api.http.analysis_runs import REQUEST_ID_HEADERS, error_responses
+from app.api.http.analysis_runs import router as analysis_runs_router
 from app.api.http.errors import register_error_handlers
 from app.api.http.health import router as health_router
 from app.api.http.request_context import RequestContextMiddleware
-from app.application.analysis_sessions.coordinator import SessionCoordinator
-from app.application.analysis_sessions.workflow import AnalysisWorkflow
+from app.application.analysis_runs.coordinator import RunCoordinator
+from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.infrastructure.config import AppSettings
 from app.infrastructure.observability.json_logging import configure_logging
 from app.infrastructure.runtime.system_clock import SystemClock
@@ -25,6 +25,7 @@ def create_app(
     clock: ClockPort | None = None,
     workflow: AnalysisWorkflow | None = None,
     id_factory: Callable[[], UUID] = uuid4,
+    record_id_factory: Callable[[], UUID] = uuid4,
     shutdown_grace_period: float = 1.0,
     keepalive_interval: float = 15.0,
 ) -> FastAPI:
@@ -34,14 +35,15 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         configure_logging(resolved_settings.log_level)
-        coordinator = SessionCoordinator(
+        coordinator = RunCoordinator(
             resolved_clock,
             workflow=workflow,
             id_factory=id_factory,
+            record_id_factory=record_id_factory,
             shutdown_grace_period=shutdown_grace_period,
             keepalive_interval=keepalive_interval,
         )
-        application.state.session_coordinator = coordinator
+        application.state.run_coordinator = coordinator
         try:
             yield
         finally:
@@ -58,7 +60,7 @@ def create_app(
     application.include_router(
         health_router, responses={**error_responses(405, 500), 200: {"headers": REQUEST_ID_HEADERS}}
     )
-    application.include_router(analysis_sessions_router)
+    application.include_router(analysis_runs_router)
     return application
 
 

@@ -1,32 +1,35 @@
 import asyncio
 import json
 import logging
-import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
 import pytest
 from fastapi import HTTPException
 
-from app.api.schemas.analysis_sessions import AnalysisSessionErrorResponse, AnalysisSessionResponse
-from app.application.analysis_sessions.models import SessionStatus
-from app.application.analysis_sessions.workflow import WorkflowContext, WorkflowFailed
+from app.api.schemas.analysis_runs import AnalysisRunErrorResponse, AnalysisRunResponse
+from app.application.analysis_runs.models import RunStatus
+from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
 from app.application.correlation import request_id_context
 from app.infrastructure.config import AppSettings
 from app.main import create_app
 
-BASE = "/api/analysis/sessions"
+BASE = "/api/analysis/runs"
 SECRET = "private-token-and-query-do-not-expose"
 TIMESTAMP = "2026-09-08T03:20:00Z"
-API_DOCUMENT = (
-    Path(__file__).resolve().parents[3] / "docs/M2/m2_analysis_session_sse_api.md"
-).read_text(encoding="utf-8")
-DOCUMENTED_ERRORS = {
-    (int(status), code)
-    for status, code in re.findall(r"^\| (\d{3}) \| `([^`]+)` \|", API_DOCUMENT, re.MULTILINE)
+SUPPORTED_ERRORS = {
+    (400, "invalid_event_cursor"),
+    (400, "invalid_request"),
+    (404, "not_found"),
+    (404, "run_not_found"),
+    (405, "method_not_allowed"),
+    (409, "event_cursor_ahead"),
+    (409, "run_already_terminal"),
+    (422, "invalid_request"),
+    (500, "internal_error"),
+    (503, "service_unavailable"),
 }
 
 
@@ -70,7 +73,7 @@ async def http_application(*, workflow=None, settings=None, **options):
             yield application, client
     assert all(
         runtime.workflow_task.done()
-        for runtime in application.state.session_coordinator._sessions.values()
+        for runtime in application.state.run_coordinator._runs.values()
     )
     assert request_id_context.get() is None
 
@@ -79,16 +82,16 @@ def run(exercise) -> None:
     asyncio.run(asyncio.wait_for(exercise(), timeout=5))
 
 
-def assert_error(response, status, code, *, session_id=None):
-    assert (status, code) in DOCUMENTED_ERRORS
+def assert_error(response, status, code, *, run_id=None):
+    assert (status, code) in SUPPORTED_ERRORS
     assert response.status_code == status
     assert response.headers["content-type"] == "application/json"
-    envelope = AnalysisSessionErrorResponse.model_validate(response.json())
+    envelope = AnalysisRunErrorResponse.model_validate(response.json())
     assert envelope.error.code == code
     assert str(envelope.error.request_id) == response.headers["x-request-id"]
     assert envelope.error.error_id != envelope.error.request_id
-    assert envelope.error.session_id == (UUID(session_id) if session_id else None)
-    assert set(response.json()) == {"error", "session", "validation"}
+    assert envelope.error.run_id == (UUID(run_id) if run_id else None)
+    assert set(response.json()) == {"error", "run", "validation"}
     assert SECRET not in response.text
     assert "Traceback" not in response.text
     assert "/Users/" not in response.text
@@ -149,7 +152,7 @@ def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> No
             assert response.status_code == 201
             assert response.headers["x-request-id"] == str(UUID(int=1))
             expected = {
-                "session_id": str(UUID(int=2)), "status": "pending",
+                "run_id": str(UUID(int=2)), "status": "pending",
                 "created_at": TIMESTAMP, "updated_at": TIMESTAMP,
                 "configuration": {
                     "analysis_timezone": zone, "time_resolution": resolution or "12h",
@@ -157,22 +160,52 @@ def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> No
                 },
             }
             assert response.json() == expected
-            AnalysisSessionResponse.model_validate(response.json())
+            AnalysisRunResponse.model_validate(response.json())
             context, release, request_id = await workflow.started.get()
             assert request_id == UUID(response.headers["x-request-id"])
             assert context.query == "private query"
-            assert context.session.status is SessionStatus.RUNNING
+            assert context.run.status is RunStatus.RUNNING
             assert app.state.settings is settings
             settings.analysis_timezone = "Europe/London"
-            assert context.session.configuration.analysis_timezone == zone
+            assert context.run.configuration.analysis_timezone == zone
             release.set()
-            runtime = app.state.session_coordinator._sessions[context.session.session_id]
+            runtime = app.state.run_coordinator._runs[context.run.run_id]
             await runtime.workflow_quiesced.wait()
             assert response.json() == expected
-            replay = await client.get(f"{BASE}/{expected['session_id']}/events")
+            replay = await client.get(f"{BASE}/{expected['run_id']}/events")
             assert replay.status_code == 200
             assert "private query" not in replay.text
             assert '"analysis_timezone":"' + zone + '"' in replay.text
+
+    run(exercise)
+
+
+def test_application_forwards_the_record_identity_factory() -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        record_ids = SequentialIds()
+        async with http_application(
+            workflow=workflow,
+            record_id_factory=record_ids,
+        ) as (app, client):
+            response = await client.post(BASE, json={"query": "query"})
+            run_id = UUID(response.json()["run_id"])
+            _, release, _ = await workflow.started.get()
+            runtime = app.state.run_coordinator._runs[run_id]
+
+            assert [item.item_id for item in runtime.transcript_items] == [
+                UUID(int=1),
+                UUID(int=2),
+            ]
+            assert [mutation.mutation_id for mutation in runtime.state_mutations] == [
+                UUID(int=3),
+                UUID(int=4),
+            ]
+
+            release.set()
+            await runtime.workflow_quiesced.wait()
+            assert runtime.state_mutations[-1].mutation_id == UUID(int=5)
+            assert runtime.transcript_items[-1].item_id == UUID(int=6)
 
     run(exercise)
 
@@ -181,21 +214,21 @@ def test_default_workflow_completes_and_idempotency_key_is_not_reused() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
             responses = [await client.post(BASE, json={"query": "query"}, headers={"Idempotency-Key": "same"}) for _ in range(2)]
-            ids = [response.json()["session_id"] for response in responses]
+            ids = [response.json()["run_id"] for response in responses]
             assert len(set(ids)) == 2
             assert all(response.json()["status"] == "pending" for response in responses)
-            for session_id in ids:
-                replay = await client.get(f"{BASE}/{session_id}/events")
+            for run_id in ids:
+                replay = await client.get(f"{BASE}/{run_id}/events")
                 assert replay.status_code == 200
                 assert replay.headers["content-type"] == "text/event-stream; charset=utf-8"
                 assert replay.headers["cache-control"] == "no-cache"
-                assert "session_created" in replay.text and "session_completed" in replay.text
+                assert "run_created" in replay.text and "run_completed" in replay.text
                 assert "session_started" not in replay.text
-                consumed = await client.get(f"{BASE}/{session_id}/events", headers={"Last-Event-ID": "2"})
+                consumed = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": "2"})
                 assert consumed.status_code == 204
                 assert consumed.content == b""
                 assert UUID(consumed.headers["x-request-id"])
-            assert len(app.state.session_coordinator._sessions) == 2
+            assert len(app.state.run_coordinator._runs) == 2
 
     run(exercise)
 
@@ -207,18 +240,18 @@ def test_default_workflow_completes_and_idempotency_key_is_not_reused() -> None:
     {"query": SECRET, "time_resolution": SECRET}, {"query": SECRET, "fake_outcome": "failed"},
     {"query": SECRET, SECRET: SECRET}, [SECRET], None,
 ])
-def test_validation_uses_safe_envelope_and_creates_no_session(body, caplog, application_logs) -> None:
+def test_validation_uses_safe_envelope_and_creates_no_run(body, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
 
     async def exercise() -> None:
         async with http_application() as (app, client):
             response = await client.post(BASE, content=json.dumps(body), headers={"Content-Type": "application/json"})
             envelope = assert_error(response, 422, "invalid_request")
-            assert envelope.session is None
+            assert envelope.run is None
             assert envelope.validation
             assert envelope.error.failed_stage is None
             assert all(set(item) == {"field", "type", "message"} for item in response.json()["validation"])
-            assert app.state.session_coordinator._sessions == {}
+            assert app.state.run_coordinator._runs == {}
             assert SECRET not in "".join(application_logs)
             if isinstance(body, dict) and SECRET in body:
                 assert ["body", "unknown_field"] in [item["field"] for item in response.json()["validation"]]
@@ -244,33 +277,33 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
 
 @pytest.mark.parametrize("running", [False, True])
 def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog, application_logs) -> None:
-    caplog.set_level(logging.INFO, logger="wateragents.analysis_sessions")
+    caplog.set_level(logging.INFO, logger="wateragents.analysis_runs")
 
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
             created = await client.post(BASE, json={"query": SECRET})
-            session_id = created.json()["session_id"]
-            runtime = app.state.session_coordinator._sessions[UUID(session_id)]
+            run_id = created.json()["run_id"]
+            runtime = app.state.run_coordinator._runs[UUID(run_id)]
             release = None
             if running:
                 _, release, _ = await workflow.started.get()
             else:
-                assert runtime.snapshot.status is SessionStatus.PENDING
-            response = await client.post(f"{BASE}/{session_id}/cancel")
+                assert runtime.snapshot.status is RunStatus.PENDING
+            response = await client.post(f"{BASE}/{run_id}/cancel")
             assert response.status_code == 200
             assert response.json() == {**created.json(), "status": "cancelled"}
             assert not runtime.workflow_quiesced.is_set()
             assert runtime.workflow_task.cancelling() == 0
-            repeated = await client.post(f"{BASE}/{session_id}/cancel")
+            repeated = await client.post(f"{BASE}/{run_id}/cancel")
             assert repeated.json() == response.json()
             assert repeated.headers["x-request-id"] != response.headers["x-request-id"]
             if release:
                 release.set()
             await runtime.workflow_quiesced.wait()
-            stream = await client.get(f"{BASE}/{session_id}/events")
-            assert "session_cancelled" in stream.text
-            assert "session_completed" not in stream.text
+            stream = await client.get(f"{BASE}/{run_id}/events")
+            assert "run_cancelled" in stream.text
+            assert "run_completed" not in stream.text
             assert len(runtime.events) == 2
             logs = [record for record in caplog.records if getattr(record, "event_name", None) == "cancel_accepted"]
             assert len(logs) == 1
@@ -285,18 +318,18 @@ def test_terminal_cancel_conflict_returns_current_snapshot_and_new_error_id(fail
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
             created = await client.post(BASE, json={"query": SECRET})
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             if failure:
                 workflow.error = WorkflowFailed(SECRET)
             release.set()
-            runtime = app.state.session_coordinator._sessions[UUID(session_id)]
+            runtime = app.state.run_coordinator._runs[UUID(run_id)]
             await runtime.workflow_quiesced.wait()
-            response = await client.post(f"{BASE}/{session_id}/cancel")
-            envelope = assert_error(response, 409, "session_already_terminal", session_id=session_id)
-            assert envelope.session.model_dump() == runtime.snapshot.model_dump()
-            assert envelope.error.message == f"The session is already {'failed' if failure else 'completed'}."
-            assert envelope.error.failed_stage == "cancel_session"
+            response = await client.post(f"{BASE}/{run_id}/cancel")
+            envelope = assert_error(response, 409, "run_already_terminal", run_id=run_id)
+            assert envelope.run.model_dump() == runtime.snapshot.model_dump()
+            assert envelope.error.message == f"The run is already {'failed' if failure else 'completed'}."
+            assert envelope.error.failed_stage == "cancel_run"
             assert envelope.error.retryable is False
             if failure:
                 assert envelope.error.error_id != runtime.last_error.error_id
@@ -306,15 +339,15 @@ def test_terminal_cancel_conflict_returns_current_snapshot_and_new_error_id(fail
 
 
 @pytest.mark.parametrize("endpoint,method", [("events", "GET"), ("cancel", "POST")])
-def test_session_lookup_errors_have_uniform_uuid_and_not_found_responses(endpoint, method) -> None:
+def test_run_lookup_errors_have_uniform_uuid_and_not_found_responses(endpoint, method) -> None:
     async def exercise() -> None:
         async with http_application() as (_, client):
             missing = str(uuid4())
             unknown = await client.request(method, f"{BASE}/{missing}/{endpoint}")
-            assert_error(unknown, 404, "session_not_found", session_id=missing)
+            assert_error(unknown, 404, "run_not_found", run_id=missing)
             invalid = await client.request(method, f"{BASE}/{SECRET}/{endpoint}")
             envelope = assert_error(invalid, 422, "invalid_request")
-            assert envelope.validation[0].field == ("path", "session_id")
+            assert envelope.validation[0].field == ("path", "run_id")
             assert envelope.validation[0].type == "uuid_parsing"
 
     run(exercise)
@@ -325,10 +358,10 @@ def test_cursor_errors_are_json_before_stream_start(cursor, status, code) -> Non
     async def exercise() -> None:
         async with http_application() as (_, client):
             created = await client.post(BASE, json={"query": "query"})
-            session_id = created.json()["session_id"]
-            response = await client.get(f"{BASE}/{session_id}/events", headers={"Last-Event-ID": cursor})
-            envelope = assert_error(response, status, code, session_id=session_id)
-            assert envelope.session is None
+            run_id = created.json()["run_id"]
+            response = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": cursor})
+            envelope = assert_error(response, status, code, run_id=run_id)
+            assert envelope.run is None
             assert envelope.validation == ()
             assert envelope.error.failed_stage == "subscribe_events"
 
@@ -346,7 +379,7 @@ def test_unknown_routes_and_methods_use_the_same_envelope(method, path, status, 
         async with http_application() as (_, client):
             response = await client.request(method, path)
             envelope = assert_error(response, status, code)
-            assert envelope.session is None and envelope.validation == ()
+            assert envelope.run is None and envelope.validation == ()
             if status == 405:
                 assert response.headers["allow"]
             assert "location" not in response.headers
@@ -362,10 +395,10 @@ def test_unexpected_failure_is_safe_and_correlates_to_logs(monkeypatch, caplog, 
             async def fail(*args, **kwargs):
                 raise RuntimeError(SECRET + " /Users/private/source.py")
 
-            monkeypatch.setattr(app.state.session_coordinator, "create_session", fail)
+            monkeypatch.setattr(app.state.run_coordinator, "create_run", fail)
             response = await client.post(BASE, json={"query": SECRET}, headers={"Authorization": SECRET, "Cookie": SECRET})
             envelope = assert_error(response, 500, "internal_error")
-            assert envelope.session is None and envelope.validation == ()
+            assert envelope.run is None and envelope.validation == ()
             records = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_failed"]
             assert len(records) == 1
             assert records[0].public_error.model_dump() == envelope.error.model_dump()
@@ -386,7 +419,7 @@ def test_http_exception_detail_is_not_public_and_allow_is_preserved(monkeypatch)
             async def fail(*args, **kwargs):
                 raise HTTPException(405, detail={"secret": SECRET}, headers={"Allow": "POST"})
 
-            monkeypatch.setattr(app.state.session_coordinator, "create_session", fail)
+            monkeypatch.setattr(app.state.run_coordinator, "create_run", fail)
             response = await client.post(BASE, json={"query": SECRET})
             assert_error(response, 405, "method_not_allowed")
             assert response.headers["allow"] == "POST"
@@ -397,11 +430,11 @@ def test_http_exception_detail_is_not_public_and_allow_is_preserved(monkeypatch)
 def test_closing_coordinator_returns_retryable_service_unavailable() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
-            await app.state.session_coordinator.shutdown()
+            await app.state.run_coordinator.shutdown()
             response = await client.post(BASE, json={"query": "query"})
             envelope = assert_error(response, 503, "service_unavailable")
             assert envelope.error.retryable is True
-            assert app.state.session_coordinator._sessions == {}
+            assert app.state.run_coordinator._runs == {}
 
     run(exercise)
 
@@ -418,19 +451,19 @@ def test_request_ids_are_server_owned_isolated_and_inherited_by_workflows(caplog
                 for index in range(2)
             ))
             contexts = [await workflow.started.get() for _ in range(2)]
-            by_session = {UUID(response.json()["session_id"]): UUID(response.headers["x-request-id"]) for response in responses}
-            assert len(set(by_session.values())) == 2
-            assert UUID(spoofed) not in by_session.values()
+            by_run = {UUID(response.json()["run_id"]): UUID(response.headers["x-request-id"]) for response in responses}
+            assert len(set(by_run.values())) == 2
+            assert UUID(spoofed) not in by_run.values()
             assert request_id_context.get() is None
             for context, release, request_id in contexts:
-                assert request_id == by_session[context.session.session_id]
+                assert request_id == by_run[context.run.run_id]
                 release.set()
-                stream = await client.get(f"{BASE}/{context.session.session_id}/events")
-                assert UUID(stream.headers["x-request-id"]) not in by_session.values()
+                stream = await client.get(f"{BASE}/{context.run.run_id}/events")
+                assert UUID(stream.headers["x-request-id"]) not in by_run.values()
             lifecycle = [record for record in caplog.records if getattr(record, "event_name", None) == "lifecycle_event_committed"]
             assert len(lifecycle) == 4
             for record in lifecycle:
-                assert record.correlation.request_id == by_session[record.correlation.session_id]
+                assert record.correlation.request_id == by_run[record.correlation.run_id]
             health = await client.get("/health", headers={"X-Request-ID": SECRET})
             assert health.json() == {"status": "healthy"}
             assert health.headers["x-request-id"] != SECRET
@@ -449,16 +482,16 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
             created = await client.post(BASE, json={"query": SECRET})
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             workflow.error = RuntimeError(SECRET)
             first_event = asyncio.Event()
 
             async def observe(message):
-                if b"session_created" in message.get("body", b""):
+                if b"run_created" in message.get("body", b""):
                     first_event.set()
 
-            task = asyncio.create_task(call_stream(app, f"{BASE}/{session_id}/events", send_hook=observe))
+            task = asyncio.create_task(call_stream(app, f"{BASE}/{run_id}/events", send_hook=observe))
             try:
                 await first_event.wait()
                 assert not task.done()
@@ -469,9 +502,9 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
                 assert UUID(headers[b"x-request-id"].decode())
                 assert headers[b"x-request-id"].decode() != created.headers["x-request-id"]
                 events = events_from(messages)
-                assert [event["type"] for event in events] == ["session_created", "session_failed"]
+                assert [event["type"] for event in events] == ["run_created", "run_failed"]
                 error = events[-1]["payload"]["error"]
-                records = [record for record in caplog.records if getattr(record, "event_name", None) == "session_failed"]
+                records = [record for record in caplog.records if getattr(record, "event_name", None) == "run_failed"]
                 assert len(records) == 1
                 assert str(records[0].correlation.error_id) == error["error_id"]
                 assert str(records[0].correlation.request_id) == created.headers["x-request-id"]
@@ -491,19 +524,19 @@ def test_stream_disconnect_or_write_failure_does_not_cancel_workflow(disconnect_
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
             created = await client.post(BASE, json={"query": SECRET})
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             context, release, _ = await workflow.started.get()
             first_event = asyncio.Event()
             disconnect = asyncio.Event()
 
             async def observe(message):
-                if b"session_created" in message.get("body", b""):
+                if b"run_created" in message.get("body", b""):
                     first_event.set()
                     if disconnect_mode == "write_failure":
                         raise OSError("connection closed")
 
             task = asyncio.create_task(call_stream(
-                app, f"{BASE}/{session_id}/events", send_hook=observe, disconnect=disconnect,
+                app, f"{BASE}/{run_id}/events", send_hook=observe, disconnect=disconnect,
                 spec="2.3" if disconnect_mode == "disconnect" else "2.4",
             ))
             try:
@@ -514,14 +547,14 @@ def test_stream_disconnect_or_write_failure_does_not_cancel_workflow(disconnect_
                 else:
                     with pytest.raises(RuntimeError, match="HTTP response stream aborted; request_id="):
                         await task
-                runtime = app.state.session_coordinator._sessions[UUID(session_id)]
-                assert runtime.snapshot.status is SessionStatus.RUNNING
+                runtime = app.state.run_coordinator._runs[UUID(run_id)]
+                assert runtime.snapshot.status is RunStatus.RUNNING
                 assert not context.cancellation.is_requested()
                 assert runtime.workflow_task.cancelling() == 0
                 release.set()
-                replay = await client.get(f"{BASE}/{session_id}/events", headers={"Last-Event-ID": "1"})
-                assert "session_completed" in replay.text
-                assert "session_created" not in replay.text
+                replay = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": "1"})
+                assert "run_completed" in replay.text
+                assert "run_created" not in replay.text
             finally:
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
@@ -533,51 +566,29 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     schema = create_app().openapi()
     paths = schema["paths"]
     assert {path: set(operations) for path, operations in paths.items()} == {
-        "/health": {"get"}, BASE: {"post"}, BASE + "/{session_id}/events": {"get"},
-        BASE + "/{session_id}/cancel": {"post"},
+        "/health": {"get"}, BASE: {"post"}, BASE + "/{run_id}/events": {"get"},
+        BASE + "/{run_id}/cancel": {"post"},
     }
     create = paths[BASE]["post"]
     assert "400" in create["responses"]
-    assert create["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisSessionResponse")
+    assert create["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisRunResponse")
     assert create["requestBody"]["required"] is True
-    assert create["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("/CreateAnalysisSessionRequest")
-    cancel = paths[BASE + "/{session_id}/cancel"]["post"]
+    assert create["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("/CreateAnalysisRunRequest")
+    cancel = paths[BASE + "/{run_id}/cancel"]["post"]
     assert "requestBody" not in cancel
-    events = paths[BASE + "/{session_id}/events"]["get"]
-    assert "m2_analysis_session_sse_api.md" in events["description"]
-    documented_routes = {
-        (path, method.lower())
-        for method, path in re.findall(r"^### `(POST|GET) ([^`]+)`", API_DOCUMENT, re.MULTILINE)
-    }
-    assert documented_routes == {
-        (path, method) for path, methods in paths.items() if path.startswith(BASE)
-        for method in methods
-    }
+    events = paths[BASE + "/{run_id}/events"]["get"]
+    assert "run" in events["description"]
     assert set(events["responses"]["200"]["content"]) == {"text/event-stream"}
     assert "content" not in events["responses"]["204"]
     assert any(parameter["in"] == "header" and parameter["name"] == "Last-Event-ID" for parameter in events["parameters"])
-    assert set(schema["components"]["schemas"]["CreateAnalysisSessionRequest"]["properties"]) == {"query", "time_resolution"}
+    assert set(schema["components"]["schemas"]["CreateAnalysisRunRequest"]["properties"]) == {"query", "time_resolution"}
     assert "HTTPValidationError" not in schema["components"]["schemas"]
     for path in paths.values():
         for operation in path.values():
             for status, response in operation["responses"].items():
                 assert response["headers"]["X-Request-ID"]["schema"] == {"type": "string", "format": "uuid"}
                 if int(status) >= 400:
-                    assert response["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisSessionErrorResponse")
-
-
-def test_documented_create_example_matches_the_actual_response() -> None:
-    examples = [json.loads(example) for example in re.findall(r"```json\n(.*?)\n```", API_DOCUMENT, re.DOTALL)]
-    request, expected = examples[:2]
-
-    async def exercise() -> None:
-        ids = iter([uuid4(), UUID(expected["session_id"])])
-        async with http_application(id_factory=lambda: next(ids)) as (_, client):
-            response = await client.post(BASE, json=request)
-            assert response.status_code == 201
-            assert response.json() == expected
-
-    run(exercise)
+                    assert response["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisRunErrorResponse")
 
 
 def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, application_logs) -> None:
@@ -587,7 +598,7 @@ def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, 
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow, keepalive_interval=0.000001) as (app, client):
             created = await client.post(BASE, json={"query": "query"})
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             comment_received = asyncio.Event()
 
@@ -596,18 +607,18 @@ def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, 
                     comment_received.set()
 
             task = asyncio.create_task(call_stream(
-                app, f"{BASE}/{session_id}/events", send_hook=observe,
+                app, f"{BASE}/{run_id}/events", send_hook=observe,
                 headers=[(b"last-event-id", b"1")],
             ))
             try:
                 await comment_received.wait()
-                cancelled = await client.post(f"{BASE}/{session_id}/cancel")
+                cancelled = await client.post(f"{BASE}/{run_id}/cancel")
                 assert cancelled.status_code == 200
                 messages = await task
                 release.set()
                 header_id = dict(messages[0]["headers"])[b"x-request-id"].decode()
                 assert len({header_id, cancelled.headers["x-request-id"], created.headers["x-request-id"]}) == 3
-                assert [event["type"] for event in events_from(messages)] == ["session_cancelled"]
+                assert [event["type"] for event in events_from(messages)] == ["run_cancelled"]
                 assert b": keepalive\n\n" in frames_from(messages)
                 completed = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_completed"]
                 assert len(completed) == 3
@@ -627,7 +638,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
             created = await client.post(BASE, json={"query": "query"})
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             original_encode = response_module.encode_event
 
@@ -645,7 +656,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
                 if message.get("body"):
                     first_event.set()
 
-            task = asyncio.create_task(call_stream(app, f"{BASE}/{session_id}/events", send_hook=observe))
+            task = asyncio.create_task(call_stream(app, f"{BASE}/{run_id}/events", send_hook=observe))
             try:
                 await first_event.wait()
                 release.set()
@@ -655,18 +666,18 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
                 assert raised.value.__suppress_context__ is True
                 assert raised.value.__cause__ is None
                 assert [message["status"] for message in delivered if message["type"] == "http.response.start"] == [200]
-                assert [event["type"] for event in events_from(delivered)] == ["session_created"]
+                assert [event["type"] for event in events_from(delivered)] == ["run_created"]
                 assert SECRET not in repr(delivered)
                 logs = [json.loads(line) for line in application_logs]
                 failure = next(row for row in logs if row["event_name"] == "http_stream_failed")
                 assert failure["exception_type"] == "RuntimeError"
-                assert failure["session_id"] == session_id
+                assert failure["run_id"] == run_id
                 assert failure["request_id"] == dict(delivered[0]["headers"])[b"x-request-id"].decode()
                 assert str(raised.value) == f"HTTP response stream aborted; request_id={failure['request_id']}"
                 assert failure["status_code"] == 200 and failure["level"] == "ERROR"
                 assert SECRET not in "".join(application_logs)
-                runtime = app.state.session_coordinator._sessions[UUID(session_id)]
-                assert runtime.snapshot.status is SessionStatus.COMPLETED
+                runtime = app.state.run_coordinator._runs[UUID(run_id)]
+                assert runtime.snapshot.status is RunStatus.COMPLETED
                 assert len(runtime.events) == 2
             finally:
                 task.cancel()

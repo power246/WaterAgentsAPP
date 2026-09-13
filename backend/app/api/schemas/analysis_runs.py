@@ -2,9 +2,9 @@ from uuid import UUID
 
 from pydantic import Field, StrictInt, StrictStr
 
-from app.application.analysis_sessions.models import (
+from app.application.analysis_runs.models import (
     AnalysisConfigurationSnapshot,
-    AnalysisSessionSnapshot,
+    AnalysisRunSnapshot,
     PublicError,
     StableCode,
 )
@@ -14,7 +14,7 @@ from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION, TimeResolut
 from app.domain.time.time_resolution_source import TimeResolutionSource
 
 
-class CreateAnalysisSessionRequest(DomainModel):
+class CreateAnalysisRunRequest(DomainModel):
     query: NonEmptyString = Field(repr=False)
     time_resolution: TimeResolution = DEFAULT_TIME_RESOLUTION
 
@@ -33,13 +33,13 @@ class CreateAnalysisSessionRequest(DomainModel):
         )
 
 
-class AnalysisSessionResponse(AnalysisSessionSnapshot):
+class AnalysisRunResponse(AnalysisRunSnapshot):
     pass
 
 
 class HttpPublicError(PublicError):
     request_id: UUID
-    session_id: UUID | None = None
+    run_id: UUID | None = None
 
 
 class ValidationViolation(DomainModel):
@@ -48,7 +48,7 @@ class ValidationViolation(DomainModel):
     message: NonEmptyString
 
 
-class AnalysisSessionErrorResponse(DomainModel):
+class AnalysisRunErrorResponse(DomainModel):
     error: HttpPublicError
-    session: AnalysisSessionResponse | None = None
+    run: AnalysisRunResponse | None = None
     validation: tuple[ValidationViolation, ...] = ()

@@ -3,7 +3,7 @@ import asyncio
 import httpx
 import pytest
 
-from scripts.session_sse_smoke import SmokeServer
+from scripts.run_sse_smoke import SmokeServer
 
 
 @pytest.fixture(autouse=True)

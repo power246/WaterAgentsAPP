@@ -15,7 +15,7 @@ def test_ci_runs_install_tests_and_both_smokes_on_all_supported_operating_system
     assert 'python -m pip install -e "./backend[dev]"' in workflow
     assert "python -m pytest backend/tests -q" in workflow
     assert "python backend/scripts/health_smoke.py" in workflow
-    assert "python backend/scripts/session_sse_smoke.py" in workflow
+    assert "python backend/scripts/run_sse_smoke.py" in workflow
     assert "HTTP_PROXY: http://127.0.0.1:1" in workflow
     assert 'NO_PROXY: ""' in workflow
 
@@ -86,8 +86,8 @@ def test_health_smoke_uses_cross_platform_process_and_path_apis() -> None:
     )
 
 
-def test_session_smoke_uses_dynamic_socket_and_cooperative_server_control() -> None:
-    path = SMOKE_SCRIPT_PATH.with_name("session_sse_smoke.py")
+def test_run_smoke_uses_dynamic_socket_and_cooperative_server_control() -> None:
+    path = SMOKE_SCRIPT_PATH.with_name("run_sse_smoke.py")
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source)
     imports = {

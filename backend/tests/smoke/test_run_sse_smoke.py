@@ -6,7 +6,7 @@ import pytest
 
 from app.infrastructure.config import AppSettings
 from app.main import create_app
-from scripts.session_sse_smoke import GatedWorkflow, running_server
+from scripts.run_sse_smoke import GatedWorkflow, running_server
 
 
 @pytest.mark.parametrize("exit_mode", ["normal", "failure", "cancelled"])
@@ -32,7 +32,7 @@ def test_server_cleanup_closes_socket_and_workflow_on_client_exit(
             async with running_server(app) as client:
                 address = str(client.base_url)
                 assert (await client.get("/health")).json() == {"status": "healthy"}
-                response = await client.post("/api/analysis/sessions", json={"query": "cleanup smoke"})
+                response = await client.post("/api/analysis/runs", json={"query": "cleanup smoke"})
                 assert response.status_code == 201
                 await workflow.started.wait()
                 entered.set()

@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from app.application.analysis_sessions.models import CorrelationContext
+from app.application.analysis_runs.models import CorrelationContext
 from app.infrastructure.observability import json_logging
 from app.infrastructure.observability.json_logging import JsonFormatter, JsonLogHandler, configure_logging
 from app.infrastructure.observability.redaction import REDACTED, redact, redact_text

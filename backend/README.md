@@ -64,15 +64,15 @@ From the repository root, the cross-platform smoke command starts the formal `py
 python backend/scripts/health_smoke.py
 ```
 
-The session/SSE smoke runs the real application factory and Uvicorn on dynamic loopback sockets. It verifies completion, gated cancellation, keepalive, reconnection, terminal EOF, and a consumed cursor returning 204:
+The run/SSE smoke runs the real application factory and Uvicorn on dynamic loopback sockets. It verifies completion, gated cancellation, keepalive, reconnection, terminal EOF, and a consumed cursor returning 204:
 
 ```text
-python backend/scripts/session_sse_smoke.py
+python backend/scripts/run_sse_smoke.py
 ```
 
 Expected stdout is `{"completed":"passed","cancelled":"passed"}`. The script controls startup/shutdown without a shell or process signals and cleans up the server before returning. Both smoke clients bypass environment proxies.
 
-The `python -m app` entry point explicitly uses one Uvicorn worker and ignores `WEB_CONCURRENCY`. It disables Uvicorn's default access log and gives active HTTP/SSE connections 2 seconds to finish during shutdown before cancelling their requests and entering application cleanup. Workflow cleanup then uses its separate 1-second cooperative grace period. Preserve the worker, access log, shutdown timeout, and server log level options when invoking Uvicorn directly. Sessions and events stay in memory and are lost on restart. See the [M2 API guide](../docs/M2/m2_analysis_session_sse_api.md) for the session protocol and limits.
+The `python -m app` entry point explicitly uses one Uvicorn worker and ignores `WEB_CONCURRENCY`. It disables Uvicorn's default access log and gives active HTTP/SSE connections 2 seconds to finish during shutdown before cancelling their requests and entering application cleanup. Workflow cleanup then uses its separate 1-second cooperative grace period. Preserve the worker, access log, shutdown timeout, and server log level options when invoking Uvicorn directly. Runs, Agent sessions, and events stay in memory and are lost on restart. The staged M3 status and remaining target protocol are tracked in the [M3 implementation checklist](../docs/M3/m3_implementation_todo.md).
 
 The `Backend M1-M2` GitHub Actions workflow runs editable installation, the complete test suite, and both smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation.
 
@@ -105,7 +105,7 @@ Settings use the `WATERAGENTS_` environment variable prefix:
 
 Timezone names must be valid IANA identifiers. The project includes `tzdata` so this behaves consistently when the operating system does not provide an IANA timezone database.
 
-At application startup, `wateragents.*` logs use single-line JSON on stderr at `WATERAGENTS_LOG_LEVEL`. They include request/session/error IDs, HTTP duration, committed lifecycle events, and redacted exception diagnostics. HTTP access records use route templates; Uvicorn's default access log is disabled so URLs containing credentials or private queries are not logged. Uvicorn server/error and third-party logs retain their own formats. See the [M2 API troubleshooting guide](../docs/M2/m2_analysis_session_sse_api.md#8-排障-runbook) for fields and event names.
+At application startup, `wateragents.*` logs use single-line JSON on stderr at `WATERAGENTS_LOG_LEVEL`. They include request/run/session/error IDs, HTTP duration, committed lifecycle events, and redacted exception diagnostics. HTTP access records use route templates; Uvicorn's default access log is disabled so URLs containing credentials or private queries are not logged. Uvicorn server/error and third-party logs retain their own formats. The [M2 API troubleshooting guide](../docs/M2/m2_analysis_session_sse_api.md#8-排障-runbook) remains the historical M2 reference; use the M3 checklist for the current implementation stage.
 
 `WATERAGENTS_LOG_LEVEL=trace` enables application trace logs; the formal entry point uses `debug` for Uvicorn in that case. Other levels pass through unchanged. When invoking Uvicorn directly, use `debug`, `info`, `warning`, `error`, or `critical` for its server log level; Uvicorn trace logs can expose private ASGI scope data. Application trace remains independently available through `WATERAGENTS_LOG_LEVEL`.
 

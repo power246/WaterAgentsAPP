@@ -7,21 +7,21 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
-from app.api.schemas.analysis_sessions import (
-    AnalysisSessionErrorResponse,
-    AnalysisSessionResponse,
-    CreateAnalysisSessionRequest,
+from app.api.schemas.analysis_runs import (
+    AnalysisRunErrorResponse,
+    AnalysisRunResponse,
+    CreateAnalysisRunRequest,
     HttpPublicError,
     ValidationViolation,
 )
-from app.application.analysis_sessions.coordinator import (
+from app.application.analysis_runs.coordinator import (
     EventCursorAheadError,
     InvalidEventCursorError,
-    InvalidSessionTransitionError,
+    InvalidRunTransitionError,
     ServiceShuttingDownError,
-    SessionNotFoundError,
+    RunNotFoundError,
 )
-from app.application.analysis_sessions.models import CorrelationContext, SessionStatus
+from app.application.analysis_runs.models import CorrelationContext, RunStatus
 from app.domain.common import normalize_utc_datetime
 
 _VALIDATION_MESSAGES = {
@@ -37,13 +37,13 @@ _VALIDATION_MESSAGES = {
     "model_type": "Expected a JSON object.",
     "value_error": "The value is invalid.",
 }
-_SAFE_FIELDS = set(CreateAnalysisSessionRequest.model_fields) | {
-    "body", "path", "header", "session_id", "last-event-id"
+_SAFE_FIELDS = set(CreateAnalysisRunRequest.model_fields) | {
+    "body", "path", "header", "run_id", "last-event-id"
 }
 
 
-def request_session_id(request: Request) -> UUID | None:
-    value = getattr(request.state, "session_id", None) or request.path_params.get("session_id")
+def request_run_id(request: Request) -> UUID | None:
+    value = getattr(request.state, "run_id", None) or request.path_params.get("run_id")
     if isinstance(value, UUID):
         return value
     if isinstance(value, str):
@@ -76,7 +76,7 @@ def log_http(
                 "timestamp": timestamp,
                 "correlation": CorrelationContext(
                     request_id=request.state.request_id,
-                    session_id=request_session_id(request),
+                    run_id=request_run_id(request),
                     error_id=error.error_id if error else None,
                 ),
                 "method": request.method,
@@ -113,30 +113,30 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     status, code, message = 500, "internal_error", "The request could not be completed."
     stage = None
     retryable = False
-    session = None
+    run = None
     validation = ()
     headers = {}
     if isinstance(exception, RequestValidationError):
         status, code, message = 422, "invalid_request", "The request is invalid."
         validation = validation_violations(exception)
-    elif isinstance(exception, SessionNotFoundError):
-        status, code, message = 404, "session_not_found", "The session was not found."
+    elif isinstance(exception, RunNotFoundError):
+        status, code, message = 404, "run_not_found", "The run was not found."
     elif isinstance(exception, InvalidEventCursorError):
         status, code = 400, "invalid_event_cursor"
         message = "The event cursor must be a non-negative decimal integer."
         stage = "subscribe_events"
     elif isinstance(exception, EventCursorAheadError):
         status, code = 409, "event_cursor_ahead"
-        message = "The event cursor is ahead of the latest session event."
+        message = "The event cursor is ahead of the latest run event."
         stage = "subscribe_events"
     elif (
-        isinstance(exception, InvalidSessionTransitionError)
-        and exception.target_status is SessionStatus.CANCELLED
+        isinstance(exception, InvalidRunTransitionError)
+        and exception.target_status is RunStatus.CANCELLED
     ):
-        status, code = 409, "session_already_terminal"
-        message = f"The session is already {exception.session.status.value}."
-        stage = "cancel_session"
-        session = AnalysisSessionResponse.model_validate(exception.session, from_attributes=True)
+        status, code = 409, "run_already_terminal"
+        message = f"The run is already {exception.run.status.value}."
+        stage = "cancel_run"
+        run = AnalysisRunResponse.model_validate(exception.run, from_attributes=True)
     elif isinstance(exception, ServiceShuttingDownError):
         status, code, message = 503, "service_unavailable", "The service is shutting down."
         retryable = True
@@ -153,13 +153,13 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     error = HttpPublicError(
         error_id=request.app.state.id_factory(),
         request_id=request.state.request_id,
-        session_id=request_session_id(request),
+        run_id=request_run_id(request),
         code=code,
         message=message,
         failed_stage=stage,
         retryable=retryable,
     )
-    envelope = AnalysisSessionErrorResponse(error=error, session=session, validation=validation)
+    envelope = AnalysisRunErrorResponse(error=error, run=run, validation=validation)
     headers["X-Request-ID"] = str(error.request_id)
     log_http(
         request, "http_request_failed", status, error=error,
@@ -171,7 +171,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
 
 def register_error_handlers(application: FastAPI) -> None:
     for exception_type in (
-        RequestValidationError, HTTPException, SessionNotFoundError, InvalidEventCursorError,
-        EventCursorAheadError, InvalidSessionTransitionError, ServiceShuttingDownError,
+        RequestValidationError, HTTPException, RunNotFoundError, InvalidEventCursorError,
+        EventCursorAheadError, InvalidRunTransitionError, ServiceShuttingDownError,
     ):
         application.add_exception_handler(exception_type, handle_error)
