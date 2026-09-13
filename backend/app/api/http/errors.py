@@ -9,9 +9,9 @@ from starlette.responses import JSONResponse
 
 from app.api.schemas.analysis_runs import (
     AnalysisRunErrorResponse,
-    AnalysisRunResponse,
     CreateAnalysisRunRequest,
     HttpPublicError,
+    RunStatusResponse,
     ValidationViolation,
 )
 from app.application.analysis_runs.coordinator import (
@@ -31,6 +31,17 @@ from app.application.analysis_runs.creation import (
     InvalidSubmissionEncodingError,
 )
 from app.application.analysis_runs.models import CorrelationContext, RunStatus
+from app.application.transcripts.reader import (
+    InvalidHistoryCursorError,
+    PersistenceRetryUnavailableError,
+    RunAlreadyTerminalError,
+    RunNotLiveError,
+    TranscriptContentUnreadableError,
+    TranscriptDatabaseUnavailableError,
+    TranscriptItemNotFoundError,
+    TranscriptRunNotFoundError,
+    TranscriptSessionNotFoundError,
+)
 from app.domain.common import normalize_utc_datetime
 
 _VALIDATION_MESSAGES = {
@@ -47,12 +58,34 @@ _VALIDATION_MESSAGES = {
     "value_error": "The value is invalid.",
 }
 _SAFE_FIELDS = set(CreateAnalysisRunRequest.model_fields) | {
-    "body", "path", "header", "run_id", "last-event-id"
+    "body", "path", "query", "header", "run_id", "session_id", "item_id",
+    "last-event-id", "view", "limit", "cursor",
 }
+
+
+class UnknownQueryParametersError(ValueError):
+    def __init__(self, fields: tuple[str, ...]) -> None:
+        self.fields = fields
+        super().__init__("The request contains unsupported query parameters.")
 
 
 def request_run_id(request: Request) -> UUID | None:
     value = getattr(request.state, "run_id", None) or request.path_params.get("run_id")
+    if isinstance(value, UUID):
+        return value
+    if isinstance(value, str):
+        try:
+            return UUID(value)
+        except ValueError:
+            pass
+    return None
+
+
+def request_session_id(request: Request) -> UUID | None:
+    value = (
+        getattr(request.state, "session_id", None)
+        or request.path_params.get("session_id")
+    )
     if isinstance(value, UUID):
         return value
     if isinstance(value, str):
@@ -86,6 +119,7 @@ def log_http(
                 "correlation": CorrelationContext(
                     request_id=request.state.request_id,
                     run_id=request_run_id(request),
+                    session_id=request_session_id(request),
                     error_id=error.error_id if error else None,
                 ),
                 "method": request.method,
@@ -124,10 +158,20 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     validation = ()
     headers = {}
     if isinstance(exception, RequestValidationError):
-        status, code, message = 422, "invalid_request", "The request is invalid."
+        status, code, message = 422, "validation_error", "The request is invalid."
         validation = validation_violations(exception)
+    elif isinstance(exception, UnknownQueryParametersError):
+        status, code, message = 422, "validation_error", "The request is invalid."
+        validation = tuple(
+            ValidationViolation(
+                field=("query", field),
+                type="extra_forbidden",
+                message="Unknown fields are not allowed.",
+            )
+            for field in exception.fields
+        )
     elif isinstance(exception, InvalidIdempotencyKeyError):
-        status, code, message = 422, "invalid_request", "The request is invalid."
+        status, code, message = 422, "validation_error", "The request is invalid."
         validation = (
             ValidationViolation(
                 field=("header", "idempotency-key"),
@@ -159,6 +203,24 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         stage, retryable = "create_run", True
     elif isinstance(exception, RunNotFoundError):
         status, code, message = 404, "run_not_found", "The run was not found."
+    elif isinstance(exception, TranscriptRunNotFoundError):
+        status, code, message = 404, "run_not_found", "The run was not found."
+    elif isinstance(exception, TranscriptSessionNotFoundError):
+        status, code, message = 404, "session_not_found", "The Agent session was not found."
+        stage = "transcript_read"
+    elif isinstance(exception, TranscriptItemNotFoundError):
+        status, code, message = 404, "transcript_item_not_found", "The transcript item was not found."
+        stage = "transcript_read"
+    elif isinstance(exception, InvalidHistoryCursorError):
+        status, code, message = 422, "invalid_history_cursor", "The history cursor is invalid."
+        stage = "history_read"
+    elif isinstance(exception, TranscriptContentUnreadableError):
+        status, code = 500, "transcript_content_unreadable"
+        message = "The transcript item's full content could not be read."
+        stage = "transcript_read"
+    elif isinstance(exception, TranscriptDatabaseUnavailableError):
+        status, code, message = 503, "database_unavailable", "The database is unavailable."
+        stage, retryable = "transcript_read", True
     elif isinstance(exception, InvalidEventCursorError):
         status, code = 400, "invalid_event_cursor"
         message = "The event cursor must be a non-negative decimal integer."
@@ -174,7 +236,25 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         status, code = 409, "run_already_terminal"
         message = f"The run is already {exception.run.status.value}."
         stage = "cancel_run"
-        run = AnalysisRunResponse.model_validate(exception.run, from_attributes=True)
+        run = RunStatusResponse(
+            run_id=exception.run.run_id,
+            status=exception.run.status,
+            created_at=exception.run.created_at,
+            updated_at=exception.run.updated_at,
+            persistence=None,
+        )
+    elif isinstance(exception, RunAlreadyTerminalError):
+        status, code = 409, "run_already_terminal"
+        message = f"The run is already {exception.run.status.value}."
+        stage, run = "cancel_run", exception.run
+    elif isinstance(exception, RunNotLiveError):
+        status, code = 409, "run_not_live"
+        message = "The run no longer has a live owner and cannot be cancelled."
+        stage = "cancel_run"
+    elif isinstance(exception, PersistenceRetryUnavailableError):
+        status, code = 409, "persistence_retry_unavailable"
+        message = "Persistence retry is unavailable after live state is released."
+        stage = "persistence_retry"
     elif isinstance(exception, ServiceShuttingDownError):
         status, code, message = 503, "service_unavailable", "The service is shutting down."
         retryable = True
@@ -184,7 +264,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
             400: ("invalid_request", "The request is invalid."),
             404: ("not_found", "The requested resource was not found."),
             405: ("method_not_allowed", "The HTTP method is not allowed."),
-            422: ("invalid_request", "The request is invalid."),
+            422: ("validation_error", "The request is invalid."),
             500: ("internal_error", "The request could not be completed."),
         }.get(status, ("http_error", "The HTTP request could not be completed."))
         headers.update(exception.headers or {})
@@ -192,12 +272,18 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         error_id=request.app.state.id_factory(),
         request_id=request.state.request_id,
         run_id=request_run_id(request),
+        session_id=request_session_id(request),
         code=code,
         message=message,
         failed_stage=stage,
         retryable=retryable,
     )
-    envelope = AnalysisRunErrorResponse(error=error, run=run, validation=validation)
+    envelope = AnalysisRunErrorResponse(
+        error=error,
+        run=run,
+        validation=validation,
+        history_url=None,
+    )
     headers["X-Request-ID"] = str(error.request_id)
     log_http(
         request, "http_request_failed", status, error=error,
@@ -211,6 +297,11 @@ def register_error_handlers(application: FastAPI) -> None:
     for exception_type in (
         RequestValidationError, HTTPException, RunNotFoundError, InvalidEventCursorError,
         EventCursorAheadError, InvalidRunTransitionError, ServiceShuttingDownError,
+        UnknownQueryParametersError, InvalidHistoryCursorError,
+        TranscriptRunNotFoundError, TranscriptSessionNotFoundError,
+        TranscriptItemNotFoundError, TranscriptContentUnreadableError,
+        TranscriptDatabaseUnavailableError, RunAlreadyTerminalError,
+        RunNotLiveError, PersistenceRetryUnavailableError,
         InvalidIdempotencyKeyError, InvalidSubmissionEncodingError,
         IdempotencyKeyConflictError, IdempotencyWaitTimeoutError,
         CreationCommitUnconfirmedError, CreationPersistenceUnavailableError,

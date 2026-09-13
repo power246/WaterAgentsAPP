@@ -1,8 +1,8 @@
 # M3 Transcript Store + History APIs 设计决策记录
 
-更新日期：2026-09-13
+更新日期：2026-09-14
 
-状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–10 实施清单](m3_implementation_todo.md)。后端尚未实现，任何验收契约均未因文档交付而视为完成。
+状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–10 实施清单](m3_implementation_todo.md)。Milestone 0–6 已完成本机实现与适用验证；其余契约仍以清单中的实际完成状态为准。
 
 本文保留确认过程与原 D 编号，供追溯设计依据。当前工程字段、约束、DTO、事件和配置以实施详细设计及 API 指南为入口；下面决策原文中的“继续定型”表示当时的工程待办，现已在新文档收敛，不要求重新逐项询问用户，也不另形成一套实现规范。
 
@@ -12,7 +12,7 @@ D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run 
 
 执行身份按 D52：session_id 统一标识独立 Agent 上下文及本次执行，取消原 D32 中同义的执行 agent_id；agent_role 表达职责，target_comid 表达适用水体，operation_id 继续标识一次调用。
 
-表职责以 D53 为准：analysis_runs、analysis_sessions、transcript_items、transcript_contents 四张核心表，分别维护 run 当前信息、独立 Agent session 当前信息、原记录和独立大正文。D33 的去重、单一事实及原子性原则保留；通用时间列按 D55、session 五态按 D60 确定，路径按 D65 确认，具体身份约束与完整 DTO 继续定型。当前 M2 代码与已实现接口仍使用旧名称，本轮尚未修改实现。
+表职责以 D53 为准：analysis_runs、analysis_sessions、transcript_items、transcript_contents 四张核心表，分别维护 run 当前信息、独立 Agent session 当前信息、原记录和独立大正文。D33 的去重、单一事实及原子性原则保留；通用时间列按 D55、session 五态按 D60 确定，路径按 D65 确认。Milestone 0–6 已落实这些身份、存储和 HTTP 读取 DTO；两层 SSE 仍由 Milestone 7 承接。
 
 ## 1. 依据与当前基线
 
@@ -21,10 +21,10 @@ D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run 
 - [跨 Milestone 延后契约](../deferred_milestone_contracts.md)，重点为 `M3-C01`–`M3-C20`、`M3-A01`–`M3-A12`
 - [M2 详细设计](../M2/m2_analysis_session_sse_design.md)
 - [M2 接力记录](../M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)
-- [前端接入约定](../frontend_integration_contracts.md)，供前端查看已确认但尚未实现的 M3 接口设计
+- [前端接入约定](../frontend_integration_contracts.md)，供前端查看已实现 HTTP 契约及后续 SSE 接入边界
 - [M3 实施清单](m3_implementation_todo.md)，汇总工程定型、交付顺序和验收。
 
-当前新后端已经包含 M1 领域模型与 M2 内存态 session、状态机、SSE、取消和日志。TranscriptStorePort 仍为 generic Protocol，尚未实现数据库或 history API。当前 M2 API 文档记录 macOS 本机 602 项回归通过，修复后的三平台完整 tests 与 smoke 仍待远端通过；本次设计未重新运行这些测试。
+当前后端已经包含 run/Agent session 模型、状态机、typed transcript、PostgreSQL 存储、历史 API、取消、补写和日志。写入与一致性读取各自通过端口约束，由 PostgreSQL 实现和内存测试替身共同承接；实际验证结果记录在实施清单。M2 API 文档保留旧阶段证据，不再作为当前 HTTP 路径来源。
 
 本阶段继续遵守单进程、单 worker、多 session 隔离、唯一终态事件、显式取消、时间 snapshot、单一事实模型和 secret 边界。业务结果的生产与最终 payload 由 M6/M7 定型，M3 不制造 fake 水质结果或历史摘要。
 

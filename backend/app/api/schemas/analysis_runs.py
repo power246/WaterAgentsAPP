@@ -8,6 +8,15 @@ from app.application.analysis_runs.models import (
     PublicError,
     StableCode,
 )
+from app.application.transcripts.read_models import (
+    PersistenceRetryResponse,
+    RunDetailResponse,
+    RunHistoryResponse,
+    RunStatusResponse,
+    SessionDetailResponse,
+    SessionTranscriptResponse,
+    TranscriptContentResponse,
+)
 from app.domain.common import NonEmptyString
 from app.domain.domain_model import DomainModel
 from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION, TimeResolution
@@ -40,6 +49,7 @@ class AnalysisRunResponse(AnalysisRunSnapshot):
 class HttpPublicError(PublicError):
     request_id: UUID
     run_id: UUID | None = None
+    session_id: UUID | None = None
 
 
 class ValidationViolation(DomainModel):
@@ -50,5 +60,22 @@ class ValidationViolation(DomainModel):
 
 class AnalysisRunErrorResponse(DomainModel):
     error: HttpPublicError
-    run: AnalysisRunResponse | None = None
+    run: RunStatusResponse | None = None
     validation: tuple[ValidationViolation, ...] = ()
+    history_url: StrictStr | None = None
+
+
+__all__ = [
+    "AnalysisRunErrorResponse",
+    "AnalysisRunResponse",
+    "CreateAnalysisRunRequest",
+    "HttpPublicError",
+    "PersistenceRetryResponse",
+    "RunDetailResponse",
+    "RunHistoryResponse",
+    "RunStatusResponse",
+    "SessionDetailResponse",
+    "SessionTranscriptResponse",
+    "TranscriptContentResponse",
+    "ValidationViolation",
+]

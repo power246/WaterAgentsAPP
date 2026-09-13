@@ -31,6 +31,7 @@ from app.application.transcripts.models import (
 )
 from app.application.transcripts.redaction import redact
 from app.domain.attribution.analysis_detail import AnalysisDetail
+from app.domain.common import JsonValue
 from app.domain.domain_model import DomainModel
 
 
@@ -70,6 +71,7 @@ class ContentRegistration:
     visibility: VisibilityExtractor = _auto_visibility
     message_adapter: MessageAdapter | None = None
     errors: ErrorExtractor = _no_references
+    history_only_possible: bool = False
     writable: bool = True
     preserve_unset: bool = False
 
@@ -280,6 +282,67 @@ class TranscriptRegistry:
         body = registration.adapter.validate_json(content.safe_body)
         return registration.errors(body)
 
+    def public_body(self, item: ReadTranscriptItem) -> JsonValue:
+        registration = self._registrations.get(
+            (item.item.content_type, item.item.content_schema_version)
+        )
+        if registration is None or item.body is None:
+            raise UnsupportedTranscriptContentError(
+                "unparsed transcript content has no public typed body"
+            )
+        return registration.adapter.dump_python(
+            item.body,
+            mode="json",
+            exclude_unset=registration.preserve_unset,
+        )
+
+    def references_from_read(self, item: ReadTranscriptItem) -> tuple[UUID, ...]:
+        registration = self._registrations.get(
+            (item.item.content_type, item.item.content_schema_version)
+        )
+        if registration is None or item.body is None:
+            return ()
+        return registration.references(item.body)
+
+    def metadata_from_read(self, item: ReadTranscriptItem) -> TranscriptMetadata:
+        registration = self._registrations.get(
+            (item.item.content_type, item.item.content_schema_version)
+        )
+        if registration is None or item.body is None:
+            return TranscriptMetadata(
+                tags=item.item.tags,
+                rag_eligible=item.item.rag_eligible,
+            )
+        derived = registration.metadata(item.body)
+        return TranscriptMetadata(
+            tags=item.item.tags,
+            rag_eligible=item.item.rag_eligible,
+            confidence=derived.confidence,
+            provenance=derived.provenance,
+        )
+
+    def visibility_from_read(self, item: ReadTranscriptItem) -> ContentVisibility:
+        registration = self._registrations.get(
+            (item.item.content_type, item.item.content_schema_version)
+        )
+        if registration is None:
+            return ContentVisibility.HISTORY_ONLY
+        if item.body is None:
+            return (
+                ContentVisibility.HISTORY_ONLY
+                if registration.history_only_possible
+                else ContentVisibility.AUTO
+            )
+        return registration.visibility(item.body)
+
+    def error_ids_from_read(self, item: ReadTranscriptItem) -> tuple[UUID, ...]:
+        registration = self._registrations.get(
+            (item.item.content_type, item.item.content_schema_version)
+        )
+        if registration is None or item.body is None:
+            return ()
+        return registration.errors(item.body)
+
 
 def _runtime_references(body: object) -> tuple[UUID, ...]:
     return (body.original_item_id,) if isinstance(body, LateMessageOutputFact) else ()
@@ -352,6 +415,7 @@ def create_production_registry() -> TranscriptRegistry:
         adapter=TypeAdapter(RuntimeFact),
         references=_runtime_references,
         visibility=_runtime_visibility,
+        history_only_possible=True,
     ))
     registry.register(ContentRegistration(
         content_type="lifecycle_event",

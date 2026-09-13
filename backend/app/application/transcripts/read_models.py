@@ -1,0 +1,223 @@
+from typing import Annotated, Literal, TypeAlias
+from uuid import UUID
+
+from pydantic import Field, StrictBool, StrictFloat, model_validator
+
+from app.application.analysis_runs.models import (
+    AgentRole,
+    AgentSessionStatus,
+    AnalysisConfigurationSnapshot,
+    AnalysisRunSnapshot,
+    PublicError,
+    RunStatus,
+    SessionSummary,
+)
+from app.application.analysis_runs.persistence import PersistenceInfo
+from app.application.transcripts.models import (
+    ParseStatus,
+    StoredTranscriptContent,
+    StoredTranscriptItem,
+    TranscriptContentRef,
+    TranscriptItem,
+)
+from app.domain.common import JsonValue, NonEmptyString, UtcDatetime
+from app.domain.domain_enum import DomainEnum
+from app.domain.domain_model import DomainModel
+
+
+class ReadView(DomainEnum):
+    AUTO = "auto"
+    HISTORY = "history"
+
+
+class ReadSource(DomainEnum):
+    LIVE = "live"
+    POSTGRESQL = "postgresql"
+
+
+class ReadIssue(DomainModel):
+    item_id: UUID
+    error: PublicError
+
+
+class RunSummary(DomainModel):
+    run_id: UUID
+    status: RunStatus
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    query: NonEmptyString
+    configuration: AnalysisConfigurationSnapshot | None = None
+
+
+class RunHistoryItem(RunSummary):
+    issues: tuple[ReadIssue, ...] = ()
+
+
+class TranscriptScope(DomainModel):
+    session_id: UUID | None = None
+    agent_role: AgentRole | None = None
+    target_comid: NonEmptyString | None = None
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> "TranscriptScope":
+        if self.session_id is None:
+            if self.agent_role is not None or self.target_comid is not None:
+                raise ValueError("run-owned transcript scope must not name an Agent")
+            return self
+        if self.agent_role is None:
+            raise ValueError("session-owned transcript scope requires an Agent role")
+        if self.agent_role is AgentRole.QUERY_PARSER and self.target_comid is not None:
+            raise ValueError("query_parser scope must not have target_comid")
+        if self.agent_role is AgentRole.WATERBODY and self.target_comid is None:
+            raise ValueError("waterbody scope requires target_comid")
+        return self
+
+
+class TranscriptCorrelation(DomainModel):
+    request_id: UUID | None = None
+    operation_id: UUID | None = None
+    error_id: UUID | None = None
+
+
+class InlineTranscriptContent(DomainModel):
+    kind: Literal["inline"] = "inline"
+    body: JsonValue
+
+
+class ReferencedTranscriptContent(DomainModel):
+    kind: Literal["reference"] = "reference"
+    preview_head: str
+    preview_tail: str
+    truncated: Literal[True] = True
+
+
+class UnparsedTranscriptContent(DomainModel):
+    kind: Literal["unparsed"] = "unparsed"
+
+
+TranscriptContentView: TypeAlias = Annotated[
+    InlineTranscriptContent
+    | ReferencedTranscriptContent
+    | UnparsedTranscriptContent,
+    Field(discriminator="kind"),
+]
+
+
+class TranscriptItemView(DomainModel):
+    item_id: UUID
+    run_id: UUID
+    transcript_sequence: int = Field(strict=True, gt=0)
+    occurred_at: UtcDatetime
+    content_type: NonEmptyString
+    content_schema_version: int = Field(strict=True, gt=0)
+    scope: TranscriptScope
+    correlation: TranscriptCorrelation
+    tags: tuple[NonEmptyString, ...] = ()
+    rag_eligible: StrictBool = False
+    confidence: Annotated[StrictFloat, Field(ge=0, le=1)] | None = None
+    provenance: tuple[NonEmptyString, ...] | None = None
+    content_bytes: int = Field(strict=True, ge=0)
+    content_ref: TranscriptContentRef
+    content: TranscriptContentView
+    parse_status: ParseStatus
+    parse_error: PublicError | None = None
+
+
+class StoredRunHeader(DomainModel):
+    run_id: UUID
+    status: RunStatus
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    query: NonEmptyString
+    request_item_id: UUID
+    created_item_id: UUID
+    terminal_item_id: UUID | None = None
+
+
+class StoredRunRead(DomainModel):
+    run: StoredRunHeader
+    sessions: tuple[SessionSummary, ...] = ()
+    items: tuple[StoredTranscriptItem, ...] = ()
+    contents: tuple[StoredTranscriptContent, ...] = ()
+
+
+class StoredRunHistoryPage(DomainModel):
+    runs: tuple[StoredRunRead, ...] = ()
+
+
+class LiveRunRead(DomainModel):
+    run: AnalysisRunSnapshot
+    query: NonEmptyString
+    sessions: tuple[SessionSummary, ...] = ()
+    items: tuple[TranscriptItem, ...] = ()
+    persistence: PersistenceInfo
+
+
+class HistoryCursorPosition(DomainModel):
+    created_at: UtcDatetime
+    run_id: UUID
+
+
+class RunHistoryResponse(DomainModel):
+    items: tuple[RunHistoryItem, ...] = ()
+    next_cursor: str | None = None
+
+
+class RunDetailResponse(DomainModel):
+    run: RunSummary
+    sessions: tuple[SessionSummary, ...] = ()
+    items: tuple[TranscriptItemView, ...] = ()
+    referenced_items: tuple[TranscriptItemView, ...] = ()
+    source: ReadSource
+    persistence: PersistenceInfo | None = None
+    issues: tuple[ReadIssue, ...] = ()
+
+
+class SessionDetailResponse(DomainModel):
+    run_id: UUID
+    session: SessionSummary
+    transcript_url: NonEmptyString
+    source: ReadSource
+    persistence: PersistenceInfo | None = None
+    issues: tuple[ReadIssue, ...] = ()
+
+
+class SessionTranscriptResponse(DomainModel):
+    run_id: UUID
+    session_id: UUID
+    items: tuple[TranscriptItemView, ...] = ()
+    referenced_items: tuple[TranscriptItemView, ...] = ()
+    source: ReadSource
+    persistence: PersistenceInfo | None = None
+    issues: tuple[ReadIssue, ...] = ()
+
+
+class TranscriptContentResponse(DomainModel):
+    run_id: UUID
+    item_id: UUID
+    content_type: NonEmptyString
+    content_schema_version: int = Field(strict=True, gt=0)
+    content_bytes: int = Field(strict=True, ge=0)
+    text: str
+    source: ReadSource
+    persistence: PersistenceInfo | None = None
+    issues: tuple[ReadIssue, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_content_bytes(self) -> "TranscriptContentResponse":
+        if len(self.text.encode("utf-8")) != self.content_bytes:
+            raise ValueError("content_bytes must match text UTF-8 size")
+        return self
+
+
+class RunStatusResponse(DomainModel):
+    run_id: UUID
+    status: RunStatus
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    persistence: PersistenceInfo | None = None
+
+
+class PersistenceRetryResponse(DomainModel):
+    run_id: UUID
+    persistence: PersistenceInfo

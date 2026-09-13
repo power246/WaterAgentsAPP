@@ -85,6 +85,7 @@ from app.application.transcripts.registry import (
     TranscriptRegistry,
     create_production_registry,
 )
+from app.application.transcripts.read_models import LiveRunRead
 from app.domain.common import NonEmptyString, normalize_utc_datetime
 from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION
 from app.domain.time.time_resolution_source import TimeResolutionSource
@@ -231,6 +232,7 @@ class RunCoordinator:
         persistence_attempt_timeout: float = 5.0,
         completion_delivery_grace: float = 2.0,
         persistence_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        transcript_registry: TranscriptRegistry | None = None,
     ) -> None:
         if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
             raise ValueError("shutdown_grace_period must be finite and non-negative")
@@ -291,7 +293,11 @@ class RunCoordinator:
         self._idempotency_wait_timeout = idempotency_wait_timeout
         self._inline_content_bytes = inline_content_bytes
         self._preview_bytes = preview_bytes
-        self._registry = create_production_registry()
+        self._registry = (
+            transcript_registry
+            if transcript_registry is not None
+            else create_production_registry()
+        )
         self._workflow_task_factory = (
             workflow_task_factory
             if workflow_task_factory is not None
@@ -1313,6 +1319,32 @@ class RunCoordinator:
         runtime = await self._lookup(run_id)
         async with runtime.condition:
             return runtime.snapshot
+
+    async def get_live_read(self, run_id: UUID | str) -> LiveRunRead | None:
+        try:
+            runtime = await self._lookup(run_id)
+        except RunNotFoundError:
+            return None
+        async with runtime.condition:
+            safe_request = AnalysisRequestV1.model_validate_json(
+                runtime.transcript_buffer.items[0].content.safe_body
+            )
+            return LiveRunRead(
+                run=runtime.snapshot,
+                query=safe_request.query,
+                sessions=tuple(
+                    session.summary
+                    for session in sorted(
+                        runtime.agent_sessions.values(),
+                        key=lambda item: (
+                            item.summary.created_at,
+                            item.summary.session_id,
+                        ),
+                    )
+                ),
+                items=runtime.transcript_buffer.items,
+                persistence=self._persistence_info_locked(runtime),
+            )
 
     async def list_sessions(self, run_id: UUID | str) -> tuple[SessionSummary, ...]:
         runtime = await self._lookup(run_id)

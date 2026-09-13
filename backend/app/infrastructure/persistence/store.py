@@ -2,9 +2,10 @@ import asyncio
 import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, text, update
+from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
@@ -16,11 +17,25 @@ from app.application.analysis_runs.creation import (
     RunCreationResult,
     StoredRunCreation,
 )
-from app.application.analysis_runs.models import AgentSessionStatus, RunStatus
+from app.application.analysis_runs.models import (
+    AgentRole,
+    AgentSessionStatus,
+    RunStatus,
+    SessionSummary,
+)
 from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceWriteBatch,
     PersistenceWriteConflictError,
+)
+from app.application.transcripts.models import (
+    StoredTranscriptContent,
+    StoredTranscriptItem,
+)
+from app.application.transcripts.read_models import (
+    StoredRunHeader,
+    StoredRunHistoryPage,
+    StoredRunRead,
 )
 
 from app.infrastructure.persistence.records import PersistenceBatch, PersistedRunRecord
@@ -30,6 +45,7 @@ from app.infrastructure.persistence.schema import (
     transcript_contents,
     transcript_items,
 )
+from app.ports.errors import PortUnavailableError
 
 
 class PostgresTranscriptStore:
@@ -163,6 +179,152 @@ class PostgresTranscriptStore:
             return BatchVerification.NOT_COMMITTED
         raise PersistenceWriteConflictError(
             "stored persistence batch is incomplete or conflicting"
+        )
+
+    async def list_runs(
+        self,
+        limit: int,
+        after_created_at: datetime | None,
+        after_run_id: UUID | None,
+    ) -> StoredRunHistoryPage:
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("limit must be a positive integer")
+        if (after_created_at is None) != (after_run_id is None):
+            raise ValueError("history cursor position must be complete")
+        statement = select(analysis_runs)
+        if after_created_at is not None and after_run_id is not None:
+            statement = statement.where(or_(
+                analysis_runs.c.created_at < after_created_at,
+                and_(
+                    analysis_runs.c.created_at == after_created_at,
+                    analysis_runs.c.run_id < after_run_id,
+                ),
+            ))
+        statement = statement.order_by(
+            analysis_runs.c.created_at.desc(),
+            analysis_runs.c.run_id.desc(),
+        ).limit(limit)
+        try:
+            async with self._read_transaction() as connection:
+                run_rows = tuple(
+                    (await connection.execute(statement)).mappings()
+                )
+                created_ids = tuple(row["created_item_id"] for row in run_rows)
+                item_rows = ()
+                content_rows = ()
+                if created_ids:
+                    item_rows = tuple(
+                        (
+                            await connection.execute(
+                                select(transcript_items).where(
+                                    transcript_items.c.item_id.in_(created_ids)
+                                )
+                            )
+                        ).mappings()
+                    )
+                    external_ids = tuple(
+                        row["item_id"]
+                        for row in item_rows
+                        if row["inline_body"] is None
+                    )
+                    if external_ids:
+                        content_rows = tuple(
+                            (
+                                await connection.execute(
+                                    select(transcript_contents).where(
+                                        transcript_contents.c.item_id.in_(external_ids)
+                                    )
+                                )
+                            ).mappings()
+                        )
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("transcript history is unavailable") from error
+        items = {
+            row["item_id"]: StoredTranscriptItem.model_validate(dict(row))
+            for row in item_rows
+        }
+        contents = {
+            row["item_id"]: StoredTranscriptContent.model_validate(dict(row))
+            for row in content_rows
+        }
+        return StoredRunHistoryPage(runs=tuple(
+            StoredRunRead(
+                run=self._stored_run_header(row),
+                items=(items[row["created_item_id"]],)
+                if row["created_item_id"] in items else (),
+                contents=(contents[row["created_item_id"]],)
+                if row["created_item_id"] in contents else (),
+            )
+            for row in run_rows
+        ))
+
+    async def read_run(self, run_id: UUID) -> StoredRunRead | None:
+        try:
+            async with self._read_transaction() as connection:
+                run_row = (
+                    await connection.execute(
+                        select(analysis_runs).where(analysis_runs.c.run_id == run_id)
+                    )
+                ).mappings().one_or_none()
+                if run_row is None:
+                    return None
+                session_rows = tuple(
+                    (
+                        await connection.execute(
+                            select(analysis_sessions)
+                            .where(analysis_sessions.c.run_id == run_id)
+                            .order_by(
+                                analysis_sessions.c.created_at,
+                                analysis_sessions.c.session_id,
+                            )
+                        )
+                    ).mappings()
+                )
+                item_rows = tuple(
+                    (
+                        await connection.execute(
+                            select(transcript_items)
+                            .where(transcript_items.c.run_id == run_id)
+                            .order_by(transcript_items.c.transcript_sequence)
+                        )
+                    ).mappings()
+                )
+                external_ids = tuple(
+                    row["item_id"] for row in item_rows if row["inline_body"] is None
+                )
+                content_rows = ()
+                if external_ids:
+                    content_rows = tuple(
+                        (
+                            await connection.execute(
+                                select(transcript_contents).where(
+                                    transcript_contents.c.item_id.in_(external_ids)
+                                )
+                            )
+                        ).mappings()
+                    )
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("transcript history is unavailable") from error
+        return StoredRunRead(
+            run=self._stored_run_header(run_row),
+            sessions=tuple(
+                SessionSummary(
+                    session_id=row["session_id"],
+                    agent_role=AgentRole(row["agent_role"]),
+                    target_comid=row["target_comid"],
+                    status=AgentSessionStatus(row["status"]),
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in session_rows
+            ),
+            items=tuple(
+                StoredTranscriptItem.model_validate(dict(row)) for row in item_rows
+            ),
+            contents=tuple(
+                StoredTranscriptContent.model_validate(dict(row))
+                for row in content_rows
+            ),
         )
 
     async def commit_batch(self, batch: PersistenceBatch) -> None:
@@ -400,6 +562,29 @@ class PostgresTranscriptStore:
             if connection is not None:
                 await self._close_connection(connection)
 
+    @asynccontextmanager
+    async def _read_transaction(self) -> AsyncIterator[AsyncConnection]:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._operation_timeout_seconds
+        connection: AsyncConnection | None = None
+        try:
+            async with asyncio.timeout_at(deadline):
+                connection = await self._engine.connect()
+                transaction = await connection.begin()
+                await connection.execute(text(
+                    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"
+                ))
+                await self._configure_statement_timeout(connection, deadline)
+                yield connection
+                await transaction.commit()
+        except BaseException:
+            if connection is not None:
+                await self._discard_connection(connection)
+            raise
+        else:
+            if connection is not None:
+                await self._close_connection(connection)
+
     @staticmethod
     async def _close_connection(connection: AsyncConnection) -> None:
         try:
@@ -483,6 +668,19 @@ class PostgresTranscriptStore:
             idempotency_key=candidate.idempotency_key,
             request_fingerprint=candidate.request_fingerprint,
             creation_receipt=candidate.creation_receipt,
+        )
+
+    @staticmethod
+    def _stored_run_header(row) -> StoredRunHeader:
+        return StoredRunHeader(
+            run_id=row["run_id"],
+            status=RunStatus(row["status"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            query=row["query"],
+            request_item_id=row["request_item_id"],
+            created_item_id=row["created_item_id"],
+            terminal_item_id=row["terminal_item_id"],
         )
 
     @staticmethod

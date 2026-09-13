@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from uuid import UUID
 
 from app.application.analysis_runs.creation import (
@@ -17,6 +18,11 @@ from app.application.analysis_runs.persistence import (
 from app.application.transcripts.models import (
     StoredTranscriptContent,
     StoredTranscriptItem,
+)
+from app.application.transcripts.read_models import (
+    StoredRunHeader,
+    StoredRunHistoryPage,
+    StoredRunRead,
 )
 
 
@@ -115,6 +121,45 @@ class InMemoryTranscriptStore:
                 "stored persistence batch is incomplete or conflicting"
             )
 
+    async def list_runs(
+        self,
+        limit: int,
+        after_created_at: datetime | None,
+        after_run_id: UUID | None,
+    ) -> StoredRunHistoryPage:
+        if type(limit) is not int or limit <= 0:
+            raise ValueError("limit must be a positive integer")
+        if (after_created_at is None) != (after_run_id is None):
+            raise ValueError("history cursor position must be complete")
+        async with self._lock:
+            run_ids = sorted(
+                self._run_snapshots,
+                key=lambda run_id: (
+                    self._run_snapshots[run_id].created_at,
+                    run_id,
+                ),
+                reverse=True,
+            )
+            if after_created_at is not None and after_run_id is not None:
+                run_ids = [
+                    run_id
+                    for run_id in run_ids
+                    if (
+                        self._run_snapshots[run_id].created_at,
+                        run_id,
+                    ) < (after_created_at, after_run_id)
+                ]
+            return StoredRunHistoryPage(runs=tuple(
+                self._read_run(run_id, summary_only=True)
+                for run_id in run_ids[:limit]
+            ))
+
+    async def read_run(self, run_id: UUID) -> StoredRunRead | None:
+        async with self._lock:
+            if run_id not in self._run_snapshots:
+                return None
+            return self._read_run(run_id, summary_only=False)
+
     def _mutation_evidence(self, batch: PersistenceWriteBatch) -> list[bool]:
         evidence: list[bool] = []
         if batch.run_mutations:
@@ -126,6 +171,60 @@ class InMemoryTranscriptStore:
         for session_id, mutations in by_session.items():
             evidence.append(self._sessions.get(session_id) == mutations[-1].summary)
         return evidence
+
+    def _read_run(self, run_id: UUID, *, summary_only: bool) -> StoredRunRead:
+        candidate = self._runs[run_id]
+        snapshot = self._run_snapshots[run_id]
+        run_items = sorted(
+            (item for item in self._items.values() if item.run_id == run_id),
+            key=lambda item: item.transcript_sequence,
+        )
+        if summary_only:
+            run_items = [
+                item for item in run_items
+                if item.item_id == candidate.created_item_id
+            ]
+        item_ids = {item.item_id for item in run_items}
+        terminal_items = [
+            item
+            for item in run_items
+            if item.session_id is None
+            and item.content_type == "lifecycle_event"
+            and item.transcript_sequence > 2
+        ]
+        return StoredRunRead(
+            run=StoredRunHeader(
+                run_id=run_id,
+                status=snapshot.status,
+                created_at=snapshot.created_at,
+                updated_at=snapshot.updated_at,
+                query=candidate.query,
+                request_item_id=candidate.request_item_id,
+                created_item_id=candidate.created_item_id,
+                terminal_item_id=(
+                    max(terminal_items, key=lambda item: item.transcript_sequence).item_id
+                    if terminal_items else None
+                ),
+            ),
+            sessions=tuple(sorted(
+                (
+                    session
+                    for session in self._sessions.values()
+                    if any(
+                        item.session_id == session.session_id
+                        and item.run_id == run_id
+                        for item in self._items.values()
+                    )
+                ),
+                key=lambda session: (session.created_at, session.session_id),
+            )) if not summary_only else (),
+            items=tuple(run_items),
+            contents=tuple(
+                content
+                for item_id, content in self._contents.items()
+                if item_id in item_ids
+            ),
+        )
 
     @staticmethod
     def _apply_batch(

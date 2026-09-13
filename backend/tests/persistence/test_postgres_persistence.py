@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
@@ -784,6 +784,105 @@ def test_external_content_is_committed_atomically(postgres_settings: AppSettings
                     {"item_id": item_id},
                 )
             assert stored == body
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_postgres_history_queries_use_ordered_consistent_read_snapshots(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        created_at = datetime.now(UTC) + timedelta(days=36500)
+        prepared = []
+        for _ in range(2):
+            run_id, batch = _run_batch()
+            prepared.append((run_id, PersistenceBatch(
+                runs=(batch.runs[0].model_copy(update={
+                    "created_at": created_at,
+                    "updated_at": created_at,
+                }),),
+                items=tuple(
+                    item.model_copy(update={"created_at": created_at})
+                    for item in batch.items
+                ),
+            )))
+        for _, batch in prepared:
+            await _commit(postgres_settings, batch)
+
+        run_id = prepared[0][0]
+        session_id = uuid4()
+        created_item_id = uuid4()
+        external_item_id = uuid4()
+        external_body = '{"message":"完整正文"}'
+        await _commit(
+            postgres_settings,
+            PersistenceBatch(
+                sessions=(PersistedSessionRecord(
+                    session_id=session_id,
+                    run_id=run_id,
+                    agent_role="query_parser",
+                    status="pending",
+                    created_at=created_at,
+                    updated_at=created_at,
+                    created_item_id=created_item_id,
+                ),),
+                items=(
+                    _item(
+                        run_id=run_id,
+                        session_id=session_id,
+                        item_id=created_item_id,
+                        sequence=3,
+                        content_type="lifecycle_event",
+                    ).model_copy(update={"created_at": created_at}),
+                    PersistedTranscriptItemRecord(
+                        item_id=external_item_id,
+                        run_id=run_id,
+                        session_id=session_id,
+                        transcript_sequence=4,
+                        created_at=created_at,
+                        content_type="fixture_message",
+                        content_schema_version=1,
+                        preview_head="head",
+                        preview_tail="tail",
+                        content_bytes=len(external_body.encode("utf-8")),
+                    ),
+                ),
+                contents=(PersistedTranscriptContentRecord(
+                    item_id=external_item_id,
+                    body=external_body,
+                    created_at=created_at,
+                ),),
+            ),
+        )
+
+        engine = create_database_engine(postgres_settings)
+        try:
+            store = PostgresTranscriptStore(engine, operation_timeout_seconds=5)
+            page = await store.list_runs(2, None, None)
+            expected_ids = sorted((item[0] for item in prepared), reverse=True)
+            assert [entry.run.run_id for entry in page.runs] == expected_ids
+            next_page = await store.list_runs(
+                1,
+                created_at,
+                expected_ids[0],
+            )
+            assert next_page.runs[0].run.run_id == expected_ids[1]
+
+            read = await store.read_run(run_id)
+            assert read is not None
+            assert read.run.run_id == run_id
+            assert [session.session_id for session in read.sessions] == [session_id]
+            assert [item.transcript_sequence for item in read.items] == [1, 2, 3, 4]
+            assert read.contents[0].item_id == external_item_id
+            assert read.contents[0].body == external_body
+
+            async with store._read_transaction() as connection:
+                isolation = await connection.scalar(text("SHOW transaction_isolation"))
+                read_only = await connection.scalar(text("SHOW transaction_read_only"))
+            assert isolation == "repeatable read"
+            assert read_only == "on"
         finally:
             await engine.dispose()
 

@@ -1,10 +1,10 @@
 # M3 Transcript Store + History APIs Implementation TODO
 
-更新日期：2026-09-13
+更新日期：2026-09-14
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–5 已于 2026-09-13 完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 6–10 待实施与验证。** 六个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
+**当前状态：Milestone 0–6 已完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 7–10 待实施与验证。** 七个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
 
 ## 阶段与设计导航
 
@@ -325,7 +325,7 @@ git diff --check
 
 #### Milestone 5 完成记录（2026-09-13）
 
-- 代码状态：`codex/m3-milestone` 分支上的 Milestone 5 本地提交；保留此前 Milestone 0–4 本地提交，未改动归档代码或无关目录。
+- 代码状态：`codex/m3-milestone` 分支，本地提交 `1ba321a`；保留此前 Milestone 0–4 本地提交，未改动归档代码或无关目录。
 - 实现位置：`application/analysis_runs/persistence.py` 定义不可变 group/batch、确认结果与 `PersistenceInfo`；`coordinator.py` 和 `runtime.py` 实现每 run 单 writer、确认集合、冻结批次、有限退避、交付窗口、恢复事实和手动恢复服务；`infrastructure/persistence/store.py` 实现共享 deadline、连接失效收尾、advisory lock、增量原子提交与未知提交核实。HTTP retry 留给 Milestone 6。
 - 性能边界：长 Unicode 正文的敏感信息扫描增加关键词门控；90KB 测试正文由约 50 秒降至亚毫秒级脱敏，并在真实 PostgreSQL 中验证外置正文完整写入。
 - 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55458 ... backend/.venv/bin/python -m pytest backend/tests/application backend/tests/persistence -q`：260 passed，真实 PostgreSQL 测试未跳过。
@@ -336,33 +336,43 @@ git diff --check
 
 ### 工作
 
-- [ ] 共享 DTO/registry/完整列表/全文装载，固定 auto/history 来源，不维护第二套模型。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；[API §3](m3_transcript_history_api.md#3-当前与历史的共同返回模型)）
-- [ ] live 短临界区取快照；PG 多语句读取使用一致的只读事务，不混入 live 配置/状态/引用。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
-- [ ] run 详情返回真实 session 目录及全部 run-owned 记录；session 详情与 transcript 严格校验 run 归属。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[API §4.2](m3_transcript_history_api.md#42-run-详情)）
-- [ ] session transcript 全量有序，沿全部原记录的显式引用装载公共闭包并去重；不只挑最终总结。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[API §4.3](m3_transcript_history_api.md#43-agent-详情与完整-transcript)）
-- [ ] 实现统一全文 API，内联/外置可读，未知版本和损坏明确表示；安全出口和 history-only 类型规则统一。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[API §4.4](m3_transcript_history_api.md#44-全文)）
-- [ ] run 历史列表默认 50、最大 200、created_at/run_id 倒序，base64url 版本游标；无 total/filters/Agent 分页。（[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)；[API §4.1](m3_transcript_history_api.md#41-run-历史列表)）
-- [ ] 四个读取入口的 view、source、persistence、issues、URL 传递与取消可见性一致。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；[设计 §7.3](m3_transcript_history_implementation_design.md#73-可见性)）
-- [ ] 补齐 create/cancel/retry 和错误 HTTP 映射，保留 request_id/error_id，参数无效 422。（[API §1](m3_transcript_history_api.md#1-基础约定与路由)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
-- [ ] retry 的 200/202/409/404/503 正确；创建/手动补写/业务取消与连接断开不同义。（[API §6.2](m3_transcript_history_api.md#62-persistenceretry)）
-- [ ] 更新 OpenAPI、API 示例与前端约定；旧路径已删除，M2 文档仍作为旧阶段证据。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
+- [x] 共享 DTO/registry/完整列表/全文装载，固定 auto/history 来源，不维护第二套模型。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；[API §3](m3_transcript_history_api.md#3-当前与历史的共同返回模型)）
+- [x] live 短临界区取快照；PG 多语句读取使用一致的只读事务，不混入 live 配置/状态/引用。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
+- [x] run 详情返回真实 session 目录及全部 run-owned 记录；session 详情与 transcript 严格校验 run 归属。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[API §4.2](m3_transcript_history_api.md#42-run-详情)）
+- [x] session transcript 全量有序，沿全部原记录的显式引用装载公共闭包并去重；不只挑最终总结。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[API §4.3](m3_transcript_history_api.md#43-agent-详情与完整-transcript)）
+- [x] 实现统一全文 API，内联/外置可读，未知版本和损坏明确表示；安全出口和 history-only 类型规则统一。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[API §4.4](m3_transcript_history_api.md#44-全文)）
+- [x] run 历史列表默认 50、最大 200、created_at/run_id 倒序，base64url 版本游标；无 total/filters/Agent 分页。（[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)；[API §4.1](m3_transcript_history_api.md#41-run-历史列表)）
+- [x] 四个读取入口的 view、source、persistence、issues、URL 传递与取消可见性一致。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；[设计 §7.3](m3_transcript_history_implementation_design.md#73-可见性)）
+- [x] 补齐 create/cancel/retry 和错误 HTTP 映射，保留 request_id/error_id，参数无效 422。（[API §1](m3_transcript_history_api.md#1-基础约定与路由)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
+- [x] retry 的 200/202/409/404/503 正确；创建/手动补写/业务取消与连接断开不同义。（[API §6.2](m3_transcript_history_api.md#62-persistenceretry)）
+- [x] 更新 OpenAPI、API 示例与前端约定；旧路径已删除，M2 文档仍作为旧阶段证据。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
 
 ### Tests
 
-- [ ] live 有而 PG 故障可读；strict history 不出现内存独有 item，auto fallback 保持取消限制。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；[设计 §7.3](m3_transcript_history_implementation_design.md#73-可见性)）
-- [ ] 公共全文只读原 item、view 传递、跨 run/session/item 404，不用全局 item ID 绕过归属。（[API §4.4](m3_transcript_history_api.md#44-全文)）
-- [ ] 大型完整过程不截断、引用闭包有序去重且不扩张到其他 Agent 全部上下文。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)）
-- [ ] 配置损坏保留列表 item/issues，完整 DB 故障 503，不假空/假末页/假 404。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
-- [ ] 同 created_at UUID tie-break、状态变化、页间新插入、最后一页、空库、游标精度及重启。（[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)）
-- [ ] 非法 view/limit/cursor/未知 query 参数，以及无 Agent 分页参数契约。（[API §1](m3_transcript_history_api.md#1-基础约定与路由)；[API §4.1](m3_transcript_history_api.md#41-run-历史列表)）
-- [ ] 取消和手动保存各分支，包括已释放历史的处理。（[API §6](m3_transcript_history_api.md#6-取消与手动保存)）
+- [x] live 有而 PG 故障可读；strict history 不出现内存独有 item，auto fallback 保持取消限制。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；[设计 §7.3](m3_transcript_history_implementation_design.md#73-可见性)）
+- [x] 公共全文只读原 item、view 传递、跨 run/session/item 404，不用全局 item ID 绕过归属。（[API §4.4](m3_transcript_history_api.md#44-全文)）
+- [x] 大型完整过程不截断、引用闭包有序去重且不扩张到其他 Agent 全部上下文。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)）
+- [x] 配置损坏保留列表 item/issues，完整 DB 故障 503，不假空/假末页/假 404。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
+- [x] 同 created_at UUID tie-break、状态变化、页间新插入、最后一页、空库、游标精度及重启。（[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)）
+- [x] 非法 view/limit/cursor/未知 query 参数，以及无 Agent 分页参数契约。（[API §1](m3_transcript_history_api.md#1-基础约定与路由)；[API §4.1](m3_transcript_history_api.md#41-run-历史列表)）
+- [x] 取消和手动保存各分支，包括已释放历史的处理。（[API §6](m3_transcript_history_api.md#6-取消与手动保存)）
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
-- [ ] 导出实际 OpenAPI 对照十路由及错误/响应模型，确认旧路由不存在。（[API §1](m3_transcript_history_api.md#1-基础约定与路由)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
+- [x] `python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 导出实际 OpenAPI 对照本阶段路由及错误/响应模型，确认旧路由不存在；十条 M3 目标中的 session SSE 明确保留给 Milestone 7。（[API §1](m3_transcript_history_api.md#1-基础约定与路由)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
 
 阶段出口：历史可诚实读取全部已保存事实，当前与历史只有来源/可见性差异，没有重复实现。
+
+#### Milestone 6 完成记录（2026-09-14）
+
+- 代码状态：`codex/m3-milestone` 分支上的 Milestone 6 本地提交；保留此前 Milestone 0–5 本地提交，未推送远端。
+- 实现位置：`application/transcripts/read_models.py` 与 `reader.py` 统一 live/PostgreSQL DTO、来源选择、全文和版本游标；生产 registry 同时承担写入与读取解析；`RunCoordinator` 在短临界区提供不可变 live 快照；memory/PostgreSQL store 实现相同读取 port，PostgreSQL 多语句读取使用 `REPEATABLE READ, READ ONLY`；`api/http/analysis_runs.py` 接入历史列表、run/session/transcript/全文、取消及手动补写，并由统一错误层输出安全关联信息。
+- 读取边界：单次响应只选择 live 或 PostgreSQL；严格 history 不补入内存内容，auto 回退数据库后仍执行取消可见性规则；session 与全文均校验 run 归属，未知/损坏内容保留身份和 issue，外置正文缺失明确失败。
+- 分页与契约：历史列表固定 created_at/run_id 倒序及版本化 base64url keyset cursor，默认 50、最大 200；非法 view/limit/cursor/未知参数为 422。实际 OpenAPI 为 10 个当前操作（9 个 analysis 操作加 `/health`），旧 `/api/analysis/sessions` 不存在；目标 session SSE 路由仍归 Milestone 7。
+- 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55462 ... backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：446 passed，真实 PostgreSQL 测试未跳过。
+- 完整回归：同一隔离 PostgreSQL 下 `backend/.venv/bin/python -m pytest backend/tests -q`：754 passed；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
+- 契约结论：live 故障隔离、历史一致性、完整过程/引用、全文归属、安全错误、游标稳定性与取消/补写各分支均有可执行测试；两层 SSE、消息生命周期、启动遗留修复与清理继续由 Milestone 7–8 承接。
 
 ## Milestone 7：两层 SSE、消息生命周期与续传
 

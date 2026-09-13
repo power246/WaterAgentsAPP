@@ -1,17 +1,17 @@
 # 前端接入约定
 
-更新日期：2026-09-13
+更新日期：2026-09-14
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
-M3 的具体字段、十条路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。本文保留跨阶段用户行为；旧段落中“继续定型”的具体表示现由这两份文档承接，仍须等待后端实现和 OpenAPI 验证后接入。
+M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–6 的 HTTP 路径和 DTO 已由运行时 OpenAPI 验证；两层 SSE 仍须等待 Milestone 7 完成后接入。
 
-**领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。下文 M2 已实现接口中的 session_id 仍是整次分析的旧命名；目标路径已按 D65 确认，完整 DTO 和事件名称见 M3 API 指南，代码尚待迁移，也不能用旧整体 ID 充当独立 Agent session ID。
+**领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
-| M2 session/SSE/cancel/error | 已实现，本机验收完成，修复后的三平台 CI 待最终确认 | 可按运行时 OpenAPI 和 [M2 API 与排障指南](M2/m2_analysis_session_sse_api.md) 调试。 |
-| M3 transcript/history/idempotency | 设计已收敛，Milestone 0–10 待实施 | 按 M3 API 指南准备接入，不能假定接口已经可用。 |
+| M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
+| M3 transcript/history/idempotency | Milestone 0–6 已完成本机实现与验证；两层 SSE 待 Milestone 7 | HTTP 以运行时 OpenAPI 和 M3 API 指南为准；暂不调用 session SSE。 |
 | M4–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -79,7 +79,7 @@ skill、tool、hook 等按语义组织为默认折叠的块，用户点击后展
 | 字段 | 身份范围 | 前端要求 |
 |---|---|---|
 | M2 接口中的 `session_id` | 整次分析的旧命名 | 仅解释当前 M2 协议；在 D50 新模型中对应 run 层，迁移后的字段和路径以最终 API 为准。 |
-| `run_id`（D50/D51 新模型） | 一次用户提交的完整分析 | 关联历史列表、整次分析状态、问题解析 session 与水体 sessions；尚未实现新字段。 |
+| `run_id`（D50/D51 新模型） | 一次用户提交的完整分析 | 关联历史列表、整次分析状态、问题解析 session 与水体 sessions。 |
 | `session_id`（D50/D51 新模型） | 单个 Agent 的独立上下文和完整 loop | 问题解析与水体推理各有独立 session；选中水体后按 D64 定位其结果与完整消息，路径按 D65。 |
 | `agent_role`（D52） | 问题解析或水体推理职责 | 用于识别职责，不作为唯一执行身份；角色的具体枚举编码随最终 DTO 定型。 |
 | `operation_id`（D32/D52） | 一次模型、工具等调用 | 开始、结束及直接关联 hook 使用同一 ID；同名调用分别保留自己的 ID，读取与补写不改变身份。 |
@@ -166,9 +166,9 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 
 当前关键 error code 和处理方式以 [M2 错误码表](M2/m2_analysis_session_sse_api.md#6-http-error) 为准。接口不自动重定向尾斜杠，前端必须使用 OpenAPI 中的准确路径和方法。
 
-## 4. 已确认但尚未实现：M3 接入约定
+## 4. M3 接入约定与分阶段状态
 
-本节来自 [M3 设计草稿](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`，设计确认不代表功能上线。未冻结的完整 DTO、水体过程 scope 参数和错误字段继续在 M3 实现前对齐；已确认行为的变更须同步对应设计与契约。
+本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–6 已实现创建、统一 HTTP 读取、历史分页、取消和手动补写；实时两层 SSE、关闭/清理及后续能力仍按各自 Milestone 状态接入。已确认行为的变更须同步运行时 schema、对应设计与契约。
 
 ### 4.1 创建分析：Idempotency-Key
 
@@ -186,23 +186,23 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 
 | 前端动作/请求 | 后端设计行为 |
 |---|---|
-| 首次提交，携带新 key | 创建一个新 session。 |
-| 请求超时或连接中断后，原样复用 key 和请求体 | 若原请求已提交，返回原 session，不重复执行；若原请求尚未创建成功，则按创建流程处理。 |
-| 分析已经结束或服务已重启，原样复用 key 和请求体 | 返回原 session，并沿用原创建配置，不再次执行分析。 |
-| 原 key 搭配不同请求体 | 返回 `409 Conflict`，不创建新 session。 |
-| 用户主动再次分析，即使 query 和请求体完全相同，也生成新 key | 创建新 session，执行新一轮分析。 |
-| 未携带 key | 每次请求都创建新 session，重试可能重复创建。 |
-| 携带的 key 不是合法 UUID v4 | 返回 `422`，本次校验失败不创建 session。 |
+| 首次提交，携带新 key | 创建一个新 run。 |
+| 请求超时或连接中断后，原样复用 key 和请求体 | 若原请求已提交，返回原 run，不重复执行；若原请求尚未创建成功，则按创建流程处理。 |
+| 分析已经结束或服务已重启，原样复用 key 和请求体 | 返回原 run，并沿用原创建配置，不再次执行分析。 |
+| 原 key 搭配不同请求体 | 返回 `409 Conflict`，不创建新 run。 |
+| 用户主动再次分析，即使 query 和请求体完全相同，也生成新 key | 创建新 run，执行新一轮分析。 |
+| 未携带 key | 每次请求都创建新 run，重试可能重复创建。 |
+| 携带的 key 不是合法 UUID v4 | 返回 `422`，本次校验失败不创建 run。 |
 
-首次创建成功与幂等重试成功都返回 **`201` 和首次创建的回执**：相同的 `run_id`、创建时间、创建时的 `updated_at`、configuration 和 `pending` 状态。这个 `pending` 只属于创建回执，不能用它覆盖已经收到的后续状态；当前进度通过后续状态读取获取。幂等命中不会再次启动分析或发布第二个 `session_created`。`X-Request-ID` 仍由服务端为每次 HTTP 请求重新生成。
+首次创建成功与幂等重试成功都返回 **`201` 和首次创建的回执**：相同的 `run_id`、创建时间、创建时的 `updated_at`、configuration 和 `pending` 状态。这个 `pending` 只属于创建回执，不能用它覆盖已经收到的后续状态；当前进度通过后续状态读取获取。幂等命中不会再次启动分析或追加第二个 `run_created`。`X-Request-ID` 仍由服务端为每次 HTTP 请求重新生成。
 
-同 key、同请求体同时到达时，后端协调出一次创建，其余请求按 [M3 D35](M3/m3_transcript_history_design.md#d35同-key-创建等待默认最多-5-秒) 默认最多等待 5 秒，可配置。确认创建成功立即返回上述回执；确认回滚后允许一个等待者接手创建。等待超时返回 `503`、`code=idempotency_wait_timeout`、`retryable=true`，前端仍原样复用 key 和请求体。这个响应只结束等待请求，不取消原创建或分析，也不代表原请求一定未创建；不能据此换 key 或把已有 session 显示为分析失败。前端依据响应处理，不把 5 秒当作整个创建请求或分析的时长上限。
+同 key、同请求体同时到达时，后端协调出一次创建，其余请求按 [M3 D35](M3/m3_transcript_history_design.md#d35同-key-创建等待默认最多-5-秒) 默认最多等待 5 秒，可配置。确认创建成功立即返回上述回执；确认回滚后允许一个等待者接手创建。等待超时返回 `503`、`code=idempotency_wait_timeout`、`retryable=true`，前端仍原样复用 key 和请求体。这个响应只结束等待请求，不取消原创建或分析，也不代表原请求一定未创建；不能据此换 key 或把已有 run 显示为分析失败。前端依据响应处理，不把 5 秒当作整个创建请求或分析的时长上限。
 
-若 session 已创建，但后台分析任务启动失败，POST 仍返回 `201` 与原创建回执；后续通过 `session_failed` 或状态读取呈现 `failed / workflow_start_failed`，并保留 `error_id`。同 key 重试不会重新启动分析，用户主动再分析需生成新 key。若进程直接崩溃，下次启动按 D61 分别处理数据库中遗留 pending/running 的 run 和 Agent session，原因记录为 service_interrupted；此处创建响应与事件仍是旧整体 session 命名，新 API 按 run 映射。
+若 run 已创建，但后台分析任务启动失败，POST 仍返回 `201` 与原创建回执；后续状态读取呈现 `failed / workflow_start_failed`，并保留 `error_id`。同 key 重试不会重新启动分析，用户主动再分析需生成新 key。若进程直接崩溃，下次启动按 D61 分别处理数据库中遗留 pending/running 的 run 和 Agent session，原因记录为 service_interrupted。
 
 ### 4.2 前端接入提示
 
-M3 的幂等记录不自动过期，随 session 历史保留。分析结束、服务重启和后端内存清理不会使旧 key 变成可用于新分析的 key；用户主动重新分析仍须生成新 key。将来删除历史后的 key 行为在 M9 admin cleanup 中定型。
+M3 的幂等记录不自动过期，随 run 历史保留。分析结束、服务重启和后端内存清理不会使旧 key 变成可用于新分析的 key；用户主动重新分析仍须生成新 key。将来删除历史后的 key 行为在 M9 admin cleanup 中定型。
 
 保存首次提交的 key 和请求体供重试使用；用户主动发起另一轮分析时再生成新 key。收到 `409` 时停止自动重试并提示请求不一致，不自动换 key 后静默提交。
 
@@ -210,19 +210,19 @@ M3 的幂等记录不自动过期，随 session 历史保留。分析结束、�
 
 `Idempotency-Key` 与现有 `X-Request-ID` 用途不同：前者由客户端管理，关联同一次提交的多次 HTTP 尝试；后者由服务端为每次 HTTP 请求生成，用于排障，不能作为幂等键的替代品。
 
-### 4.3 尚未定型的细节
+### 4.3 后续前端与 SSE 细节
 
 - 页面刷新后的客户端 key 保存方式；格式与唯一范围已按 D34 确认。
 - 创建提交结果不确定、HTTP 中断的处理，以及前端 HTTP 重试次数和退避策略；同 key 等待上限及错误码已按 D35 确认。后端数据库补写的重试预算不等于前端 HTTP 重试预算。
-- M3 历史接口与实时读取的完整 DTO；水体按 D64 定位、路径按 D65。统一路径与可选 view 按 D42/D43，Agent 记录完整列表按 D45，query 列表页大小/排序及分页响应按 D47，游标按 D48，首版列表参数按 D49 仅 limit/cursor。重启后 SSE 的 `410` 错误码与历史入口字段，见 4.6。基于 fetch 的统一客户端已确认，由 M9 实现，见 4.7。
+- M3 历史与实时 HTTP 读取 DTO 已在 Milestone 6 冻结；水体按 D64 定位、路径按 D65，列表仅支持 limit/cursor。重启后 SSE 的 `410` 错误码与 history_url 由 Milestone 7/8 完成，见 4.6。基于 fetch 的统一客户端由 M9 实现，见 4.7。
 
-后续设计确认应同时更新本文与 M3 详细设计。M3 实现验收时需要校对 OpenAPI、接口文档和实际行为；设计确认本身不代表功能上线。
+后续设计确认应同时更新本文与 M3 详细设计。已实现 HTTP 行为以运行时 OpenAPI 为准；尚未完成的 SSE 仍不能仅凭设计文档视为上线。
 
 ### 4.4 History 与 transcript
 
 M3 提供 run 历史列表、run 详情、Agent 详情与结果、Agent 完整过程及原 item 全文读取。产品入口仍按“选择历史 run → 地图水体 → 预测与总结 → 推理上下文”组织；当前与历史按 D42/D43 共用路径，不增加 /current 路由。
 
-以下路径按 [D65](M3/m3_transcript_history_design.md#d65接口以-runs-为根嵌套读取独立-session) 已确认，由 M3 实现时直接替换旧整体 session 路径；上文 M2 接口仍表示当前实现，不能提前当作已迁移。完整 DTO 和生命周期事件名称继续定型。
+以下路径按 [D65](M3/m3_transcript_history_design.md#d65接口以-runs-为根嵌套读取独立-session) 已实现，并已直接替换旧整体 session 路径。完整 HTTP DTO 见 M3 API 指南与运行时 OpenAPI；SSE 事件仍由 Milestone 7 定型实现。
 
 | GET 路径 | 行为 |
 |---|---|
@@ -232,7 +232,7 @@ M3 提供 run 历史列表、run 详情、Agent 详情与结果、Agent 完整�
 | /api/analysis/runs/{run_id}/sessions/{session_id}/transcript | 一次返回所选 session 的完整有序过程及显式公共引用，不分页。 |
 | /api/analysis/runs/{run_id}/transcript/{item_id}/content | 原 item 全文，覆盖内联/独立大正文及 run/session 两类归属。 |
 
-创建改用 POST /api/analysis/runs；D69 两层 SSE 使用 GET /api/analysis/runs/{run_id}/events（整体通知）和 GET /api/analysis/runs/{run_id}/sessions/{session_id}/events（所选 Agent 过程）。取消使用 POST /api/analysis/runs/{run_id}/cancel，手动补写路径见 4.5。此前整次分析的 session_id 映射为 run_id，独立 Agent 的 session_id 保留；创建、取消、补写行为保持原义，SSE 关闭时机按 D70，具体续传与握手响应按两层协议定型，不保留旧路径兼容别名。
+创建、取消和手动补写已分别使用 POST /api/analysis/runs、POST /api/analysis/runs/{run_id}/cancel 与 POST /api/analysis/runs/{run_id}/persistence/retry。D69 的两层 SSE 目标路径不变，但 session SSE 和新的 run snapshot 语义由 Milestone 7 实现；此前整次分析的 session_id 已映射为 run_id，独立 Agent 的 session_id 保留，不维护旧 HTTP 路径兼容别名。
 
 query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历史列表按创建顺序游标分页)：limit 省略为 50，允许整数 1–200，非法值返回 422。首次不传 cursor，后续原样传回 next_cursor；返回 items 与 next_cursor，不返回总条数。next_cursor=null 表示本次已到末尾，无记录时 items=[]；数据库失败显示错误，不能显示成正常末页。状态/updated_at 更新不改变创建顺序，新分析通过刷新首页查看。
 
@@ -240,7 +240,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 
 游标按 [M3 D48](M3/m3_transcript_history_design.md#d48历史游标编码位置不保存分页状态) 由后端将版本与上一页末条记录的 created_at/run_id 编码成字符串。前端原样传回，不解析或按展示时间重建；服务端不保存分页状态或页面快照，普通重启后仍可使用支持版本的游标。无法解析、字段格式非法或版本不支持时返回 422，不静默返回首页；前端应明确处理错误，需要重新浏览时移除 cursor 从首页开始。该游标不与 SSE cursor 或 Agent 记录混用。
 
-上述是已确认但尚未实现的路径。详情、timeline 和全文按 [M3 D43](M3/m3_transcript_history_design.md#d43同一路径通过可选-view-选择严格历史读取) 使用可选 view 参数，普通请求不需要判断数据存放位置：
+上述读取路径已经实现。详情、timeline 和全文按 [M3 D43](M3/m3_transcript_history_design.md#d43同一路径通过可选-view-选择严格历史读取) 使用可选 view 参数，普通请求不需要判断数据存放位置：
 
 | view | 前端约定 |
 |---|---|
@@ -252,7 +252,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 - view=history 只展示 PostgreSQL 已持久化事实，不从内存补齐正文或实时保存状态；默认自动读取可能返回领先数据库的内存内容，不能把它伪装成已保存历史。历史模式保留既有审计可见性，自动模式在转读 PostgreSQL 后仍遵守当前读取的取消后传播限制。
 - 按 [M3 D25](M3/m3_transcript_history_design.md#d25每批-transcript完整内容与关联原子提交)，已保存记录与同批全文、正文引用及适用状态更新一起提交；写入不会留下只有预览却缺少对应全文的半条历史。读取接口本身发生错误时仍按错误契约处理，不能用 preview 冒充全文。
 - 后端按 D53 采用四张核心表并保留 D33 去重原则；前端沿用结果和原 item 引用，地图、结果与上下文阅读流程保持原义。run 汇总可以表达整个分析的结论，并引用各水体原结果。按水体取得独立 session 的完整过程，再读取显式关联的公共上下文，不能只显示最终总结引用的几条记录。后端按需生成 content_ref/scope/correlation 返回对象，前端不依赖它们在数据库中的保存形式。
-- 当前分析的结果/上下文按 [M3 D24](M3/m3_transcript_history_design.md#d24当前结果与上下文统一读取后端选择内存或数据库来源) 使用统一读取路径：后端在 live state 存在时读内存，内存释放后读 PostgreSQL。前端沿用 D57 的原 run/item 全文引用，不自行判断或切换存储来源；默认读取与只返回已保存事实的历史读取在同一路径承接不同语义，路径按 D65，完整 DTO 仍待冻结。
+- 当前分析的结果/上下文按 [M3 D24](M3/m3_transcript_history_design.md#d24当前结果与上下文统一读取后端选择内存或数据库来源) 使用统一读取路径：后端在 live state 存在时读内存，内存释放后读 PostgreSQL。前端沿用 D57 的原 run/item 全文引用，不自行判断或切换存储来源；默认读取与只返回已保存事实的历史读取在同一路径承接不同语义，DTO 以运行时 OpenAPI 为准。
 - 当前与历史读取共享 DTO、类型解析和内容装载语义，前端复用对应解析/展示；来源进度、持久化警告和取消后的可见性仍按各自入口处理。当前状态由后端状态机提供，前端不通过回放公开事件推导所有状态，也不等待新增 session_started 事件。历史列表既有 configuration 仍由后端从已保存的创建事件装配。
 - 按 [M3 D27](M3/m3_transcript_history_design.md#d27进入可读取的-live-buffer-前脱敏持久化边界再次执行)，内存内容在可读取前就完成凭据脱敏，数据库写入再次执行同一规则。前端取得的正文、preview 和全文都是脱敏版本，普通 query/业务正文仍保留；展开完整内容不会恢复被替换的凭据。
 - 列表和结果详情不自动下载完整 prompt、tool result 或原始输出。timeline 接口可以返回 preview/reference 以减少传输，展开时再加载尚未取得的完整内容；已返回的 inline 内容仍按语义折叠。
@@ -261,7 +261,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 - 按 [M3 D45](M3/m3_transcript_history_design.md#d45水体过程一次返回完整记录列表大正文按需读取)，进入水体推理上下文时，一次读取该次分析中该水体的完整有序记录列表，按 transcript_sequence 升序排列；Agent 记录不使用 cursor、limit 或下一页字段。小正文随列表返回，大正文保留 preview/content_ref，展开时读取全文，公共上下文仍完整关联。query 历史列表独立按 D47 分页。
   - 按 [D56](M3/m3_transcript_history_design.md#d56每个-run-统一分配-transcript_sequence)，run 和各 session 的原记录共用一个过程序列；水体读取可能得到 `4、7、9` 等不连续序号，前端保留原值，不把缺口直接显示为消息丢失或要求补齐其他水体记录。公共引用保持原 item/序号，SSE 独立编号。
 - 完整记录列表表示本次所选来源及可见性规则下可读的全部匹配记录，不表示分析已经结束或全部数据已持久化；仍依据业务 status 与 persistence 展示状态。刷新读取当前列表，按原 item 身份与顺序组织，不混用 SSE sequence，不按数量裁掉过程或仅保留总结引用。
-- 公共字段按 [M3 D29](M3/m3_transcript_history_design.md#d29公共-envelope-的字段命名与职责)：发生时间为 occurred_at，按 D55 由原记录 created_at 装配，仍保留原生命周期时间。按 content_type/content_schema_version 读取内容；外层不再提供同义 type，内部原 LifecycleEvent.type 保留。内联 content 与 content_ref 按实际装载表示处理，具体 DTO 仍待冻结。
+- 公共字段按 [M3 D29](M3/m3_transcript_history_design.md#d29公共-envelope-的字段命名与职责)：发生时间为 occurred_at，按 D55 由原记录 created_at 装配，仍保留原生命周期时间。按 content_type/content_schema_version 读取内容；外层不再提供同义 type，内部原 LifecycleEvent.type 保留。内联、引用和不可解析 content 的 DTO 已在 Milestone 6 冻结。
 - 身份与全文引用按 M3 D31/D57：同一 item 在内存和数据库中沿用 UUID，通过原 run_id + item_id 引用读取全文，后端核对 item 所属 run；相同正文的不同记录仍是不同 item，前端不能按文本合并过程。session_id 继续用于取得某个 Agent 的完整过程，公共记录不用借用解析 session 身份。
   - 按 [D58](M3/m3_transcript_history_design.md#d58普通过程引用限于同一-run历史证据显式关联)，普通过程引用允许同 run 内跨 session，前端保留原归属；来自其他 run 的证据通过历史来源结构关联，保留原身份与置信度，不展示为本次 session 产生的过程。仍先读取所选 session 全部记录，再读取显式公共引用；允许关联不代表合并所有 session 的消息。
 - 执行身份按 [M3 D52](M3/m3_transcript_history_design.md#d52session_id-统一标识-agent-执行取消重复-agent_id)：run_id 标识整次分析，session_id 统一标识一次 Agent 上下文与完整执行，取消同义执行 agent_id；agent_role 表达问题解析或水体推理职责，target_comid 表达适用水体。operation_id 继续标识一次模型/工具等调用，同一调用的开始/结束及直接关联 hook 按它配对。前端使用后端 ID 组织过程，不按 COMID、角色、名称或正文合并执行；读取和数据库补写不会改变原 ID。
@@ -272,7 +272,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 - 未知 content type/version 应保留 item identity、时间、类型和版本并显示“不支持”，不能当作正常结果；已知版本损坏时显示安全错误和 `error_id`，其余 timeline 继续可读。
 - 数据库整体读取失败是错误，不能渲染成“暂无历史”。M3 尚未产生的业务字段也不能由前端从 query 猜测或填充 placeholder。
 
-统一路径及默认自动行为按 D42，严格历史模式按 D43，过程完整列表按 D45，query 历史列表分页与参数范围按 D47–D49；完整 DTO 和水体过程 scope 参数尚未冻结，前端当前不得将设计接口当作已上线接口。
+统一路径及默认自动行为按 D42，严格历史模式按 D43，过程完整列表按 D45，query 历史列表分页与参数范围按 D47–D49，均已在 Milestone 6 实现并由 OpenAPI/测试验证。前端仍不得调用 Milestone 7 才提供的 session SSE。
 
 ### 4.5 持久化异常与取消后的内容
 
@@ -301,7 +301,7 @@ persistence.warning 使用已有安全 PublicError 结构；正常等待时为 n
 
 历史读取及当前入口回退 PostgreSQL 时，persistence 为 null，表示本次读取不提供 live 保存运行信息；返回内容是已保存事实，不能据此推断整个分析都已保存完整或当前一定不存在 live state。原记录中的错误/警告照常展示，不显示手动恢复按钮。当前与历史复用 DTO，不另维护 can_retry 或一套前端重试计数。
 
-手动补写接口按 [M3 D41](M3/m3_transcript_history_design.md#d41手动补写接口只受理恢复不等待保存完成)，尚未实现：
+手动补写接口已按 [M3 D41](M3/m3_transcript_history_design.md#d41手动补写接口只受理恢复不等待保存完成) 实现：
 
 `POST /api/analysis/runs/{run_id}/persistence/retry`
 

@@ -9,6 +9,7 @@ from app.api.schemas.analysis_runs import (
     AnalysisRunResponse,
     CreateAnalysisRunRequest,
     HttpPublicError,
+    RunStatusResponse,
     ValidationViolation,
 )
 from app.application.analysis_runs.models import (
@@ -143,18 +144,17 @@ def test_http_error_defaults_and_optional_terminal_snapshot_round_trip() -> None
     response = AnalysisRunErrorResponse(error=error)
 
     assert response.model_dump(mode="json") == {
-        "error": {**ERROR, "run_id": None},
+        "error": {**ERROR, "run_id": None, "session_id": None},
         "run": None,
         "validation": [],
+        "history_url": None,
     }
-    snapshot = AnalysisRunResponse(
+    snapshot = RunStatusResponse(
         run_id=UUID(RUN_ID),
         status=RunStatus.COMPLETED,
         created_at=UTC_TIME,
         updated_at=UTC_TIME,
-        configuration=CreateAnalysisRunRequest(
-            query="private query"
-        ).to_configuration_snapshot("America/Chicago"),
+        persistence=None,
     )
     response = AnalysisRunErrorResponse(error=HttpPublicError(**ERROR), run=snapshot)
     assert AnalysisRunErrorResponse.model_validate_json(response.model_dump_json()) == response

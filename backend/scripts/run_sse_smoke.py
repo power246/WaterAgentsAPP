@@ -10,7 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import TypeAdapter
 
-from app.api.schemas.analysis_runs import AnalysisRunResponse
+from app.api.schemas.analysis_runs import AnalysisRunResponse, RunStatusResponse
 from app.application.analysis_runs.models import RunLifecycleEvent, RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config import AppSettings
@@ -196,10 +196,9 @@ async def cancelled_smoke() -> None:
                 assert await read_frame(lines) == [": keepalive"]
                 cancelled = await client.post(f"{BASE}/{snapshot.run_id}/cancel")
                 assert cancelled.status_code == 200, cancelled.text
-                cancellation = AnalysisRunResponse.model_validate(cancelled.json())
+                cancellation = RunStatusResponse.model_validate(cancelled.json())
                 assert cancellation.status is RunStatus.CANCELLED
                 assert cancellation.run_id == snapshot.run_id
-                assert cancellation.configuration == snapshot.configuration
                 assert len({request_id(created), request_id(response), request_id(cancelled)}) == 3
                 assert not workflow.exited.is_set(), "Cancel waited for the workflow gate"
                 assert workflow.context.cancellation.is_requested()
@@ -209,7 +208,10 @@ async def cancelled_smoke() -> None:
                 assert terminal.payload.cancelled_at == cancellation.updated_at
                 assert await anext(lines, None) is None, "Terminal stream did not close"
             repeated = await client.post(f"{BASE}/{snapshot.run_id}/cancel")
-            assert repeated.status_code == 200 and repeated.json() == cancelled.json()
+            repeated_status = RunStatusResponse.model_validate(repeated.json())
+            assert repeated.status_code == 200
+            assert repeated_status.run_id == cancellation.run_id
+            assert repeated_status.status is RunStatus.CANCELLED
             assert request_id(repeated) != request_id(cancelled)
             workflow.release.set()
             await workflow.exited.wait()

@@ -1,8 +1,8 @@
 # M3 Transcript Store + History APIs 实施详细设计
 
-更新日期：2026-09-13
+更新日期：2026-09-14
 
-状态：设计交付，后端尚未实现。本文把已经确认的 D01–D86 收敛为可执行的工程方案；具体任务与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。
+状态：设计已定稿，Milestone 0–6 已完成本机实现与适用验证，Milestone 7–10 待实施。本文把已经确认的 D01–D86 收敛为可执行的工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -32,7 +32,7 @@ M4 产生真实结构化问题与 BFS；M6 产生真实模型/工具/技能/钩�
 
 ## 2. 当前代码与目标模块
 
-当前代码只有 M1 领域与 M2 内存态整体分析：`application/analysis_sessions/` 中的协调器、快照和 workflow 都指整次分析；HTTP 只有创建、SSE、取消，`TranscriptStorePort` 只有 generic append/list，尚无数据库依赖。M2 文档中的本机测试数量属于原实现证据，M3 开发开始时重新记录基线。
+当前代码已迁移到 `application/analysis_runs/`，具备 run/Agent session 身份、typed transcript、PostgreSQL 四表存储、幂等创建、串行补写及统一 history 读取。HTTP 已提供创建、历史列表、run/session/transcript/全文读取、取消、手动补写和过渡期 run SSE；Milestone 7 再替换 run SSE 语义并增加 session SSE。M2 文档及其测试数量只作为旧阶段证据。
 
 建议目录如下；每个模块包含相关小类型，不为每个 DTO 单独建文件。
 

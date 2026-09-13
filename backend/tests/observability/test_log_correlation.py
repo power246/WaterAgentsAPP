@@ -145,7 +145,7 @@ def test_http_duration_uses_clock_and_server_errors_keep_safe_diagnostics(monkey
                 raise RuntimeError(f"service failure {QUERY}; API_KEY={SECRET}")
 
             monkeypatch.setattr(app.state.run_coordinator, "create_run", fail)
-            response = await client.post(BASE + "?token=" + SECRET, json={"query": QUERY})
+            response = await client.post(BASE, json={"query": QUERY})
             assert response.status_code == 500
             public = response.json()["error"]
             error = parsed(application_logs, "http_request_failed")[-1]

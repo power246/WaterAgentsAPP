@@ -1,8 +1,8 @@
 # M3 Transcript、History 与两层 SSE API / 搭建排障指南
 
-更新日期：2026-09-13
+更新日期：2026-09-14
 
-**状态：目标协议与运行手册，尚未实现。** 本文中的新路由、数据库配置、命令和 smoke 需要按 [实施清单](m3_implementation_todo.md) 交付后才能执行。当前已实现接口仍以 [M2 API](../M2/m2_analysis_session_sse_api.md) 为准；M3 实施时直接替换旧整体 session 路径，不维护兼容别名。
+**状态：Milestone 0–6 已完成本机实现与适用验证。** 创建、历史分页、统一详情/全文读取、取消与手动补写以运行时 OpenAPI 和本文 §1–§4、§6 为准，旧整体 session 路径未保留兼容别名。`run`/`session` 两层 SSE 的目标协议仍由 Milestone 7 实现；在此之前 `/runs/{run_id}/events` 仍是过渡期的 M2 生命周期流，Agent session 事件路由尚不可用。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 

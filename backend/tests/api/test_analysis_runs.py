@@ -25,16 +25,22 @@ SUPPORTED_ERRORS = {
     (400, "invalid_request"),
     (404, "not_found"),
     (404, "run_not_found"),
+    (404, "session_not_found"),
+    (404, "transcript_item_not_found"),
     (405, "method_not_allowed"),
     (409, "event_cursor_ahead"),
     (409, "idempotency_key_conflict"),
     (409, "run_already_terminal"),
-    (422, "invalid_request"),
+    (422, "validation_error"),
+    (422, "invalid_history_cursor"),
     (500, "internal_error"),
     (503, "service_unavailable"),
     (503, "creation_commit_unconfirmed"),
     (503, "database_unavailable"),
     (503, "idempotency_wait_timeout"),
+    (409, "persistence_retry_unavailable"),
+    (409, "run_not_live"),
+    (500, "transcript_content_unreadable"),
 }
 
 
@@ -88,7 +94,7 @@ def run(exercise) -> None:
     asyncio.run(asyncio.wait_for(exercise(), timeout=5))
 
 
-def assert_error(response, status, code, *, run_id=None):
+def assert_error(response, status, code, *, run_id=None, session_id=None):
     assert (status, code) in SUPPORTED_ERRORS
     assert response.status_code == status
     assert response.headers["content-type"] == "application/json"
@@ -97,7 +103,8 @@ def assert_error(response, status, code, *, run_id=None):
     assert str(envelope.error.request_id) == response.headers["x-request-id"]
     assert envelope.error.error_id != envelope.error.request_id
     assert envelope.error.run_id == (UUID(run_id) if run_id else None)
-    assert set(response.json()) == {"error", "run", "validation"}
+    assert envelope.error.session_id == (UUID(session_id) if session_id else None)
+    assert set(response.json()) == {"error", "run", "validation", "history_url"}
     assert SECRET not in response.text
     assert "Traceback" not in response.text
     assert "/Users/" not in response.text
@@ -301,7 +308,7 @@ def test_idempotency_key_must_be_uuid_v4(key: str) -> None:
                 json={"query": "lake"},
                 headers={"Idempotency-Key": key},
             )
-            envelope = assert_error(response, 422, "invalid_request")
+            envelope = assert_error(response, 422, "validation_error")
             assert envelope.validation[0].field == ("header", "idempotency-key")
             assert app.state.run_coordinator._runs == {}
 
@@ -395,7 +402,7 @@ def test_validation_uses_safe_envelope_and_creates_no_run(body, caplog, applicat
     async def exercise() -> None:
         async with http_application() as (app, client):
             response = await client.post(BASE, content=json.dumps(body), headers={"Content-Type": "application/json"})
-            envelope = assert_error(response, 422, "invalid_request")
+            envelope = assert_error(response, 422, "validation_error")
             assert envelope.run is None
             assert envelope.validation
             assert envelope.error.failed_stage is None
@@ -412,11 +419,11 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
     async def exercise() -> None:
         async with http_application() as (_, client):
             malformed = await client.post(BASE, content='{"query":"' + SECRET, headers={"Content-Type": "application/json"})
-            envelope = assert_error(malformed, 422, "invalid_request")
+            envelope = assert_error(malformed, 422, "validation_error")
             assert envelope.validation[0].type == "json_invalid"
             assert envelope.validation[0].message == "The request body must contain valid JSON."
             wrong_type = await client.post(BASE, content=SECRET, headers={"Content-Type": "text/plain"})
-            assert_error(wrong_type, 422, "invalid_request")
+            assert_error(wrong_type, 422, "validation_error")
             invalid_encoding = await client.post(BASE, content=b"\xff", headers={"Content-Type": "application/json"})
             envelope = assert_error(invalid_encoding, 400, "invalid_request")
             assert envelope.validation == ()
@@ -441,11 +448,23 @@ def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog
                 assert runtime.snapshot.status is RunStatus.PENDING
             response = await client.post(f"{BASE}/{run_id}/cancel")
             assert response.status_code == 200
-            assert response.json() == {**created.json(), "status": "cancelled"}
+            assert {key: value for key, value in response.json().items() if key != "persistence"} == {
+                "run_id": run_id,
+                "status": "cancelled",
+                "created_at": created.json()["created_at"],
+                "updated_at": created.json()["updated_at"],
+            }
+            assert response.json()["persistence"]["state"] in {"pending", "up_to_date"}
             assert not runtime.workflow_quiesced.is_set()
             assert runtime.workflow_task.cancelling() == 0
             repeated = await client.post(f"{BASE}/{run_id}/cancel")
-            assert repeated.json() == response.json()
+            assert {
+                key: value for key, value in repeated.json().items()
+                if key != "persistence"
+            } == {
+                key: value for key, value in response.json().items()
+                if key != "persistence"
+            }
             assert repeated.headers["x-request-id"] != response.headers["x-request-id"]
             if release:
                 release.set()
@@ -476,7 +495,11 @@ def test_terminal_cancel_conflict_returns_current_snapshot_and_new_error_id(fail
             await runtime.workflow_quiesced.wait()
             response = await client.post(f"{BASE}/{run_id}/cancel")
             envelope = assert_error(response, 409, "run_already_terminal", run_id=run_id)
-            assert envelope.run.model_dump() == runtime.snapshot.model_dump()
+            assert envelope.run.run_id == runtime.snapshot.run_id
+            assert envelope.run.status == runtime.snapshot.status
+            assert envelope.run.created_at == runtime.snapshot.created_at
+            assert envelope.run.updated_at == runtime.snapshot.updated_at
+            assert envelope.run.persistence is not None
             assert envelope.error.message == f"The run is already {'failed' if failure else 'completed'}."
             assert envelope.error.failed_stage == "cancel_run"
             assert envelope.error.retryable is False
@@ -495,7 +518,7 @@ def test_run_lookup_errors_have_uniform_uuid_and_not_found_responses(endpoint, m
             unknown = await client.request(method, f"{BASE}/{missing}/{endpoint}")
             assert_error(unknown, 404, "run_not_found", run_id=missing)
             invalid = await client.request(method, f"{BASE}/{SECRET}/{endpoint}")
-            envelope = assert_error(invalid, 422, "invalid_request")
+            envelope = assert_error(invalid, 422, "validation_error")
             assert envelope.validation[0].field == ("path", "run_id")
             assert envelope.validation[0].type == "uuid_parsing"
 
@@ -519,9 +542,9 @@ def test_cursor_errors_are_json_before_stream_start(cursor, status, code) -> Non
 
 @pytest.mark.parametrize("method,path,status,code", [
     ("GET", "/missing", 404, "not_found"), ("GET", "/health/", 404, "not_found"),
-    ("POST", BASE + "/", 404, "not_found"), ("GET", BASE, 405, "method_not_allowed"),
+    ("POST", BASE + "/", 404, "not_found"),
     ("PUT", "/health", 405, "method_not_allowed"),
-    ("GET", BASE + "/" + str(UUID(int=99)), 404, "not_found"),
+    ("GET", BASE + "/" + str(UUID(int=99)) + "/missing", 404, "not_found"),
 ])
 def test_unknown_routes_and_methods_use_the_same_envelope(method, path, status, code) -> None:
     async def exercise() -> None:
@@ -715,8 +738,14 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     schema = create_app().openapi()
     paths = schema["paths"]
     assert {path: set(operations) for path, operations in paths.items()} == {
-        "/health": {"get"}, BASE: {"post"}, BASE + "/{run_id}/events": {"get"},
+        "/health": {"get"}, BASE: {"get", "post"},
+        BASE + "/{run_id}": {"get"},
+        BASE + "/{run_id}/sessions/{session_id}": {"get"},
+        BASE + "/{run_id}/sessions/{session_id}/transcript": {"get"},
+        BASE + "/{run_id}/transcript/{item_id}/content": {"get"},
+        BASE + "/{run_id}/events": {"get"},
         BASE + "/{run_id}/cancel": {"post"},
+        BASE + "/{run_id}/persistence/retry": {"post"},
     }
     create = paths[BASE]["post"]
     assert "400" in create["responses"]
@@ -725,6 +754,23 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     assert create["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("/CreateAnalysisRunRequest")
     cancel = paths[BASE + "/{run_id}/cancel"]["post"]
     assert "requestBody" not in cancel
+    history = paths[BASE]["get"]
+    history_parameters = {
+        parameter["name"]: parameter for parameter in history["parameters"]
+    }
+    assert set(history_parameters) == {"limit", "cursor"}
+    assert history_parameters["limit"]["schema"] == {
+        "type": "integer",
+        "maximum": 200,
+        "minimum": 1,
+        "default": 50,
+        "title": "Limit",
+    }
+    retry = paths[BASE + "/{run_id}/persistence/retry"]["post"]
+    for status in ("200", "202"):
+        assert retry["responses"][status]["content"]["application/json"][
+            "schema"
+        ]["$ref"].endswith("/PersistenceRetryResponse")
     events = paths[BASE + "/{run_id}/events"]["get"]
     assert "run" in events["description"]
     assert set(events["responses"]["200"]["content"]) == {"text/event-stream"}
@@ -732,6 +778,8 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     assert any(parameter["in"] == "header" and parameter["name"] == "Last-Event-ID" for parameter in events["parameters"])
     assert set(schema["components"]["schemas"]["CreateAnalysisRunRequest"]["properties"]) == {"query", "time_resolution"}
     assert "HTTPValidationError" not in schema["components"]["schemas"]
+    assert BASE + "/{run_id}/sessions/{session_id}/events" not in paths
+    assert "/api/analysis/sessions" not in paths
     for path in paths.values():
         for operation in path.values():
             for status, response in operation["responses"].items():
