@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
-from collections.abc import AsyncGenerator, Callable, Mapping
+from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from math import isfinite
@@ -55,6 +55,14 @@ from app.application.analysis_runs.models import (
     SessionSummary,
     TranscriptItemIdentity,
 )
+from app.application.analysis_runs.persistence import (
+    BatchVerification,
+    PersistenceGroup,
+    PersistenceInfo,
+    PersistenceState,
+    PersistenceWriteBatch,
+    PersistenceWriteConflictError,
+)
 from app.application.analysis_runs.runtime import AgentSessionRuntime, RunRuntime
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
@@ -64,8 +72,15 @@ from app.application.analysis_runs.workflow import (
     WorkflowStopped,
 )
 from app.application.correlation import request_id_context
-from app.application.transcripts.buffer import TranscriptBuffer
-from app.application.transcripts.models import AnalysisRequestV1
+from app.application.transcripts.buffer import (
+    PendingTranscriptReferencesError,
+    TranscriptBuffer,
+)
+from app.application.transcripts.models import (
+    AnalysisRequestV1,
+    PersistenceRecoveredFact,
+    TranscriptContentRef,
+)
 from app.application.transcripts.registry import (
     TranscriptRegistry,
     create_production_registry,
@@ -195,6 +210,8 @@ class RunCoordinator:
         transcript_store: TranscriptStorePort[
             RunCreationCandidate,
             RunCreationResult,
+            PersistenceWriteBatch,
+            BatchVerification,
         ],
         analysis_timezone: str = "America/Chicago",
         id_factory: Callable[[], UUID] = uuid4,
@@ -202,15 +219,28 @@ class RunCoordinator:
         logger: logging.Logger | None = None,
         workflow: AnalysisWorkflow | None = None,
         shutdown_grace_period: float = 1.0,
+        shutdown_save_grace_period: float = 5.0,
         keepalive_interval: float = 15.0,
         idempotency_wait_timeout: float = 5.0,
         inline_content_bytes: int = 65536,
         preview_bytes: int = 1024,
         workflow_task_factory: WorkflowTaskFactory | None = None,
         verification_retry_interval: float = 0.05,
+        persistence_batch_items: int = 100,
+        persistence_retry_delays: tuple[float, ...] = (1, 2, 4, 8, 16),
+        persistence_attempt_timeout: float = 5.0,
+        completion_delivery_grace: float = 2.0,
+        persistence_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
             raise ValueError("shutdown_grace_period must be finite and non-negative")
+        if (
+            not isfinite(shutdown_save_grace_period)
+            or shutdown_save_grace_period < 0
+        ):
+            raise ValueError(
+                "shutdown_save_grace_period must be finite and non-negative"
+            )
         if (
             isinstance(keepalive_interval, bool)
             or not isfinite(keepalive_interval)
@@ -221,6 +251,22 @@ class RunCoordinator:
             raise ValueError("idempotency_wait_timeout must be finite and positive")
         if not isfinite(verification_retry_interval) or verification_retry_interval <= 0:
             raise ValueError("verification_retry_interval must be finite and positive")
+        if type(persistence_batch_items) is not int or persistence_batch_items <= 0:
+            raise ValueError("persistence_batch_items must be a positive integer")
+        if len(persistence_retry_delays) != 5 or any(
+            not isfinite(delay) or delay < 0 for delay in persistence_retry_delays
+        ):
+            raise ValueError(
+                "persistence_retry_delays must contain five finite non-negative delays"
+            )
+        if (
+            isinstance(persistence_attempt_timeout, bool)
+            or not isfinite(persistence_attempt_timeout)
+            or persistence_attempt_timeout <= 0
+        ):
+            raise ValueError("persistence_attempt_timeout must be finite and positive")
+        if not isfinite(completion_delivery_grace) or completion_delivery_grace < 0:
+            raise ValueError("completion_delivery_grace must be finite and non-negative")
         self._clock = clock
         self._transcript_store = transcript_store
         self._analysis_timezone = analysis_timezone
@@ -238,6 +284,7 @@ class RunCoordinator:
         self._runs_lock = asyncio.Lock()
         self._workflow = workflow if workflow is not None else DefaultFakeWorkflow()
         self._shutdown_grace_period = shutdown_grace_period
+        self._shutdown_save_grace_period = shutdown_save_grace_period
         self._shutdown_lock = asyncio.Lock()
         self._closing = False
         self._keepalive_interval = keepalive_interval
@@ -251,6 +298,11 @@ class RunCoordinator:
             else lambda coroutine, name: asyncio.create_task(coroutine, name=name)
         )
         self._verification_retry_interval = verification_retry_interval
+        self._persistence_batch_items = persistence_batch_items
+        self._persistence_retry_delays = persistence_retry_delays
+        self._persistence_attempt_timeout = persistence_attempt_timeout
+        self._completion_delivery_grace = completion_delivery_grace
+        self._persistence_sleep = persistence_sleep
 
     async def create_run(
         self,
@@ -539,11 +591,18 @@ class RunCoordinator:
     ) -> None:
         runtime = prepared.runtime
         run_id = runtime.snapshot.run_id
+        runtime.persisted_item_ids.update(
+            item.item_id for item in prepared.candidate.transcript.items
+        )
+        runtime.persisted_mutation_ids.add(
+            runtime.state_mutations[0].mutation_id
+        )
         async with self._runs_lock:
             if run_id in self._runs:
                 raise ValueError("The generated run ID already exists.")
             self._runs[run_id] = runtime
             closing = self._closing
+        self._start_run_writer(runtime)
         self._log_run_transition(None, runtime.snapshot, prepared.event)
         if closing:
             self._mark_quiesced(runtime)
@@ -573,6 +632,24 @@ class RunCoordinator:
             return
         runtime.workflow_task = task
         task.add_done_callback(lambda completed: self._workflow_done(runtime, completed))
+
+    def _start_run_writer(self, runtime: RunRuntime) -> None:
+        coroutine = self._run_writer(runtime)
+        try:
+            task = asyncio.create_task(
+                coroutine,
+                name=f"analysis-run-writer-{runtime.snapshot.run_id}",
+            )
+        except BaseException as error:
+            coroutine.close()
+            runtime.persistence_exhausted = True
+            runtime.persistence_warning = self._persistence_error(error)
+            runtime.writer_quiesced.set()
+            return
+        runtime.writer_task = task
+        task.add_done_callback(
+            lambda completed: self._writer_done(runtime, completed)
+        )
 
     async def _await_creation(
         self,
@@ -662,6 +739,361 @@ class RunCoordinator:
             return
         task.exception()
 
+    def _enqueue_persistence_group_locked(
+        self,
+        runtime: RunRuntime,
+        *,
+        item_ids: tuple[UUID, ...] = (),
+        mutation_ids: tuple[UUID, ...] = (),
+        recovery_fact: bool = False,
+    ) -> None:
+        runtime.persistence_groups.append(
+            PersistenceGroup(
+                item_ids=item_ids,
+                mutation_ids=mutation_ids,
+                recovery_fact=recovery_fact,
+            )
+        )
+        runtime.writer_wakeup.set()
+
+    def _freeze_persistence_batch_locked(
+        self,
+        runtime: RunRuntime,
+    ) -> PersistenceWriteBatch | None:
+        if runtime.persistence_exhausted:
+            return None
+        if runtime.persistence_active_batch is not None:
+            return runtime.persistence_active_batch
+        selected: list[PersistenceGroup] = []
+        selected_items = 0
+        for group in runtime.persistence_groups:
+            if selected and (
+                group.recovery_fact
+                or selected[-1].recovery_fact
+                or selected_items + len(group.item_ids) > self._persistence_batch_items
+            ):
+                break
+            candidate = (*selected, group)
+            try:
+                self._build_persistence_batch_locked(runtime, candidate)
+            except PendingTranscriptReferencesError:
+                continue
+            selected.append(group)
+            selected_items += len(group.item_ids)
+            if group.recovery_fact or selected_items >= self._persistence_batch_items:
+                break
+        if not selected:
+            return None
+        batch = self._build_persistence_batch_locked(runtime, tuple(selected))
+        runtime.persistence_active_batch = batch
+        return batch
+
+    def _build_persistence_batch_locked(
+        self,
+        runtime: RunRuntime,
+        groups: tuple[PersistenceGroup, ...],
+    ) -> PersistenceWriteBatch:
+        item_ids = tuple(item_id for group in groups for item_id in group.item_ids)
+        mutation_ids = {
+            mutation_id for group in groups for mutation_id in group.mutation_ids
+        }
+        selected_item_ids = set(item_ids)
+        persisted = tuple(
+            TranscriptContentRef(run_id=runtime.snapshot.run_id, item_id=item_id)
+            for item_id in runtime.persisted_item_ids
+        )
+        generating = tuple(
+            TranscriptContentRef(
+                run_id=runtime.snapshot.run_id,
+                item_id=item.item_id,
+            )
+            for item in runtime.transcript_items
+            if item.item_id not in runtime.persisted_item_ids
+            and item.item_id not in selected_item_ids
+        )
+        transcript = runtime.transcript_buffer.to_storage_batch(
+            inline_content_bytes=self._inline_content_bytes,
+            preview_bytes=self._preview_bytes,
+            persisted=persisted,
+            generating=generating,
+            item_ids=item_ids,
+        )
+        run_mutations = tuple(
+            mutation
+            for mutation in runtime.state_mutations
+            if isinstance(mutation, RunStateMutation)
+            and mutation.mutation_id in mutation_ids
+        )
+        session_mutations = tuple(
+            mutation
+            for mutation in runtime.state_mutations
+            if isinstance(mutation, SessionStateMutation)
+            and mutation.mutation_id in mutation_ids
+        )
+        return PersistenceWriteBatch(
+            run_id=runtime.snapshot.run_id,
+            groups=groups,
+            transcript=transcript,
+            run_mutations=run_mutations,
+            session_mutations=session_mutations,
+        )
+
+    async def _run_writer(self, runtime: RunRuntime) -> None:
+        try:
+            while True:
+                await runtime.writer_wakeup.wait()
+                runtime.writer_wakeup.clear()
+                while True:
+                    async with runtime.condition:
+                        if runtime.writer_stop.is_set():
+                            return
+                        batch = self._freeze_persistence_batch_locked(runtime)
+                        if batch is None:
+                            break
+                    succeeded = await self._attempt_persistence_batch(runtime, batch)
+                    if succeeded:
+                        continue
+                    async with runtime.condition:
+                        if runtime.persistence_exhausted:
+                            break
+                        delay = self._persistence_retry_delays[
+                            runtime.persistence_failures - 1
+                        ]
+                    await self._persistence_sleep(delay)
+                    if runtime.writer_stop.is_set():
+                        return
+        finally:
+            runtime.writer_quiesced.set()
+            async with runtime.condition:
+                runtime.condition.notify_all()
+
+    async def _attempt_persistence_batch(
+        self,
+        runtime: RunRuntime,
+        batch: PersistenceWriteBatch,
+    ) -> bool:
+        try:
+            async with asyncio.timeout(self._persistence_attempt_timeout):
+                if runtime.persistence_unknown:
+                    verification = await self._transcript_store.verify_batch(batch)
+                    if verification is BatchVerification.NOT_COMMITTED:
+                        async with runtime.condition:
+                            runtime.persistence_unknown = False
+                        raise RuntimeError(
+                            "the previous persistence attempt rolled back"
+                        )
+                else:
+                    try:
+                        await self._transcript_store.write_batch(batch)
+                    except PersistenceWriteConflictError:
+                        raise
+                    except Exception:
+                        async with runtime.condition:
+                            runtime.persistence_unknown = True
+                        verification = await self._transcript_store.verify_batch(batch)
+                        if verification is BatchVerification.NOT_COMMITTED:
+                            async with runtime.condition:
+                                runtime.persistence_unknown = False
+                            raise RuntimeError(
+                                "the persistence attempt did not commit"
+                            ) from None
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError as error:
+            async with runtime.condition:
+                runtime.persistence_unknown = True
+                self._record_persistence_failure_locked(runtime, error)
+                runtime.condition.notify_all()
+            return False
+        except PersistenceWriteConflictError as error:
+            async with runtime.condition:
+                self._record_persistence_failure_locked(
+                    runtime,
+                    error,
+                    retryable=False,
+                )
+                runtime.persistence_failures = 6
+                runtime.persistence_exhausted = True
+                runtime.condition.notify_all()
+            return False
+        except Exception as error:
+            async with runtime.condition:
+                self._record_persistence_failure_locked(runtime, error)
+                runtime.condition.notify_all()
+            return False
+        async with runtime.condition:
+            self._confirm_persistence_batch_locked(runtime, batch)
+            runtime.condition.notify_all()
+        return True
+
+    def _record_persistence_failure_locked(
+        self,
+        runtime: RunRuntime,
+        error: BaseException,
+        *,
+        retryable: bool = True,
+    ) -> None:
+        runtime.persistence_failures += 1
+        if runtime.persistence_warning is None:
+            runtime.persistence_warning = self._persistence_error(
+                error,
+                retryable=retryable,
+            )
+        if runtime.persistence_failures == 4:
+            runtime.third_retry_failed_at = asyncio.get_running_loop().time()
+        if runtime.persistence_failures >= 6:
+            runtime.persistence_exhausted = True
+        self._log_activity(
+            "persistence_write_failed",
+            runtime,
+            exception=error,
+            attempt=runtime.persistence_failures,
+        )
+
+    def _confirm_persistence_batch_locked(
+        self,
+        runtime: RunRuntime,
+        batch: PersistenceWriteBatch,
+    ) -> None:
+        runtime.persisted_item_ids.update(batch.item_ids)
+        runtime.persisted_mutation_ids.update(batch.mutation_ids)
+        selected = set(batch.groups)
+        runtime.persistence_groups[:] = [
+            group for group in runtime.persistence_groups if group not in selected
+        ]
+        runtime.persistence_active_batch = None
+        runtime.persistence_unknown = False
+        warning = runtime.persistence_warning
+        runtime.persistence_failures = 0
+        runtime.persistence_exhausted = False
+        runtime.third_retry_failed_at = None
+        if warning is not None and not batch.is_recovery_fact:
+            self._append_persistence_recovered_locked(runtime, warning.error_id)
+        runtime.persistence_warning = None
+        if runtime.persistence_groups:
+            runtime.writer_wakeup.set()
+
+    def _append_persistence_recovered_locked(
+        self,
+        runtime: RunRuntime,
+        error_id: UUID,
+    ) -> None:
+        timestamp = self._clock.now()
+        identity = self._reserve_transcript_item_locked(
+            runtime,
+            session_id=None,
+            request_id=request_id_context.get(),
+            operation_id=None,
+            created_at=timestamp,
+        )
+        runtime.transcript_buffer.append(
+            identity,
+            "runtime_fact",
+            1,
+            PersistenceRecoveredFact(error_id=error_id),
+        )
+        self._enqueue_persistence_group_locked(
+            runtime,
+            item_ids=(identity.item_id,),
+            recovery_fact=True,
+        )
+
+    def _persistence_error(
+        self,
+        error: BaseException,
+        *,
+        retryable: bool = True,
+    ) -> PublicError:
+        return PublicError(
+            error_id=self._new_id(),
+            code=(
+                "persistence_write_failed"
+                if retryable
+                else "persistence_write_conflict"
+            ),
+            message=(
+                "Some analysis records have not been saved yet."
+                if retryable
+                else "Some analysis records conflict with stored history."
+            ),
+            failed_stage="persist_transcript",
+            retryable=retryable,
+        )
+
+    def _persistence_info_locked(self, runtime: RunRuntime) -> PersistenceInfo:
+        if runtime.persistence_exhausted:
+            state = PersistenceState.RETRY_EXHAUSTED
+        elif self._has_pending_persistence_locked(runtime):
+            state = PersistenceState.PENDING
+        else:
+            state = PersistenceState.UP_TO_DATE
+        return PersistenceInfo(state=state, warning=runtime.persistence_warning)
+
+    @staticmethod
+    def _has_pending_persistence_locked(runtime: RunRuntime) -> bool:
+        finalized = {item.item_id for item in runtime.transcript_buffer.items}
+        reserved = {item.item_id for item in runtime.transcript_items}
+        mutation_ids = {
+            mutation.mutation_id for mutation in runtime.state_mutations
+        }
+        return bool(
+            reserved - finalized
+            or finalized - runtime.persisted_item_ids
+            or mutation_ids - runtime.persisted_mutation_ids
+            or runtime.persistence_groups
+            or runtime.persistence_active_batch is not None
+            or runtime.persistence_unknown
+        )
+
+    async def _wait_for_required_persistence(
+        self,
+        runtime: RunRuntime,
+        required_item_ids: set[UUID],
+        required_mutation_ids: set[UUID],
+    ) -> PublicError | None:
+        while True:
+            async with runtime.condition:
+                if (
+                    required_item_ids <= runtime.persisted_item_ids
+                    and required_mutation_ids <= runtime.persisted_mutation_ids
+                ):
+                    return None
+                if runtime.persistence_exhausted:
+                    return runtime.persistence_warning or self._persistence_error(
+                        RuntimeError("persistence writer is unavailable")
+                    )
+                failed_at = runtime.third_retry_failed_at
+                if failed_at is None:
+                    await runtime.condition.wait()
+                    continue
+                remaining = (
+                    failed_at
+                    + self._completion_delivery_grace
+                    - asyncio.get_running_loop().time()
+                )
+                if remaining <= 0:
+                    return runtime.persistence_warning or self._persistence_error(
+                        RuntimeError("persistence delivery window expired")
+                    )
+                try:
+                    async with asyncio.timeout(remaining):
+                        await runtime.condition.wait()
+                except TimeoutError:
+                    return runtime.persistence_warning or self._persistence_error(
+                        RuntimeError("persistence delivery window expired")
+                    )
+
+    def _writer_done(
+        self,
+        runtime: RunRuntime,
+        task: asyncio.Task[None],
+    ) -> None:
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            self._log_activity("persistence_writer_failed", runtime, exception=error)
+
     async def shutdown(self) -> None:
         async with self._shutdown_lock:
             async with self._runs_lock:
@@ -688,25 +1120,67 @@ class RunCoordinator:
                     runtime.stop_requested.set()
                     for session in runtime.agent_sessions.values():
                         session.stop_requested.set()
-            if not active:
-                return
-            _, pending = await asyncio.wait(
-                [task for _, _, task in active],
-                timeout=self._shutdown_grace_period,
-            )
+            if active:
+                _, pending = await asyncio.wait(
+                    [task for _, _, task in active],
+                    timeout=self._shutdown_grace_period,
+                )
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(
+                    *(task for _, _, task in active),
+                    return_exceptions=True,
+                )
+                for runtime, original_status, task in active:
+                    self._log_activity(
+                        "service_shutdown",
+                        runtime,
+                        original_status=original_status,
+                        outcome=(
+                            "task_cancelled" if task.cancelled() else "quiesced"
+                        ),
+                    )
+            await self._shutdown_run_writers()
+
+    async def _shutdown_run_writers(self) -> None:
+        runtimes = tuple(self._runs.values())
+        drainers = [
+            asyncio.create_task(self._wait_for_writer_drain(runtime))
+            for runtime in runtimes
+            if runtime.writer_task is not None and not runtime.writer_task.done()
+        ]
+        if drainers:
+            try:
+                async with asyncio.timeout(self._shutdown_save_grace_period):
+                    await asyncio.gather(*drainers)
+            except TimeoutError:
+                for task in drainers:
+                    task.cancel()
+                await asyncio.gather(*drainers, return_exceptions=True)
+        writer_tasks = []
+        for runtime in runtimes:
+            task = runtime.writer_task
+            if task is None or task.done():
+                continue
+            runtime.writer_stop.set()
+            runtime.writer_wakeup.set()
+            writer_tasks.append(task)
+        if writer_tasks:
+            _, pending = await asyncio.wait(writer_tasks, timeout=1.0)
             for task in pending:
                 task.cancel()
-            await asyncio.gather(
-                *(task for _, _, task in active),
-                return_exceptions=True,
-            )
-            for runtime, original_status, task in active:
-                self._log_activity(
-                    "service_shutdown",
-                    runtime,
-                    original_status=original_status,
-                    outcome="task_cancelled" if task.cancelled() else "quiesced",
+            await asyncio.gather(*writer_tasks, return_exceptions=True)
+
+    async def _wait_for_writer_drain(self, runtime: RunRuntime) -> None:
+        async with runtime.condition:
+            await runtime.condition.wait_for(
+                lambda: runtime.persistence_exhausted
+                or not (
+                    runtime.persistence_groups
+                    or runtime.persistence_active_batch is not None
+                    or runtime.persistence_unknown
                 )
+            )
 
     async def _run_workflow(self, runtime: RunRuntime) -> None:
         token = CancellationToken(runtime.stop_requested)
@@ -925,14 +1399,18 @@ class RunCoordinator:
                 runtime.query_parser_session_id = summary.session_id
             else:
                 runtime.waterbody_session_ids[comid] = summary.session_id
-            runtime.state_mutations.append(
-                SessionStateMutation(
-                    mutation_id=mutation_id,
-                    run_id=runtime.snapshot.run_id,
-                    previous_status=None,
-                    summary=summary,
-                    transcript_item=item,
-                )
+            mutation = SessionStateMutation(
+                mutation_id=mutation_id,
+                run_id=runtime.snapshot.run_id,
+                previous_status=None,
+                summary=summary,
+                transcript_item=item,
+            )
+            runtime.state_mutations.append(mutation)
+            self._enqueue_persistence_group_locked(
+                runtime,
+                item_ids=(item.item_id,),
+                mutation_ids=(mutation.mutation_id,),
             )
             runtime.condition.notify_all()
         self._log_agent_session_transition(runtime, None, summary, event)
@@ -1043,6 +1521,63 @@ class RunCoordinator:
             runtime.condition.notify_all()
             return item
 
+    async def finalize_transcript_item(
+        self,
+        run_id: UUID | str,
+        item_id: UUID | str,
+        content_type: str,
+        content_schema_version: int,
+        body: object,
+        *,
+        private_values: tuple[str, ...] = (),
+    ) -> TranscriptItemIdentity:
+        runtime = await self._lookup(run_id)
+        key = _UUID.validate_python(item_id)
+        async with runtime.condition:
+            identity = next(
+                (item for item in runtime.transcript_items if item.item_id == key),
+                None,
+            )
+            if identity is None:
+                raise ValueError("transcript item identity is not reserved in this run")
+            runtime.transcript_buffer.append(
+                identity,
+                content_type,
+                content_schema_version,
+                body,
+                private_values=private_values,
+            )
+            self._enqueue_persistence_group_locked(
+                runtime,
+                item_ids=(identity.item_id,),
+            )
+            runtime.condition.notify_all()
+            return identity
+
+    async def get_persistence_info(
+        self,
+        run_id: UUID | str,
+    ) -> PersistenceInfo:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            return self._persistence_info_locked(runtime)
+
+    async def retry_persistence(
+        self,
+        run_id: UUID | str,
+    ) -> PersistenceInfo:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            if runtime.persistence_exhausted and self._has_pending_persistence_locked(
+                runtime
+            ):
+                runtime.persistence_exhausted = False
+                runtime.persistence_failures = 0
+                runtime.third_retry_failed_at = None
+                runtime.writer_wakeup.set()
+                runtime.condition.notify_all()
+            return self._persistence_info_locked(runtime)
+
     async def list_transcript_items(
         self,
         run_id: UUID | str,
@@ -1078,7 +1613,31 @@ class RunCoordinator:
         return await self._transition_run(run_id, RunStatus.RUNNING)
 
     async def complete_run(self, run_id: UUID | str) -> AnalysisRunSnapshot:
-        return await self._transition_run(run_id, RunStatus.COMPLETED)
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            if runtime.snapshot.status is not RunStatus.RUNNING:
+                raise InvalidRunTransitionError(runtime.snapshot, RunStatus.COMPLETED)
+            required_items = frozenset(
+                item.item_id for item in runtime.transcript_buffer.items
+            )
+            required_mutations = frozenset(
+                mutation.mutation_id for mutation in runtime.state_mutations
+            )
+        warning = await self._wait_for_required_persistence(
+            runtime,
+            required_items,
+            required_mutations,
+        )
+        async with runtime.condition:
+            if runtime.snapshot.status is RunStatus.CANCELLED:
+                return runtime.snapshot
+        if warning is None:
+            return await self._transition_run(run_id, RunStatus.COMPLETED)
+        return await self._transition_run(
+            run_id,
+            RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR,
+            warning,
+        )
 
     async def complete_run_with_persistence_error(
         self,
@@ -1256,13 +1815,17 @@ class RunCoordinator:
                     in {RunStatus.FAILED, RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR}
                     else None
                 )
-            runtime.state_mutations.append(
-                RunStateMutation(
-                    mutation_id=mutation_id,
-                    previous_status=current.status,
-                    snapshot=snapshot,
-                    transcript_item=item,
-                )
+            mutation = RunStateMutation(
+                mutation_id=mutation_id,
+                previous_status=current.status,
+                snapshot=snapshot,
+                transcript_item=item,
+            )
+            runtime.state_mutations.append(mutation)
+            self._enqueue_persistence_group_locked(
+                runtime,
+                item_ids=(item.item_id,) if item is not None else (),
+                mutation_ids=(mutation.mutation_id,),
             )
             if resolved is RunStatus.CANCELLED:
                 runtime.cancel_requested.set()
@@ -1395,14 +1958,18 @@ class RunCoordinator:
         if resolved is AgentSessionStatus.CANCELLED:
             session_runtime.stop_requested.set()
         session_runtime.summary = summary
-        runtime.state_mutations.append(
-            SessionStateMutation(
-                mutation_id=mutation_id,
-                run_id=runtime.snapshot.run_id,
-                previous_status=current.status,
-                summary=summary,
-                transcript_item=item,
-            )
+        mutation = SessionStateMutation(
+            mutation_id=mutation_id,
+            run_id=runtime.snapshot.run_id,
+            previous_status=current.status,
+            summary=summary,
+            transcript_item=item,
+        )
+        runtime.state_mutations.append(mutation)
+        self._enqueue_persistence_group_locked(
+            runtime,
+            item_ids=(item.item_id,) if item is not None else (),
+            mutation_ids=(mutation.mutation_id,),
         )
         return current.status, summary, event
 

@@ -18,6 +18,20 @@ HEADER_VALUE = re.compile(
     re.IGNORECASE,
 )
 URL_CREDENTIAL = re.compile(r"(https?://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
+_SENSITIVE_CANDIDATES = (
+    "authorization",
+    "cookie",
+    "api",
+    "access",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "credential",
+    "private",
+    "request",
+    "headers",
+)
 
 
 def private_variants(private_values: tuple[str, ...]) -> tuple[str, ...]:
@@ -39,10 +53,15 @@ def private_variants(private_values: tuple[str, ...]) -> tuple[str, ...]:
 def redact_text(value: str, private_values: tuple[str, ...] = ()) -> str:
     for private in private_variants(private_values):
         value = value.replace(private, REDACTED)
-    value = HEADER_VALUE.sub(lambda match: match["key"] + REDACTED, value)
-    value = ASSIGNMENT.sub(lambda match: match["key"] + REDACTED, value)
-    value = AUTH_SCHEME.sub(REDACTED, value)
-    return URL_CREDENTIAL.sub(r"\1[REDACTED]@", value)
+    lowered = value.casefold()
+    if any(candidate in lowered for candidate in _SENSITIVE_CANDIDATES):
+        value = HEADER_VALUE.sub(lambda match: match["key"] + REDACTED, value)
+        value = ASSIGNMENT.sub(lambda match: match["key"] + REDACTED, value)
+    if "bearer" in lowered or "basic" in lowered:
+        value = AUTH_SCHEME.sub(REDACTED, value)
+    if "http://" in lowered or "https://" in lowered:
+        value = URL_CREDENTIAL.sub(r"\1[REDACTED]@", value)
+    return value
 
 
 def redact(value: object, private_values: tuple[str, ...] = ()) -> object:

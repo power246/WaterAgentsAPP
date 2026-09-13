@@ -104,16 +104,19 @@ class TranscriptBuffer:
         preview_bytes: int = DEFAULT_PREVIEW_BYTES,
         persisted: tuple[TranscriptContentRef, ...] = (),
         generating: tuple[TranscriptContentRef, ...] = (),
+        item_ids: tuple[UUID, ...] | None = None,
     ) -> TranscriptStorageBatch:
+        selected = self._selected_items(item_ids)
         resolution = self.reference_resolution(
             persisted=persisted,
             generating=generating,
+            item_ids=item_ids,
         )
         if resolution.status is ReferenceResolutionStatus.WAITING:
             raise PendingTranscriptReferencesError(resolution)
         stored_items: list[StoredTranscriptItem] = []
         contents: list[StoredTranscriptContent] = []
-        for item in self._items:
+        for item in selected:
             content = self._registry.recheck(
                 item.content,
                 private_values=private_values,
@@ -169,10 +172,12 @@ class TranscriptBuffer:
         *,
         persisted: tuple[TranscriptContentRef, ...] = (),
         generating: tuple[TranscriptContentRef, ...] = (),
+        item_ids: tuple[UUID, ...] | None = None,
     ) -> ReferenceResolution:
-        same_batch = tuple(item.content_ref for item in self._items)
+        selected = self._selected_items(item_ids)
+        same_batch = tuple(item.content_ref for item in selected)
         waiting: list[TranscriptContentRef] = []
-        for item in self._items:
+        for item in selected:
             resolution = validate_registered_references(
                 item.run_id,
                 item.content.references,
@@ -189,3 +194,17 @@ class TranscriptBuffer:
                 waiting_for=tuple(waiting),
             )
         return ReferenceResolution(status=ReferenceResolutionStatus.READY)
+
+    def _selected_items(
+        self,
+        item_ids: tuple[UUID, ...] | None,
+    ) -> tuple[TranscriptItem, ...]:
+        if item_ids is None:
+            return tuple(self._items)
+        requested = set(item_ids)
+        if len(requested) != len(item_ids):
+            raise ValueError("selected transcript item identities must be unique")
+        selected = tuple(item for item in self._items if item.item_id in requested)
+        if len(selected) != len(requested):
+            raise ValueError("selected transcript item is not finalized")
+        return selected

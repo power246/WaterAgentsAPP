@@ -4,6 +4,7 @@ from uuid import UUID
 import pytest
 
 from app.application.analysis_runs.models import RunFailedEvent, TranscriptItemIdentity
+from app.application.transcripts import redaction
 from app.application.transcripts.buffer import (
     PendingTranscriptReferencesError,
     TranscriptBuffer,
@@ -115,6 +116,24 @@ def test_redaction_happens_before_live_and_is_rechecked_for_storage() -> None:
     assert batch.items[0].inline_body == item.content.safe_body
     with pytest.raises(ValueError, match="differs from the readable live body"):
         buffer.to_storage_batch(private_values=("inspect",))
+
+
+def test_large_non_sensitive_text_skips_complex_redaction_patterns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnexpectedPattern:
+        def sub(self, *args: object, **kwargs: object) -> str:
+            del args, kwargs
+            raise AssertionError("complex redaction pattern should not run")
+
+    pattern = UnexpectedPattern()
+    monkeypatch.setattr(redaction, "HEADER_VALUE", pattern)
+    monkeypatch.setattr(redaction, "ASSIGNMENT", pattern)
+    monkeypatch.setattr(redaction, "AUTH_SCHEME", pattern)
+    monkeypatch.setattr(redaction, "URL_CREDENTIAL", pattern)
+    value = "水" * 30000
+
+    assert redaction.redact_text(value) == value
 
 
 def test_reference_targets_must_be_persisted_same_batch_or_waited_for() -> None:

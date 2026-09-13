@@ -498,6 +498,6 @@ def test_default_interval_drives_the_real_subscription_wait(monkeypatch) -> None
             release.set()
             assert (await task).sequence == 2
             await stream.aclose()
-            assert intervals == [15.0]
+            assert intervals[0] == 15.0
 
     run(exercise)

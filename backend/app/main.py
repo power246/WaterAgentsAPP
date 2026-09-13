@@ -16,6 +16,10 @@ from app.api.http.request_context import RequestContextMiddleware
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.creation import RunCreationCandidate, RunCreationResult
+from app.application.analysis_runs.persistence import (
+    BatchVerification,
+    PersistenceWriteBatch,
+)
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.infrastructure.config import AppSettings
 from app.infrastructure.observability.json_logging import configure_logging
@@ -38,6 +42,8 @@ def create_app(
     transcript_store: TranscriptStorePort[
         RunCreationCandidate,
         RunCreationResult,
+        PersistenceWriteBatch,
+        BatchVerification,
     ] | None = None,
     workflow_task_factory: Callable[
         [Coroutine[object, object, None], str],
@@ -68,12 +74,19 @@ def create_app(
             id_factory=id_factory,
             record_id_factory=record_id_factory,
             shutdown_grace_period=shutdown_grace_period,
+            shutdown_save_grace_period=(
+                resolved_settings.shutdown_save_grace_seconds
+            ),
             keepalive_interval=keepalive_interval,
             idempotency_wait_timeout=(
                 resolved_settings.idempotency_wait_timeout_seconds
             ),
             inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
             preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+            persistence_batch_items=resolved_settings.persistence_batch_items,
+            persistence_attempt_timeout=(
+                resolved_settings.db_operation_timeout_seconds
+            ),
             workflow_task_factory=workflow_task_factory,
         )
         application.state.run_coordinator = coordinator

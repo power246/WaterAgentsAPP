@@ -13,6 +13,19 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.creation import IdempotencyKeyConflictError
+from app.application.analysis_runs.models import (
+    AgentRole,
+    AgentSessionStatus,
+    SessionStateMutation,
+    SessionSummary,
+    TranscriptItemIdentity,
+)
+from app.application.analysis_runs.persistence import (
+    PersistenceGroup,
+    PersistenceState,
+    PersistenceWriteBatch,
+    PersistenceWriteConflictError,
+)
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import (
@@ -28,6 +41,11 @@ from app.infrastructure.persistence.records import (
     PersistedTranscriptItemRecord,
 )
 from app.infrastructure.persistence.schema import metadata, transcript_items
+from app.infrastructure.persistence.schema import (
+    analysis_runs,
+    analysis_sessions,
+    transcript_contents,
+)
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 
 
@@ -122,6 +140,22 @@ async def _commit(settings: AppSettings, batch: PersistenceBatch) -> None:
         ).commit_batch(batch)
     finally:
         await engine.dispose()
+
+
+async def _wait_persistence(
+    coordinator: RunCoordinator,
+    run_id: UUID,
+) -> None:
+    runtime = coordinator._runs[run_id]
+    async with asyncio.timeout(10):
+        async with runtime.condition:
+            await runtime.condition.wait_for(
+                lambda: coordinator._persistence_info_locked(runtime).state
+                is not PersistenceState.PENDING
+            )
+            info = coordinator._persistence_info_locked(runtime)
+    if info.state is not PersistenceState.UP_TO_DATE:
+        raise AssertionError(info)
 
 
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
@@ -375,6 +409,233 @@ def test_concurrent_coordinators_use_database_key_authority_and_execute_once(
             await asyncio.gather(
                 *(coordinator.shutdown() for coordinator in coordinators)
             )
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_run_writer_persists_incremental_state_events_and_large_content(
+    postgres_settings: AppSettings,
+) -> None:
+    class Clock:
+        def now(self) -> datetime:
+            return datetime.now(UTC)
+
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise() -> None:
+        engine = create_database_engine(postgres_settings)
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        workflow = Workflow()
+        coordinator = RunCoordinator(
+            Clock(),
+            transcript_store=store,
+            workflow=workflow,
+            persistence_retry_delays=(0, 0, 0, 0, 0),
+            shutdown_grace_period=0,
+            shutdown_save_grace_period=1,
+        )
+        try:
+            created = await coordinator.create_run(b'{"query":"writer integration"}')
+            await workflow.calls.get()
+            await _wait_persistence(coordinator, created.run_id)
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            await coordinator.complete_agent_session(
+                created.run_id,
+                session.session_id,
+            )
+            large = await coordinator.reserve_transcript_item(created.run_id)
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                large.item_id,
+                "analysis_request",
+                1,
+                {"query": "水" * 30000},
+            )
+            await _wait_persistence(coordinator, created.run_id)
+            completed = await coordinator.complete_run(created.run_id)
+            await _wait_persistence(coordinator, created.run_id)
+
+            async with engine.connect() as connection:
+                run_row = (
+                    await connection.execute(
+                        select(analysis_runs).where(
+                            analysis_runs.c.run_id == created.run_id
+                        )
+                    )
+                ).mappings().one()
+                session_row = (
+                    await connection.execute(
+                        select(analysis_sessions).where(
+                            analysis_sessions.c.session_id == session.session_id
+                        )
+                    )
+                ).mappings().one()
+                item_rows = tuple(
+                    (
+                        await connection.execute(
+                            select(transcript_items)
+                            .where(transcript_items.c.run_id == created.run_id)
+                            .order_by(transcript_items.c.transcript_sequence)
+                        )
+                    ).mappings()
+                )
+                content_row = (
+                    await connection.execute(
+                        select(transcript_contents).where(
+                            transcript_contents.c.item_id == large.item_id
+                        )
+                    )
+                ).mappings().one()
+            assert run_row["status"] == completed.status.value == "completed"
+            assert run_row["terminal_item_id"] == item_rows[-1]["item_id"]
+            assert session_row["status"] == "completed"
+            assert session_row["terminal_item_id"] is not None
+            assert [row["transcript_sequence"] for row in item_rows] == list(
+                range(1, 7)
+            )
+            assert content_row["body"].count("水") == 30000
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_incremental_writer_reuses_one_engine_across_batches(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, creation = _run_batch()
+        engine = create_database_engine(postgres_settings)
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        try:
+            await store.commit_batch(creation)
+            for sequence in (3, 4):
+                item = _item(
+                    run_id=run_id,
+                    item_id=uuid4(),
+                    sequence=sequence,
+                )
+                group = PersistenceGroup(item_ids=(item.item_id,))
+                await store.write_batch(PersistenceWriteBatch(
+                    run_id=run_id,
+                    groups=(group,),
+                    transcript={"items": (item,), "contents": ()},
+                ))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_incremental_batch_rolls_back_session_event_and_full_content_together(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, creation = _run_batch()
+        await _commit(postgres_settings, creation)
+        session_id = uuid4()
+        item_id = uuid4()
+        timestamp = datetime.now(UTC)
+        identity = TranscriptItemIdentity(
+            item_id=item_id,
+            run_id=run_id,
+            session_id=session_id,
+            transcript_sequence=1,
+            created_at=timestamp,
+        )
+        summary = SessionSummary(
+            session_id=session_id,
+            agent_role=AgentRole.QUERY_PARSER,
+            status=AgentSessionStatus.PENDING,
+            created_at=timestamp,
+            updated_at=timestamp,
+        )
+        mutation = SessionStateMutation(
+            mutation_id=uuid4(),
+            run_id=run_id,
+            previous_status=None,
+            summary=summary,
+            transcript_item=identity,
+        )
+        body = '{"payload":"' + "x" * 70000 + '"}'
+        item = PersistedTranscriptItemRecord(
+            **identity.model_dump(mode="python"),
+            content_type="lifecycle_event",
+            content_schema_version=2,
+            preview_head=body[:32],
+            preview_tail=body[-32:],
+            content_bytes=len(body.encode("utf-8")),
+        )
+        content = PersistedTranscriptContentRecord(
+            item_id=item_id,
+            body=body,
+            created_at=timestamp,
+        )
+        group = PersistenceGroup(
+            item_ids=(item_id,),
+            mutation_ids=(mutation.mutation_id,),
+        )
+        batch = PersistenceWriteBatch(
+            run_id=run_id,
+            groups=(group,),
+            transcript={"items": (item,), "contents": (content,)},
+            session_mutations=(mutation,),
+        )
+        engine = create_database_engine(postgres_settings)
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        try:
+            with pytest.raises(PersistenceWriteConflictError):
+                await store.write_batch(batch)
+            async with engine.connect() as connection:
+                assert (
+                    await connection.scalar(
+                        select(analysis_sessions.c.session_id).where(
+                            analysis_sessions.c.session_id == session_id
+                        )
+                    )
+                ) is None
+                assert (
+                    await connection.scalar(
+                        select(transcript_items.c.item_id).where(
+                            transcript_items.c.item_id == item_id
+                        )
+                    )
+                ) is None
+                assert (
+                    await connection.scalar(
+                        select(transcript_contents.c.item_id).where(
+                            transcript_contents.c.item_id == item_id
+                        )
+                    )
+                ) is None
+        finally:
             await engine.dispose()
 
     asyncio.run(exercise())

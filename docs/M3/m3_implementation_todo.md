@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–4 已于 2026-09-13 完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 5–10 待实施与验证。** 五个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于增量 transcript writer、完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
+**当前状态：Milestone 0–5 已于 2026-09-13 完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 6–10 待实施与验证。** 六个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
 
 ## 阶段与设计导航
 
@@ -284,7 +284,7 @@ git diff --check
 
 #### Milestone 4 完成记录（2026-09-13）
 
-- 代码状态：`codex/m3-milestone` 分支上的未提交 Milestone 4 diff；保留此前 Milestone 0–3 提交，未改动归档代码或无关目录。
+- 代码状态：`codex/m3-milestone` 分支，本地提交 `0d9e9d4`；保留此前 Milestone 0–3 提交，未改动归档代码或无关目录。
 - 实现位置：创建候选/不可变回执与错误位于 `application/analysis_runs/creation.py`；协调、未知提交核实、注册窗口和 workflow gate 位于 `application/analysis_runs/coordinator.py`；PostgreSQL 原子创建、事务级 advisory lock 与真实唯一约束裁决位于 `infrastructure/persistence/store.py`；HTTP 单次读 body、UUID v4、错误映射和生产 store 装配位于 `api/http/analysis_runs.py`、`api/http/errors.py` 与 `main.py`。`infrastructure/persistence/memory_store.py` 仅作为确定性测试 fake，并非生产幂等权威。
 - 环境：Darwin 25.6.0 arm64、Python 3.12.14、PostgreSQL 17.10、SQLAlchemy 2.0.52、psycopg 3.3.5、Alembic 1.20.0；schema revision `20260913_01`。
 - 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55433 ... backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：417 passed，真实 PostgreSQL 测试未跳过。
@@ -295,33 +295,42 @@ git diff --check
 
 ### 工作
 
-- [ ] 每 run 只建一个 writer；待写引用原 buffer，准备/冻结批次在锁内，SQL 在锁外。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
-- [ ] 100 items 目标、空闲立即写、状态单独触发、原子组不可拆、无空 SQL。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
-- [ ] 草稿占据原序号但不提前写库；无依赖可写记录可先保存，按实际 item/mutation 维护确认。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
-- [ ] 运行中失败仍保留 live/分析，重试冻结原批次，不覆写已保存原事实、不重排身份/时间。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
-- [ ] 默认 5 秒覆盖 acquire/SQL/commit，旧调用退出与连接失效收尾后才退避。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 实现提交后响应丢失的核实，检查同批身份/正文/适用状态；不能把未知结果当成功或回滚。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 首次 + 最多 5 次重试、1/2/4/8/16 秒；adapter 无隐藏重试，新事实不重置预算。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
-- [ ] 成功分析冻结此前必需事实集合；第三次重试失败后两秒到期交付警告终态，已过期不重新等待。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
-- [ ] 终态及收尾另存原子组，保存失败不重选终态；唯一 run_completed 可表达 persistence error。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
-- [ ] 派生 PersistenceInfo，草稿 pending、实际 warning、耗尽优先；恢复后清当前 warning、保留原事件 warning。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[API §3.1](m3_transcript_history_api.md#31-来源与保存情况)）
-- [ ] 实现手动恢复服务：exhausted 新一轮，pending 复用，up_to_date 无操作；HTTP 在 Milestone 6 接入。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[API §6.2](m3_transcript_history_api.md#62-persistenceretry)）
+- [x] 每 run 只建一个 writer；待写引用原 buffer，准备/冻结批次在锁内，SQL 在锁外。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
+- [x] 100 items 目标、空闲立即写、状态单独触发、原子组不可拆、无空 SQL。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
+- [x] 草稿占据原序号但不提前写库；无依赖可写记录可先保存，按实际 item/mutation 维护确认。（[设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
+- [x] 运行中失败仍保留 live/分析，重试冻结原批次，不覆写已保存原事实、不重排身份/时间。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
+- [x] 默认 5 秒覆盖 acquire/SQL/commit，旧调用退出与连接失效收尾后才退避。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 实现提交后响应丢失的核实，检查同批身份/正文/适用状态；不能把未知结果当成功或回滚。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 首次 + 最多 5 次重试、1/2/4/8/16 秒；adapter 无隐藏重试，新事实不重置预算。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
+- [x] 成功分析冻结此前必需事实集合；第三次重试失败后两秒到期交付警告终态，已过期不重新等待。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
+- [x] 终态及收尾另存原子组，保存失败不重选终态；唯一 run_completed 可表达 persistence error。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
+- [x] 派生 PersistenceInfo，草稿 pending、实际 warning、耗尽优先；恢复后清当前 warning、保留原事件 warning。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[API §3.1](m3_transcript_history_api.md#31-来源与保存情况)）
+- [x] 实现手动恢复服务：exhausted 新一轮，pending 复用，up_to_date 无操作；HTTP 在 Milestone 6 接入。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[API §6.2](m3_transcript_history_api.md#62-persistenceretry)）
 
 ### Tests
 
-- [ ] 两 run 并行、同 run 串行；状态/事件/全文/refs 同批失败全部回滚。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 较大序号已保存而小草稿未定稿时仍 pending；所有 group/mutation 确认后才 up_to_date。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
-- [ ] 冻结失败批次优先、新记录不抢跑、不额外 writer、无空事务。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
-- [ ] 每次超时共享预算、取消收尾、unknown commit 核实及不并行重写。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 各次退避、第三次失败后两秒、窗口已过、窗口中恢复/取消、后续终态写入失败。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
-- [ ] 耗尽后 DB 恢复/GET/新内容不唤醒；手动重复/并发不重置执行中预算。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
-- [ ] 保存恢复事实只追加一次，不因保存自己递归追加。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
+- [x] 两 run 并行、同 run 串行；状态/事件/全文/refs 同批失败全部回滚。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 较大序号已保存而小草稿未定稿时仍 pending；所有 group/mutation 确认后才 up_to_date。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
+- [x] 冻结失败批次优先、新记录不抢跑、不额外 writer、无空事务。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)）
+- [x] 每次超时共享预算、取消收尾、unknown commit 核实及不并行重写。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 各次退避、第三次失败后两秒、窗口已过、窗口中恢复/取消、后续终态写入失败。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)）
+- [x] 耗尽后 DB 恢复/GET/新内容不唤醒；手动重复/并发不重置执行中预算。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
+- [x] 保存恢复事实只追加一次，不因保存自己递归追加。（[设计 §5.1](m3_transcript_history_implementation_design.md#51-注册器)）
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] `python -m pytest backend/tests/application backend/tests/persistence -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：持久化与业务状态分别正确，故障矩阵证明真实确认和原子性，而非仅测试入队成功。
+
+#### Milestone 5 完成记录（2026-09-13）
+
+- 代码状态：`codex/m3-milestone` 分支上的 Milestone 5 本地提交；保留此前 Milestone 0–4 本地提交，未改动归档代码或无关目录。
+- 实现位置：`application/analysis_runs/persistence.py` 定义不可变 group/batch、确认结果与 `PersistenceInfo`；`coordinator.py` 和 `runtime.py` 实现每 run 单 writer、确认集合、冻结批次、有限退避、交付窗口、恢复事实和手动恢复服务；`infrastructure/persistence/store.py` 实现共享 deadline、连接失效收尾、advisory lock、增量原子提交与未知提交核实。HTTP retry 留给 Milestone 6。
+- 性能边界：长 Unicode 正文的敏感信息扫描增加关键词门控；90KB 测试正文由约 50 秒降至亚毫秒级脱敏，并在真实 PostgreSQL 中验证外置正文完整写入。
+- 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55458 ... backend/.venv/bin/python -m pytest backend/tests/application backend/tests/persistence -q`：260 passed，真实 PostgreSQL 测试未跳过。
+- 完整回归：`WATERAGENTS_TEST_POSTGRES_PORT=55458 ... backend/.venv/bin/python -m pytest backend/tests -q`：746 passed。
+- 契约结论：单 run 串行/多 run 并行、草稿缺口、100 items 目标、原子组、确认集合、共享超时预算、未知提交核实、首次加五次补写、交付窗口、终态不重选、派生保存状态和手动恢复均满足；真实 PostgreSQL 覆盖连续连接复用、状态/事件/全文提交及冲突整批回滚。
 
 ## Milestone 6：统一读取、历史分页与 HTTP 契约
 
