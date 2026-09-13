@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–1 已于 2026-09-13 完成本机基线、契约盘点以及 Run / Agent session 模型和统一状态入口；Milestone 2–10 待实施与验证。** 两个已完成阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于数据库持久化、完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。后续阶段中的命令仍是 Verify 目标，不是本轮运行证据。M2 原验收记录保留原义，不能当作 M3 三平台通过结果。
+**当前状态：Milestone 0–2 已于 2026-09-13 完成本机实现与适用验证；Milestone 2 的 Ubuntu/macOS/Windows 实际 CI 结果仍为 partial，Milestone 3–10 待实施与验证。** 三个已完成实现阶段的实际命令、环境和影响面记录见各自完成记录；它们不等同于 transcript workflow 已接入持久化、完整历史路由、两层 SSE 或其余 M3 业务契约已经实现。M2 新增的三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由本机结果代替。
 
 ## 阶段与设计导航
 
@@ -168,37 +168,54 @@ git diff --check
 
 ### 工作
 
-- [ ] 新增 SQLAlchemy Core asyncio、psycopg binary、Alembic 依赖和锁文件；版本范围与实际解析版本记录一致。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)）
-- [ ] 创建 analysis_runs、analysis_sessions、transcript_items、transcript_contents 及 Alembic 单链迁移。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)；[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)）
-- [ ] 实现 PK/FK、同 run 联合归属、run 序号唯一、可空 UUID key 唯一、角色/COMID、终态引用和行正文互斥约束。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)）
-- [ ] created/terminal/request 引用使用延迟外键支持原子创建；不添加完整配置、结果、副本正文或独立 key 表。（[设计 §4.1](m3_transcript_history_implementation_design.md#41-analysis_runs)；[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)）
-- [ ] 写清跨表全文存在/互斥的 adapter 事务校验与行 CHECK 的区别；非法输入不能通过正常 store 写入口。（[设计 §4.4](m3_transcript_history_implementation_design.md#44-transcript_contents)）
-- [ ] 增加实际历史列表/目录/完整过程所需索引，不预建全文、confidence 或关联查询索引。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
-- [ ] 新增 backend/compose.yaml、.env.example、忽略真实 .env、命名持久卷和 loopback 端口/healthcheck。（[API §8.2](m3_transcript_history_api.md#82-本地-compose)）
-- [ ] AppSettings 按明确优先级加载 backend/.env；SecretStr 密码不 trim、不回显，分列 URL 构造覆盖特殊字符。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[API §8.1](m3_transcript_history_api.md#81-环境变量)）
-- [ ] 实现 wateragents-db upgrade/check；与 app 共用配置，迁移资源从已安装包/明确项目路径可定位。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)）
-- [ ] schema 版本只来自 Alembic 单 head；check 不 DDL，未知/缺失/旧/新/多 head 明确失败。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
-- [ ] Windows 正式 CLI、测试和 smoke 复用 Selector loop 初始化；不在已经运行的 loop 中切换。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)）
-- [ ] 更新 README 的本地 Compose、已有 PG、remote TLS、升级/停止/保留卷与单实例限制。（[API §8](m3_transcript_history_api.md#8-跨平台搭建与配置)）
-- [ ] 将路径/包资源、UTF-8、进程启动与系统差异集中在基础设施边界；初始化和 smoke 不依赖 Bash/GNU/Unix 专用能力，不硬编码开发机路径或依赖当前 cwd。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)）
+- [x] 新增 SQLAlchemy Core asyncio、psycopg binary、Alembic 依赖和锁文件；版本范围与实际解析版本记录一致。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)）
+- [x] 创建 analysis_runs、analysis_sessions、transcript_items、transcript_contents 及 Alembic 单链迁移。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)；[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)）
+- [x] 实现 PK/FK、同 run 联合归属、run 序号唯一、可空 UUID key 唯一、角色/COMID、终态引用和行正文互斥约束。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)）
+- [x] created/terminal/request 引用使用延迟外键支持原子创建；不添加完整配置、结果、副本正文或独立 key 表。（[设计 §4.1](m3_transcript_history_implementation_design.md#41-analysis_runs)；[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)）
+- [x] 写清跨表全文存在/互斥的 adapter 事务校验与行 CHECK 的区别；非法输入不能通过正常 store 写入口。（[设计 §4.4](m3_transcript_history_implementation_design.md#44-transcript_contents)）
+- [x] 增加实际历史列表/目录/完整过程所需索引，不预建全文、confidence 或关联查询索引。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
+- [x] 新增 backend/compose.yaml、.env.example、忽略真实 .env、命名持久卷和 loopback 端口/healthcheck。（[API §8.2](m3_transcript_history_api.md#82-本地-compose)）
+- [x] AppSettings 按明确优先级加载 backend/.env；SecretStr 密码不 trim、不回显，分列 URL 构造覆盖特殊字符。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[API §8.1](m3_transcript_history_api.md#81-环境变量)）
+- [x] 实现 wateragents-db upgrade/check；与 app 共用配置，迁移资源从已安装包/明确项目路径可定位。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)）
+- [x] schema 版本只来自 Alembic 单 head；check 不 DDL，未知/缺失/旧/新/多 head 明确失败。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
+- [x] Windows 正式 CLI、测试和 smoke 复用 Selector loop 初始化；不在已经运行的 loop 中切换。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)）
+- [x] 更新 README 的本地 Compose、已有 PG、remote TLS、升级/停止/保留卷与单实例限制。（[API §8](m3_transcript_history_api.md#8-跨平台搭建与配置)）
+- [x] 将路径/包资源、UTF-8、进程启动与系统差异集中在基础设施边界；初始化和 smoke 不依赖 Bash/GNU/Unix 专用能力，不硬编码开发机路径或依赖当前 cwd。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)）
 
 ### Tests
 
-- [ ] 真实空测试库 upgrade→check→再次 upgrade；确认 revision 与四表约束。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)；[API §8.3](m3_transcript_history_api.md#83-已有数据库与升级)）
-- [ ] 重复 key、run 序号、parser/waterbody 身份、跨 run FK 和非法状态的失败。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)）
-- [ ] inline/external 批次错误、丢全文、重复全文、字节数/时间不一致被 adapter 拒绝并整批回滚。（[设计 §4.4](m3_transcript_history_implementation_design.md#44-transcript_contents)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 配置 cwd 独立、环境覆盖、含 @:/#%$ 和空白的密码、sslrootcert、缺密码安全错误。（[API §8.1](m3_transcript_history_api.md#81-环境变量)）
-- [ ] import/fake 注入不依赖真实数据库；正式启动缺配置明确失败。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)；[API §8.1](m3_transcript_history_api.md#81-环境变量)）
+- [x] 真实空测试库 upgrade→check→再次 upgrade；确认 revision 与四表约束。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)；[API §8.3](m3_transcript_history_api.md#83-已有数据库与升级)）
+- [x] 重复 key、run 序号、parser/waterbody 身份、跨 run FK 和非法状态的失败。（[设计 §4](m3_transcript_history_implementation_design.md#4-postgresql-schema)）
+- [x] inline/external 批次错误、丢全文、重复全文、字节数/时间不一致被 adapter 拒绝并整批回滚。（[设计 §4.4](m3_transcript_history_implementation_design.md#44-transcript_contents)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 配置 cwd 独立、环境覆盖、含 @:/#%$ 和空白的密码、sslrootcert、缺密码安全错误。（[API §8.1](m3_transcript_history_api.md#81-环境变量)）
+- [x] import/fake 注入不依赖真实数据库；正式启动缺配置明确失败。（[设计 §2](m3_transcript_history_implementation_design.md#2-当前代码与目标模块)；[API §8.1](m3_transcript_history_api.md#81-环境变量)）
 - [ ] 三平台目标入口连接真实 PG；不要把仅执行配置解析当成连接验证。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)；[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 - [ ] 相同锁文件在目标平台重新安装；含空格/中文路径、不同 cwd、LF/CRLF 配置和平台对应的原生依赖均可正常使用，不复制旧 venv。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；[API §8.5](m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)）
 
 ### Verify
 
-- [ ] `wateragents-db upgrade`、`wateragents-db check`（独立测试环境）。（[API §8.2](m3_transcript_history_api.md#82-本地-compose)；[API §8.3](m3_transcript_history_api.md#83-已有数据库与升级)）
-- [ ] `python -m pytest backend/tests/persistence backend/tests/architecture -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
-- [ ] 记录 PG minor/digest、driver/SQLAlchemy/Alembic 版本、migration revision。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)；[证据记录格式](#实际证据记录格式)）
+- [x] `wateragents-db upgrade`、`wateragents-db check`（独立测试环境）。（[API §8.2](m3_transcript_history_api.md#82-本地-compose)；[API §8.3](m3_transcript_history_api.md#83-已有数据库与升级)）
+- [x] `python -m pytest backend/tests/persistence backend/tests/architecture -q`。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 记录 PG minor/digest、driver/SQLAlchemy/Alembic 版本、migration revision。（[设计 §10.1](m3_transcript_history_implementation_design.md#101-技术选择)；[证据记录格式](#实际证据记录格式)）
 
 阶段出口：可复现空库 schema、可靠连接及命令，尚不把启动修复或 transcript 写入标记完成。
+
+#### Milestone 2 完成记录（2026-09-13）
+
+本阶段在 `codex/m3-milestone`、基线 `388a48dc0074dc85ca5a87a83277788a74b8fc26` 上完成；开始时工作区无未提交用户改动。新增 `infrastructure/persistence` 的 SQLAlchemy Core 四表 metadata、单个 Alembic revision `20260913_01`、共享数据库配置/engine、只读 schema check、显式 upgrade CLI、跨表批次记录与原子 store。数据库 CHECK/PK/FK/唯一约束负责行内及关系事实；普通 CHECK 无法验证另一表是否存在全文，因此 store 在进入事务前重新验证 inline XOR contents、全文同批、UTF-8 字节数及原 `created_at`，数据库仍负责事务内全部回滚。没有增加完整配置/结果列、第二份正文、独立 key 表、全文/confidence/关联查询索引，也没有把 live workflow 接入或启动修复提前到本阶段。
+
+配置新增固定 `backend/.env`、不 trim 的 `SecretStr` 密码、分列 `URL.create` 和 TLS 参数；正式 app、数据库 CLI、测试及 smoke 共享 Windows Selector-loop 初始化。`backend/compose.yaml` 使用 `postgres:17`、loopback 端口、`pg_isready` 和命名卷；README 记录本地 Compose、已有/远程 PostgreSQL、TLS、升级/check、停止保留卷、换机重建环境及当前单实例限制。CI 改为三平台安装同一 `uv.lock`，并用 `ikalnytskyi/action-setup-postgres@v8` 启动真实 PostgreSQL 17 后运行包含实库用例的完整测试。
+
+本机环境为 macOS 26.6.2 arm64、uv 0.11.23、Python 3.12.14。锁定直接数据库依赖为 Alembic 1.20.0、SQLAlchemy 2.0.52、psycopg/psycopg-binary 3.3.5；实际测试服务为 PostgreSQL 17.10 Homebrew，非容器，因此本机 image digest 不适用；Compose 镜像保持设计指定的 `postgres:17`，其实际 minor/digest 待每次容器/CI 证据记录。数据库当前 revision 为 `20260913_01`，public 中为四张业务表加 `alembic_version`。
+
+实际验证：
+
+- 全新隔离库依次执行 `wateragents-db upgrade`、`check`、再次 `upgrade`，均到达 `20260913_01`；另一个空库的 `check` 明确失败，查询系统目录确认失败后 public 表数仍为 0。
+- `uv run --project backend --locked python -m pytest backend/tests/persistence backend/tests/architecture -q`：89 passed；其中真实 PostgreSQL 用例验证 migration/metadata 无漂移、全部约束、重复 key/序号/parser/waterbody、跨 run 归属、非法状态、external 正文和事务回滚。
+- `uv run --project backend --locked python -m pytest backend/tests -q`：659 passed；health smoke 输出 `{"status":"healthy"}`，run/SSE smoke 输出 `{"completed":"passed","cancelled":"passed"}`。
+- 从 `/private/tmp/WaterAgents M2 中文` 运行已安装 `wateragents-db check` 成功；单元测试覆盖含空格/中文路径、不同 cwd、LF/CRLF `.env`、`@:/#%$` 及首尾空白密码。`git diff --check` 在提交前复核。
+
+阶段工作和本机适用验证已完成。三平台 CI 入口已经落地，但当前没有本次远端 workflow 的实际链接/结果，所以“三平台真实 PG”和“各目标平台重新安装同锁”两项保持未勾选（partial），不能由 macOS 本机通过替代。Docker 在本机不可用，所以没有伪造 `postgres:17` image digest。Milestone 3 承接 typed content、严格 registry、单份正文编码/预览和引用验证；Milestone 4 以后承接实际创建/增量持久化，Milestone 8 承接启动 schema 检查、遗留修复与关闭收敛。
 
 ## Milestone 3：Typed content、单份正文、引用与安全入口
 

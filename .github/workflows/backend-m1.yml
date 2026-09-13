@@ -25,23 +25,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: pip
-          cache-dependency-path: backend/pyproject.toml
+      - name: Start PostgreSQL 17
+        uses: ikalnytskyi/action-setup-postgres@v8
+        with:
+          postgres-version: "17"
+          username: wateragents
+          password: wateragents-ci-password
+          database: wateragents_m2
+          port: "5432"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
       - name: Install backend
-        run: python -m pip install -e "./backend[dev]"
+        run: uv sync --project backend --extra dev --locked
       - name: Run complete test suite
-        run: python -m pytest backend/tests -q
+        env:
+          WATERAGENTS_TEST_POSTGRES_HOST: 127.0.0.1
+          WATERAGENTS_TEST_POSTGRES_PORT: "5432"
+          WATERAGENTS_TEST_POSTGRES_DB: wateragents_m2
+          WATERAGENTS_TEST_POSTGRES_USER: wateragents
+          WATERAGENTS_TEST_POSTGRES_PASSWORD: wateragents-ci-password
+        run: uv run --project backend --locked python -m pytest backend/tests -q
       - name: Run Uvicorn health smoke test
         env:
           HTTP_PROXY: http://127.0.0.1:1
           HTTPS_PROXY: http://127.0.0.1:1
           ALL_PROXY: http://127.0.0.1:1
           NO_PROXY: ""
-        run: python backend/scripts/health_smoke.py
+        run: uv run --project backend --locked python backend/scripts/health_smoke.py
       - name: Run Uvicorn run and SSE smoke test
         env:
           HTTP_PROXY: http://127.0.0.1:1
           HTTPS_PROXY: http://127.0.0.1:1
           ALL_PROXY: http://127.0.0.1:1
           NO_PROXY: ""
-        run: python backend/scripts/run_sse_smoke.py
+        run: uv run --project backend --locked python backend/scripts/run_sse_smoke.py

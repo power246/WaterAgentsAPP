@@ -9,9 +9,12 @@ description = "WaterAgents backend"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.13,<2",
     "fastapi>=0.115,<1",
+    "psycopg[binary]>=3.2,<4",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",
+    "sqlalchemy[asyncio]>=2.0,<3",
     "tzdata>=2025.1",
     "uvicorn>=0.34,<1",
 ]
@@ -24,10 +27,14 @@ dev = [
 
 [project.scripts]
 wateragents = "app.__main__:main"
+wateragents-db = "app.infrastructure.persistence.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
+
+[tool.setuptools.package-data]
+"app.infrastructure.persistence.migrations" = ["script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

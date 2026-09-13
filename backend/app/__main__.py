@@ -3,10 +3,14 @@ from __future__ import annotations
 import uvicorn
 
 from app.infrastructure.config import AppSettings
+from app.infrastructure.persistence.database import require_database_password
+from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 
 
 def main() -> None:
+    configure_asyncio_event_loop()
     settings = AppSettings()
+    require_database_password(settings)
     uvicorn.run(
         "app.main:app",
         host=settings.host,

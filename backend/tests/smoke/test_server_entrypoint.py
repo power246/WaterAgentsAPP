@@ -26,6 +26,7 @@ def running_entrypoint(monkeypatch, request):
     ]
     monkeypatch.setenv("WATERAGENTS_LOG_LEVEL", getattr(request, "param", "info"))
     monkeypatch.setenv("WATERAGENTS_HOST", "127.0.0.1")
+    monkeypatch.setenv("WATERAGENTS_DB_PASSWORD", "entrypoint-test-only")
 
     @asynccontextmanager
     async def run(application):

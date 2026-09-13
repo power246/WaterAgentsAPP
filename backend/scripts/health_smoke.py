@@ -35,6 +35,7 @@ def main() -> None:
     process_environment["WATERAGENTS_HOST"] = "127.0.0.1"
     process_environment["WATERAGENTS_PORT"] = str(port)
     process_environment["WATERAGENTS_LOG_LEVEL"] = "INFO"
+    process_environment.setdefault("WATERAGENTS_DB_PASSWORD", "smoke-only-password")
     process = subprocess.Popen(
         [
             sys.executable,

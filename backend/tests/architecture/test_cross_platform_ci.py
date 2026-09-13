@@ -4,6 +4,7 @@ from pathlib import Path
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "backend-m1.yml"
 SMOKE_SCRIPT_PATH = REPOSITORY_ROOT / "backend" / "scripts" / "health_smoke.py"
+TEST_CONFIG_PATH = REPOSITORY_ROOT / "backend" / "tests" / "conftest.py"
 
 
 def test_ci_runs_install_tests_and_both_smokes_on_all_supported_operating_systems() -> None:
@@ -12,10 +13,20 @@ def test_ci_runs_install_tests_and_both_smokes_on_all_supported_operating_system
     for runner in ("ubuntu-latest", "macos-latest", "windows-latest"):
         assert runner in workflow
     assert 'python-version: "3.11"' in workflow
-    assert 'python -m pip install -e "./backend[dev]"' in workflow
-    assert "python -m pytest backend/tests -q" in workflow
-    assert "python backend/scripts/health_smoke.py" in workflow
-    assert "python backend/scripts/run_sse_smoke.py" in workflow
+    assert "ikalnytskyi/action-setup-postgres@v8" in workflow
+    assert 'postgres-version: "17"' in workflow
+    assert "astral-sh/setup-uv@v6" in workflow
+    assert "uv sync --project backend --extra dev --locked" in workflow
+    assert "uv run --project backend --locked python -m pytest backend/tests -q" in workflow
+    assert "WATERAGENTS_TEST_POSTGRES_PORT" in workflow
+    assert (
+        "uv run --project backend --locked python backend/scripts/health_smoke.py"
+        in workflow
+    )
+    assert (
+        "uv run --project backend --locked python backend/scripts/run_sse_smoke.py"
+        in workflow
+    )
     assert "HTTP_PROXY: http://127.0.0.1:1" in workflow
     assert 'NO_PROXY: ""' in workflow
 
@@ -31,6 +42,16 @@ def test_ci_commands_do_not_require_a_platform_specific_shell() -> None:
     )
 
     assert not any(command in workflow for command in platform_specific_commands)
+
+
+def test_tests_and_direct_async_smoke_share_windows_loop_initialization() -> None:
+    test_config = TEST_CONFIG_PATH.read_text(encoding="utf-8")
+    direct_smoke = (
+        REPOSITORY_ROOT / "backend" / "scripts" / "run_sse_smoke.py"
+    ).read_text(encoding="utf-8")
+
+    for source in (test_config, direct_smoke):
+        assert "configure_asyncio_event_loop" in source
 
 
 def test_health_smoke_uses_cross_platform_process_and_path_apis() -> None:

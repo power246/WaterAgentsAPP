@@ -14,6 +14,7 @@ from app.api.schemas.analysis_runs import AnalysisRunResponse
 from app.application.analysis_runs.models import RunLifecycleEvent, RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config import AppSettings
+from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 from app.main import create_app
 
 BASE = "/api/analysis/runs"
@@ -225,4 +226,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    configure_asyncio_event_loop()
     asyncio.run(main())

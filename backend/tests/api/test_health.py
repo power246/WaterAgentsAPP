@@ -25,6 +25,22 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "host": "127.0.0.1",
         "port": 8000,
         "analysis_timezone": "America/Chicago",
+        "db_host": "127.0.0.1",
+        "db_port": 5432,
+        "db_name": "wateragents",
+        "db_user": "wateragents",
+        "db_password": None,
+        "db_sslmode": "disable",
+        "db_sslrootcert": None,
+        "db_pool_size": 5,
+        "db_max_overflow": 5,
+        "db_operation_timeout_seconds": 5.0,
+        "idempotency_wait_timeout_seconds": 5.0,
+        "persistence_batch_items": 100,
+        "transcript_inline_max_bytes": 65536,
+        "transcript_preview_bytes": 2048,
+        "live_state_grace_seconds": 60.0,
+        "shutdown_save_grace_seconds": 5.0,
     }
     assert create_app(settings).state.settings is settings
 
@@ -100,6 +116,7 @@ def test_main_entrypoint_enforces_one_worker_despite_environment(monkeypatch, wo
     import app.__main__ as entrypoint
 
     monkeypatch.setenv("WEB_CONCURRENCY", workers)
+    monkeypatch.setenv("WATERAGENTS_DB_PASSWORD", "entrypoint-test-only")
     configurations = []
 
     def capture_run(app, **options):

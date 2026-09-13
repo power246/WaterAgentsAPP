@@ -1,0 +1,22 @@
+name: wateragents
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${WATERAGENTS_DB_NAME:-wateragents}
+      POSTGRES_USER: ${WATERAGENTS_DB_USER:-wateragents}
+      POSTGRES_PASSWORD: ${WATERAGENTS_DB_PASSWORD:?set WATERAGENTS_DB_PASSWORD}
+    ports:
+      - "127.0.0.1:${WATERAGENTS_DB_PORT:-5432}:5432"
+    volumes:
+      - wateragents-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+volumes:
+  wateragents-postgres-data:
