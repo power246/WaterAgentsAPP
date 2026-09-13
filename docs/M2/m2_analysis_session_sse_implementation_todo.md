@@ -962,12 +962,15 @@ Applicable contracts：`GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`
 
 #### 后续接力入口与验收
 
+新增设计接力（尚未实现）：[M3 D26](../M3/m3_transcript_history_design.md#d26日志保留-query-正文仅对其中凭据脱敏) / `M3-C19` / `M3-A11` 将日志策略改为保留业务 query、仅脱敏其中凭据。M3 应调整 `redaction.py`、formatter 字段、HTTP/workflow 诊断私有值及对应测试；本文件此前关于隐藏 query 的通过记录保留为当时实现证据，不再作为新设计的禁止规则。凭据保护和公开错误安全边界继续验收。
+
 以下“入口”指当前可读取、复用或直接演进的真实符号，不代表未来功能已实现。各 ID 的完整硬约束仍以中心 register 为准；后续实现必须保留 M2 基线，并在所属 Milestone 补齐 durable/业务能力的测试。
 
 | 归属与 ID | 当前接力入口 | 必须保留的约束与可观察验收 |
 |---|---|---|
-| M3：`M3-C08`、`M3-C09`（关联 `M3-C01`–`M3-C07`） | `SessionCoordinator.create_session/_transition`、`models.py`、`CreateAnalysisSessionRequest`、`backend/app/ports/transcript_store.py` | 存储 request/session/原 LifecycleEvent/errors；存在时才保存 versioned final result。durable append 后重启读取仍保留 schema version、sequence、原时间、configuration；同 key+相同规范化请求跨重启返回原 session，不同请求返回 409。大内容 preview/reference、写前脱敏及 history 无假字段一并验收。 |
-| M3：`M3-C10`、`M3-C11` | `SessionCoordinator._run_workflow/_workflow_failed/_transition`、`SessionCompletedPayload`、`PublicError` | cancelled 在途产物只追加 transcript，不进入 SSE/downstream，不增加 after-cancel 字段；分析成功但持久化失败提交 completed_with_persistence_error 与 session_completed 安全 warning/error_id。测试写失败仍能交付结果且不误报 session_failed。 |
+| M3：`M3-C08`、`M3-C09`（关联 `M3-C01`–`M3-C07`） | `SessionCoordinator.create_session/_transition`、`models.py`、`CreateAnalysisSessionRequest`、`backend/app/ports/transcript_store.py` | 存储 request/session/原 LifecycleEvent/errors；存在时才保存 versioned final result。durable append 后重启读取仍保留 schema version、sequence、原时间、configuration；同 key + 完全相同的原始请求体跨重启返回原 session，不同请求体返回 409；按 M3 D12 原样比较，不额外规范化。大内容 preview/reference、写前脱敏及 history 无假字段一并验收。 |
+| M3：`M3-C10`、`M3-C11` | `SessionCoordinator._run_workflow/_workflow_failed/_transition`、`SessionCompletedPayload`、`PublicError` | cancelled 在途产物只追加 transcript，不进入 SSE/downstream，不增加 after-cancel 字段；按 D38，成功分析结束时固定此前必需写入范围，交付窗口到期仍未保存完整则提交 completed_with_persistence_error 与 session_completed 安全 warning/error_id。终态自身/后续收尾保存失败通过当前读取返回警告，保持原终态并补写；测试唯一终态、取消即时响应、写失败仍能交付结果且不误报 session_failed。 |
+| M3：`M3-C20`、`M3-A12` | `SessionCoordinator`、`SessionRuntime`、新增 M3 持久化写入器和保存恢复 route | 按 D39–D41 实现无请求体 POST /api/analysis/sessions/{session_id}/persistence/retry，自动补写耗尽后复用原写入器开启新一轮；执行/退避中重复触发不增加并发或重置预算。202/200 与 409/404/503/422 按 D41 验收，HTTP 断开不取消已受理补写，原事实与终态保持不变，内存丢失不伪造恢复。接口和验收待 M3 实现，按钮及不自动重发由 M9-C11/M9-A08 承接。 |
 | M3：`M3-C12`–`M3-C15` | `SessionRuntime.workflow_quiesced`、`SessionCoordinator` session map、`shutdown/subscribe`、`create_app` lifespan | 本 session 所有适用 durable write 成功回调 + quiesced + grace 到期才清理；仅入队/建 task/live buffer 不算确认。分别验证未确认、失败、未收敛、未到期、幂等重试及 cleanup 失败不改终态；启动遗留 active 归档 failed/service_interrupted；重启后历史 timeline 不伪装可续跑 active stream。 |
 | M4：`M4-C01`–`M4-C08` | `CreateAnalysisSessionRequest`、`AnalysisConfigurationSnapshot`、`WorkflowContext`、`backend/app/domain/time/`、`models.py:LifecycleEvent` | 直接替换阶段 request，定型 AnalysisContext；包含整天结束日期按 session timezone 转 UTC，DST/auto 真正规则有测试；使用 ParameterKey，真实解析 location/COMID/mode/topology；query_understood/topology_ready 共享 envelope/sequence/replay。history 从持久化版本化 context 投影，查询时不重算。 |
 | M5：`M5-C09`、`M5-C10`；producer 归 M7 / 项目 M8 | `models.py:LifecycleEvent`、`api/sse/encoder.py`、`backend/app/ports/event_publisher.py` | 大 tool/evidence 仅 preview+reference，不把无界 raw data 放入 replay buffer；类型、容量及完整内容引用可测试。upstream-result/RAG tool 槽位明确 unavailable，真实 producer 分别由 M7 和项目 M8 接入，不能用生产 fake 伪装可用。 |

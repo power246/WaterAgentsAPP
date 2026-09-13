@@ -598,6 +598,8 @@ LifecycleEvent
 
 ### 12.3 Structured backend log
 
+后续设计变更：用户已在 [M3 D26](../M3/m3_transcript_history_design.md#d26日志保留-query-正文仅对其中凭据脱敏) 明确要求日志保留业务 query，仅对其中凭据脱敏。本节及 §12.5 下文记录当前 M2 实现，其中整段隐藏 query 的行为由 M3-C19/M3-A11 承接调整，不能继续作为后续禁止记录 query 的要求；本次未修改运行时代码或重写历史测试证据。
+
 WaterAgents 自有应用日志输出单行 JSON，至少支持：
 
 ```text
@@ -663,6 +665,8 @@ Formatter 只选择上述字段及已有 `public_error/lifecycle_event/original_
 M2 不实现 transcript。M3 使用相同 lifecycle event 构造可审计 item，并记录 user request、取消上下文和业务错误。HTTP access log、keepalive 和纯传输异常不默认进入 transcript。
 
 ### 12.5 Redaction
+
+以下为当前 M2 的脱敏行为；query 保留规则的已确认变更与实现接力见 §12.3 开头及 M3 D26。
 
 - 不记录原始 Authorization、Cookie、Set-Cookie、API key 或 credential headers。
 - 对结构化 payload 按大小写不敏感的 secret key allow/deny policy 递归脱敏。
@@ -858,7 +862,8 @@ Completed 场景使用默认 workflow，验证 pending response、created/comple
 - 实现持久化幂等创建：相同 `Idempotency-Key` + 相同请求返回原 session；相同 key + 不同请求返回 409。
 - cancelled session 可以记录已经产生的在途结果；不增加 `produced_after_cancel` 字段，以 session status 提供上下文。
 - 实现 lifecycle event 的跨重启读取或明确的历史 timeline mapping。
-- 实现 `completed_with_persistence_error`：分析成功但持久化失败时发布 `session_completed`，payload 带 status 和公开 persistence warning/error_id；不得误报 `session_failed`。
+- 实现 `completed_with_persistence_error`：按 M3 D38，成功分析结束时固定此前必需写入范围，若到 D04 交付窗口仍未保存完整则发布 `session_completed`，payload 带 status 和公开 persistence warning/error_id，不得误报 `session_failed`。选定终态后，其自身及后续收尾写入失败由当前读取返回警告，不改写原终态；等待期间取消仍立即响应。
+- 按 M3 D39/M3-C20 提供自动补写耗尽后的手动保存恢复入口，复用原写入器和记录；不重跑 workflow，不改业务终态，执行/退避中重复触发不重置预算。前端按钮由 M9-C11 承接。
 - 双写持久化成功后回调标记 `persistence_confirmed`。
 - 只有 `persistence_confirmed + workflow_quiesced + grace period elapsed` 同时满足时才异步清理 live state；持久化失败不得清理。
 - 清理 callback 幂等，清理失败可重试且不修改 session 业务终态。

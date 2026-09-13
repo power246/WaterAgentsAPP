@@ -8,6 +8,8 @@
 
 M2 是后端内部里程碑，不与现有 WebSocket 前端兼容。最终前端重构应在 M9 按当时的最终 OpenAPI 和事件文档接入。
 
+M3 已确认但尚未实现的前端接入设计统一记录在父目录的 [前端接入约定](../frontend_integration_contracts.md)，包括 `Idempotency-Key` 的生成、复用和冲突处理。该文档不改变本文所述的 M2 当前行为。
+
 ## 1. Base URL 与限制
 
 本地默认地址：
@@ -373,6 +375,8 @@ M2 不公开 `session_started`：
 前端点击停止必须调用 cancel API；只调用 `EventSource.close()` 不会取消分析。
 
 ## 8. 排障 Runbook
+
+本节描述当前 M2 行为。用户已在 [M3 D26](../M3/m3_transcript_history_design.md#d26日志保留-query-正文仅对其中凭据脱敏) 确认日志保留业务 query、仅脱敏其中凭据；当前代码仍隐藏 query，调整由 M3-C19/M3-A11 承接。下文的 query 不输出说明不是后续设计约束。
 
 应用启动后，`wateragents.*` 日志以单行 JSON 写到 stderr，级别由 `WATERAGENTS_LOG_LEVEL` 控制（默认 info）。正式入口关闭 Uvicorn 默认 access log，避免 URL 中的凭据或私有 query 原样落盘；HTTP 访问使用应用的安全结构化记录。Uvicorn server/error 与第三方日志保持自身格式；只将 WaterAgents 自有日志作为本节 JSON 查询对象。每行包含 `timestamp/level/event_name/message/component`，ID 按上下文出现。`http_request_completed` 包含 `method/route/status_code/duration_ms`，其中 route 是模板，duration 覆盖完整 SSE 订阅时间。UTC 时钟回拨时 duration 为 0。
 
