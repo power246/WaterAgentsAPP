@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11 已完成本机实现与适用验证，Milestone 12–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -380,6 +380,8 @@ run cancel 在统一状态边界关闭调度入口，固定全部生成中原消
 公开 tags 与正文使用同一 `private_values` 和静态凭据规则，在 `message_started` 可见前完成安全化；脱敏后重复的 tag 按原顺序稳定去重。finalized item、live/history DTO 和数据库记录复用这一份安全 metadata，持久化边界再次复核，不能把未安全化 tags 写入存储。
 
 流式过滤器在不可读的私有缓冲中维护已知 secret 前缀和敏感字段识别状态：仅释放已经排除匹配可能的安全前缀；凭据值进入遮蔽状态后不缓存或发送原值，直到确定分隔边界。known secret 的后缀前缀保留到后片段确定；敏感标记可能跨片段时同样保留。结束/取消时未能判定的敏感候选按安全替换收尾，不能原样放行。取消之后保留遮蔽状态，避免跨边界剩余凭据出现在历史尾部；不保留一份未脱敏全文。
+
+URL scheme 可确认后立即释放，过滤器只在 authority 判定期保留最多 2,048 个字符；`/`、`?`、`#` 或空白结束 authority，后续 path/query/fragment 回到通用有界 look-behind。authority 中出现 `@` 才表示 userinfo，此前内容统一遮蔽，安全 host/port 继续输出；没有 `@` 的域名端口、IPv4 与方括号 IPv6 原样保留。authority 超限时立即输出一次安全占位并进入 masked 状态直至分隔符，因此空间有固定上限，扫描成本不随无空白长 URL 超线性增长。取消时未决 authority 先以安全占位计入原消息，再保留 masked 状态消费取消后的剩余 authority，不能把前缀或后缀移动成 late audit 明文。
 
 这是限定凭据规则的跨片段处理，不宣称识别所有敏感信息。使用合成凭据逐切分点验证（包括 Unicode、引号、转义、分隔符、取消处与日志），并验证正常文本有持续增量输出；不能通过整段等到结束才输出规避流式验收。持久化出口再次校验与脱敏，不能用最终安全覆盖弥补已泄露 SSE。
 

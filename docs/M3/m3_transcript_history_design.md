@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–16 实施清单](m3_implementation_todo.md)。Milestone 0–10 的历史实现记录已经保留；针对提交 `452749b` 的审查修复按功能追加为 Milestone 11–16，Milestone 11 已完成本机实现与适用验证，Milestone 12–16 须在实现和验证后再勾选，实际状态以清单为准。
+状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–16 实施清单](m3_implementation_todo.md)。Milestone 0–10 的历史实现记录已经保留；针对提交 `452749b` 的审查修复按功能追加为 Milestone 11–16，Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 须在实现和验证后再勾选，实际状态以清单为准。
 
 本文保留确认过程与原 D 编号，供追溯设计依据。当前工程字段、约束、DTO、事件和配置以实施详细设计及 API 指南为入口；下面决策原文中的“继续定型”表示当时的工程待办，现已在新文档收敛，不要求重新逐项询问用户，也不另形成一套实现规范。
 

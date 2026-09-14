@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11 已完成本机实现与适用验证，Milestone 12–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic 凭据与显式 private value tags 已在正文、日志、SSE、live/history 和存储边界统一安全化；取消边界、引用依赖、手动补写竞争及 corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL 与取消边界的敏感状态已经统一安全化；取消时的引用依赖、手动补写竞争及 corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
@@ -278,6 +278,8 @@ run_snapshot 没有 SSE id；客户端不为 run 保存 Last-Event-ID，服务�
 | message_started | `{item: TranscriptItemHeader}`，原消息一次性元信息。 |
 | message_delta | `{item_id,text}`，只含新增安全文本。 |
 | message_finalized | `{item: TranscriptItemView,generation_status:"completed"或"incomplete"}`，状态从原正文派生。 |
+
+流式安全过滤只在 URL authority 判定期使用最多 2,048 字符的内部缓冲；`/`、`?`、`#` 或空白后立即恢复普通增量输出。userinfo 由 authority 中的 `@` 判定并遮蔽，普通 `host:port`、IPv4 和方括号 IPv6 不因冒号被误判。取消会安全结算原消息的未决凭据并延续遮蔽状态，因此其余敏感值不会以孤立文本进入 history-only late audit。
 
 message_started 的类型表示哪种注册消息正在生成；具体消息正文由生产阶段注册。M3 用严格测试类型验证事件能力，不制造生产 LLM 消息结构。以下只展示与具体业务类型无关的 delta frame：
 

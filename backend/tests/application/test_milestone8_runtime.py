@@ -107,12 +107,11 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
                 session.session_id,
                 "fixture_message",
                 1,
-                private_values=("secret-value",),
             )
             await coordinator.append_transcript_message_delta(
                 created.run_id,
                 message.item_id,
-                "kept ",
+                "kept api_key=",
             )
             await coordinator.cancel_run(created.run_id)
             process = coordinator._runs[created.run_id].agent_sessions[
@@ -136,18 +135,19 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
             assert await coordinator.append_transcript_message_delta(
                 created.run_id,
                 message.item_id,
-                "late secret-",
+                "abcdef",
             ) == ""
-            assert await coordinator.append_transcript_message_delta(
+            late_chunk = await coordinator.append_transcript_message_delta(
                 created.run_id,
                 message.item_id,
-                "value tail",
-            ) == ""
+                " tail",
+            )
+            assert "abcdef" not in late_chunk
             await coordinator.finalize_transcript_message(
                 created.run_id,
                 message.item_id,
                 FixtureMessageV1(
-                    text="kept late secret-value tail",
+                    text="kept api_key=abcdef tail",
                     generation_status=GenerationStatus.COMPLETED,
                     end_reason=MessageEndReason.COMPLETED,
                 ),
@@ -166,7 +166,7 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
             }
             original = json.loads(bodies[message.item_id])
             assert original == {
-                "text": "kept ",
+                "text": "kept api_key=[REDACTED]",
                 "generation_status": "incomplete",
                 "end_reason": "cancelled",
             }
@@ -178,8 +178,8 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
             ]
             late = next(item for item in audits if isinstance(item, LateMessageOutputFact))
             assert late.original_item_id == message.item_id
-            assert late.text == "late [REDACTED] tail"
-            assert "secret-value" not in "".join(bodies.values())
+            assert late.text == " tail"
+            assert "abcdef" not in "".join(bodies.values())
 
     run(exercise)
 

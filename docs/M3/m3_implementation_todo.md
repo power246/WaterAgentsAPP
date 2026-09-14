@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11 已完成本机实现与适用验证，Milestone 12–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成流式 URL 状态机、取消引用依赖、retry/cleanup 原子性、corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
+**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成取消引用依赖、retry/cleanup 原子性、corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
 
 ## 阶段与设计导航
 
@@ -718,25 +718,33 @@ git diff --check
 
 ### 工作
 
-- [ ] 将 `StreamingCredentialFilter` 重构为单遍状态机；每个输入字符只进入一次状态转换，不在每个 chunk 上重新扫描不断增长的完整 URL。
-- [ ] URL 只在 authority 判定期保留有明确上限的缓冲：遇到 `/`、`?`、`#` 或空白后立即释放普通 host/path；超过上限时保守遮蔽 authority 并继续消费，内存不随攻击输入增长。
-- [ ] authority 以 `@` 判定 userinfo；有 userinfo 时遮蔽凭据并保留安全 host/port，无 userinfo 时原样保留 `https://example.com:8443/path`，同时覆盖 IPv6 host 与端口。
-- [ ] `cancel()` 作为原消息与晚到审计的分界而不是过滤器重置：`api_key=`、header value、quoted value、`Bearer/Basic` token 和 URL `user:` 的未完成遮蔽状态必须跨边界保留。
-- [ ] 原消息、late audit 与最终 typed message 使用同一安全文本；普通端口 URL 不再导致 streamed/final body mismatch，也不把正常完成消息降级为 `incomplete/error`。
+- [x] 将 `StreamingCredentialFilter` 重构为单遍状态机；每个输入字符只进入一次状态转换，不在每个 chunk 上重新扫描不断增长的完整 URL。
+- [x] URL 只在 authority 判定期保留有明确上限的缓冲：遇到 `/`、`?`、`#` 或空白后立即释放普通 host/path；超过上限时保守遮蔽 authority 并继续消费，内存不随攻击输入增长。
+- [x] authority 以 `@` 判定 userinfo；有 userinfo 时遮蔽凭据并保留安全 host/port，无 userinfo 时原样保留 `https://example.com:8443/path`，同时覆盖 IPv6 host 与端口。
+- [x] `cancel()` 作为原消息与晚到审计的分界而不是过滤器重置：`api_key=`、header value、quoted value、`Bearer/Basic` token 和 URL `user:` 的未完成遮蔽状态必须跨边界保留。
+- [x] 原消息、late audit 与最终 typed message 使用同一安全文本；普通端口 URL 不再导致 streamed/final body mismatch，也不把正常完成消息降级为 `incomplete/error`。
 
 ### Tests
 
-- [ ] 在不传 `private_values` 时，对 `feed("api_key=") → cancel() → feed("abcdef") → finish()` 和 `https://user:` 跨取消序列逐切分验证，原消息、晚到审计和拼接结果均不含凭据。
-- [ ] 对 userinfo URL、普通 host:port、IPv4、IPv6、query/fragment、无 path URL 和所有 chunk split 验证流式结果与静态安全正文一致。
-- [ ] 逐字符输入至少 128 KiB 的无空白 URL/path，每次断言 `buffered_characters` 不超过固定上限；不使用易抖动的耗时阈值，以有界状态直接守卫空间与扫描复杂度。
-- [ ] 经真实 coordinator/SSE 路径验证普通 URL 消息保持 `completed` 且 streamed text 等于 final body；取消后的敏感后缀只进入已脱敏 history-only audit。
+- [x] 在不传 `private_values` 时，对 `feed("api_key=") → cancel() → feed("abcdef") → finish()` 和 `https://user:` 跨取消序列逐切分验证，原消息、晚到审计和拼接结果均不含凭据。
+- [x] 对 userinfo URL、普通 host:port、IPv4、IPv6、query/fragment、无 path URL 和所有 chunk split 验证流式结果与静态安全正文一致。
+- [x] 逐字符输入至少 128 KiB 的无空白 URL/path，每次断言 `buffered_characters` 不超过固定上限；不使用易抖动的耗时阈值，以有界状态直接守卫空间与扫描复杂度。
+- [x] 经真实 coordinator/SSE 路径验证普通 URL 消息保持 `completed` 且 streamed text 等于 final body；取消后的敏感后缀只进入已脱敏 history-only audit。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application/test_streaming_redaction.py backend/tests/api/test_analysis_events.py backend/tests/application/test_milestone8_runtime.py -q`。
-- [ ] 运行 SSE socket smoke，确认长消息不会阻塞其他 run、keepalive 或 `stream_end`。
+- [x] `python -m pytest backend/tests/application/test_streaming_redaction.py backend/tests/api/test_analysis_events.py backend/tests/application/test_milestone8_runtime.py -q`。
+- [x] 运行 SSE socket smoke，确认长消息不会阻塞其他 run、keepalive 或 `stream_end`。
 
 阶段出口：流式过滤的内部缓冲有明确上限，长 URL 处理为线性；userinfo、host:port 和取消边界同时满足安全性与正文一致性。
+
+### Milestone 12 完成记录（2026-09-14）
+
+- 实现：URL scheme 识别后只暂存最多 2,048 个 authority 字符；`/`、`?`、`#` 或空白立即结束判定，超限 authority 一次性保守遮蔽并以 masked 状态继续消费，不再反复扫描不断增长的整段 URL。
+- 语义：authority 出现 `@` 才视为 userinfo；凭据遮蔽后保留安全 host/port，普通域名端口、IPv4 与 IPv6 原样保留。取消会安全结算原消息的未决片段，并把 assignment/header/quote/auth/URL 遮蔽状态带到 late audit，取消后敏感后缀不会成为孤立明文。
+- 测试：新增无 `private_values` 的取消跨界逐切分、七类 URL 所有切分点、128 KiB 逐字符固定缓冲上限、coordinator/SSE 完成态一致性，以及真实 Uvicorn socket 下长消息与并发 run/`stream_end` 回归。
+- 验证：指定的 application/API focused tests 为 68 passed；包含新增长消息场景的真实 socket smoke 为 19 passed；允许 loopback bind、排除需要外部测试库的真实 PostgreSQL 用例后，后端完整回归为 786 passed；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
+- 限制：Milestone 13–16、真实 PostgreSQL 追加修复验证、Ubuntu/macOS/Windows 实际 CI 与同库跨系统迁移证据仍未完成；整体状态继续保持 `partial / request changes`。
 
 ## Milestone 13：取消时的引用依赖与持久化收敛
 

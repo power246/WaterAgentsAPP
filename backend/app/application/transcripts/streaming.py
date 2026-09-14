@@ -18,6 +18,8 @@ _HEADER_PREFIX = re.compile(
 _AUTH_PREFIX = re.compile(r"\b(?:Bearer|Basic)\s+", re.IGNORECASE)
 _URL_PREFIX = re.compile(r"https?://", re.IGNORECASE)
 _TOKEN_DELIMITERS = frozenset("\r\n\t ,;}&]\"'")
+_URL_AUTHORITY_DELIMITERS = frozenset("/?#")
+_MAX_URL_AUTHORITY_CHARACTERS = 2048
 _CANDIDATE_MARKERS = (
     "authorization",
     "proxy-authorization",
@@ -56,11 +58,12 @@ class StreamingCredentialFilter:
         self._mode = "normal"
         self._quote = ""
         self._escaped = False
+        self._url_authority = ""
         self._closed = False
 
     @property
     def buffered_characters(self) -> int:
-        return len(self._pending)
+        return len(self._pending) + len(self._url_authority)
 
     def feed(self, chunk: str) -> str:
         if self._closed:
@@ -74,16 +77,17 @@ class StreamingCredentialFilter:
         if self._closed:
             return ""
         output = self._drain(final=False)
+        if self._mode == "url_authority":
+            self._url_authority = ""
+            self._mode = "url_authority_masked"
+            return output + REDACTED
+        if self._mode == "url_authority_masked":
+            return output
         if self._mode == "normal" and self._pending:
-            candidate_start = self._candidate_start()
-            output += redact_text(
-                self._pending[:candidate_start],
-                self._private_values,
-            )
-            if candidate_start < len(self._pending):
-                output += REDACTED
+            incomplete_candidate = self._candidate_start() < len(self._pending)
+            output += self._drain(final=True)
+            if incomplete_candidate and self._mode == "normal":
                 self._mode = "token"
-            self._pending = ""
         elif self._mode != "normal":
             self._pending = ""
         return output
@@ -98,7 +102,12 @@ class StreamingCredentialFilter:
 
     def _drain(self, *, final: bool) -> str:
         output: list[str] = []
-        while self._pending:
+        while self._pending or (final and self._mode.startswith("url_authority")):
+            if self._mode.startswith("url_authority"):
+                output.append(self._consume_url_authority(final=final))
+                if self._mode != "normal":
+                    break
+                continue
             if self._mode != "normal":
                 released = self._consume_masked()
                 output.append(released)
@@ -119,9 +128,11 @@ class StreamingCredentialFilter:
             ]
             selected = min(starts, key=lambda value: (value[0], value[1])) if starts else None
             if selected is not None and selected[1] == "url":
-                if self._consume_url(output, selected[2], final=final):
-                    continue
-                break
+                start, _, match = selected
+                output.append(self._pending[:start] + match.group())
+                self._pending = self._pending[match.end():]
+                self._mode = "url_authority"
+                continue
             if selected is not None and selected[1] == "known":
                 start, _, value = selected
                 output.append(self._pending[:start])
@@ -228,30 +239,46 @@ class StreamingCredentialFilter:
         self._pending = ""
         return ""
 
-    def _consume_url(self, output: list[str], match, *, final: bool) -> bool:
-        start = match.start()
-        end = next(
+    def _consume_url_authority(self, *, final: bool) -> str:
+        output: list[str] = []
+        delimiter_index = next(
             (
                 index
-                for index in range(match.end(), len(self._pending))
-                if self._pending[index].isspace()
+                for index, character in enumerate(self._pending)
+                if character.isspace() or character in _URL_AUTHORITY_DELIMITERS
             ),
             None,
         )
-        if end is None and not final:
-            output.append(self._pending[:start])
-            self._pending = self._pending[start:]
-            return False
-        end = len(self._pending) if end is None else end
-        candidate = self._pending[start:end]
-        authority = candidate[match.group().find("://") + 3:].split("/", 1)[0]
-        if ":" in authority and "@" not in authority and final:
-            rendered = match.group() + REDACTED
+        if delimiter_index is None:
+            authority = self._pending
+            self._pending = ""
         else:
-            rendered = redact_text(candidate, self._private_values)
-        output.append(self._pending[:start] + rendered)
-        self._pending = self._pending[end:]
-        return True
+            authority = self._pending[:delimiter_index]
+            delimiter = self._pending[delimiter_index]
+            self._pending = self._pending[delimiter_index + 1:]
+
+        if self._mode == "url_authority":
+            available = _MAX_URL_AUTHORITY_CHARACTERS - len(self._url_authority)
+            self._url_authority += authority[:available]
+            if len(authority) > available:
+                output.append(REDACTED)
+                self._url_authority = ""
+                self._mode = "url_authority_masked"
+
+        if delimiter_index is not None or final:
+            if self._mode == "url_authority":
+                output.append(self._render_url_authority())
+            self._url_authority = ""
+            self._mode = "normal"
+            if delimiter_index is not None:
+                output.append(delimiter)
+        return "".join(output)
+
+    def _render_url_authority(self) -> str:
+        if "@" not in self._url_authority:
+            return redact_text(self._url_authority, self._private_values)
+        _, _, host = self._url_authority.rpartition("@")
+        return REDACTED + "@" + redact_text(host, self._private_values)
 
     def _safe_final_pending(self) -> str:
         candidate_start = self._candidate_start()

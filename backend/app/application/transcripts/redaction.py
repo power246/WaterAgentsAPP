@@ -20,7 +20,7 @@ HEADER_VALUE = re.compile(
     r"(?P<key>\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+",
     re.IGNORECASE,
 )
-URL_CREDENTIAL = re.compile(r"(https?://)[^\s/@]+:[^\s/@]+@", re.IGNORECASE)
+URL_CREDENTIAL = re.compile(r"(https?://)[^\s/@]+@", re.IGNORECASE)
 _SENSITIVE_CANDIDATES = (
     "authorization",
     "cookie",

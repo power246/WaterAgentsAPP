@@ -4,10 +4,16 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 
+from app.application.analysis_runs.models import AgentRole
+from app.application.transcripts.models import FixtureMessageV1, GenerationStatus
+from app.application.transcripts.registry import (
+    create_production_registry,
+    fixture_message_registration,
+)
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
-from scripts.run_sse_smoke import GatedWorkflow, running_server
+from scripts.run_sse_smoke import BASE, GatedWorkflow, read_event, running_server
 
 
 @pytest.mark.parametrize("exit_mode", ["normal", "failure", "cancelled"])
@@ -87,5 +93,83 @@ def test_lifespan_startup_failure_is_reported_without_orphan_tasks(application_l
             async with running_server(app):
                 pytest.fail("The client must not run after a startup failure.")
         assert not asyncio.all_tasks() - before
+
+    asyncio.run(asyncio.wait_for(exercise(), timeout=15))
+
+
+def test_long_transcript_stream_allows_another_run_and_reaches_stream_end(
+    application_logs,
+):
+    async def exercise():
+        workflow = GatedWorkflow()
+        registry = create_production_registry().copy_with(
+            fixture_message_registration()
+        )
+        app = create_app(
+            AppSettings(log_level="warning"),
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+            transcript_registry=registry,
+            shutdown_grace_period=0,
+        )
+        try:
+            async with running_server(app) as client:
+                first = await client.post(BASE, json={"query": "long transcript smoke"})
+                assert first.status_code == 201
+                await workflow.started.wait()
+                coordinator = app.state.run_coordinator
+                run_id = first.json()["run_id"]
+                session = await coordinator.prepare_agent_session(
+                    run_id,
+                    agent_role=AgentRole.QUERY_PARSER,
+                )
+                await coordinator.mark_agent_session_running(run_id, session.session_id)
+                message = await coordinator.start_transcript_message(
+                    run_id,
+                    session.session_id,
+                    "fixture_message",
+                    1,
+                )
+                expected = "https://example.com/" + "a" * (128 * 1024)
+                path = f"{BASE}/{run_id}/sessions/{session.session_id}/events"
+
+                async def produce_transcript():
+                    for offset in range(0, len(expected), 256):
+                        await coordinator.append_transcript_message_delta(
+                            run_id,
+                            message.item_id,
+                            expected[offset:offset + 256],
+                        )
+                    await coordinator.finalize_transcript_message(
+                        run_id,
+                        message.item_id,
+                        FixtureMessageV1(
+                            text=expected,
+                            generation_status=GenerationStatus.COMPLETED,
+                        ),
+                    )
+                    await coordinator.complete_agent_session(run_id, session.session_id)
+
+                async with client.stream("GET", path) as response:
+                    assert response.status_code == 200
+                    lines = response.aiter_lines()
+                    producer = asyncio.create_task(produce_transcript())
+                    other_run = asyncio.create_task(
+                        client.post(BASE, json={"query": "concurrent run smoke"})
+                    )
+                    streamed = []
+                    while True:
+                        name, data, _ = await read_event(lines)
+                        if name == "message_delta":
+                            streamed.append(data["payload"]["text"])
+                        if name == "stream_end":
+                            assert data["stream"] == "session"
+                            break
+                    await producer
+                    created_while_streaming = await other_run
+                    assert created_while_streaming.status_code == 201
+                    assert "".join(streamed) == expected
+        finally:
+            workflow.release.set()
 
     asyncio.run(asyncio.wait_for(exercise(), timeout=15))

@@ -670,6 +670,83 @@ def test_streamed_message_metadata_matches_started_finalized_get_and_storage() -
     run(exercise)
 
 
+def test_streamed_host_port_url_stays_completed_and_matches_final_body() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (
+            app, coordinator, created, _, _, store,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            expected = "https://example.com:8443/path"
+            for chunk in ("https://example.com:", "8443/", "path"):
+                await coordinator.append_transcript_message_delta(
+                    created.run_id,
+                    message.item_id,
+                    chunk,
+                )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text=expected,
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(
+                created.run_id,
+                session.session_id,
+            )
+            runtime = coordinator._runs[created.run_id]
+            await coordinator._wait_for_writer_drain(runtime)
+
+            response = await create_session_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+                session.session_id,
+            )
+            events = decoded_frames(await collect_response(response))
+            streamed = "".join(
+                data["payload"]["text"]
+                for name, _, data in events
+                if name == "message_delta"
+                and data["payload"]["item_id"] == str(message.item_id)
+            )
+            finalized = next(
+                data for name, _, data in events
+                if name == "message_finalized"
+                and data["payload"]["item"]["item_id"] == str(message.item_id)
+            )
+            assert streamed == expected
+            assert finalized["payload"]["generation_status"] == "completed"
+            assert finalized["payload"]["item"]["content"]["body"]["text"] == expected
+            assert not any(
+                item.content.content_type == "error"
+                for item in runtime.transcript_buffer.items
+                if item.item_id != message.item_id
+            )
+
+            stored = await store.read_run(created.run_id)
+            stored_message = next(
+                item for item in stored.items if item.item_id == message.item_id
+            )
+            assert json.loads(stored_message.inline_body)["text"] == expected
+
+    run(exercise)
+
+
 def test_terminal_session_returns_200_then_unnumbered_stream_end() -> None:
     async def exercise() -> None:
         async with run_runtime() as (app, coordinator, created, _, _, _):
