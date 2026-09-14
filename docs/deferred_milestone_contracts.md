@@ -482,11 +482,11 @@ cancelled
 
 ### M3 待验收索引
 
-本节只索引本机实现与契约审计证据，不属于上表的最终承接记录。当前分支为 `codex/m3-milestone`；Milestone 8/9 的本机收口提交为 `bac4edf`，Milestone 10 以当前可复核文档 diff 登记。`M3-C01`–`M3-C20` 与 `M3-A01`–`M3-A12` 已具备本机实现、完整回归、真实 PostgreSQL 和正式进程 smoke 证据，但仍共同依赖 GLOBAL-C11 的三平台实际结果，因此保持未最终承接。
+本节只索引本机实现与契约审计证据，不属于上表的最终承接记录。当前分支为 `codex/m3-milestone`；Milestone 2–9 审查回补对应本地提交 `6c3a515`–`01e8f07`，Milestone 10 以当前可复核 diff 登记。`M3-C01`–`M3-C20` 与 `M3-A01`–`M3-A12` 的审查回补均已完成，具备本机完整回归、真实 PostgreSQL、正式独立进程 smoke 及协议文档 golden 证据；它们仍共同依赖 GLOBAL-C11 的三平台实际结果，因此保持未最终承接。
 
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
-| `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。本机完整回归、真实 PostgreSQL persistence、health 及 run/history smoke 的实际命令和结果见 [Milestone 10 完成记录](M3/m3_implementation_todo.md#milestone-10-完成记录2026-09-14)。 | Ubuntu/macOS/Windows 以 Python 3.11 和同一代码/锁分别跑完整测试及两项 smoke；三系统停止旧实例后依次接入同一已保存测试 PostgreSQL，核对原身份、历史游标、回执、全文引用和不恢复 Agent。全部取得实际证据后，才能在最终承接表追加 `implemented` 行及提交/MR/CI 引用。 |
+| `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。本机完整回归、真实 PostgreSQL persistence、health、独立进程 run/history smoke 及 `test_m3_documented_protocol.py` golden 的实际结果见 [Milestone 10 完成记录](M3/m3_implementation_todo.md#milestone-10-完成记录2026-09-14)。 | Ubuntu/macOS/Windows 以 Python 3.11 和同一代码/锁分别跑完整测试及两项 smoke；三系统停止旧实例后依次接入同一已保存测试 PostgreSQL，核对原身份、历史游标、回执、全文引用和不恢复 Agent。全部取得实际证据后，才能在最终承接表追加 `implemented` 行及提交/MR/CI 引用。 |
 
 未新增、拆分、替换或取消 contract。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 

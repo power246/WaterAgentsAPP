@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 的首轮本机实现与验收已完成，但 2026-09-14 分支全量审查确认了安全、状态收敛、持久化核实、读取和验收契约缺口；相关 Milestone 已追加未勾选回补项，因此当前整体状态恢复为 `partial`，中心最终承接暂不登记 `implemented`。** 此外，Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与跨系统迁移结果仍为 partial。十一个阶段的历史命令、环境和影响面记录保留为当时证据，不替代新增回补项的重新验证；三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由 macOS 本机结果代替。
+**当前状态：Milestone 0–10 的本机实现、分支审查回补与适用验证已经完成；中心最终承接仍因 GLOBAL-C11 保持 `partial`，暂不登记 `implemented`。** Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果尚未取得。十一个阶段的历史命令、环境和影响面记录保留为当时证据，最新本机回归与协议审计见 Milestone 10 完成记录；三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由 macOS 本机结果代替。
 
 ## 阶段与设计导航
 
@@ -24,7 +24,7 @@
 | [Milestone 9：完整集成、三平台 smoke 与运行手册](#milestone-9完整集成三平台-smoke-与运行手册) | [设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)；[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性) | [API §8.5](m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)；[API §9](m3_transcript_history_api.md#9-排障与验证) |
 | [Milestone 10：契约验收与后续交接](#milestone-10契约验收与后续交接) | [设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)；[设计 §1.2](m3_transcript_history_implementation_design.md#12-后续阶段承接) | [契约 §13](../deferred_milestone_contracts.md#13-承接记录)；[前端约定 §5](../frontend_integration_contracts.md#5-m4m9-的前端接力边界) |
 
-以下原任务内容与未完成状态保持不变，链接仅提供定位；修改设计章节标题时须同步校验这些锚点。各 Milestone 的历史完成记录不追溯改写；2026-09-14 审查回补项是当前重新通过该阶段的必要门禁，只有实现和对应测试实际通过后才能打勾。
+以下原任务内容与链接保留用于定位。各 Milestone 的历史完成记录不追溯改写；2026-09-14 审查回补项均在实现和对应测试实际通过后打勾。仍未取得的外部三平台证据继续保持未勾选。
 
 ## 执行原则
 
@@ -43,18 +43,18 @@
 
 ## 成功标准
 
-- [ ] 一个 run 可拥有问题解析与多个 COMID sessions；状态、身份、时间与独立上下文正确，未执行节点不预建 session；workflow 失败或返回时不存在遗留的非终态 session。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
+- [x] 一个 run 可拥有问题解析与多个 COMID sessions；状态、身份、时间与独立上下文正确，未执行节点不预建 session；workflow 失败或返回时不存在遗留的非终态 session。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)）
 - [ ] 全新 PostgreSQL 环境能独立初始化/升级，三个平台按文档搭建；启动严格检查并修复遗留后才接收请求。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
 - [ ] 三系统分别作为迁移目标，用同版代码和锁安装运行；接回同一测试数据库后原身份、历史游标、回执与全文引用保持有效，不转移未保存内存或自动恢复 Agent。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；[API §8.5](m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)）
-- [ ] 创建事务提交后才执行，同 key + 原 body 返回原 201 回执；任意无法证明回滚的提交异常都先核实，响应丢失、并发和未知提交都不会重复执行。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [ ] 过程增量保存、同批原子、稳定身份及明确提交确认成立；生成中草稿不能被最大序号误判已保存，pending session 的创建核实不能误判终态引用。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 有限补写、第三次失败后两秒的完成交付窗口、手动恢复和唯一业务终态相互独立；确定性坏引用不能杀死唯一 writer 并留下不可恢复 pending。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
-- [ ] 当前读取与严格历史共享 DTO/解析/全文实现；PG 故障时 live 可读，history 不混入内存，读取侧安全复核不能破坏合法 JSON。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
+- [x] 创建事务提交后才执行，同 key + 原 body 返回原 201 回执；任意无法证明回滚的提交异常都先核实，响应丢失、并发和未知提交都不会重复执行。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
+- [x] 过程增量保存、同批原子、稳定身份及明确提交确认成立；生成中草稿不能被最大序号误判已保存，pending session 的创建核实不能误判终态引用。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 有限补写、第三次失败后两秒的完成交付窗口、手动恢复和唯一业务终态相互独立；确定性坏引用不能杀死唯一 writer 并留下不可恢复 pending。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
+- [x] 当前读取与严格历史共享 DTO/解析/全文实现；PG 故障时 live 可读，history 不混入内存，读取侧安全复核不能破坏合法 JSON。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
 - [x] 只有 run 历史列表分页，任一实际 session 的完整过程与显式公共全文都可读取。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)）
-- [ ] 两层 SSE、首次完整过程、整数续传、三阶段消息和明确 stream_end/410 成立；正文不逐帧重复落库，流式正文、最终正文与 metadata 保持一致。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
-- [ ] 取消即固定原生成中正文，晚到审计仅历史可见；凭据跨片段、取消边界和日志均不泄漏，通用在途结果也不能绕过取消边界。（[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [ ] 只有终态、执行收敛、全部实际保存和完整 grace 后清理；workflow 失败和 session 取消同样收束活动消息，重启不自动恢复 Agent 或补造未保存内容。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
-- [ ] 中心全部适用契约有实现位置和重新验证证据，API、OpenAPI、前端约定、fixture 与运行时一致，未完成的跨平台验证或业务后续项准确登记。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)；[契约覆盖矩阵](#契约覆盖矩阵)）
+- [x] 两层 SSE、首次完整过程、整数续传、三阶段消息和明确 stream_end/410 成立；正文不逐帧重复落库，流式正文、最终正文与 metadata 保持一致。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
+- [x] 取消即固定原生成中正文，晚到审计仅历史可见；凭据跨片段、取消边界和日志均不泄漏，通用在途结果也不能绕过取消边界。（[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] 只有终态、执行收敛、全部实际保存和完整 grace 后清理；workflow 失败和 session 取消同样收束活动消息，重启不自动恢复 Agent 或补造未保存内容。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
+- [x] 中心全部适用契约有实现位置和重新验证证据，API、OpenAPI、前端约定、fixture 与运行时一致，未完成的跨平台验证或业务后续项准确登记。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)；[契约覆盖矩阵](#契约覆盖矩阵)）
 
 ## Milestone 0：基线、适用契约与工作区
 
@@ -589,35 +589,35 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] 以运行时实现和实际 OpenAPI 为依据统一公开错误码，移除或更正 `persistence_write_timeout`、`unsupported_content`、`persistence_identity_conflict` 等漂移名称。（[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
-- [ ] 前端约定明确 `completed_with_persistence_error` 只属于 run，session 保持五态；run/session terminal event 与保存 warning 的职责不混用。（[前端约定 §4.5](../frontend_integration_contracts.md#45-持久化异常与取消后的内容)）
-- [ ] 修正完整 item 示例的 `content_bytes`，并以正式 registry 规范序列化生成的可执行 golden 覆盖示例字节数、时间格式和事件 wrapper。（[API §3.4](m3_transcript_history_api.md#34-完整-item-示例)；[API §5](m3_transcript_history_api.md#5-两层-sse)）
-- [ ] Milestone 2–9 回补全部完成后重新审计 M3-C01–C20、M3-A01–A12、GLOBAL/MR 门禁，更新本清单、实施设计、API 指南、前端约定和中心承接状态；未取得的三平台证据继续保持 partial。（[契约覆盖矩阵](#契约覆盖矩阵)；[契约 §13](../deferred_milestone_contracts.md#13-承接记录)）
+- [x] 以运行时实现和实际 OpenAPI 为依据统一公开错误码，移除或更正 `persistence_write_timeout`、`unsupported_content`、`persistence_identity_conflict` 等漂移名称。（[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
+- [x] 前端约定明确 `completed_with_persistence_error` 只属于 run，session 保持五态；run/session terminal event 与保存 warning 的职责不混用。（[前端约定 §4.5](../frontend_integration_contracts.md#45-持久化异常与取消后的内容)）
+- [x] 修正完整 item 示例的 `content_bytes`，并以正式 registry 规范序列化生成的可执行 golden 覆盖示例字节数、时间格式和事件 wrapper。（[API §3.4](m3_transcript_history_api.md#34-完整-item-示例)；[API §5](m3_transcript_history_api.md#5-两层-sse)）
+- [x] Milestone 2–9 回补全部完成后重新审计 M3-C01–C20、M3-A01–A12、GLOBAL/MR 门禁，更新本清单、实施设计、API 指南、前端约定和中心承接状态；未取得的三平台证据继续保持 partial。（[契约覆盖矩阵](#契约覆盖矩阵)；[契约 §13](../deferred_milestone_contracts.md#13-承接记录)）
 
 ### 契约覆盖矩阵
 
-下表逐项覆盖全部 M3 contract ID；同一行只合并共享实现边界与验收用例的条目。`本机已验证` 表示当前代码、focused/regression、真实 PostgreSQL 与正式进程 smoke 均有证据，`回补待验证` 表示首轮曾通过但本次审查已发现会破坏该保证的缺口，必须完成所属 Milestone 回补并重新取得证据。两者都不等于中心最终 `implemented`；所有行仍共同等待 GLOBAL-C11 的三平台实际结果。
+下表逐项覆盖全部 M3 contract ID；同一行只合并共享实现边界与验收用例的条目。`本机已验证` 表示当前代码、focused/regression、真实 PostgreSQL 与正式进程 smoke 均有证据，但不等于中心最终 `implemented`；所有行仍共同等待 GLOBAL-C11 的三平台实际结果。
 
 | 契约 | 状态 | 实现位置 | 重点测试位置 | 文档与剩余风险 |
 |---|---|---|---|---|
 | GLOBAL-C11 | partial | `backend/app/infrastructure/config/`、`runtime/event_loop.py`、`scripts/test_database.py`、两条 smoke、三平台 workflow | `test_cross_platform_ci.py`、`test_database_config.py`、两条 smoke | [设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；缺 Ubuntu/macOS/Windows 远端实际 CI 与同库依次切换证据。 |
 | M3-C01 / M3-A01 | 本机已验证 | `application/transcripts/buffer.py`、`analysis_runs/persistence.py`、`infrastructure/persistence/schema.py`、`store.py` | `test_transcript_buffer.py`、`test_run_writer.py`、`test_postgres_persistence.py` | [设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；四表、live buffer、append-only item 与单份正文均有真实 PG 证据。 |
-| M3-C02 / M3-A02 | 回补待验证 | `application/transcripts/models.py`、`registry.py`、`reader.py` | `test_transcript_registry.py`、`test_run_models.py`、`test_analysis_history.py` | [设计 §5](m3_transcript_history_implementation_design.md#5-typed-content-与读取表示)；读取侧结构化安全复核完成后重验。 |
-| M3-C03 / M3-C07 | 回补待验证 | `application/analysis_runs/models.py`、`coordinator.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_agent_session_models.py`、`test_agent_session_runtime.py`、`test_analysis_history.py` | [设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；workflow 结束时的父子终态收束完成后重验。 |
-| M3-C04 | 回补待验证 | `api/http/analysis_runs.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_analysis_history.py`、`test_analysis_runs.py`、`test_analysis_events.py` | [API §4](m3_transcript_history_api.md#4-get-读取接口)；读取安全与 OpenAPI header 约束完成后重验。 |
-| M3-C05 / M3-C06 / M3-A03 | 回补待验证 | `application/transcripts/buffer.py`、`streaming.py`、`redaction.py`、`reader.py` | `test_transcript_buffer.py`、`test_streaming_redaction.py`、`test_analysis_history.py`、`test_json_logging.py` | [设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)、[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)；跨 chunk 泄漏与业务正文误杀修复后重验。 |
-| M3-C08 | 回补待验证 | `application/analysis_runs/models.py`、`coordinator.py`、`creation.py`、`startup_repair.py` | `test_run_state_machine.py`、`test_run_creation.py`、`test_milestone8_runtime.py` | [设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；workflow 失败后的 run/session 收束完成后重验。 |
-| M3-C09 / M3-A04 | 回补待验证 | `application/analysis_runs/creation.py`、`coordinator.py`、`infrastructure/persistence/store.py`、创建路由 | `test_run_creation.py`、`test_analysis_runs.py`、`test_postgres_persistence.py`、run/history smoke | [API §2](m3_transcript_history_api.md#2-创建与幂等)；非超时提交未知与外置正文顺序核实完成后重验。 |
-| M3-C10 / M3-A05 | 回补待验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/streaming.py`、`registry.py` | `test_milestone8_runtime.py`、`test_streaming_redaction.py`、`test_analysis_history.py` | [设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；通用结果和单 session 取消边界完成后重验。 |
-| M3-C11 / M3-A07 | 回补待验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、`application/transcripts/reader.py` | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_events.py` | [设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；活动草稿、writer 退出与保存收敛修复后重验。 |
-| M3-C12 / M3-C13 / M3-A06 | 回补待验证 | `application/analysis_runs/coordinator.py`、`runtime.py`、`main.py` | `test_milestone8_runtime.py`、`test_run_workflow.py`、`test_run_writer.py`、两条 smoke | [设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；失败 quiescence、SSE 结束和 live 清理完成后重验。 |
-| M3-C14 | 回补待验证 | `main.py`、`application/analysis_runs/startup_repair.py`、`infrastructure/persistence/database.py`、`store.py` | `test_database_config.py`、`test_milestone8_runtime.py`、`test_postgres_persistence.py`、run/history smoke | [设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)；独立 OS 进程 restart smoke 完成后重验。 |
-| M3-C15 / M3-A08 | 回补待验证 | `application/analysis_runs/coordinator.py`、`api/sse/encoder.py`、`response.py`、两层 SSE 路由 | `test_analysis_events.py`、`test_analysis_runs.py`、`test_run_sse_smoke.py`、run/history smoke | [API §5](m3_transcript_history_api.md#5-两层-sse)；消息一致性、失败关闭和 chunk 安全完成后重验。 |
-| M3-C16 / M3-A09 | 回补待验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/registry.py`、`reader.py` | `test_agent_session_runtime.py`、`test_transcript_registry.py`、`test_analysis_history.py` | [设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)；引用入口与消息 metadata 单源完成后重验。 |
-| M3-C17 | 回补待验证 | `application/transcripts/reader.py`、统一详情/过程/全文路由 | `test_analysis_history.py`、`test_analysis_events.py` | [设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；读取 JSON 和取消可见性修复后重验。 |
-| M3-C18 / M3-A10 | 回补待验证 | `application/analysis_runs/persistence.py`、`coordinator.py`、`infrastructure/persistence/store.py`、`records.py` | `test_run_writer.py`、`test_postgres_persistence.py`、`test_records.py` | [设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；session terminal 核实及 memory/PG parity 完成后重验。 |
-| M3-C19 / M3-A11 | 回补待验证 | `infrastructure/observability/redaction.py`、`json_logging.py`、`application/transcripts/streaming.py` | `test_json_logging.py`、`test_log_correlation.py`、`test_streaming_redaction.py` | [设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)；流式泄漏、普通文本误杀和 warning 日志关联完成后重验。 |
-| M3-C20 / M3-A12 | 回补待验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、补写路由 | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_runs.py` | [API §6.2](m3_transcript_history_api.md#62-persistenceretry)；writer 异常与手动恢复不再形成无人负责的 pending 后重验。 |
+| M3-C02 / M3-A02 | 本机已验证 | `application/transcripts/models.py`、`registry.py`、`reader.py` | `test_transcript_registry.py`、`test_run_models.py`、`test_analysis_history.py`、`test_m3_documented_protocol.py` | [设计 §5](m3_transcript_history_implementation_design.md#5-typed-content-与读取表示)；严格 registry、结构化安全复核与文档 golden 已重验。 |
+| M3-C03 / M3-C07 | 本机已验证 | `application/analysis_runs/models.py`、`coordinator.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_agent_session_models.py`、`test_agent_session_runtime.py`、`test_analysis_history.py`、`test_milestone8_runtime.py` | [设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；run 六态、session 五态及 workflow 父子终态收束已重验。 |
+| M3-C04 | 本机已验证 | `api/http/analysis_runs.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_analysis_history.py`、`test_analysis_runs.py`、`test_analysis_events.py`、`test_m3_documented_protocol.py` | [API §4](m3_transcript_history_api.md#4-get-读取接口)；读取安全、实际 OpenAPI 与公开错误码已重验。 |
+| M3-C05 / M3-C06 / M3-A03 | 本机已验证 | `application/transcripts/buffer.py`、`streaming.py`、`redaction.py`、`reader.py` | `test_transcript_buffer.py`、`test_streaming_redaction.py`、`test_analysis_history.py`、`test_json_logging.py` | [设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)、[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)；跨 chunk 凭据与合法业务正文边界已重验。 |
+| M3-C08 | 本机已验证 | `application/analysis_runs/models.py`、`coordinator.py`、`creation.py`、`startup_repair.py` | `test_run_state_machine.py`、`test_run_creation.py`、`test_milestone8_runtime.py` | [设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；workflow 失败、返回与取消的 run/session 收束已重验。 |
+| M3-C09 / M3-A04 | 本机已验证 | `application/analysis_runs/creation.py`、`coordinator.py`、`infrastructure/persistence/store.py`、创建路由 | `test_run_creation.py`、`test_analysis_runs.py`、`test_postgres_persistence.py`、run/history smoke | [API §2](m3_transcript_history_api.md#2-创建与幂等)；非超时提交未知、并发接管、原回执及外置正文顺序已重验。 |
+| M3-C10 / M3-A05 | 本机已验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/streaming.py`、`registry.py` | `test_milestone8_runtime.py`、`test_streaming_redaction.py`、`test_analysis_history.py` | [设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；通用结果、消息定稿与单 session 取消边界已重验。 |
+| M3-C11 / M3-A07 | 本机已验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、`application/transcripts/reader.py` | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_events.py` | [设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；活动草稿、run 保存 warning、writer 退出与交付收敛已重验。 |
+| M3-C12 / M3-C13 / M3-A06 | 本机已验证 | `application/analysis_runs/coordinator.py`、`runtime.py`、`main.py` | `test_milestone8_runtime.py`、`test_run_workflow.py`、`test_run_writer.py`、两条 smoke | [设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；失败 quiescence、SSE 结束、完整 grace 与 cleanup 重试已重验。 |
+| M3-C14 | 本机已验证 | `main.py`、`application/analysis_runs/startup_repair.py`、`infrastructure/persistence/database.py`、`store.py` | `test_database_config.py`、`test_milestone8_runtime.py`、`test_postgres_persistence.py`、run/history smoke | [设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)；独立 OS 子进程 restart、严格门禁与幂等修复已重验。 |
+| M3-C15 / M3-A08 | 本机已验证 | `application/analysis_runs/coordinator.py`、`api/sse/encoder.py`、`response.py`、两层 SSE 路由 | `test_analysis_events.py`、`test_analysis_runs.py`、`test_run_sse_smoke.py`、`test_m3_documented_protocol.py`、run/history smoke | [API §5](m3_transcript_history_api.md#5-两层-sse)；wrapper golden、消息一致性、失败关闭和 chunk 安全已重验。 |
+| M3-C16 / M3-A09 | 本机已验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/registry.py`、`reader.py` | `test_agent_session_runtime.py`、`test_transcript_registry.py`、`test_analysis_history.py` | [设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)；引用入口、归属与消息 metadata 单源已重验。 |
+| M3-C17 | 本机已验证 | `application/transcripts/reader.py`、统一详情/过程/全文路由 | `test_analysis_history.py`、`test_analysis_events.py` | [设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；JSON 安全读取、auto/history 与取消可见性已重验。 |
+| M3-C18 / M3-A10 | 本机已验证 | `application/analysis_runs/persistence.py`、`coordinator.py`、`infrastructure/persistence/store.py`、`records.py` | `test_run_writer.py`、`test_postgres_persistence.py`、`test_records.py` | [设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；session terminal 核实、原子回滚与 memory/PG parity 已重验。 |
+| M3-C19 / M3-A11 | 本机已验证 | `infrastructure/observability/redaction.py`、`json_logging.py`、`application/transcripts/streaming.py` | `test_json_logging.py`、`test_log_correlation.py`、`test_streaming_redaction.py` | [设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)；全切分流式安全、普通文本保留和 warning 关联已重验。 |
+| M3-C20 / M3-A12 | 本机已验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、补写路由 | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_runs.py` | [API §6.2](m3_transcript_history_api.md#62-persistenceretry)；异常 writer、唯一恢复所有者与手动补写预算已重验。 |
 
 ### GLOBAL / MR 门禁审计
 
@@ -649,10 +649,12 @@ git diff --check
 
 ### Milestone 10 完成记录（2026-09-14）
 
-- 代码状态：开始时位于 `codex/m3-milestone`，工作区无未提交改动，基线为 `bac4edfcb9615e23c167627f509fa04f5b509d71`（`feat: complete M3 milestones 8 and 9`）。契约审计未发现需要新增 production code、测试专用 schema 或兼容层的缺口；本阶段只同步本清单、实施设计、API/runbook、前端接入约定和中心契约登记。
+- 代码状态：首轮开始时位于 `codex/m3-milestone`，工作区无未提交改动，基线为 `bac4edfcb9615e23c167627f509fa04f5b509d71`（`feat: complete M3 milestones 8 and 9`）。首轮契约审计未发现需要新增 production code、测试专用 schema 或兼容层的缺口；随后在 Milestone 2–9 审查回补提交 `6c3a515`–`01e8f07` 上完成本轮复审，生产代码仍无需修改。
 - 契约结论：矩阵完整覆盖 20 个 M3-C 和 12 个 M3-A ID，并复核 GLOBAL-C01–C11、M2 保留基线及 MR-G01–G14；未新增、拆分、替换或取消 contract。M4/M6/M7/M8/产品 M9 已有明确实现入口、保留约束和可观察验收。
 - 本机环境：macOS 26.6.2 arm64、Python 3.12.14、PostgreSQL 17.10、SQLAlchemy 2.0.52、psycopg 3.3.5、Alembic 1.20.0，schema head `20260913_01`。临时实例监听 `127.0.0.1:55440`，专用测试库为 `wateragents_m10`；业务库名保护值为 `wateragents_business_guard`。
 - 实际验证：在相同 `WATERAGENTS_DB_*` 与 `WATERAGENTS_TEST_DB_NAME=wateragents_m10` 环境下，`python -m pytest backend/tests -q` 为 735 passed；`python -m pytest backend/tests/persistence -q` 为 39 passed；代理污染环境下 `python backend/scripts/health_smoke.py` 输出 `{"status":"healthy"}`，`python backend/scripts/run_history_smoke.py` 输出 `{"history":"passed","restart_repair":"passed","database":"wateragents_m10"}`。`python -m compileall -q backend/app backend/scripts`、`git diff --check`、5 份同步文档的 529 个相对文件链接检查通过；中心 M3 集合与矩阵均为 32 个 ID，差集为空。
+- 审查回补实现：API §7 已按实际 OpenAPI 和运行时名称区分 HTTP error、成功 item 的 parse error、run 保存 warning 与 lifecycle 诊断；前端 §4.5 固定 run 六态/session 五态及唯一 run terminal event 边界。完整 item 的规范正文为 340 UTF-8 bytes，零微秒 UTC 使用 `Z`；新增 `test_m3_documented_protocol.py` 直接调用 production registry、SSE encoder 和实际 OpenAPI 锁定这些文档 golden，并守卫 32 个 M3 contract ID 与 GLOBAL/MR 审计入口。
+- 审查回补本机证据：macOS 26.6.2 arm64、Python 3.12.14、PostgreSQL 17.10、SQLAlchemy 2.0.52、psycopg 3.3.5、Alembic 1.20.0，schema head `20260913_01`；隔离实例监听 `127.0.0.1:55443`，测试库为 `wateragents_m10_review`，业务库保护值为 `wateragents_business_guard`。完整 `backend/tests` 为 767 passed，真实 PostgreSQL persistence 为 43 passed，协议文档 golden 为 4 passed；health 输出 `{"status":"healthy"}`，history 输出 `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"wateragents_m10_review"}`。compileall、`git diff --check`、5 份同步文档的 573 个相对文件链接、32 个契约 ID 精确集合与全部 GLOBAL/MR 分组检查通过，测试库无 `wateragents_m3_*` schema 残留。
 - 限制：GLOBAL-C11 仍缺 Ubuntu/macOS/Windows 远端 runner 的实际完整 tests/两项 smoke 结果，以及三系统依次接入同一已保存 PostgreSQL 的身份、游标、回执和全文引用核对。对应两个成功标准、Milestone 2/9 Verify 与中心最终承接保持未完成/`partial`；本机结果不替代这些证据。
 - 可复现入口：[API §9](m3_transcript_history_api.md#9-排障与验证)列出完整测试与 smoke 命令，[API §8.5](m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)列出三平台迁移步骤；中心状态见 [M3 待验收索引](../deferred_milestone_contracts.md#m3-待验收索引)。本阶段未提交、未推送、未创建 MR。
 
@@ -669,4 +671,4 @@ git diff --check
 | 契约结论 | 已满足、partial 或未满足，缺少的具体证据。 |
 | 后续接力 | 所属 Milestone/contract、入口、未实现业务边界。 |
 
-Milestone 0–10 的首轮本机实现、契约审计与适用验证记录已保留；当前还必须完成各阶段的 2026-09-14 审查回补并重新验证。Milestone 2/9 的三平台实际 CI 和跨系统迁移证据同样仍为 partial，不能由本机结果替代。中心最终承接须在回补和外部证据均齐备后更新。
+Milestone 0–10 的本机实现、2026-09-14 审查回补、契约复审与适用验证均已完成。Milestone 2/9 的三平台实际 CI 和跨系统迁移证据仍为 partial，不能由本机结果替代；中心最终承接须在这些外部证据齐备后更新。

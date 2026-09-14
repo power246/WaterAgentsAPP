@@ -197,7 +197,7 @@ session 完成不代表 run 完成；run 取消保留已经完成/失败的 sess
 - 历史列表索引 `(created_at DESC, run_id DESC)`。
 - session 目录索引 `(run_id, created_at, session_id)`；完整过程索引 `(run_id, session_id, transcript_sequence)`；run 全部原记录利用序号唯一索引。
 - 初版不为 confidence、provenance、tags、工具名等预建筛选索引；不存 scope/correlation JSON、额外公开 content_ref 或关联表。
-- 所有业务内容只追加，冲突时不能 `DO UPDATE` 覆盖正文。相同身份且各不可变字段/正文相同才视为同一事实；同 ID 不同内容报 `persistence_identity_conflict` 并保留待写与诊断，不能吞冲突。
+- 所有业务内容只追加，冲突时不能 `DO UPDATE` 覆盖正文。相同身份且各不可变字段/正文相同才视为同一事实；同 ID 不同内容形成 run 级 `persistence_write_conflict` warning 并保留待写与诊断，不能吞冲突。
 - 记录和所需同批引用、状态、全文形成原子组，先验证再提交；事务中的引用目标必须已存在于同 run 或在本批。引用生成不能指向仍在生成且不在本批的草稿；这种有依赖的组等待目标定稿，无关可写组照常保存。
 - 明确引用在原 typed content、AnalysisDetail、AnalysisStep 中保留；注册器唯一实现提取/验证。首版不做反向索引，M6/M7 按真实查询需求评估。
 
@@ -435,10 +435,11 @@ uv.lock 能描述操作系统、架构和 Python 条件下的依赖选择；本�
 
 | 层 | 必须证明的行为 |
 |---|---|
-| 模型与纯函数 | run/session 五态与六态、UTC、UUID、严格注册、JSON round-trip、字节边界、引用提取、游标编解码。 |
+| 模型与纯函数 | run 六态/session 五态、UTC、UUID、严格注册、JSON round-trip、字节边界、引用提取、游标编解码。 |
 | Application + 可控故障 store | 单 writer、草稿缺口、状态独立确认、原子组、1/2/4/8/16、第三次失败后两秒、取消胜出、耗尽/手动恢复/清理。 |
 | 真 PostgreSQL | 唯一 key 竞争、回执复用、FK/序号/事务回滚、全文单份、引用批次、未知 commit 后核实、启动遗留与严格 schema。 |
 | HTTP / SSE | 十路由及错误、auto/history、完整过程、两层流、首次与新增无缺口、三阶段消息及晚到审计、200/410/stream_end。 |
+| 文档协议 golden | 从实际 OpenAPI 核对公开错误状态和 run/session 枚举；用 production registry 与 SSE encoder 生成完整 item 字节数、UTC 时间和 raw frame，避免示例手工漂移。 |
 | 脱敏与日志 | 全切分点合成凭据、取消跨边界、普通 query、异常与 driver 输出、全文/预览和无订阅生成。 |
 | 正式服务 smoke | 实际 PG + Uvicorn，创建→两层观察→历史→重启读取；取消与连接关闭；Windows selector/资源收尾。 |
 | 跨系统迁移 | 三个系统分别作为目标环境，以同一代码/锁完成安装和启动；顺序接入同一测试 PG，核对原历史、回执、游标与全文引用，期间不修改业务代码。 |
@@ -455,4 +456,4 @@ M3 完成需同时满足：四表与环境可搭建；已保存事实可重启�
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
 
-Milestone 10 已逐项审计 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并把 M4/M6/M7/M8/产品 M9 的接入边界和可观察验收登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)。本机完成标准已满足；中心最终验收仍由 GLOBAL-C11 阻塞，待 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据齐备后再登记 `implemented`。
+Milestone 10 在 Milestone 2–9 审查回补完成后重新逐项审计 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并通过可执行文档 golden 对齐实际 OpenAPI、production registry 和 SSE encoder；M4/M6/M7/M8/产品 M9 的接入边界和可观察验收登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)。本机完成标准已满足；中心最终验收仍由 GLOBAL-C11 阻塞，待 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据齐备后再登记 `implemented`。

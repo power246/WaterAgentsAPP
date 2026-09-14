@@ -276,13 +276,14 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 
 ### 4.5 持久化异常与取消后的内容
 
+- 当前 OpenAPI 中只有 run 可以进入 `completed_with_persistence_error`；Agent session 始终只使用五态 pending/running/completed/failed/cancelled。run 的保存进度和 warning 不新增或改写 session 状态，session terminal event 不携带 run 级保存 warning。
 - 按 [M3 D36](M3/m3_transcript_history_design.md#d36单次数据库写入共用-5-秒执行预算)，后端单次数据库写入默认采用 5 秒执行预算，可配置；该预算不表示整个分析应在 5 秒完成，也不替代后台重试与终态交付窗口。前端仍依据实际状态、warning 和 HTTP 错误处理，不自行倒计时将分析标为失败。
-- 按 [M3 D38](M3/m3_transcript_history_design.md#d38终态选定前检查既有写入后续保存失败保留终态)，后端在成功分析结束时固定此前已产生的必需结果、过程和状态的保存范围；该范围在既定交付窗口到期时仍未保存完整，则 session 为 `completed_with_persistence_error`，仍通过唯一 `session_completed` 交付当前结果，并带安全 warning/`error_id`。前端应显示结果和持久化警告，不能归类为 `session_failed`。
-- completed 表示业务分析完成，不保证完成事件自身和所有后续收尾记录均已保存。它们的保存随后失败时，后端保持原终态，通过当前读取接口及 D69 的 run SSE 通知保存情况和警告/`error_id`；前端保留完成结果并展示该警告，不能自行改写业务终态。保存变化不产生第二个业务终态，不能在业务终态到达时直接认定 run 通知流结束；关闭时机按 D70，具体通知 DTO 继续定型。
+- 按 [M3 D38](M3/m3_transcript_history_design.md#d38终态选定前检查既有写入后续保存失败保留终态)，后端在成功分析结束时固定此前已产生的必需结果、过程和状态的保存范围；该范围在既定交付窗口到期时仍未保存完整，则 run 为 `completed_with_persistence_error`，仍通过唯一 `run_completed` 交付当前结果，并带安全 warning/`error_id`。前端应显示结果和持久化警告，不能归类为 `run_failed`；各 Agent session 保留自己的原五态和 terminal event。
+- run 的 completed 表示业务分析完成，不保证完成事件自身和所有后续收尾记录均已保存。它们的保存随后失败时，后端保持原 run 终态，通过当前读取接口及 D69 的 run SSE 通知保存情况和警告/`error_id`；前端保留完成结果并展示该警告，不能自行改写业务终态。保存变化不产生第二个 run terminal event，也不产生 session terminal event，不能在业务终态到达时直接认定 run 通知流结束；关闭时机按 D70，具体通知 DTO 继续定型。
 - 内存仍保留时，统一读取入口可读取当前结果及尚未保存的完整上下文；展开大内容不要求 PostgreSQL 已恢复。成功读取不代表保存成功，仍展示后端提供的持久化警告。进程退出后未保存内容可能丢失，不能把本地读过的内容标成后端已保存。
-- 后台补写恢复后不改变原终态，也不再发送第二个 terminal event。前端不得等待状态从 `completed_with_persistence_error` 自动变成 `completed`。
+- 后台补写恢复后不改变原 run 终态，也不再发送第二个 `run_completed`。前端不得等待 run 状态从 `completed_with_persistence_error` 自动变成 `completed`；session 状态和 terminal event 同样不因 run 保存恢复而变化。
 - 按 [M3 D39](M3/m3_transcript_history_design.md#d39自动补写耗尽后允许用户手动开启新一轮)，每轮 5 次自动重试耗尽后停止。M3 提供“重试保存”接口，M9 在保存警告处接入按钮：仅用户主动操作可在后端仍保留待写内容时开启新一轮，首次立即尝试，失败后最多自动重试 5 次。数据库恢复、页面刷新或新内容到来不自动重置耗尽预算。
-- “重试保存”只补写原 session 的原记录，不重新分析、不改变终态。执行或退避中的重复点击不启动额外任务、不重置预算；触发成功不等于已经保存，前端继续依据实际读取更新保存情况。内存已丢失时不能恢复未保存内容，没有待写内容时不做空写入；按钮依据 D40 的保存状态，路由和 HTTP 响应按 D41。
+- “重试保存”只补写原 run 及其 sessions 的原记录，不重新分析、不改变任一层终态。执行或退避中的重复点击不启动额外任务、不重置预算；触发成功不等于已经保存，前端继续依据实际读取更新保存情况。内存已丢失时不能恢复未保存内容，没有待写内容时不做空写入；按钮依据 D40 的保存状态，路由和 HTTP 响应按 D41。
 - 完成前等待保存期间仍可立即取消；取消先被后端接受就保持 cancelled，完成先被接受则沿用终态冲突响应，前端以服务器返回的状态为准。
 - cancelled session 的已产生在途内容可以进入历史审计，但不得出现在 live SSE 或继续触发下游结果。不会增加 `produced_after_cancel` 一类字段，前端不得依赖该标记。
 - 服务重启按 [D61](M3/m3_transcript_history_design.md#d61重启时分别处理-run-与-session-的遗留状态)，数据库中遗留 pending/running 的 run 和 Agent session 分别标记为 failed，错误码为 service_interrupted；各层已保存的终态保持不变。run 已终态时，其下遗留非终态 session 仍需处理，所以前端不能从 run 终态推导所有 Agent 的状态。保留已保存过程，不补造未保存会话；第一版不自动恢复 workflow，也不得伪造可继续执行的 active SSE stream。
