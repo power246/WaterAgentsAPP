@@ -19,6 +19,7 @@ from app.infrastructure.persistence.database import (
     expected_schema_head,
     require_database_password,
 )
+from scripts import test_database
 
 
 def test_database_settings_are_cwd_independent_and_environment_wins(
@@ -73,6 +74,73 @@ def test_env_file_supports_unicode_space_paths_and_line_endings(
     assert settings.db_password is not None
     assert settings.db_password.get_secret_value() == "  p@:/#%$ word  "
     assert settings.db_sslmode == "require"
+
+
+def test_database_smoke_rejects_business_database_loaded_from_env_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "WATERAGENTS_DB_NAME=business_from_file\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("WATERAGENTS_DB_NAME", raising=False)
+    monkeypatch.setenv("WATERAGENTS_TEST_DB_NAME", "business_from_file")
+    monkeypatch.setattr(
+        test_database,
+        "AppSettings",
+        lambda: AppSettings(_env_file=env_file),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="WATERAGENTS_TEST_DB_NAME must differ from WATERAGENTS_DB_NAME",
+    ):
+        test_database.require_test_database_settings()
+
+
+def test_database_smoke_preserves_business_connection_for_distinct_test_database(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            (
+                "WATERAGENTS_DB_HOST=db.from.file",
+                "WATERAGENTS_DB_PORT=6543",
+                "WATERAGENTS_DB_NAME=business_from_file",
+                "WATERAGENTS_DB_USER=smoke_user",
+                "WATERAGENTS_DB_PASSWORD=smoke_password",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "WATERAGENTS_DB_HOST",
+        "WATERAGENTS_DB_PORT",
+        "WATERAGENTS_DB_NAME",
+        "WATERAGENTS_DB_USER",
+        "WATERAGENTS_DB_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("WATERAGENTS_TEST_DB_NAME", "wateragents_test")
+    monkeypatch.setattr(
+        test_database,
+        "AppSettings",
+        lambda: AppSettings(_env_file=env_file),
+    )
+
+    settings = test_database.require_test_database_settings()
+
+    assert settings.db_host == "db.from.file"
+    assert settings.db_port == 6543
+    assert settings.db_name == "wateragents_test"
+    assert settings.db_user == "smoke_user"
+    assert settings.db_password is not None
+    assert settings.db_password.get_secret_value() == "smoke_password"
 
 
 def test_database_url_preserves_and_encodes_special_password() -> None:

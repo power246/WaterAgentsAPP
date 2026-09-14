@@ -200,8 +200,8 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] 测试数据库安全闸门必须读取与正式应用相同的 `.env`/环境配置并在任何 DDL 前比较实际业务库与测试库目标；不能因 `_env_file=None` 看见默认库名而放行真实业务库。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
-- [ ] 默认配置测试显式禁用 `.env`，数据库安全测试覆盖“业务库名只在 `.env`、测试库名与其相同”必定拒绝，以及不同专用测试库正常通过。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 测试数据库安全闸门必须读取与正式应用相同的 `.env`/环境配置并在任何 DDL 前比较实际业务库与测试库目标；不能因 `_env_file=None` 看见默认库名而放行真实业务库。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
+- [x] 默认配置测试显式禁用 `.env`，数据库安全测试覆盖“业务库名只在 `.env`、测试库名与其相同”必定拒绝，以及不同专用测试库正常通过。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：可复现空库 schema、可靠连接及命令，尚不把启动修复或 transcript 写入标记完成。
 
@@ -221,6 +221,13 @@ git diff --check
 - 从 `/private/tmp/WaterAgents M2 中文` 运行已安装 `wateragents-db check` 成功；单元测试覆盖含空格/中文路径、不同 cwd、LF/CRLF `.env`、`@:/#%$` 及首尾空白密码。`git diff --check` 在提交前复核。
 
 阶段工作和本机适用验证已完成。三平台 CI 入口已经落地，但当前没有本次远端 workflow 的实际链接/结果，所以“三平台真实 PG”和“各目标平台重新安装同锁”两项保持未勾选（partial），不能由 macOS 本机通过替代。Docker 在本机不可用，所以没有伪造 `postgres:17` image digest。Milestone 3 承接 typed content、严格 registry、单份正文编码/预览和引用验证；Milestone 4 以后承接实际创建/增量持久化，Milestone 8 承接启动 schema 检查、遗留修复与关闭收敛。
+
+#### Milestone 2 审查回补完成记录（2026-09-14）
+
+- 实现：`scripts/test_database.py` 通过无参数 `AppSettings()` 读取与正式应用相同的固定 `.env` 和进程环境来源，再用显式 `WATERAGENTS_TEST_DB_NAME` 替换数据库名；默认配置测试显式传入 `_env_file=None`，不受开发者本地配置污染。
+- 安全测试：临时 `.env` 只声明业务库名时，相同测试库名在任何 DDL 前被拒绝；使用不同测试库名时保留 env file 中的 host、port、user 和 password，仅替换 db_name。旧的 `_env_file=None` 调用会因测试替身拒绝额外参数而失败，防止该缺口回归。
+- 验证：focused 配置/安全/架构测试为 38 passed；隔离 PostgreSQL 17 下 persistence + architecture 为 103 passed；同一测试库下完整 `backend/tests` 为 737 passed。测试使用 `wateragents_business_guard` 作为业务库保护名、`wateragents_m2_review` 作为专用测试库，临时实例及数据目录已停止并删除。
+- 限制：本次只完成 2026-09-14 审查回补；Milestone 2 原有 Ubuntu/macOS/Windows 实际 PostgreSQL 和同锁安装证据仍保持未勾选/partial。
 
 ## Milestone 3：Typed content、单份正文、引用与安全入口
 

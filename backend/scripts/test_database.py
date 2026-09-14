@@ -15,7 +15,7 @@ from app.infrastructure.persistence.database import (
 
 
 def require_test_database_settings() -> AppSettings:
-    business = AppSettings(_env_file=None)
+    business = AppSettings()
     test_name = os.environ.get("WATERAGENTS_TEST_DB_NAME", "").strip()
     if not test_name:
         raise RuntimeError(

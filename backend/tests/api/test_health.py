@@ -16,7 +16,7 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     for field_name in AppSettings.model_fields:
         monkeypatch.delenv(f"WATERAGENTS_{field_name.upper()}", raising=False)
 
-    settings = AppSettings()
+    settings = AppSettings(_env_file=None)
 
     assert settings.model_dump() == {
         "app_name": "WaterAgents API",
