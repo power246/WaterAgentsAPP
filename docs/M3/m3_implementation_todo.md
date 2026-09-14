@@ -459,10 +459,10 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] 流式 assignment 在当前 chunk 只到 `key=`/尾随空白时保留 pending，等待下一字符后再决定 quoted/token 模式；引号位于下一 chunk 时秘密仍不得进入 SSE。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [ ] final body 与已发送安全文本不一致时，以实际 `message.safe_text` 构造 `INCOMPLETE/ERROR` 原消息并追加诊断，不能用矛盾 body 覆盖已展示内容。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
-- [ ] `message_started` 固定的 tags 与 `rag_eligible` 随 StreamingMessage、message_finalized、GET/history 和持久化 recheck 保持一致，不退回注册类型默认值。（[设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)；[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
-- [ ] 对 quoted assignment、header、URL 和显式 secret 的每个 chunk 分割点做参数化测试；增加 mismatch 与 metadata 的 started/finalized/stored 三层一致性测试。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 流式 assignment 在当前 chunk 只到 `key=`/尾随空白时保留 pending，等待下一字符后再决定 quoted/token 模式；引号位于下一 chunk 时秘密仍不得进入 SSE。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] final body 与已发送安全文本不一致时，以实际 `message.safe_text` 构造 `INCOMPLETE/ERROR` 原消息并追加诊断，不能用矛盾 body 覆盖已展示内容。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
+- [x] `message_started` 固定的 tags 与 `rag_eligible` 随 StreamingMessage、message_finalized、GET/history 和持久化 recheck 保持一致，不退回注册类型默认值。（[设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)；[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)）
+- [x] 对 quoted assignment、header、URL 和显式 secret 的每个 chunk 分割点做参数化测试；增加 mismatch 与 metadata 的 started/finalized/stored 三层一致性测试。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：原过程一份、live 事件可续传，数据库不按 token/frame 增长，实时查看不改变执行。
 
@@ -476,6 +476,9 @@ git diff --check
 - 完整回归：macOS、Python 3.12.14、隔离 PostgreSQL 17.10 下，通过 `WATERAGENTS_TEST_POSTGRES_*` 运行 `backend/.venv/bin/python -m pytest -q backend/tests`：729 passed，无 skip。
 - 可执行 smoke：同一隔离 PostgreSQL 完成迁移后运行 `backend/.venv/bin/python backend/scripts/run_sse_smoke.py`，输出 `{"completed":"passed","cancelled":"passed"}`；覆盖动态 loopback Uvicorn、完整快照、keepalive、重连、取消、最终保存快照、`stream_end` 与 EOF。
 - 契约结论：M7 两层 SSE、过程续传、消息生命周期、凭据安全与 200/400/409/410/503 边界均有可执行证据；取消定稿/晚到审计、启动遗留修复和 live grace 清理继续由 Milestone 8 承接，三平台实际 CI 仍保持 partial。
+- 审查回补聚焦验证：`backend/.venv/bin/python -m pytest backend/tests/application/test_streaming_redaction.py backend/tests/api/test_analysis_events.py backend/tests/application/test_transcript_buffer.py backend/tests/application/test_transcript_registry.py -q`：79 passed；覆盖全部 chunk 分割点、mismatch 安全降级和 metadata 四层贯通。
+- 审查回补指定验证：`backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/observability -q`：469 passed。
+- 审查回补完整回归：在隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests -q`：757 passed，无 skip；迁移后 SSE smoke 输出 `{"completed":"passed","cancelled":"passed"}`；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 
 ## Milestone 8：取消、遗留修复、关闭与 live 清理
 

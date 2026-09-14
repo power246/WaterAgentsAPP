@@ -130,6 +130,15 @@ class StreamingCredentialFilter:
                 continue
             if selected is not None:
                 start, kind, match = selected
+                if (
+                    kind == "assignment"
+                    and not final
+                    and not match.group("quote")
+                    and match.end() == len(self._pending)
+                ):
+                    output.append(self._pending[:start])
+                    self._pending = self._pending[start:]
+                    break
                 output.append(self._pending[:start])
                 if kind == "auth":
                     output.append(REDACTED)

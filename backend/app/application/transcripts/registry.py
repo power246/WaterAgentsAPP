@@ -274,7 +274,7 @@ class TranscriptRegistry:
         )
         if checked.safe_body != content.safe_body:
             raise ValueError("persistence redaction differs from the readable live body")
-        return checked
+        return checked.model_copy(update={"metadata": content.metadata})
 
     def parse_many(
         self,

@@ -86,6 +86,7 @@ from app.application.transcripts.models import (
     PersistenceRecoveredFact,
     TranscriptContentRef,
     TranscriptItem,
+    TranscriptMetadata,
 )
 from app.application.transcripts.registry import (
     TranscriptRegistry,
@@ -1801,6 +1802,7 @@ class RunCoordinator:
                 operation_id=operation_key,
                 created_at=timestamp,
             )
+            metadata = TranscriptMetadata(tags=tags, rag_eligible=rag_eligible)
             header = TranscriptItemHeader(
                 item_id=identity.item_id,
                 run_id=identity.run_id,
@@ -1817,14 +1819,15 @@ class RunCoordinator:
                     request_id=request_key,
                     operation_id=operation_key,
                 ),
-                tags=tags,
-                rag_eligible=rag_eligible,
+                tags=metadata.tags,
+                rag_eligible=metadata.rag_eligible,
             )
             runtime.streaming_messages[identity.item_id] = StreamingMessage(
                 item_id=identity.item_id,
                 session_id=session_key,
                 content_type=content_type,
                 content_schema_version=content_schema_version,
+                metadata=metadata,
                 filter=StreamingCredentialFilter(private_values),
                 private_values=private_values,
             )
@@ -1921,12 +1924,24 @@ class RunCoordinator:
                 suffix = projection.text[len(message.safe_text):]
                 if suffix:
                     self._append_message_delta_locked(runtime, message, suffix)
+            finalized_body = body
+            finalized_status = projection.generation_status
+            if mismatch:
+                finalized_status = GenerationStatus.INCOMPLETE
+                finalized_body = self._registry.finalized_message_body(
+                    message.content_type,
+                    message.content_schema_version,
+                    message.safe_text,
+                    finalized_status,
+                    MessageEndReason.ERROR,
+                )
             finalized = runtime.transcript_buffer.append(
                 identity,
                 message.content_type,
                 message.content_schema_version,
-                body,
+                finalized_body,
                 private_values=message.private_values,
+                metadata=message.metadata,
             )
             session_runtime = self._lookup_agent_session_locked(
                 runtime,
@@ -1937,7 +1952,7 @@ class RunCoordinator:
                 sequence=len(session_runtime.process_events) + 1,
                 occurred_at=timestamp,
                 item=finalized,
-                generation_status=projection.generation_status,
+                generation_status=finalized_status,
             ))
             persistence_item_ids = [identity.item_id]
             if mismatch:
@@ -1997,6 +2012,7 @@ class RunCoordinator:
                 message.content_schema_version,
                 body,
                 private_values=message.private_values,
+                metadata=message.metadata,
             )
             session_runtime = self._lookup_agent_session_locked(
                 runtime,

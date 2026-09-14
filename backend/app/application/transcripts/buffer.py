@@ -11,6 +11,7 @@ from app.application.transcripts.models import (
     StoredTranscriptItem,
     TranscriptContentRef,
     TranscriptItem,
+    TranscriptMetadata,
     TranscriptStorageBatch,
 )
 from app.application.transcripts.registry import (
@@ -71,6 +72,7 @@ class TranscriptBuffer:
         body: object,
         *,
         private_values: tuple[str, ...] = (),
+        metadata: TranscriptMetadata | None = None,
         reserved_references: tuple[TranscriptContentRef, ...] | None = None,
     ) -> TranscriptItem:
         if identity.item_id in self._item_ids:
@@ -84,6 +86,10 @@ class TranscriptBuffer:
             body,
             private_values=private_values,
         )
+        if metadata is not None:
+            content = content.model_copy(
+                update={"metadata": TranscriptMetadata.model_validate(metadata)}
+            )
         if reserved_references is not None:
             validate_registered_references(
                 identity.run_id,

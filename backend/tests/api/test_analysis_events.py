@@ -511,7 +511,7 @@ def test_two_streaming_messages_can_interleave_without_mixing_identity() -> None
 def test_streamed_and_final_text_mismatch_records_visible_diagnostic() -> None:
     async def exercise() -> None:
         async with run_runtime(message_registry=True) as (
-            _, coordinator, created, _, _, _,
+            _, coordinator, created, _, _, store,
         ):
             session = await coordinator.prepare_agent_session(
                 created.run_id,
@@ -533,7 +533,7 @@ def test_streamed_and_final_text_mismatch_records_visible_diagnostic() -> None:
                 message.item_id,
                 FixtureMessageV1(
                     text="different final text",
-                    generation_status=GenerationStatus.INCOMPLETE,
+                    generation_status=GenerationStatus.COMPLETED,
                 ),
             )
             runtime = coordinator._runs[created.run_id]
@@ -542,11 +542,115 @@ def test_streamed_and_final_text_mismatch_records_visible_diagnostic() -> None:
                 MessageFinalizedProcessRecord,
                 TranscriptItemProcessRecord,
             ]
+            finalized = records[-2]
+            assert isinstance(finalized, MessageFinalizedProcessRecord)
+            assert finalized.generation_status is GenerationStatus.INCOMPLETE
+            assert json.loads(finalized.item.content.safe_body) == {
+                "text": "streamed text",
+                "generation_status": "incomplete",
+                "end_reason": "error",
+            }
             assert records[-1].item.content.content_type == "error"
             assert sum(
                 item.item_id == message.item_id
                 for item in runtime.transcript_buffer.items
             ) == 1
+            await coordinator._wait_for_writer_drain(runtime)
+            stored = await store.read_run(created.run_id)
+            stored_message = next(
+                item for item in stored.items if item.item_id == message.item_id
+            )
+            assert json.loads(stored_message.inline_body) == {
+                "text": "streamed text",
+                "generation_status": "incomplete",
+                "end_reason": "error",
+            }
+
+    run(exercise)
+
+
+def test_streamed_message_metadata_matches_started_finalized_get_and_storage() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (
+            app, coordinator, created, _, _, store,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+                tags=("answer", "water-quality"),
+                rag_eligible=True,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                "metadata answer",
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text="metadata answer",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(
+                created.run_id,
+                session.session_id,
+            )
+            runtime = coordinator._runs[created.run_id]
+            await coordinator._wait_for_writer_drain(runtime)
+
+            response = await create_session_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+                session.session_id,
+            )
+            events = decoded_frames(await collect_response(response))
+            started = next(
+                data for name, _, data in events if name == "message_started"
+            )
+            finalized = next(
+                data for name, _, data in events if name == "message_finalized"
+            )
+            for payload in (started, finalized):
+                assert payload["payload"]["item"]["tags"] == [
+                    "answer",
+                    "water-quality",
+                ]
+                assert payload["payload"]["item"]["rag_eligible"] is True
+
+            stored = await store.read_run(created.run_id)
+            stored_message = next(
+                item for item in stored.items if item.item_id == message.item_id
+            )
+            assert stored_message.tags == ("answer", "water-quality")
+            assert stored_message.rag_eligible is True
+
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                history = await client.get(
+                    f"/api/analysis/runs/{created.run_id}/sessions/"
+                    f"{session.session_id}/transcript?view=history"
+                )
+            history_message = next(
+                item for item in history.json()["items"]
+                if item["item_id"] == str(message.item_id)
+            )
+            assert history_message["tags"] == ["answer", "water-quality"]
+            assert history_message["rag_eligible"] is True
 
     run(exercise)
 

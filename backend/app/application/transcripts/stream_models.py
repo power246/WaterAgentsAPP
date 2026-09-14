@@ -11,7 +11,11 @@ from app.application.analysis_runs.models import (
     SessionSummary,
 )
 from app.application.analysis_runs.persistence import PersistenceInfo
-from app.application.transcripts.models import GenerationStatus, TranscriptItem
+from app.application.transcripts.models import (
+    GenerationStatus,
+    TranscriptItem,
+    TranscriptMetadata,
+)
 from app.application.transcripts.read_models import (
     TranscriptCorrelation,
     TranscriptItemView,
@@ -139,6 +143,7 @@ class StreamingMessage:
     session_id: UUID
     content_type: str
     content_schema_version: int
+    metadata: TranscriptMetadata
     filter: StreamingCredentialFilter
     private_values: tuple[str, ...] = ()
     safe_text: str = ""

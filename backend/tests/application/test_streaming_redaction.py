@@ -14,20 +14,42 @@ def _render_at_every_split(text: str, private_values: tuple[str, ...] = ()) -> t
 
 
 @pytest.mark.parametrize(
-    ("text", "secrets"),
+    ("text", "private_values", "secrets"),
     [
-        ('before api_key="秘密🔑value" after', ("秘密🔑value",)),
-        ("before Authorization: Bearer synthetic-token\nafter", ("synthetic-token",)),
-        ("before Cookie: sid=synthetic-cookie; HttpOnly\nafter", ("synthetic-cookie",)),
+        ('before api_key =   "秘密🔑value" after', (), ("秘密🔑value",)),
+        (
+            "before Authorization: Bearer synthetic-token\nafter",
+            (),
+            ("synthetic-token",),
+        ),
+        (
+            "before Cookie: sid=synthetic-cookie; HttpOnly\nafter",
+            (),
+            ("synthetic-cookie",),
+        ),
         (
             "before https://user:synthetic-password@provider.test/path after",
+            (),
             ("synthetic-password",),
         ),
-        ("before client_secret='quoted\\\"value' after", ('quoted\\"value',)),
+        (
+            "before client_secret='quoted\\\"value' after",
+            (),
+            ('quoted\\"value',),
+        ),
+        (
+            "before explicit synthetic-private-value after",
+            ("synthetic-private-value",),
+            ("synthetic-private-value",),
+        ),
     ],
 )
-def test_credentials_are_hidden_at_every_chunk_split(text: str, secrets: tuple[str, ...]) -> None:
-    for rendered in _render_at_every_split(text, secrets):
+def test_credentials_are_hidden_at_every_chunk_split(
+    text: str,
+    private_values: tuple[str, ...],
+    secrets: tuple[str, ...],
+) -> None:
+    for rendered in _render_at_every_split(text, private_values):
         assert "[REDACTED]" in rendered
         assert all(secret not in rendered for secret in secrets)
         assert "before" in rendered
