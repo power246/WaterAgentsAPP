@@ -26,6 +26,7 @@ from app.application.analysis_runs.models import (
     TranscriptItemIdentity,
 )
 from app.application.analysis_runs.persistence import (
+    BatchVerification,
     PersistenceGroup,
     PersistenceState,
     PersistenceWriteBatch,
@@ -570,6 +571,106 @@ def test_run_writer_persists_incremental_state_events_and_large_content(
                 range(1, 7)
             )
             assert content_row["body"].count("水") == 30000
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_pending_session_creation_unknown_commit_matches_memory_contract(
+    postgres_settings: AppSettings,
+) -> None:
+    class LostPendingSessionCommitStore(PostgresTranscriptStore):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.session_write_attempts = 0
+            self.session_verify_attempts = 0
+            self.lost_response = False
+            self.session_batch: PersistenceWriteBatch | None = None
+
+        async def write_batch(self, batch: PersistenceWriteBatch) -> None:
+            is_session_creation = any(
+                mutation.previous_status is None
+                for mutation in batch.session_mutations
+            )
+            await super().write_batch(batch)
+            if is_session_creation:
+                self.session_batch = batch
+                self.session_write_attempts += 1
+                if not self.lost_response:
+                    self.lost_response = True
+                    raise OSError("session creation commit response was lost")
+
+        async def verify_batch(
+            self,
+            batch: PersistenceWriteBatch,
+        ) -> BatchVerification:
+            if any(
+                mutation.previous_status is None
+                for mutation in batch.session_mutations
+            ):
+                self.session_verify_attempts += 1
+            return await super().verify_batch(batch)
+
+    class Clock:
+        def now(self) -> datetime:
+            return datetime.now(UTC)
+
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise() -> None:
+        engine = create_database_engine(postgres_settings)
+        store = LostPendingSessionCommitStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        workflow = Workflow()
+        coordinator = RunCoordinator(
+            Clock(),
+            transcript_store=store,
+            workflow=workflow,
+            shutdown_grace_period=0,
+        )
+        try:
+            created = await coordinator.create_run(b'{"query":"session verify"}')
+            await workflow.calls.get()
+            await _wait_persistence(coordinator, created.run_id)
+
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await _wait_persistence(coordinator, created.run_id)
+
+            assert store.session_write_attempts == 1
+            assert store.session_verify_attempts == 1
+            assert store.session_batch is not None
+            assert len(store.session_batch.item_ids) == 1
+            async with engine.connect() as connection:
+                row = (
+                    await connection.execute(
+                        select(
+                            analysis_sessions.c.status,
+                            analysis_sessions.c.created_item_id,
+                            analysis_sessions.c.terminal_item_id,
+                        ).where(
+                            analysis_sessions.c.session_id == session.session_id
+                        )
+                    )
+                ).mappings().one()
+            assert row["status"] == "pending"
+            assert row["created_item_id"] == store.session_batch.item_ids[0]
+            assert row["terminal_item_id"] is None
         finally:
             workflow.release.set()
             await coordinator.shutdown()

@@ -21,6 +21,7 @@ from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
     RunStatus,
+    SessionStateMutation,
     SessionSummary,
 )
 from app.application.analysis_runs.persistence import (
@@ -46,6 +47,20 @@ from app.infrastructure.persistence.schema import (
     transcript_items,
 )
 from app.ports.errors import PortUnavailableError
+
+
+def _session_terminal_item_id(mutation: SessionStateMutation) -> UUID | None:
+    if mutation.summary.status not in {
+        AgentSessionStatus.COMPLETED,
+        AgentSessionStatus.FAILED,
+        AgentSessionStatus.CANCELLED,
+    }:
+        return None
+    return (
+        mutation.transcript_item.item_id
+        if mutation.transcript_item is not None
+        else None
+    )
 
 
 class PostgresTranscriptStore:
@@ -406,17 +421,7 @@ class PostgresTranscriptStore:
                     "persisted run state changed unexpectedly"
                 )
         for mutation in batch.session_mutations:
-            terminal_item_id = (
-                mutation.transcript_item.item_id
-                if mutation.summary.status
-                in {
-                    AgentSessionStatus.COMPLETED,
-                    AgentSessionStatus.FAILED,
-                    AgentSessionStatus.CANCELLED,
-                }
-                and mutation.transcript_item is not None
-                else None
-            )
+            terminal_item_id = _session_terminal_item_id(mutation)
             if mutation.previous_status is None:
                 await connection.execute(
                     analysis_sessions.insert().values(
@@ -562,11 +567,7 @@ class PostgresTranscriptStore:
                 and row["updated_at"] == final.summary.updated_at
                 and row["created_item_id"] == created_item
                 and row["terminal_item_id"]
-                == (
-                    final.transcript_item.item_id
-                    if final.transcript_item is not None
-                    else None
-                )
+                == _session_terminal_item_id(final)
             )
         return evidence
 

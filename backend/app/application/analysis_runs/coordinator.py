@@ -882,27 +882,39 @@ class RunCoordinator:
     async def _run_writer(self, runtime: RunRuntime) -> None:
         try:
             while True:
-                await runtime.writer_wakeup.wait()
-                runtime.writer_wakeup.clear()
-                while True:
-                    async with runtime.condition:
+                try:
+                    await runtime.writer_wakeup.wait()
+                    runtime.writer_wakeup.clear()
+                    while True:
+                        async with runtime.condition:
+                            if runtime.writer_stop.is_set():
+                                return
+                            batch = self._freeze_persistence_batch_locked(runtime)
+                            if batch is None:
+                                break
+                        succeeded = await self._attempt_persistence_batch(runtime, batch)
+                        if succeeded:
+                            continue
+                        async with runtime.condition:
+                            if runtime.persistence_exhausted:
+                                break
+                            delay = self._persistence_retry_delays[
+                                runtime.persistence_failures - 1
+                            ]
+                        await self._persistence_sleep(delay)
                         if runtime.writer_stop.is_set():
                             return
-                        batch = self._freeze_persistence_batch_locked(runtime)
-                        if batch is None:
-                            break
-                    succeeded = await self._attempt_persistence_batch(runtime, batch)
-                    if succeeded:
-                        continue
+                except asyncio.CancelledError:
+                    raise
+                except Exception as error:
                     async with runtime.condition:
-                        if runtime.persistence_exhausted:
-                            break
-                        delay = self._persistence_retry_delays[
-                            runtime.persistence_failures - 1
-                        ]
-                    await self._persistence_sleep(delay)
-                    if runtime.writer_stop.is_set():
-                        return
+                        self._record_persistence_failure_locked(
+                            runtime,
+                            error,
+                            retryable=False,
+                        )
+                        runtime.persistence_exhausted = True
+                        runtime.condition.notify_all()
         finally:
             runtime.writer_quiesced.set()
             async with runtime.condition:
@@ -975,7 +987,9 @@ class RunCoordinator:
         retryable: bool = True,
     ) -> None:
         runtime.persistence_failures += 1
-        if runtime.persistence_warning is None:
+        if runtime.persistence_warning is None or (
+            not retryable and runtime.persistence_warning.retryable
+        ):
             runtime.persistence_warning = self._persistence_error(
                 error,
                 retryable=retryable,
@@ -988,6 +1002,7 @@ class RunCoordinator:
             "persistence_write_failed",
             runtime,
             exception=error,
+            error_id=runtime.persistence_warning.error_id,
             attempt=runtime.persistence_failures,
         )
 
@@ -1412,6 +1427,7 @@ class RunCoordinator:
         *,
         timestamp: datetime | None = None,
         exception: BaseException | None = None,
+        error_id: UUID | None = None,
         **fields: object,
     ) -> None:
         try:
@@ -1432,9 +1448,13 @@ class RunCoordinator:
                         request_id=request_id_context.get(),
                         run_id=runtime.snapshot.run_id,
                         error_id=(
-                            runtime.last_error.error_id
-                            if runtime.last_error
-                            else None
+                            error_id
+                            if error_id is not None
+                            else (
+                                runtime.last_error.error_id
+                                if runtime.last_error
+                                else None
+                            )
                         ),
                     ),
                     "exception_type": (

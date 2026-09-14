@@ -354,10 +354,10 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] 写入与 `verify_batch` 共用 session `terminal_item_id` 的期望计算；pending/running session 的创建/状态 item 不能被误作终态引用。（[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] writer 对确定性非法批次不得静默退出：正常入口提前拒绝坏引用，任务最外层仍将意外非取消异常转为明确的不可重试 warning/诊断，不能留下无人负责的普通 pending。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
-- [ ] 持久化失败日志携带与公开 warning 相同的 `error_id` 及实际 attempt，不借用业务 `last_error`，使客户端错误可直接关联日志。（[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
-- [ ] memory store 与真实 PostgreSQL 运行同一 unknown-commit 核实契约；增加 pending session creation-only、坏引用 writer 存活和 warning/log ID 一致性测试。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 写入与 `verify_batch` 共用 session `terminal_item_id` 的期望计算；pending/running session 的创建/状态 item 不能被误作终态引用。（[设计 §4.2](m3_transcript_history_implementation_design.md#42-analysis_sessions)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] writer 对确定性非法批次不得静默退出：正常入口提前拒绝坏引用，任务最外层仍将意外非取消异常转为明确的不可重试 warning/诊断，不能留下无人负责的普通 pending。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
+- [x] 持久化失败日志携带与公开 warning 相同的 `error_id` 及实际 attempt，不借用业务 `last_error`，使客户端错误可直接关联日志。（[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
+- [x] memory store 与真实 PostgreSQL 运行同一 unknown-commit 核实契约；增加 pending session creation-only、坏引用 writer 存活和 warning/log ID 一致性测试。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：持久化与业务状态分别正确，故障矩阵证明真实确认和原子性，而非仅测试入队成功。
 
@@ -369,6 +369,10 @@ git diff --check
 - 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55458 ... backend/.venv/bin/python -m pytest backend/tests/application backend/tests/persistence -q`：260 passed，真实 PostgreSQL 测试未跳过。
 - 完整回归：`WATERAGENTS_TEST_POSTGRES_PORT=55458 ... backend/.venv/bin/python -m pytest backend/tests -q`：746 passed。
 - 契约结论：单 run 串行/多 run 并行、草稿缺口、100 items 目标、原子组、确认集合、共享超时预算、未知提交核实、首次加五次补写、交付窗口、终态不重选、派生保存状态和手动恢复均满足；真实 PostgreSQL 覆盖连续连接复用、状态/事件/全文提交及冲突整批回滚。
+- 审查回补聚焦验证：`backend/.venv/bin/python -m pytest backend/tests/application/test_run_writer.py backend/tests/observability/test_json_logging.py -q`：72 passed；覆盖坏引用入口、writer 最外层异常恢复以及 warning/log ID 与 attempt。
+- 审查回补 PostgreSQL 验证：`backend/.venv/bin/python -m pytest backend/tests/persistence/test_postgres_persistence.py -q`：13 passed；pending session creation-only 的 unknown commit 与 memory store 核实结果一致。
+- 审查回补指定验证：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests/application backend/tests/persistence -q`：283 passed，无 skip。
+- 审查回补完整回归：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests -q`：752 passed，无 skip；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 
 ## Milestone 6：统一读取、历史分页与 HTTP 契约
 

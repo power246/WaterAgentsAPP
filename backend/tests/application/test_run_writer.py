@@ -6,7 +6,7 @@ from uuid import UUID
 import pytest
 
 from app.application.analysis_runs.coordinator import RunCoordinator
-from app.application.analysis_runs.models import AgentRole, RunStatus
+from app.application.analysis_runs.models import AgentRole, PublicError, RunStatus
 from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceState,
@@ -98,6 +98,37 @@ class LostCommitStore(InMemoryTranscriptStore):
         batch: PersistenceWriteBatch,
     ) -> BatchVerification:
         self.verify_attempts += 1
+        return await super().verify_batch(batch)
+
+
+class PendingSessionLostCommitStore(InMemoryTranscriptStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.session_write_attempts = 0
+        self.session_verify_attempts = 0
+        self.lost_response = False
+
+    async def write_batch(self, batch: PersistenceWriteBatch) -> None:
+        is_session_creation = any(
+            mutation.previous_status is None
+            for mutation in batch.session_mutations
+        )
+        await super().write_batch(batch)
+        if is_session_creation:
+            self.session_write_attempts += 1
+            if not self.lost_response:
+                self.lost_response = True
+                raise OSError("session creation commit response was lost")
+
+    async def verify_batch(
+        self,
+        batch: PersistenceWriteBatch,
+    ) -> BatchVerification:
+        if any(
+            mutation.previous_status is None
+            for mutation in batch.session_mutations
+        ):
+            self.session_verify_attempts += 1
         return await super().verify_batch(batch)
 
 
@@ -460,6 +491,8 @@ def test_finalize_rejects_unknown_and_cross_run_references_without_drafts() -> N
                 identity.item_id for identity in identities
             )
             await wait_for_state(coordinator, second.run_id, PersistenceState.UP_TO_DATE)
+            writer = coordinator._runs[second.run_id].writer_task
+            assert writer is not None and not writer.done()
 
             await coordinator.finalize_transcript_item(
                 first.run_id,
@@ -488,6 +521,144 @@ def test_unknown_commit_is_verified_without_rewriting_the_frozen_batch() -> None
             assert store.write_attempts == 1
             assert store.verify_attempts == 1
             assert len(store.write_batches) == 1
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_pending_session_creation_unknown_commit_is_verified_in_memory() -> None:
+    async def exercise() -> None:
+        store = PendingSessionLostCommitStore()
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow)
+        try:
+            created = await coordinator.create_run(b'{"query":"lake"}')
+            await workflow.calls.get()
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+
+            assert store.session_write_attempts == 1
+            assert store.session_verify_attempts == 1
+            assert store._sessions[session.session_id] == session
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_unexpected_writer_failure_is_nonretryable_and_writer_can_recover(
+    monkeypatch: pytest.MonkeyPatch,
+    application_logs: list[str],
+) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow)
+        try:
+            created = await coordinator.create_run(b'{"query":"lake"}')
+            await workflow.calls.get()
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            runtime = coordinator._runs[created.run_id]
+            original = coordinator._freeze_persistence_batch_locked
+            failed = False
+
+            def fail_once(candidate):
+                nonlocal failed
+                if not failed:
+                    failed = True
+                    raise ValueError("unexpected invalid persistence batch")
+                return original(candidate)
+
+            monkeypatch.setattr(
+                coordinator,
+                "_freeze_persistence_batch_locked",
+                fail_once,
+            )
+            item = await coordinator.reserve_transcript_item(created.run_id)
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                item.item_id,
+                "analysis_request",
+                1,
+                {"query": "recoverable fact"},
+            )
+            await wait_for_state(
+                coordinator,
+                created.run_id,
+                PersistenceState.RETRY_EXHAUSTED,
+            )
+
+            warning = (await coordinator.get_persistence_info(created.run_id)).warning
+            assert warning is not None and warning.retryable is False
+            assert runtime.writer_task is not None and not runtime.writer_task.done()
+            rows = [
+                json.loads(line)
+                for line in application_logs
+                if json.loads(line)["event_name"] == "persistence_write_failed"
+            ]
+            assert rows[-1]["error_id"] == str(warning.error_id)
+            assert rows[-1]["attempt"] == 1
+
+            retried = await coordinator.retry_persistence(created.run_id)
+            assert retried.state is PersistenceState.PENDING
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            assert runtime.writer_task is not None and not runtime.writer_task.done()
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_persistence_failure_logs_use_warning_error_id_and_actual_attempts(
+    application_logs: list[str],
+) -> None:
+    async def exercise() -> None:
+        store = FailingStore(failures=0)
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow)
+        try:
+            created = await coordinator.create_run(b'{"query":"lake"}')
+            await workflow.calls.get()
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            store.failures = None
+            business_error = PublicError(
+                error_id=UUID(int=700),
+                code="workflow_failed",
+                message="The analysis workflow failed.",
+                failed_stage="workflow",
+                retryable=False,
+            )
+
+            await coordinator.fail_run(created.run_id, business_error)
+            await wait_for_state(
+                coordinator,
+                created.run_id,
+                PersistenceState.RETRY_EXHAUSTED,
+            )
+
+            runtime = coordinator._runs[created.run_id]
+            info = await coordinator.get_persistence_info(created.run_id)
+            assert info.warning is not None
+            assert runtime.last_error == business_error
+            assert info.warning.error_id != business_error.error_id
+            rows = [
+                json.loads(line)
+                for line in application_logs
+                if json.loads(line)["event_name"] == "persistence_write_failed"
+            ]
+            assert [row["attempt"] for row in rows] == [1, 2, 3, 4, 5, 6]
+            assert {
+                row["error_id"] for row in rows
+            } == {str(info.warning.error_id)}
         finally:
             workflow.release.set()
             await coordinator.shutdown()
