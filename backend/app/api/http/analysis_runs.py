@@ -376,11 +376,10 @@ async def retry_persistence(
     _reject_unknown_query_parameters(request, set())
     request.state.run_id = run_id
     coordinator = request.app.state.run_coordinator
-    live = await coordinator.get_live_read(run_id)
-    if live is None:
+    persistence = await coordinator.retry_persistence(run_id)
+    if persistence is None:
         await request.app.state.transcript_reader.get_historical_status(run_id)
         raise PersistenceRetryUnavailableError(run_id)
-    persistence = await coordinator.retry_persistence(run_id)
     response.status_code = (
         200
         if persistence.state is PersistenceState.UP_TO_DATE

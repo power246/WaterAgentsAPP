@@ -2228,18 +2228,33 @@ class RunCoordinator:
     async def retry_persistence(
         self,
         run_id: UUID | str,
-    ) -> PersistenceInfo:
-        runtime = await self._lookup(run_id)
-        async with runtime.condition:
-            if runtime.persistence_exhausted and self._has_pending_persistence_locked(
-                runtime
-            ):
-                runtime.persistence_exhausted = False
-                runtime.persistence_failures = 0
-                runtime.third_retry_failed_at = None
-                runtime.writer_wakeup.set()
-                runtime.condition.notify_all()
-            return self._persistence_info_locked(runtime)
+    ) -> PersistenceInfo | None:
+        key = _UUID.validate_python(run_id)
+        while True:
+            async with self._runs_lock:
+                runtime = self._runs.get(key)
+                owner = self._creation_by_run.get(key)
+                if runtime is not None:
+                    async with runtime.condition:
+                        if (
+                            runtime.persistence_exhausted
+                            and self._has_pending_persistence_locked(runtime)
+                        ):
+                            runtime.persistence_exhausted = False
+                            runtime.persistence_failures = 0
+                            runtime.third_retry_failed_at = None
+                            runtime.writer_wakeup.set()
+                            runtime.condition.notify_all()
+                        return self._persistence_info_locked(runtime)
+            if owner is None or owner.task is None:
+                return None
+            try:
+                async with asyncio.timeout(self._idempotency_wait_timeout):
+                    await asyncio.shield(owner.task)
+            except TimeoutError:
+                raise CreationCommitUnconfirmedError(key) from None
+            except (CreationRolledBackError, IdempotencyKeyConflictError):
+                return None
 
     async def list_transcript_items(
         self,

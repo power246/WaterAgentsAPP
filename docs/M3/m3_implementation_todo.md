@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–13 已完成本机实现与适用验证，Milestone 14–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成 retry/cleanup 原子性、corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
+**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–14 已完成本机实现与适用验证，Milestone 15–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成 corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
 
 ## 阶段与设计导航
 
@@ -786,23 +786,31 @@ git diff --check
 
 ### 工作
 
-- [ ] 将“live owner 是否存在”和“必要时重启原 writer”合并进 coordinator 的单次原子操作，统一使用 `_runs_lock → runtime.condition` 锁顺序，与 `_release_live_state()` 保持一致。
-- [ ] coordinator 以明确的 absent 结果表示 live 已释放，不把 cleanup 后的正常状态抛成 `RunNotFoundError`；原 `up_to_date`、`pending`、`retry_exhausted` 预算语义保持不变。
-- [ ] HTTP 路由只调用一次原子 retry；absent 后查询 history，存在则返回 `409/persistence_retry_unavailable`，完全不存在返回 404，数据库不可用返回 503。
-- [ ] retry 与 cleanup 同时获胜时只允许两种线性化结果：retry 在释放前受理并返回 200/202，或 cleanup 先完成并按历史返回 409；不得返回错误 404、启动第二个 writer 或重置执行中的预算。
+- [x] 将“live owner 是否存在”和“必要时重启原 writer”合并进 coordinator 的单次原子操作，统一使用 `_runs_lock → runtime.condition` 锁顺序，与 `_release_live_state()` 保持一致。
+- [x] coordinator 以明确的 absent 结果表示 live 已释放，不把 cleanup 后的正常状态抛成 `RunNotFoundError`；原 `up_to_date`、`pending`、`retry_exhausted` 预算语义保持不变。
+- [x] HTTP 路由只调用一次原子 retry；absent 后查询 history，存在则返回 `409/persistence_retry_unavailable`，完全不存在返回 404，数据库不可用返回 503。
+- [x] retry 与 cleanup 同时获胜时只允许两种线性化结果：retry 在释放前受理并返回 200/202，或 cleanup 先完成并按历史返回 409；不得返回错误 404、启动第二个 writer 或重置执行中的预算。
 
 ### Tests
 
-- [ ] 用 gate 精确控制 retry 与 `_release_live_state()` 的交错，覆盖两种锁顺序结果，不用 sleep 猜竞态。
-- [ ] API 覆盖 history 已存在时 409、完全不存在时 404、history 查询失败时 503，以及 live `up_to_date` 200、pending/重新受理 202。
-- [ ] 保留并发重复点击只复用一个 writer/一轮预算的现有测试，增加 cleanup 竞争后无额外 recovery fact 的断言。
+- [x] 用 gate 精确控制 retry 与 `_release_live_state()` 的交错，覆盖两种锁顺序结果，不用 sleep 猜竞态。
+- [x] API 覆盖 history 已存在时 409、完全不存在时 404、history 查询失败时 503，以及 live `up_to_date` 200、pending/重新受理 202。
+- [x] 保留并发重复点击只复用一个 writer/一轮预算的现有测试，增加 cleanup 竞争后无额外 recovery fact 的断言。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api/test_analysis_history.py backend/tests/application/test_run_writer.py backend/tests/application/test_milestone8_runtime.py -q`。
-- [ ] `python -m compileall -q backend/app backend/tests` 与 `git diff --check`。
+- [x] `python -m pytest backend/tests/api/test_analysis_history.py backend/tests/application/test_run_writer.py backend/tests/application/test_milestone8_runtime.py -q`。
+- [x] `python -m compileall -q backend/app backend/tests` 与 `git diff --check`。
 
 阶段出口：手动补写与 cleanup 有唯一线性化点；历史存在时永不因竞态误报 404，重复点击不创建额外保存任务。
+
+### Milestone 14 完成记录（2026-09-15）
+
+- 实现：`RunCoordinator.retry_persistence()` 在单次调用中以 `_runs_lock → runtime.condition` 顺序完成 live owner 判定、耗尽预算重置和 writer 唤醒；live 已释放时返回明确 absent，不再经过会在 cleanup 后抛 `RunNotFoundError` 的第二次 lookup。创建仍在收敛时沿用原有有界等待和错误语义。
+- HTTP：retry 路由只调用一次 coordinator 原子操作。absent 时再查询 PostgreSQL：历史存在返回 `409/persistence_retry_unavailable`，完全不存在保持 404，读取失败保持 503；live `up_to_date`、`pending` 与重新受理 `retry_exhausted` 仍分别返回既有 200/202。
+- 竞态：可控 condition gate 分别让 retry 和 `_release_live_state()` 先取得 `_runs_lock`；前者获胜时返回原 persistence 后允许 cleanup，后者获胜时 retry 返回 absent 并由路由稳定分类为 409。测试不依赖 sleep，两个方向都确认没有第二个 writer、预算重置或额外 `persistence_recovered` fact。
+- 验证：Milestone 14 指定 focused tests 为 42 passed；允许 loopback bind、排除需要外部测试库的 PostgreSQL 文件后，后端完整回归为 792 passed；`python -m compileall -q backend/app backend/tests`、文档协议测试与 `git diff --check` 通过。
+- 限制：Milestone 15–16、Ubuntu/macOS/Windows 实际 CI 与同库跨系统迁移证据仍未完成；整体状态继续保持 `partial / request changes`。
 
 ## Milestone 15：Corrupt item 的安全全文读取
 

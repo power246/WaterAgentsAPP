@@ -2,7 +2,7 @@
 
 更新日期：2026-09-15
 
-状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–13 已完成本机实现与适用验证，Milestone 14–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–14 已完成本机实现与适用验证，Milestone 15–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -305,7 +305,7 @@ psycopg 文档说明异步任务取消时数据库操作可能已经完成，因
 
 `PersistenceInfo` 是 run 的 live 派生结果：`state=up_to_date/pending/retry_exhausted` 与 `warning:PublicError|null`。先判断耗尽；否则生成中必需正文、待写组或未确认状态均为 pending；仅所有当前必需事实确认时为 up_to_date。正常等待生成时 warning=null，实际失败才有警告；保存恢复后当前 warning 清除，原终态 warning 不改。
 
-手动 POST 重试复用原 writer：耗尽时开始新一轮，pending 时返回现况、不重置，up_to_date 时不做空事务。等待生成也不能被手动请求强制定稿。没有 live 无法恢复未保存内容，响应见 API 指南。
+手动 POST 重试复用原 writer：耗尽时开始新一轮，pending 时返回现况、不重置，up_to_date 时不做空事务。等待生成也不能被手动请求强制定稿。coordinator 在一次操作内按 `_runs_lock → runtime.condition` 顺序判定 live owner 并完成必要的预算重置/唤醒，与 cleanup 共用唯一线性化点；live 已释放返回明确 absent，不抛普通 run lookup 的 not found。HTTP 不预读 live：只调用该原子操作，absent 后查 history，存在返回 409、完全不存在返回 404、数据库失败返回 503。retry 先取得锁时可返回原 200/202，即使 cleanup 随后释放；cleanup 先取得锁时稳定走历史 409，不启动第二个 writer或增加 recovery fact。
 
 run 终态、所有工作执行方 quiesced、所有必需事实及状态实际确认后，开始默认 60 秒可配置 grace；包括终态、晚到审计与恢复事实。失败不计时，后续新待写使资格失效，恢复后重新获得完整 grace。到期在原状态锁中复查再移除 live runtime/事件/正文；cleanup 幂等、失败可重试，不影响业务终态。SSE 的正常结束不等待 grace，也不增加极慢连接排空/浏览器 ACK 协议。
 

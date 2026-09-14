@@ -2,7 +2,7 @@
 
 更新日期：2026-09-15
 
-**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–13 已完成本机实现与适用验证，Milestone 14–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态及取消时的引用依赖已经收敛；手动补写竞争与 corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–14 已完成本机实现与适用验证，Milestone 15–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态、取消引用依赖及手动补写/cleanup 竞态已经收敛；corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
@@ -337,6 +337,8 @@ M9 使用基于 fetch 的统一 SSE 客户端，才能读取握手错误状态�
 | up_to_date | 200，无空事务。 |
 | live 已丢失、历史仍在 | 409 / persistence_retry_unavailable / retryable=false。 |
 | 完全不存在 | 404。 |
+
+live 判定与必要的 writer 唤醒在 coordinator 内是一个原子操作，与 cleanup 使用同一 `_runs_lock → runtime condition` 锁顺序。retry 先完成时返回当时的 200/202，即使 cleanup 随后释放；cleanup 先完成时路由根据历史返回 409，不会在两次 live lookup 之间误报 404。历史查询本身失败仍返回 503；重复请求不创建第二个 writer或另一轮预算。
 
 202 仅表示仍由原保存过程处理，不能显示“保存成功”。自动重试最多 5 次，间隔 1/2/4/8/16 秒；耗尽后 DB 恢复、刷新和新消息不自动重开。手动 POST 超时先 GET 或观察 run SSE 核对现况，不自动再次发送；用户再次明确点击才能重新操作。网络断开不撤销已受理补写，不重新分析。
 

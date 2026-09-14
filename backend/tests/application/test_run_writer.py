@@ -862,6 +862,8 @@ def test_retry_budget_delays_exhaustion_and_manual_recovery_are_stable() -> None
             await asyncio.sleep(0)
             attempts = store.verify_attempts
             writes = len(store.attempts)
+            runtime = coordinator._runs[created.run_id]
+            writer = runtime.writer_task
             await coordinator.get_persistence_info(created.run_id)
             draft = await coordinator.reserve_transcript_item(created.run_id)
             await coordinator.finalize_transcript_item(
@@ -882,9 +884,10 @@ def test_retry_budget_delays_exhaustion_and_manual_recovery_are_stable() -> None
             )
             assert first.state is second.state is PersistenceState.PENDING
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            assert runtime.writer_task is writer
             recovery_facts = [
                 item
-                for item in coordinator._runs[created.run_id].transcript_buffer.items
+                for item in runtime.transcript_buffer.items
                 if item.content.content_type == "runtime_fact"
                 and json.loads(item.content.safe_body)["fact"]
                 == "persistence_recovered"

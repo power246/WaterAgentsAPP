@@ -499,11 +499,20 @@ def test_corrupt_items_remain_visible_and_missing_fulltext_is_not_empty() -> Non
     run(exercise)
 
 
-def test_cancel_and_manual_persistence_controls_cover_live_and_history() -> None:
+def test_cancel_and_manual_persistence_controls_cover_live_and_history(
+    monkeypatch,
+) -> None:
     async def exercise() -> None:
         store = InMemoryTranscriptStore()
         workflow = GatedWorkflow()
-        async with app_client(store=store, workflow=workflow) as (application, client):
+        async with app_client(
+            store=store,
+            workflow=workflow,
+            settings=AppSettings(
+                _env_file=None,
+                live_state_grace_seconds=3600,
+            ),
+        ) as (application, client):
             created = await client.post(BASE, json={"query": "control run"})
             run_id = UUID(created.json()["run_id"])
             _, release = await workflow.started.get()
@@ -527,12 +536,48 @@ def test_cancel_and_manual_persistence_controls_cover_live_and_history() -> None
             runtime = application.state.run_coordinator._runs[run_id]
             await runtime.workflow_quiesced.wait()
             await wait_saved(application, run_id)
-            await application.state.run_coordinator.shutdown()
-            application.state.run_coordinator._runs.pop(run_id)
 
-            unavailable = await client.post(f"{BASE}/{run_id}/persistence/retry")
+            coordinator = application.state.run_coordinator
+            assert runtime.cleanup_task is not None
+            runtime.cleanup_task.cancel()
+            await asyncio.gather(runtime.cleanup_task, return_exceptions=True)
+            runtime.cleanup_eligible_at = (
+                asyncio.get_running_loop().time()
+                - coordinator._live_state_grace_period
+                - 1
+            )
+            original_retry = coordinator.retry_persistence
+            retry_entered = asyncio.Event()
+            allow_retry = asyncio.Event()
+            retry_calls = 0
+
+            async def gated_retry(candidate_run_id):
+                nonlocal retry_calls
+                retry_calls += 1
+                retry_entered.set()
+                await allow_retry.wait()
+                return await original_retry(candidate_run_id)
+
+            monkeypatch.setattr(coordinator, "retry_persistence", gated_retry)
+            unavailable_task = asyncio.create_task(
+                client.post(f"{BASE}/{run_id}/persistence/retry")
+            )
+            await retry_entered.wait()
+            assert await coordinator._release_live_state(runtime) is True
+            allow_retry.set()
+            unavailable = await unavailable_task
+
+            assert retry_calls == 1
             assert unavailable.status_code == 409
             assert unavailable.json()["error"]["code"] == "persistence_retry_unavailable"
+            stored = await store.read_run(run_id)
+            assert stored is not None
+            assert not any(
+                item.content_type == "runtime_fact"
+                and item.inline_body is not None
+                and json.loads(item.inline_body)["fact"] == "persistence_recovered"
+                for item in stored.items
+            )
             terminal = await client.post(f"{BASE}/{run_id}/cancel")
             assert terminal.status_code == 409
             assert terminal.json()["error"]["code"] == "run_already_terminal"

@@ -12,6 +12,7 @@ from app.application.analysis_runs.coordinator import (
     InvalidRunTransitionError,
     RunNotFoundError,
 )
+from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.models import (
     FixtureMessageV1,
@@ -636,5 +637,98 @@ def test_live_cleanup_waits_for_terminal_quiescence_and_retries_failure() -> Non
                 pass
             else:
                 raise AssertionError("cleaned live state remained addressable")
+
+    run(exercise)
+
+
+@pytest.mark.parametrize("first", ("retry", "cleanup"))
+def test_persistence_retry_and_cleanup_have_one_linearization_point(
+    first: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        store = InMemoryTranscriptStore()
+        application = create_app(
+            AppSettings(_env_file=None, live_state_grace_seconds=3600),
+            workflow=workflow,
+            transcript_store=store,
+            shutdown_grace_period=0,
+        )
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            created = await coordinator.create_run("cleanup race", CONFIGURATION)
+            await workflow.started.wait()
+            runtime = coordinator._runs[created.run_id]
+            workflow.release.set()
+            await runtime.workflow_quiesced.wait()
+            await wait_saved(application, created.run_id)
+
+            writer = runtime.writer_task
+            assert runtime.cleanup_task is not None
+            runtime.cleanup_task.cancel()
+            await asyncio.gather(runtime.cleanup_task, return_exceptions=True)
+            runtime.cleanup_eligible_at = (
+                asyncio.get_running_loop().time()
+                - coordinator._live_state_grace_period
+                - 1
+            )
+
+            original_acquire = runtime.condition.acquire
+            first_entered = asyncio.Event()
+            allow_first = asyncio.Event()
+
+            async def gated_acquire() -> bool:
+                if asyncio.current_task().get_name() == first:
+                    first_entered.set()
+                    await allow_first.wait()
+                return await original_acquire()
+
+            monkeypatch.setattr(runtime.condition, "acquire", gated_acquire)
+            first_call = (
+                coordinator.retry_persistence(created.run_id)
+                if first == "retry"
+                else coordinator._release_live_state(runtime)
+            )
+            first_task = asyncio.create_task(first_call, name=first)
+            await first_entered.wait()
+            lock_held_at_condition = coordinator._runs_lock.locked()
+            second = "cleanup" if first == "retry" else "retry"
+            second_call = (
+                coordinator._release_live_state(runtime)
+                if second == "cleanup"
+                else coordinator.retry_persistence(created.run_id)
+            )
+            second_task = asyncio.create_task(second_call, name=second)
+            allow_first.set()
+
+            if first == "retry":
+                retry_result, cleanup_result = await asyncio.gather(
+                    first_task,
+                    second_task,
+                )
+            else:
+                cleanup_result, retry_result = await asyncio.gather(
+                    first_task,
+                    second_task,
+                )
+
+            assert lock_held_at_condition
+            assert cleanup_result is True
+            assert runtime.writer_task is writer
+            if first == "retry":
+                assert retry_result is not None
+                assert retry_result.state is PersistenceState.UP_TO_DATE
+            else:
+                assert retry_result is None
+            assert created.run_id not in coordinator._runs
+            recovery_facts = [
+                item
+                for item in runtime.transcript_buffer.items
+                if item.content.content_type == "runtime_fact"
+                and json.loads(item.content.safe_body)["fact"]
+                == "persistence_recovered"
+            ]
+            assert recovery_facts == []
 
     run(exercise)
