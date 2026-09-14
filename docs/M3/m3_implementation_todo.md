@@ -259,9 +259,9 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] 收紧静态脱敏语义：Authorization/header、敏感 key/assignment 和显式 private value 继续遮蔽，普通 `Basic water quality`、`Bearer population estimate` 等业务文本保持原样。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [ ] typed content 在 finalize 边界校验引用属于同一 run 且目标已经 reserve；确定不存在或跨 run 的引用同步拒绝，不能先进入 buffer 再由后台 writer 发现。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
-- [ ] 增加普通 Basic/Bearer 文本、真实 Authorization/header/assignment、显式 private value 和非法/等待引用的边界测试，证明安全与业务正文均不被破坏。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 收紧静态脱敏语义：Authorization/header、敏感 key/assignment 和显式 private value 继续遮蔽，普通 `Basic water quality`、`Bearer population estimate` 等业务文本保持原样。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] typed content 在 finalize 边界校验引用属于同一 run 且目标已经 reserve；确定不存在或跨 run 的引用同步拒绝，不能先进入 buffer 再由后台 writer 发现。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
+- [x] 增加普通 Basic/Bearer 文本、真实 Authorization/header/assignment、显式 private value 和非法/等待引用的边界测试，证明安全与业务正文均不被破坏。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：一份安全原正文贯穿 live、存储和读取模型；registry 为后续生产方提供明确接入点。
 
@@ -269,6 +269,9 @@ git diff --check
 
 - `backend/.venv/bin/python -m pytest backend/tests/application backend/tests/observability backend/tests/persistence -q`：283 passed，5 skipped；跳过项为需要外部 PostgreSQL 的既有集成测试。
 - `backend/.venv/bin/python -m pytest backend/tests -q`：691 passed，5 skipped；真实 socket smoke 在允许本机回环端口的环境执行并通过。
+- 审查回补聚焦验证：`backend/.venv/bin/python -m pytest backend/tests/application/test_transcript_buffer.py backend/tests/application/test_run_writer.py backend/tests/observability/test_json_logging.py -q`：88 passed。
+- 审查回补指定验证：在隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests/application backend/tests/observability backend/tests/persistence -q`：340 passed，无 skip。
+- 审查回补完整回归：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests -q`：745 passed，无 skip；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 
 ## Milestone 4：创建原子事务、幂等和所有权收敛
 

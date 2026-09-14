@@ -71,6 +71,7 @@ class TranscriptBuffer:
         body: object,
         *,
         private_values: tuple[str, ...] = (),
+        reserved_references: tuple[TranscriptContentRef, ...] | None = None,
     ) -> TranscriptItem:
         if identity.item_id in self._item_ids:
             raise ValueError("transcript item identity already exists")
@@ -83,6 +84,12 @@ class TranscriptBuffer:
             body,
             private_values=private_values,
         )
+        if reserved_references is not None:
+            validate_registered_references(
+                identity.run_id,
+                content.references,
+                same_batch=reserved_references,
+            )
         error_ids = self._registry.error_ids(content)
         if self._error_ids.intersection(error_ids):
             raise ValueError("an embedded error must not be copied to another item")

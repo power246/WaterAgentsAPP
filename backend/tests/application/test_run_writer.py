@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
 
@@ -412,6 +413,62 @@ def test_reference_waiting_does_not_block_independent_ready_facts() -> None:
             assert store._items[target.item_id].transcript_sequence < store._items[
                 dependent.item_id
             ].transcript_sequence
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_finalize_rejects_unknown_and_cross_run_references_without_drafts() -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow)
+        try:
+            first = await coordinator.create_run(b'{"query":"first"}')
+            second = await coordinator.create_run(b'{"query":"second"}')
+            await workflow.calls.get()
+            await workflow.calls.get()
+            await wait_for_state(coordinator, first.run_id, PersistenceState.UP_TO_DATE)
+            await wait_for_state(coordinator, second.run_id, PersistenceState.UP_TO_DATE)
+
+            foreign_target = await coordinator.reserve_transcript_item(first.run_id)
+            rejected_ids = []
+            for reference_id, error in (
+                (UUID(int=999), "does not exist"),
+                (foreign_target.item_id, "same run"),
+            ):
+                rejected = await coordinator.reserve_transcript_item(second.run_id)
+                rejected_ids.append(rejected.item_id)
+                with pytest.raises(ValueError, match=error):
+                    await coordinator.finalize_transcript_item(
+                        second.run_id,
+                        rejected.item_id,
+                        "runtime_fact",
+                        1,
+                        {
+                            "fact": "late_message_output",
+                            "original_item_id": str(reference_id),
+                            "text": "late",
+                            "end_reason": "cancelled",
+                        },
+                    )
+
+            identities = await coordinator.list_transcript_items(second.run_id)
+            assert not set(rejected_ids).intersection(
+                identity.item_id for identity in identities
+            )
+            await wait_for_state(coordinator, second.run_id, PersistenceState.UP_TO_DATE)
+
+            await coordinator.finalize_transcript_item(
+                first.run_id,
+                foreign_target.item_id,
+                "analysis_request",
+                1,
+                {"query": "target"},
+            )
+            await wait_for_state(coordinator, first.run_id, PersistenceState.UP_TO_DATE)
         finally:
             workflow.release.set()
             await coordinator.shutdown()

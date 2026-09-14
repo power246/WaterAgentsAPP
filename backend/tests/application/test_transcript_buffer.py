@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -129,11 +130,56 @@ def test_large_non_sensitive_text_skips_complex_redaction_patterns(
     pattern = UnexpectedPattern()
     monkeypatch.setattr(redaction, "HEADER_VALUE", pattern)
     monkeypatch.setattr(redaction, "ASSIGNMENT", pattern)
-    monkeypatch.setattr(redaction, "AUTH_SCHEME", pattern)
+    monkeypatch.setattr(redaction, "AUTH_CREDENTIAL", pattern)
     monkeypatch.setattr(redaction, "URL_CREDENTIAL", pattern)
     value = "水" * 30000
 
     assert redaction.redact_text(value) == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    (
+        "Basic water quality is acceptable",
+        "Bearer population estimate",
+    ),
+)
+def test_business_text_that_uses_auth_words_is_preserved(value: str) -> None:
+    registry = create_production_registry()
+
+    content = registry.encode("analysis_request", 1, {"query": value})
+
+    assert json.loads(content.safe_body)["query"] == value
+
+
+@pytest.mark.parametrize(
+    ("value", "private_values", "expected"),
+    (
+        (
+            "Authorization: Bearer synthetic-token",
+            (),
+            "Authorization: [REDACTED]",
+        ),
+        (
+            "upstream rejected Bearer synthetic-token",
+            (),
+            "upstream rejected [REDACTED]",
+        ),
+        ("Cookie: sid=synthetic-cookie", (), "Cookie: [REDACTED]"),
+        ("api_key=synthetic-key", (), "api_key=[REDACTED]"),
+        (
+            "inspect synthetic-private-value",
+            ("synthetic-private-value",),
+            "inspect [REDACTED]",
+        ),
+    ),
+)
+def test_static_redaction_keeps_explicit_credential_boundaries(
+    value: str,
+    private_values: tuple[str, ...],
+    expected: str,
+) -> None:
+    assert redaction.redact_text(value, private_values) == expected
 
 
 def test_reference_targets_must_be_persisted_same_batch_or_waited_for() -> None:

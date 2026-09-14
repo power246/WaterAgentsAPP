@@ -12,7 +12,10 @@ ASSIGNMENT = re.compile(
     r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,}&]+)",
     re.IGNORECASE,
 )
-AUTH_SCHEME = re.compile(r"\b(?:Bearer|Basic)\s+[^\s,;\"'}]+", re.IGNORECASE)
+AUTH_CREDENTIAL = re.compile(
+    r"\b(?:Bearer|Basic)\s+(?=[^\s,;\"'}]*[\d._~+/=-])[^\s,;\"'}]+",
+    re.IGNORECASE,
+)
 HEADER_VALUE = re.compile(
     r"(?P<key>\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*:\s*)[^\r\n]+",
     re.IGNORECASE,
@@ -58,7 +61,7 @@ def redact_text(value: str, private_values: tuple[str, ...] = ()) -> str:
         value = HEADER_VALUE.sub(lambda match: match["key"] + REDACTED, value)
         value = ASSIGNMENT.sub(lambda match: match["key"] + REDACTED, value)
     if "bearer" in lowered or "basic" in lowered:
-        value = AUTH_SCHEME.sub(REDACTED, value)
+        value = AUTH_CREDENTIAL.sub(REDACTED, value)
     if "http://" in lowered or "https://" in lowered:
         value = URL_CREDENTIAL.sub(r"\1[REDACTED]@", value)
     return value

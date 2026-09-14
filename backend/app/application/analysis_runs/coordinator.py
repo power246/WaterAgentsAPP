@@ -1706,13 +1706,31 @@ class RunCoordinator:
             )
             if identity is None:
                 raise ValueError("transcript item identity is not reserved in this run")
-            finalized = runtime.transcript_buffer.append(
-                identity,
-                content_type,
-                content_schema_version,
-                body,
-                private_values=private_values,
+            reserved_references = tuple(
+                TranscriptContentRef(
+                    run_id=candidate.snapshot.run_id,
+                    item_id=item.item_id,
+                )
+                for candidate in self._runs.values()
+                for item in candidate.transcript_items
             )
+            try:
+                finalized = runtime.transcript_buffer.append(
+                    identity,
+                    content_type,
+                    content_schema_version,
+                    body,
+                    private_values=private_values,
+                    reserved_references=reserved_references,
+                )
+            except (TypeError, ValueError):
+                finalized_ids = {
+                    item.item_id for item in runtime.transcript_buffer.items
+                }
+                if identity.item_id not in finalized_ids:
+                    runtime.transcript_items.remove(identity)
+                    runtime.condition.notify_all()
+                raise
             self._append_transcript_process_locked(
                 runtime,
                 finalized,
