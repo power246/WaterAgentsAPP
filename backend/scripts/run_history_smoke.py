@@ -1,11 +1,17 @@
 import asyncio
 import json
+import os
+import subprocess
+import sys
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import httpx
+from fastapi import FastAPI
 
 from app.application.analysis_runs.models import AgentRole
-from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.models import FixtureMessageV1, GenerationStatus
 from app.application.transcripts.registry import (
@@ -15,42 +21,185 @@ from app.application.transcripts.registry import (
 from app.infrastructure.config import AppSettings
 from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 from app.main import create_app
-from run_sse_smoke import read_event, running_server, stream_headers
+from health_smoke import available_loopback_port, stop_process
+from run_sse_smoke import read_event, stream_headers
 from test_database import temporary_migrated_schema
 
 BASE = "/api/analysis/runs"
+SCRIPT_ROOT = Path(__file__).resolve().parent
+COMPLETED_QUERY = "M3 process history smoke with UTF-8"
+CANCELLED_QUERY = "M3 process cancel smoke"
+INTERRUPTED_QUERY = "M3 process restart repair smoke"
+LARGE_TEXT = "流域结论：" + ("water-quality-observation " * 180)
 
 
-class GatedWorkflow:
+class HistorySmokeWorkflow:
     def __init__(self) -> None:
-        self.calls: asyncio.Queue[tuple[WorkflowContext, asyncio.Event]] = asyncio.Queue()
+        self._application: FastAPI | None = None
+
+    def bind(self, application: FastAPI) -> None:
+        self._application = application
 
     async def run(self, context: WorkflowContext) -> None:
-        release = asyncio.Event()
-        self.calls.put_nowait((context, release))
-        await release.wait()
-        context.cancellation.checkpoint()
+        if self._application is None:
+            raise RuntimeError("smoke workflow is not bound to the application")
+        coordinator = self._application.state.run_coordinator
+        run_id = context.run.run_id
+
+        if context.query == COMPLETED_QUERY:
+            session = await coordinator.prepare_agent_session(
+                run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(run_id, session.session_id)
+            message = await coordinator.start_transcript_message(
+                run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            for offset in range(0, len(LARGE_TEXT), 97):
+                await coordinator.append_transcript_message_delta(
+                    run_id,
+                    message.item_id,
+                    LARGE_TEXT[offset : offset + 97],
+                )
+            await coordinator.finalize_transcript_message(
+                run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text=LARGE_TEXT,
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(run_id, session.session_id)
+            return
+
+        if context.query == CANCELLED_QUERY:
+            await context.cancellation.wait()
+            context.cancellation.checkpoint()
+
+        if context.query == INTERRUPTED_QUERY:
+            session = await coordinator.prepare_agent_session(
+                run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="987654321",
+            )
+            await coordinator.mark_agent_session_running(run_id, session.session_id)
+            await asyncio.Event().wait()
+
+        raise RuntimeError(f"unexpected smoke query: {context.query!r}")
 
 
-class RejectingWorkflow:
-    def __init__(self) -> None:
-        self.calls = 0
+def create_smoke_app() -> FastAPI:
+    workflow = HistorySmokeWorkflow()
+    registry = create_production_registry().copy_with(
+        fixture_message_registration()
+    )
+    application = create_app(
+        AppSettings(log_level="warning", live_state_grace_seconds=60),
+        workflow=workflow,
+        transcript_registry=registry,
+        shutdown_grace_period=0,
+        keepalive_interval=0.05,
+    )
+    workflow.bind(application)
+    return application
 
-    async def run(self, context: WorkflowContext) -> None:
-        del context
-        self.calls += 1
-        raise AssertionError("stored runs must not restart workflow execution")
+
+def start_application(settings: AppSettings) -> tuple[subprocess.Popen[str], int]:
+    port = available_loopback_port()
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUNBUFFERED": "1",
+            "WATERAGENTS_DB_NAME": settings.db_name,
+            "WATERAGENTS_LOG_LEVEL": "warning",
+        }
+    )
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "run_history_smoke:create_smoke_app",
+            "--factory",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--workers",
+            "1",
+            "--no-access-log",
+            "--timeout-graceful-shutdown",
+            "2",
+            "--log-level",
+            "warning",
+        ],
+        cwd=SCRIPT_ROOT,
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+    )
+    return process, port
+
+
+async def wait_until_ready(
+    process: subprocess.Popen[str],
+    client: httpx.AsyncClient,
+) -> None:
+    deadline = asyncio.get_running_loop().time() + 20
+    while asyncio.get_running_loop().time() < deadline:
+        if process.poll() is not None:
+            output = process.communicate()[0]
+            raise RuntimeError(f"Uvicorn exited before readiness:\n{output}")
+        try:
+            response = await client.get("/health")
+            response.raise_for_status()
+            if response.json() == {"status": "healthy"}:
+                return
+        except httpx.HTTPError:
+            pass
+        await asyncio.sleep(0.1)
+    raise TimeoutError("Uvicorn did not become healthy within 20 seconds")
+
+
+@asynccontextmanager
+async def running_application(
+    settings: AppSettings,
+) -> AsyncIterator[tuple[subprocess.Popen[str], httpx.AsyncClient]]:
+    process, port = start_application(settings)
+    client = httpx.AsyncClient(
+        base_url=f"http://127.0.0.1:{port}",
+        timeout=10,
+        trust_env=False,
+    )
+    try:
+        await wait_until_ready(process, client)
+        yield process, client
+    finally:
+        await client.aclose()
+        stop_process(process)
+
+
+def assert_request_id(response: httpx.Response) -> None:
+    request_id = response.headers["x-request-id"]
+    assert str(UUID(request_id)) == request_id
 
 
 async def collect_stream(
     client: httpx.AsyncClient,
     path: str,
-    connected: asyncio.Event,
+    connected: asyncio.Event | None = None,
 ) -> list[tuple[str, dict[str, object], int | None]]:
     events = []
     async with client.stream("GET", path) as response:
         stream_headers(response)
-        connected.set()
+        if connected is not None:
+            connected.set()
         lines = response.aiter_lines()
         while True:
             event = await read_event(lines)
@@ -60,251 +209,230 @@ async def collect_stream(
                 return events
 
 
-async def wait_saved(application, run_id: UUID) -> None:
-    coordinator = application.state.run_coordinator
-    runtime = coordinator._runs[run_id]
-    async with asyncio.timeout(15):
-        async with runtime.condition:
-            await runtime.condition.wait_for(
-                lambda: coordinator._persistence_info_locked(runtime).state
-                is PersistenceState.UP_TO_DATE
-            )
+async def wait_for_detail(
+    client: httpx.AsyncClient,
+    run_id: UUID,
+    predicate: Callable[[dict[str, object]], bool],
+) -> dict[str, object]:
+    deadline = asyncio.get_running_loop().time() + 15
+    while asyncio.get_running_loop().time() < deadline:
+        response = await client.get(f"{BASE}/{run_id}")
+        assert response.status_code == 200, response.text
+        detail = response.json()
+        if predicate(detail):
+            return detail
+        await asyncio.sleep(0.05)
+    raise TimeoutError(f"run {run_id} did not reach the expected state")
 
 
-def assert_request_id(response: httpx.Response) -> None:
-    assert str(UUID(response.headers["x-request-id"])) == response.headers["x-request-id"]
-
-
-async def create_saved_runs(settings: AppSettings) -> dict[str, object]:
-    workflow = GatedWorkflow()
-    registry = create_production_registry().copy_with(fixture_message_registration())
-    app = create_app(
-        settings,
-        workflow=workflow,
-        transcript_registry=registry,
-        shutdown_grace_period=0,
-        keepalive_interval=0.05,
+async def create_saved_runs(client: httpx.AsyncClient) -> dict[str, object]:
+    key = uuid4()
+    created = await client.post(
+        BASE,
+        json={"query": COMPLETED_QUERY, "time_resolution": "6h"},
+        headers={"Idempotency-Key": str(key)},
     )
-    async with running_server(app) as client:
-        key = uuid4()
-        query = "M3 跨平台 history smoke with UTF-8"
-        created = await client.post(
-            BASE,
-            json={"query": query, "time_resolution": "6h"},
-            headers={"Idempotency-Key": str(key)},
-        )
-        assert created.status_code == 201, created.text
-        assert_request_id(created)
-        receipt = created.json()
-        completed_id = UUID(receipt["run_id"])
-        _, release = await workflow.calls.get()
-        coordinator = app.state.run_coordinator
-        session = await coordinator.prepare_agent_session(
-            completed_id,
-            agent_role=AgentRole.QUERY_PARSER,
-        )
-        await coordinator.mark_agent_session_running(completed_id, session.session_id)
+    assert created.status_code == 201, created.text
+    assert_request_id(created)
+    receipt = created.json()
+    completed_id = UUID(receipt["run_id"])
+    run_events = await collect_stream(client, f"{BASE}/{completed_id}/events")
+    assert run_events[-1][0] == "stream_end"
 
-        run_connected = asyncio.Event()
-        session_connected = asyncio.Event()
-        run_events_task = asyncio.create_task(collect_stream(
-            client,
-            f"{BASE}/{completed_id}/events",
-            run_connected,
-        ))
-        session_events_task = asyncio.create_task(collect_stream(
-            client,
-            f"{BASE}/{completed_id}/sessions/{session.session_id}/events",
-            session_connected,
-        ))
-        await asyncio.gather(run_connected.wait(), session_connected.wait())
+    completed = await wait_for_detail(
+        client,
+        completed_id,
+        lambda detail: detail["run"]["status"] == "completed",
+    )
+    session_id = UUID(completed["sessions"][0]["session_id"])
+    session_events = await collect_stream(
+        client,
+        f"{BASE}/{completed_id}/sessions/{session_id}/events",
+    )
+    names = [name for name, _, _ in session_events]
+    for expected in (
+        "transcript_item",
+        "message_started",
+        "message_delta",
+        "message_finalized",
+        "stream_end",
+    ):
+        assert expected in names
+    finalized = next(
+        payload for name, payload, _ in session_events if name == "message_finalized"
+    )
+    message_id = UUID(finalized["payload"]["item"]["item_id"])
 
-        large_text = "流域结论：" + ("water-quality-observation " * 180)
-        message = await coordinator.start_transcript_message(
-            completed_id,
-            session.session_id,
-            "fixture_message",
-            1,
-        )
-        for offset in range(0, len(large_text), 97):
-            await coordinator.append_transcript_message_delta(
-                completed_id,
-                message.item_id,
-                large_text[offset:offset + 97],
-            )
-        await coordinator.finalize_transcript_message(
-            completed_id,
-            message.item_id,
-            FixtureMessageV1(
-                text=large_text,
-                generation_status=GenerationStatus.COMPLETED,
-            ),
-        )
-        await coordinator.complete_agent_session(completed_id, session.session_id)
-        release.set()
-        run_events, session_events = await asyncio.gather(
-            run_events_task,
-            session_events_task,
-        )
-        assert run_events[-1][0] == "stream_end"
-        names = [name for name, _, _ in session_events]
-        for expected in (
-            "transcript_item",
-            "message_started",
-            "message_delta",
-            "message_finalized",
-            "stream_end",
-        ):
-            assert expected in names
-        await wait_saved(app, completed_id)
+    detail_response = await client.get(
+        f"{BASE}/{completed_id}", params={"view": "history"}
+    )
+    transcript_response = await client.get(
+        f"{BASE}/{completed_id}/sessions/{session_id}/transcript",
+        params={"view": "history"},
+    )
+    content_response = await client.get(
+        f"{BASE}/{completed_id}/transcript/{message_id}/content",
+        params={"view": "history"},
+    )
+    for response in (detail_response, transcript_response, content_response):
+        assert response.status_code == 200, response.text
+        assert response.json()["source"] == "postgresql"
+    assert LARGE_TEXT in content_response.json()["text"]
 
-        content = await client.get(
-            f"{BASE}/{completed_id}/transcript/{message.item_id}/content",
-            params={"view": "history"},
-        )
-        assert content.status_code == 200, content.text
-        assert large_text in content.json()["text"]
+    cancelled = await client.post(BASE, json={"query": CANCELLED_QUERY})
+    assert cancelled.status_code == 201, cancelled.text
+    cancelled_id = UUID(cancelled.json()["run_id"])
+    await wait_for_detail(
+        client,
+        cancelled_id,
+        lambda detail: detail["run"]["status"] == "running",
+    )
+    connected = asyncio.Event()
+    cancel_events_task = asyncio.create_task(
+        collect_stream(client, f"{BASE}/{cancelled_id}/events", connected)
+    )
+    await connected.wait()
+    cancelled_response = await client.post(f"{BASE}/{cancelled_id}/cancel")
+    assert cancelled_response.status_code == 200, cancelled_response.text
+    assert cancelled_response.json()["status"] == "cancelled"
+    cancel_events = await cancel_events_task
+    assert cancel_events[-1][0] == "stream_end"
 
-        cancelled = await client.post(BASE, json={"query": "cancel smoke"})
-        assert cancelled.status_code == 201, cancelled.text
-        cancelled_id = UUID(cancelled.json()["run_id"])
-        _, cancel_release = await workflow.calls.get()
-        cancelled_response = await client.post(f"{BASE}/{cancelled_id}/cancel")
-        assert cancelled_response.status_code == 200, cancelled_response.text
-        assert cancelled_response.json()["status"] == "cancelled"
-        cancel_release.set()
-        cancelled_runtime = coordinator._runs[cancelled_id]
-        await cancelled_runtime.workflow_quiesced.wait()
-        await wait_saved(app, cancelled_id)
+    interrupted = await client.post(BASE, json={"query": INTERRUPTED_QUERY})
+    assert interrupted.status_code == 201, interrupted.text
+    interrupted_id = UUID(interrupted.json()["run_id"])
+    interrupted_detail = await wait_for_detail(
+        client,
+        interrupted_id,
+        lambda detail: (
+            detail["run"]["status"] == "running"
+            and bool(detail["sessions"])
+            and detail["sessions"][0]["status"] == "running"
+            and detail["persistence"]["state"] == "up_to_date"
+        ),
+    )
+    interrupted_session_id = UUID(
+        interrupted_detail["sessions"][0]["session_id"]
+    )
 
-        interrupted = await client.post(BASE, json={"query": "restart repair smoke"})
-        assert interrupted.status_code == 201, interrupted.text
-        interrupted_id = UUID(interrupted.json()["run_id"])
-        await workflow.calls.get()
-        interrupted_session = await coordinator.prepare_agent_session(
-            interrupted_id,
-            agent_role=AgentRole.WATERBODY,
-            target_comid="987654321",
-        )
-        await coordinator.mark_agent_session_running(
-            interrupted_id,
-            interrupted_session.session_id,
-        )
-        await wait_saved(app, interrupted_id)
-
+    history = await client.get(BASE, params={"limit": 2})
+    assert history.status_code == 200, history.text
+    restart_cursor = history.json()["next_cursor"]
+    assert restart_cursor
     return {
-        "key": key,
-        "query": query,
+        "key": str(key),
         "receipt": receipt,
-        "completed_id": completed_id,
-        "session_id": session.session_id,
-        "message_id": message.item_id,
-        "large_text": large_text,
-        "cancelled_id": cancelled_id,
-        "interrupted_id": interrupted_id,
-        "interrupted_session_id": interrupted_session.session_id,
+        "completed_id": str(completed_id),
+        "session_id": str(session_id),
+        "message_id": str(message_id),
+        "cancelled_id": str(cancelled_id),
+        "interrupted_id": str(interrupted_id),
+        "interrupted_session_id": str(interrupted_session_id),
+        "restart_cursor": restart_cursor,
+        "detail": detail_response.json(),
+        "transcript": transcript_response.json(),
+        "content": content_response.json(),
     }
 
 
-async def verify_restart(settings: AppSettings, state: dict[str, object]) -> None:
-    workflow = RejectingWorkflow()
-    registry = create_production_registry().copy_with(fixture_message_registration())
-    app = create_app(
-        settings,
-        workflow=workflow,
-        transcript_registry=registry,
-        shutdown_grace_period=0,
-        keepalive_interval=0.05,
+async def verify_restart(
+    client: httpx.AsyncClient,
+    state: dict[str, object],
+) -> None:
+    first_page = await client.get(BASE, params={"limit": 2})
+    second_page = await client.get(
+        BASE,
+        params={"limit": 2, "cursor": state["restart_cursor"]},
     )
-    async with running_server(app) as client:
-        first_page = await client.get(BASE, params={"limit": 2})
-        assert first_page.status_code == 200, first_page.text
-        cursor = first_page.json()["next_cursor"]
-        assert cursor
-        second_page = await client.get(BASE, params={"limit": 2, "cursor": cursor})
-        assert second_page.status_code == 200, second_page.text
-        listed = {
-            UUID(item["run_id"])
-            for page in (first_page, second_page)
-            for item in page.json()["items"]
-        }
-        expected = {
-            state["completed_id"],
-            state["cancelled_id"],
-            state["interrupted_id"],
-        }
-        assert listed == expected
+    for response in (first_page, second_page):
+        assert response.status_code == 200, response.text
+    listed = {
+        item["run_id"]
+        for page in (first_page, second_page)
+        for item in page.json()["items"]
+    }
+    expected = {
+        state["completed_id"],
+        state["cancelled_id"],
+        state["interrupted_id"],
+    }
+    assert listed == expected
 
-        completed_id = state["completed_id"]
-        session_id = state["session_id"]
-        message_id = state["message_id"]
-        detail = await client.get(f"{BASE}/{completed_id}", params={"view": "history"})
-        assert detail.status_code == 200, detail.text
-        assert detail.json()["source"] == "postgresql"
-        assert detail.json()["run"]["query"] == state["query"]
-        session = await client.get(
+    completed_id = state["completed_id"]
+    session_id = state["session_id"]
+    message_id = state["message_id"]
+    responses = (
+        await client.get(f"{BASE}/{completed_id}", params={"view": "history"}),
+        await client.get(
             f"{BASE}/{completed_id}/sessions/{session_id}/transcript",
             params={"view": "history"},
-        )
-        assert session.status_code == 200, session.text
-        sequences = [item["transcript_sequence"] for item in session.json()["items"]]
-        assert sequences == sorted(sequences)
-        assert str(message_id) in {item["item_id"] for item in session.json()["items"]}
-        content = await client.get(
+        ),
+        await client.get(
             f"{BASE}/{completed_id}/transcript/{message_id}/content",
             params={"view": "history"},
-        )
-        assert content.status_code == 200, content.text
-        assert state["large_text"] in content.json()["text"]
+        ),
+    )
+    for response, key in zip(responses, ("detail", "transcript", "content")):
+        assert response.status_code == 200, response.text
+        assert response.json() == state[key]
 
-        interrupted_id = state["interrupted_id"]
-        repaired = await client.get(
-            f"{BASE}/{interrupted_id}",
-            params={"view": "history"},
-        )
-        assert repaired.status_code == 200, repaired.text
-        assert repaired.json()["run"]["status"] == "failed"
-        repaired_session = await client.get(
-            f"{BASE}/{interrupted_id}/sessions/{state['interrupted_session_id']}/transcript",
-            params={"view": "history"},
-        )
-        assert repaired_session.status_code == 200, repaired_session.text
-        repair_evidence = json.dumps(
-            (repaired.json(), repaired_session.json()),
-            ensure_ascii=False,
-        )
-        assert repair_evidence.count("service_interrupted") == 2
+    interrupted_id = state["interrupted_id"]
+    repaired = await client.get(
+        f"{BASE}/{interrupted_id}", params={"view": "history"}
+    )
+    repaired_session = await client.get(
+        f"{BASE}/{interrupted_id}/sessions/{state['interrupted_session_id']}/transcript",
+        params={"view": "history"},
+    )
+    assert repaired.status_code == 200, repaired.text
+    assert repaired_session.status_code == 200, repaired_session.text
+    assert repaired.json()["run"]["status"] == "failed"
+    repair_evidence = json.dumps(
+        (repaired.json(), repaired_session.json()), ensure_ascii=False
+    )
+    assert repair_evidence.count("service_interrupted") == 2
 
-        for run_id in expected:
-            response = await client.get(f"{BASE}/{run_id}/events")
-            assert response.status_code == 410, response.text
-            assert response.json()["history_url"].endswith(
-                f"/api/analysis/runs/{run_id}?view=history"
-            )
-
-        repeated = await client.post(
-            BASE,
-            json={"query": state["query"], "time_resolution": "6h"},
-            headers={"Idempotency-Key": str(state["key"])},
+    for run_id in expected:
+        response = await client.get(f"{BASE}/{run_id}/events")
+        assert response.status_code == 410, response.text
+        assert response.json()["history_url"].endswith(
+            f"/api/analysis/runs/{run_id}?view=history"
         )
-        assert repeated.status_code == 201, repeated.text
-        assert repeated.json() == state["receipt"]
-        assert workflow.calls == 0
+
+    repeated = await client.post(
+        BASE,
+        json={"query": COMPLETED_QUERY, "time_resolution": "6h"},
+        headers={"Idempotency-Key": state["key"]},
+    )
+    assert repeated.status_code == 201, repeated.text
+    assert repeated.json() == state["receipt"]
+    final_history = await client.get(BASE, params={"limit": 10})
+    assert len(final_history.json()["items"]) == 3
 
 
 async def run_smoke(settings: AppSettings) -> None:
-    async with asyncio.timeout(60):
-        state = await create_saved_runs(settings)
-        await verify_restart(settings, state)
-    print(json.dumps(
-        {
-            "history": "passed",
-            "restart_repair": "passed",
-            "database": settings.db_name,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ))
+    async with asyncio.timeout(90):
+        async with running_application(settings) as (first_process, first_client):
+            first_pid = first_process.pid
+            state = await create_saved_runs(first_client)
+        assert first_process.poll() is not None
+
+        async with running_application(settings) as (second_process, second_client):
+            assert second_process.pid != first_pid
+            await verify_restart(second_client, state)
+        assert second_process.poll() is not None
+    print(
+        json.dumps(
+            {
+                "history": "passed",
+                "independent_process_restart": "passed",
+                "restart_repair": "passed",
+                "database": settings.db_name,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    )
 
 
 def main() -> None:

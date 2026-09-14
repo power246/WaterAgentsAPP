@@ -12,7 +12,23 @@ If `uv` is installed, create or synchronize `backend/.venv` from the committed l
 uv sync --project backend --extra dev --locked
 ```
 
-The standard-library alternative requires no project-specific package manager.
+Then enter `backend/` and activate the environment.
+
+macOS or Linux:
+
+```bash
+cd backend
+source .venv/bin/activate
+```
+
+Windows PowerShell:
+
+```powershell
+Set-Location backend
+.\.venv\Scripts\Activate.ps1
+```
+
+The standard-library alternative below does not require `uv`.
 
 macOS or Linux:
 
@@ -32,14 +48,14 @@ py -3.11 -m venv .venv
 python -m pip install -e ".[dev]"
 ```
 
-Python 3.12 or newer may be selected instead of 3.11. After activation, all platforms use the same commands below.
+Python 3.12 or newer may be selected instead of 3.11. After activation, keep the current directory at `backend/`; every remaining command in this README is written for that directory and can be copied unchanged on all platforms unless a platform-specific block is shown.
 
 ## Run
 
 Configure PostgreSQL and run the explicit schema commands first; the following sections show both local Compose and existing-database setups. The formal entry point rejects a missing `WATERAGENTS_DB_PASSWORD`:
 
 ```text
-uv run --project backend --locked python -m app
+python -m app
 ```
 
 The defaults are `127.0.0.1:8000` and analysis timezone `America/Chicago`. Check the service from another terminal:
@@ -63,16 +79,16 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-acc
 Create a dedicated empty test database, set `WATERAGENTS_TEST_DB_NAME` to its name, and keep it different from `WATERAGENTS_DB_NAME`. Both smoke scripts create and migrate a random temporary schema inside that test database, then delete only that schema. The health smoke starts the formal `python -m app` entry point on an available loopback port, verifies the exact response, and stops the child process:
 
 ```text
-python backend/scripts/health_smoke.py
+python scripts/health_smoke.py
 ```
 
 The run/history smoke uses real Uvicorn and PostgreSQL on dynamic loopback sockets. It verifies both SSE layers, a large UTF-8 message and full-text read, completion, gated cancellation, persisted history, pagination, process restart repair, HTTP 410 history handoff, and the original idempotent creation receipt without a real LLM:
 
 ```text
-python backend/scripts/run_history_smoke.py
+python scripts/run_history_smoke.py
 ```
 
-Expected final stdout is `{"history":"passed","restart_repair":"passed","database":"<test DB>"}`. The scripts control startup/shutdown without a shell or process signals, bypass environment proxies, and fail clearly if the test database variable or connection is missing.
+Expected final stdout is `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"<test DB>"}`. The history smoke fully stops its first Uvicorn child process before starting a freshly imported application in a second child process against the same database. Both smoke scripts use cross-platform process APIs with terminate, bounded wait, and kill fallback; they do not invoke a shell or GNU utility. They bypass environment proxies and fail clearly if the test database variable or connection is missing.
 
 The `python -m app` entry point explicitly uses one Uvicorn worker and ignores `WEB_CONCURRENCY`. It disables Uvicorn's default access log and gives active HTTP/SSE connections 2 seconds to finish during shutdown before entering application cleanup. Lifespan connects to PostgreSQL, requires the exact Alembic head, repairs saved non-terminal run/session state as `failed/service_interrupted`, and only then accepts traffic; it never runs DDL or resumes Agents automatically. User cancellation freezes active message prefixes and stores any later safe tail as history-only audit. Terminal live state is released only after workflow quiescence, required persistence, and the configured full grace period; saved history remains readable and SSE returns HTTP 410 afterward.
 
@@ -82,16 +98,8 @@ The `Backend M1-M9` GitHub Actions workflow installs the same `backend/uv.lock`,
 
 PostgreSQL integration tests are mandatory. Set the normal `WATERAGENTS_DB_*` host, port, user, password, and SSL variables for a dedicated test server, set `WATERAGENTS_DB_NAME` to a different business guard name, and set `WATERAGENTS_TEST_DB_NAME` to the pre-created test database. Tests use temporary schemas and refuse a missing or identical test database name.
 
-From `backend/`:
-
 ```text
 python -m pytest -q
-```
-
-From the repository root:
-
-```text
-python -m pytest backend/tests -q
 ```
 
 ## Configuration
@@ -126,13 +134,13 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 
 ### Local PostgreSQL with Compose
 
-Copy `backend/.env.example` to `backend/.env`, replace the sample password, and leave that file uncommitted. Then, from the repository root:
+Copy `.env.example` to `.env`, replace the sample password, and leave that file uncommitted. Then run:
 
 ```text
-docker compose --env-file backend/.env -f backend/compose.yaml up -d --wait
-uv run --project backend --locked wateragents-db upgrade
-uv run --project backend --locked wateragents-db check
-uv run --project backend --locked python -m app
+docker compose --env-file .env -f compose.yaml up -d --wait
+wateragents-db upgrade
+wateragents-db check
+python -m app
 ```
 
 Compose publishes PostgreSQL only on loopback and stores data in the named `wateragents-postgres-data` volume. `wateragents-db upgrade` is safe to repeat. `wateragents-db check` only reads `alembic_version`; it never creates or repairs schema and fails clearly for missing, old, newer, unknown, or multiple revisions.
@@ -140,7 +148,7 @@ Compose publishes PostgreSQL only on loopback and stores data in the named `wate
 Stop containers while retaining the database:
 
 ```text
-docker compose --env-file backend/.env -f backend/compose.yaml down
+docker compose --env-file .env -f compose.yaml down
 ```
 
 To intentionally delete all local database data, add `--volumes` to that command. This cannot be undone.
@@ -161,7 +169,7 @@ WATERAGENTS_DB_SSLROOTCERT=/absolute/path/to/provider-ca.pem
 
 Run `wateragents-db upgrade` as an explicit deployment step, followed by `wateragents-db check`, before starting the application. Never grant the application more database privileges than its deployment model requires. Do not run multiple application workers or replicas: the first M3 release intentionally keeps live coordination and persistence ownership in one process.
 
-When moving to another OS or machine, check out the source and committed `backend/uv.lock`, create a new environment with `uv sync --project backend --extra dev --locked`, recreate the uncommitted UTF-8 `.env`, start or select PostgreSQL 17, and run the two database commands. Never copy an old virtual environment or database data directory between platforms.
+When moving to another OS or machine, check out the source and committed `backend/uv.lock`, create a fresh environment with either setup path above, enter `backend/`, activate that environment, recreate the uncommitted UTF-8 `.env`, start or select PostgreSQL 17, and run `wateragents-db upgrade` followed by `wateragents-db check`. Never copy an old virtual environment or database data directory between platforms.
 
 Timezone names must be valid IANA identifiers. The project includes `tzdata` so this behaves consistently when the operating system does not provide an IANA timezone database.
 

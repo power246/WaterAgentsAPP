@@ -554,10 +554,10 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] `run_history_smoke.py` 通过两个独立 OS 子进程启动正式 Uvicorn/app 入口，完整停止第一进程后再以同一数据库启动第二进程；不能以同一解释器内重建 ASGI app 冒充 process restart。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
-- [ ] 子进程停止使用跨平台 terminate、超时与 kill fallback，验证 fresh import、环境重载、退出资源和重启修复；health/history smoke 均不得依赖 Bash、GNU 工具或旧进程模块状态。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)）
-- [ ] README 统一命令执行目录；标准 venv 路径不依赖未安装的 `uv`，启动、数据库命令和 smoke 的项目/脚本路径均可直接复制执行。（[API §8](m3_transcript_history_api.md#8-跨平台搭建与配置)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
-- [ ] 在带合法 `backend/.env` 的本地环境重新运行完整测试、真实 PostgreSQL 测试、health smoke 和独立进程 history smoke，并记录真实结果。（[证据记录格式](#实际证据记录格式)）
+- [x] `run_history_smoke.py` 通过两个独立 OS 子进程启动正式 Uvicorn/app 入口，完整停止第一进程后再以同一数据库启动第二进程；不能以同一解释器内重建 ASGI app 冒充 process restart。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 子进程停止使用跨平台 terminate、超时与 kill fallback，验证 fresh import、环境重载、退出资源和重启修复；health/history smoke 均不得依赖 Bash、GNU 工具或旧进程模块状态。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)）
+- [x] README 统一命令执行目录；标准 venv 路径不依赖未安装的 `uv`，启动、数据库命令和 smoke 的项目/脚本路径均可直接复制执行。（[API §8](m3_transcript_history_api.md#8-跨平台搭建与配置)；[API §9](m3_transcript_history_api.md#9-排障与验证)）
+- [x] 在带合法 `backend/.env` 的本地环境重新运行完整测试、真实 PostgreSQL 测试、health smoke 和独立进程 history smoke，并记录真实结果。（[证据记录格式](#实际证据记录格式)）
 
 阶段出口：记录真实命令、平台/版本、通过/失败数量及 CI 入口。任何平台缺失保持 partial，不借用 M2 测试数量。
 
@@ -568,6 +568,10 @@ git diff --check
 - 本机环境与结果：macOS 26.6.2 arm64、Python 3.12.14、PostgreSQL 17.10、Alembic revision `20260913_01`；完整 `backend/tests` 为 735 passed，真实 PostgreSQL persistence 为 39 passed，compileall 和 focused 跨平台/取消测试通过。
 - CI 入口：`.github/workflows/backend-m1.yml` 使用 Ubuntu/macOS/Windows、Python 3.11 和 PostgreSQL 17，逐平台执行完整测试、health smoke 与 run/history smoke；workflow 方案已交付。
 - partial：本次未取得三个远端 runner 的实际链接/结果，也未把一份已保存数据库依次接到三个目标 OS。因此“跨系统切换”和两项对应 Verify 保持未勾选；本机停止/重启对照已覆盖同库身份、游标、回执、全文与不重跑分析。
+- 审查回补实现：`run_history_smoke.py` 不再在父解释器内两次构造 ASGI app，而是顺序启动两个 `python -m uvicorn ... --factory` 子进程；第一进程完全退出后，第二进程从相同 PostgreSQL 临时 schema fresh import 并执行启动修复。进程退出复用 health smoke 的 `terminate`、5 秒 wait、`TimeoutExpired` 后 `kill` fallback，两个 smoke 均只用 Python 跨平台 API、动态 loopback 端口和 `trust_env=False`。
+- 审查回补对照：第一进程保存 completed/cancelled/interrupted 三类 run；第二进程逐项对照原 run/session/item ID、UTC 时间、顺序、第一进程生成的 history cursor、同 key 原回执及 UTF-8 大正文全文，验证遗留 run/session 各追加一次 `service_interrupted`、所有旧 SSE 返回 410，且 history 总数保持 3，证明未重跑 workflow。
+- 审查回补运行手册：README 规定完成环境安装后统一进入并停留在 `backend/`；普通 venv 路径只用标准库 `venv` 与 `pip`，后续 `python -m app`、`wateragents-db upgrade/check`、`python scripts/*.py` 和 Compose 路径均以该目录为基准，不要求运行时存在 `uv`。
+- 审查回补本机证据：macOS 26.6.2 arm64、Python 3.12.14、PostgreSQL 17.10；在临时合法 UTF-8 `backend/.env` 存在且进程环境显式指向隔离测试库时，`python -m pytest tests -q` 为 763 passed，`python -m pytest tests/persistence -q` 为 43 passed，跨平台架构守卫为 9 passed；health 输出 `{"status":"healthy"}`，history 输出 `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"wateragents_m9_review"}`。测试后测试库无 `wateragents_m3_*` 临时 schema 残留，临时 `.env` 与隔离 PG 均清理。
 
 ## Milestone 10：契约验收与后续交接
 
