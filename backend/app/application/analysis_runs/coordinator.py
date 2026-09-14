@@ -69,6 +69,7 @@ from app.application.analysis_runs.workflow import (
     CancellationToken,
     DefaultFakeWorkflow,
     WorkflowContext,
+    WorkflowFailed,
     WorkflowStopped,
 )
 from app.application.correlation import request_id_context
@@ -1340,6 +1341,11 @@ class RunCoordinator:
             running = await self.mark_running(runtime.snapshot.run_id)
             await self._workflow.run(WorkflowContext(running, runtime.query, token))
             token.checkpoint()
+            async with runtime.condition:
+                if self._workflow_has_unfinished_outputs_locked(runtime):
+                    raise WorkflowFailed(
+                        "The workflow returned before its outputs reached a terminal state."
+                    )
             await self.complete_run(running.run_id)
         except (WorkflowStopped, ServiceShuttingDownError) as error:
             if token.is_requested():
@@ -1421,6 +1427,23 @@ class RunCoordinator:
             runtime.workflow_quiesced.set()
             runtime.condition.notify_all()
         self._log_activity("workflow_quiesced", runtime)
+
+    @staticmethod
+    def _workflow_has_unfinished_outputs_locked(runtime: RunRuntime) -> bool:
+        finalized_item_ids = {
+            item.item_id for item in runtime.transcript_buffer.items
+        }
+        return bool(
+            runtime.streaming_messages
+            or any(
+                session.summary.status in _SESSION_TRANSITIONS
+                for session in runtime.agent_sessions.values()
+            )
+            or any(
+                item.item_id not in finalized_item_ids
+                for item in runtime.transcript_items
+            )
+        )
 
     def _log_activity(
         self,
@@ -1695,8 +1718,21 @@ class RunCoordinator:
             _UUID.validate_python(operation_id) if operation_id is not None else None
         )
         async with runtime.condition:
+            if runtime.snapshot.status not in _RUN_TRANSITIONS:
+                raise InvalidRunTransitionError(
+                    runtime.snapshot,
+                    RunStatus.RUNNING,
+                )
             if session_key is not None:
-                self._lookup_agent_session_locked(runtime, session_key)
+                session_runtime = self._lookup_agent_session_locked(
+                    runtime,
+                    session_key,
+                )
+                if session_runtime.summary.status not in _SESSION_TRANSITIONS:
+                    raise InvalidAgentSessionTransitionError(
+                        session_runtime.summary,
+                        session_runtime.summary.status,
+                    )
             item = self._reserve_transcript_item_locked(
                 runtime,
                 session_id=session_key,
@@ -1725,6 +1761,9 @@ class RunCoordinator:
                 None,
             )
             if identity is None:
+                suppressed = runtime.suppressed_transcript_items.get(key)
+                if suppressed is not None:
+                    return suppressed
                 raise ValueError("transcript item identity is not reserved in this run")
             reserved_references = tuple(
                 TranscriptContentRef(
@@ -1788,6 +1827,11 @@ class RunCoordinator:
             _UUID.validate_python(operation_id) if operation_id is not None else None
         )
         async with runtime.condition:
+            if runtime.snapshot.status not in _RUN_TRANSITIONS:
+                raise InvalidRunTransitionError(
+                    runtime.snapshot,
+                    RunStatus.RUNNING,
+                )
             session_runtime = self._lookup_agent_session_locked(runtime, session_key)
             if session_runtime.summary.status not in _SESSION_TRANSITIONS:
                 raise InvalidAgentSessionTransitionError(
@@ -1989,8 +2033,16 @@ class RunCoordinator:
             runtime.condition.notify_all()
             return identity
 
-    def _freeze_streaming_messages_locked(self, runtime: RunRuntime) -> None:
+    def _freeze_streaming_messages_locked(
+        self,
+        runtime: RunRuntime,
+        *,
+        session_id: UUID | None = None,
+        end_reason: MessageEndReason,
+    ) -> None:
         for message in tuple(runtime.streaming_messages.values()):
+            if session_id is not None and message.session_id != session_id:
+                continue
             safe_tail = message.filter.cancel()
             if safe_tail:
                 self._append_message_delta_locked(runtime, message, safe_tail)
@@ -2004,7 +2056,7 @@ class RunCoordinator:
                 message.content_schema_version,
                 message.safe_text,
                 GenerationStatus.INCOMPLETE,
-                MessageEndReason.CANCELLED,
+                end_reason,
             )
             finalized = runtime.transcript_buffer.append(
                 identity,
@@ -2025,11 +2077,32 @@ class RunCoordinator:
                 generation_status=GenerationStatus.INCOMPLETE,
             ))
             runtime.streaming_messages.pop(message.item_id)
+            message.late_end_reason = end_reason
             runtime.late_streaming_messages[message.item_id] = message
             self._enqueue_persistence_group_locked(
                 runtime,
                 item_ids=(message.item_id,),
             )
+
+    @staticmethod
+    def _suppress_pending_transcript_items_locked(
+        runtime: RunRuntime,
+        *,
+        session_id: UUID | None = None,
+    ) -> None:
+        finalized_item_ids = {
+            item.item_id for item in runtime.transcript_buffer.items
+        }
+        retained: list[TranscriptItemIdentity] = []
+        for item in runtime.transcript_items:
+            if (
+                item.item_id not in finalized_item_ids
+                and (session_id is None or item.session_id == session_id)
+            ):
+                runtime.suppressed_transcript_items[item.item_id] = item
+            else:
+                retained.append(item)
+        runtime.transcript_items[:] = retained
 
     def _finalize_late_message_locked(
         self,
@@ -2059,7 +2132,9 @@ class RunCoordinator:
                 LateMessageOutputFact(
                     original_item_id=message.item_id,
                     text=message.late_text,
-                    end_reason=MessageEndReason.CANCELLED,
+                    end_reason=(
+                        message.late_end_reason or MessageEndReason.CANCELLED
+                    ),
                 ),
             )
             self._enqueue_persistence_group_locked(
@@ -2546,22 +2621,43 @@ class RunCoordinator:
                 item_ids=(item.item_id,) if item is not None else (),
                 mutation_ids=(mutation.mutation_id,),
             )
-            if resolved is RunStatus.CANCELLED:
-                runtime.cancel_requested.set()
+            if resolved in {RunStatus.FAILED, RunStatus.CANCELLED}:
+                if resolved is RunStatus.CANCELLED:
+                    runtime.cancel_requested.set()
                 runtime.stop_requested.set()
-                self._freeze_streaming_messages_locked(runtime)
+                end_reason = (
+                    MessageEndReason.CANCELLED
+                    if resolved is RunStatus.CANCELLED
+                    else MessageEndReason.ERROR
+                )
+                session_target = (
+                    AgentSessionStatus.CANCELLED
+                    if resolved is RunStatus.CANCELLED
+                    else AgentSessionStatus.FAILED
+                )
+                self._freeze_streaming_messages_locked(
+                    runtime,
+                    end_reason=end_reason,
+                )
                 for session_runtime in runtime.agent_sessions.values():
-                    session_runtime.stop_requested.set()
                     if session_runtime.summary.status in _SESSION_TRANSITIONS:
+                        session_error = None
+                        if session_target is AgentSessionStatus.FAILED:
+                            assert error is not None
+                            session_error = error.model_copy(
+                                update={"error_id": self._new_record_id()}
+                            )
                         session_transitions.append(
                             self._transition_agent_session_locked(
                                 runtime,
                                 session_runtime,
-                                AgentSessionStatus.CANCELLED,
-                                None,
+                                session_target,
+                                session_error,
                                 timestamp,
                             )
                         )
+                    session_runtime.stop_requested.set()
+                self._suppress_pending_transcript_items_locked(runtime)
             runtime.condition.notify_all()
         self._log_run_transition(current.status, snapshot, event)
         for previous, summary, session_event in session_transitions:
@@ -2635,6 +2731,23 @@ class RunCoordinator:
         )
         if resolved is None:
             raise InvalidAgentSessionTransitionError(current, target)
+        if resolved in {
+            AgentSessionStatus.FAILED,
+            AgentSessionStatus.CANCELLED,
+        }:
+            self._freeze_streaming_messages_locked(
+                runtime,
+                session_id=current.session_id,
+                end_reason=(
+                    MessageEndReason.CANCELLED
+                    if resolved is AgentSessionStatus.CANCELLED
+                    else MessageEndReason.ERROR
+                ),
+            )
+            self._suppress_pending_transcript_items_locked(
+                runtime,
+                session_id=current.session_id,
+            )
         if timestamp is None:
             timestamp = self._clock.now()
         summary = SessionSummary(
@@ -2676,7 +2789,10 @@ class RunCoordinator:
             if session_runtime.execution_claimed:
                 raise InvalidAgentSessionTransitionError(current, target)
             session_runtime.execution_claimed = True
-        if resolved is AgentSessionStatus.CANCELLED:
+        if resolved in {
+            AgentSessionStatus.FAILED,
+            AgentSessionStatus.CANCELLED,
+        }:
             session_runtime.stop_requested.set()
         session_runtime.summary = summary
         mutation = SessionStateMutation(

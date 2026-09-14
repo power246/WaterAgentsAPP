@@ -43,6 +43,9 @@ class RunRuntime:
     waterbody_participation: dict[str, bool] = field(default_factory=dict)
     streaming_messages: dict[UUID, StreamingMessage] = field(default_factory=dict)
     late_streaming_messages: dict[UUID, StreamingMessage] = field(default_factory=dict)
+    suppressed_transcript_items: dict[UUID, TranscriptItemIdentity] = field(
+        default_factory=dict
+    )
     next_transcript_sequence: int = 1
     condition: asyncio.Condition = field(default_factory=asyncio.Condition, repr=False)
     cancel_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)

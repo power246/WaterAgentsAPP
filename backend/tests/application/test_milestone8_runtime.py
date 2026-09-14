@@ -7,7 +7,11 @@ import pytest
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.application.analysis_runs.startup_repair import StartupRepairError
 from app.application.analysis_runs.models import AgentRole, AgentSessionStatus, RunStatus
-from app.application.analysis_runs.coordinator import RunNotFoundError
+from app.application.analysis_runs.coordinator import (
+    InvalidAgentSessionTransitionError,
+    InvalidRunTransitionError,
+    RunNotFoundError,
+)
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.models import (
     FixtureMessageV1,
@@ -18,6 +22,10 @@ from app.application.transcripts.models import (
 from app.application.transcripts.registry import (
     create_production_registry,
     fixture_message_registration,
+)
+from app.application.transcripts.stream_models import (
+    MessageFinalizedProcessRecord,
+    TranscriptItemProcessRecord,
 )
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
@@ -43,11 +51,14 @@ class GatedWorkflow:
     def __init__(self) -> None:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
+        self.error: Exception | None = None
 
     async def run(self, context: WorkflowContext) -> None:
         self.started.set()
         await self.release.wait()
         context.cancellation.checkpoint()
+        if self.error is not None:
+            raise self.error
 
 
 async def wait_saved(application, run_id) -> None:
@@ -90,6 +101,7 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
                 created.run_id,
                 session.session_id,
             )
+            generic = await coordinator.reserve_transcript_item(created.run_id)
             message = await coordinator.start_transcript_message(
                 created.run_id,
                 session.session_id,
@@ -103,6 +115,24 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
                 "kept ",
             )
             await coordinator.cancel_run(created.run_id)
+            process = coordinator._runs[created.run_id].agent_sessions[
+                session.session_id
+            ].process_events
+            assert isinstance(process[-2], MessageFinalizedProcessRecord)
+            assert isinstance(process[-1], TranscriptItemProcessRecord)
+            assert "session_cancelled" in process[-1].item.content.safe_body
+            with pytest.raises(InvalidRunTransitionError):
+                await coordinator.reserve_transcript_item(created.run_id)
+            assert await coordinator.finalize_transcript_item(
+                created.run_id,
+                generic.item_id,
+                "analysis_request",
+                1,
+                {"query": "suppressed late result"},
+            ) is generic
+            assert generic not in await coordinator.list_transcript_items(
+                created.run_id
+            )
             assert await coordinator.append_transcript_message_delta(
                 created.run_id,
                 message.item_id,
@@ -128,6 +158,7 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
 
             stored = await store.read_run(created.run_id)
             assert stored is not None
+            assert all(item.item_id != generic.item_id for item in stored.items)
             bodies = {
                 item.item_id: item.inline_body
                 for item in stored.items
@@ -149,6 +180,289 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
             assert late.original_item_id == message.item_id
             assert late.text == "late [REDACTED] tail"
             assert "secret-value" not in "".join(bodies.values())
+
+    run(exercise)
+
+
+@pytest.mark.parametrize("workflow_error", [False, True])
+def test_workflow_failure_closes_sessions_messages_and_pending_results(
+    workflow_error,
+) -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        store = InMemoryTranscriptStore()
+        registry = create_production_registry().copy_with(
+            fixture_message_registration()
+        )
+        application = create_app(
+            AppSettings(_env_file=None),
+            clock=TickingClock(),
+            workflow=workflow,
+            transcript_store=store,
+            transcript_registry=registry,
+            shutdown_grace_period=0,
+        )
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            created = await coordinator.create_run("failed workflow", CONFIGURATION)
+            await workflow.started.wait()
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            pending_session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="456",
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                "partial answer",
+            )
+            generic = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+            )
+            if workflow_error:
+                workflow.error = RuntimeError("injected workflow failure")
+            workflow.release.set()
+
+            runtime = coordinator._runs[created.run_id]
+            await runtime.workflow_quiesced.wait()
+            await wait_saved(application, created.run_id)
+
+            assert runtime.snapshot.status is RunStatus.FAILED
+            assert runtime.agent_sessions[
+                session.session_id
+            ].summary.status is AgentSessionStatus.FAILED
+            assert runtime.agent_sessions[
+                pending_session.session_id
+            ].summary.status is AgentSessionStatus.FAILED
+            failure_ids = {
+                runtime.last_error.error_id,
+                runtime.agent_sessions[session.session_id].last_error.error_id,
+                runtime.agent_sessions[
+                    pending_session.session_id
+                ].last_error.error_id,
+            }
+            assert len(failure_ids) == 3
+            assert message.item_id not in runtime.streaming_messages
+            assert message.item_id not in runtime.late_streaming_messages
+            assert generic.item_id in runtime.suppressed_transcript_items
+            assert await coordinator.finalize_transcript_item(
+                created.run_id,
+                generic.item_id,
+                "analysis_request",
+                1,
+                {"query": "late generic result"},
+            ) is generic
+
+            process = runtime.agent_sessions[session.session_id].process_events
+            finalized_index = next(
+                index
+                for index, record in enumerate(process)
+                if isinstance(record, MessageFinalizedProcessRecord)
+            )
+            terminal_index = next(
+                index
+                for index, record in enumerate(process)
+                if isinstance(record, TranscriptItemProcessRecord)
+                and "session_failed" in record.item.content.safe_body
+            )
+            assert finalized_index < terminal_index
+            message_body = next(
+                item.content.safe_body
+                for item in runtime.transcript_buffer.items
+                if item.item_id == message.item_id
+            )
+            assert json.loads(message_body) == {
+                "text": "partial answer",
+                "generation_status": "incomplete",
+                "end_reason": "error",
+            }
+
+            assert len([
+                event async for event in await coordinator.subscribe_session(
+                    created.run_id,
+                    session.session_id,
+                )
+            ]) == len(process)
+            assert len([
+                event async for event in await coordinator.subscribe_run(
+                    created.run_id
+                )
+            ]) == 1
+
+            stored = await store.read_run(created.run_id)
+            assert stored is not None
+            assert all(item.item_id != generic.item_id for item in stored.items)
+            assert next(
+                item for item in stored.items if item.item_id == message.item_id
+            ).inline_body == message_body
+
+            coordinator._live_state_grace_period = 0
+            async with runtime.condition:
+                runtime.condition.notify_all()
+            for _ in range(200):
+                if created.run_id not in coordinator._runs:
+                    break
+                await asyncio.sleep(0)
+            assert created.run_id not in coordinator._runs
+
+    run(exercise)
+
+
+def test_single_session_cancel_contains_stream_and_generic_late_results() -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        store = InMemoryTranscriptStore()
+        registry = create_production_registry().copy_with(
+            fixture_message_registration()
+        )
+        application = create_app(
+            AppSettings(_env_file=None),
+            clock=TickingClock(),
+            workflow=workflow,
+            transcript_store=store,
+            transcript_registry=registry,
+            shutdown_grace_period=0,
+        )
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            created = await coordinator.create_run("session cancel", CONFIGURATION)
+            await workflow.started.wait()
+            cancelled_session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            other_session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="123",
+            )
+            for session in (cancelled_session, other_session):
+                await coordinator.mark_agent_session_running(
+                    created.run_id,
+                    session.session_id,
+                )
+            cancelled_message = await coordinator.start_transcript_message(
+                created.run_id,
+                cancelled_session.session_id,
+                "fixture_message",
+                1,
+            )
+            other_message = await coordinator.start_transcript_message(
+                created.run_id,
+                other_session.session_id,
+                "fixture_message",
+                1,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                cancelled_message.item_id,
+                "kept",
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                other_message.item_id,
+                "other",
+            )
+            generic = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=cancelled_session.session_id,
+            )
+
+            cancelled = await coordinator.cancel_agent_session(
+                created.run_id,
+                cancelled_session.session_id,
+            )
+            runtime = coordinator._runs[created.run_id]
+            assert cancelled.status is AgentSessionStatus.CANCELLED
+            assert runtime.agent_sessions[
+                other_session.session_id
+            ].summary.status is AgentSessionStatus.RUNNING
+            assert set(runtime.streaming_messages) == {other_message.item_id}
+            assert set(runtime.late_streaming_messages) == {
+                cancelled_message.item_id
+            }
+            process = runtime.agent_sessions[
+                cancelled_session.session_id
+            ].process_events
+            assert isinstance(process[-2], MessageFinalizedProcessRecord)
+            assert isinstance(process[-1], TranscriptItemProcessRecord)
+            assert "session_cancelled" in process[-1].item.content.safe_body
+            with pytest.raises(InvalidAgentSessionTransitionError):
+                await coordinator.reserve_transcript_item(
+                    created.run_id,
+                    session_id=cancelled_session.session_id,
+                )
+
+            assert await coordinator.append_transcript_message_delta(
+                created.run_id,
+                cancelled_message.item_id,
+                " late tail",
+            ) == ""
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                cancelled_message.item_id,
+                FixtureMessageV1(
+                    text="kept late tail",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            assert await coordinator.finalize_transcript_item(
+                created.run_id,
+                generic.item_id,
+                "analysis_request",
+                1,
+                {"query": "suppressed"},
+            ) is generic
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                other_message.item_id,
+                FixtureMessageV1(
+                    text="other",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(
+                created.run_id,
+                other_session.session_id,
+            )
+            workflow.release.set()
+            await runtime.workflow_quiesced.wait()
+            await wait_saved(application, created.run_id)
+
+            assert runtime.snapshot.status is RunStatus.COMPLETED
+            assert generic.item_id in runtime.suppressed_transcript_items
+            assert not runtime.streaming_messages
+            assert not runtime.late_streaming_messages
+            stored = await store.read_run(created.run_id)
+            assert stored is not None
+            assert all(item.item_id != generic.item_id for item in stored.items)
+            audit = next(
+                item
+                for item in stored.items
+                if item.content_type == "runtime_fact"
+                and item.inline_body is not None
+                and "late_message_output" in item.inline_body
+            )
+            parsed_audit = registry.parse(audit, audit.inline_body)
+            assert isinstance(parsed_audit.body, LateMessageOutputFact)
+            assert parsed_audit.body.original_item_id == cancelled_message.item_id
+            assert parsed_audit.body.text == " late tail"
+            assert parsed_audit.body.end_reason is MessageEndReason.CANCELLED
 
     run(exercise)
 

@@ -13,6 +13,7 @@ from app.application.analysis_runs.models import (
 from app.application.analysis_runs.persistence import PersistenceInfo
 from app.application.transcripts.models import (
     GenerationStatus,
+    MessageEndReason,
     TranscriptItem,
     TranscriptMetadata,
 )
@@ -148,6 +149,7 @@ class StreamingMessage:
     private_values: tuple[str, ...] = ()
     safe_text: str = ""
     late_text: str = ""
+    late_end_reason: MessageEndReason | None = None
 
 
 def snapshot_from_state(

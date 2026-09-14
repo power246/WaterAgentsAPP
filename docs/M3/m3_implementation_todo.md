@@ -511,10 +511,10 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] run 进入 failed/cancelled 时在同一终态边界固定全部活动消息，并把所有未终态 session 分别转为 failed/cancelled；消息 finalization 必须先于对应 session 终态过程事件。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)）
-- [ ] workflow 正常返回前检查没有活动消息或未终态 session；违反内部 workflow 契约时按失败收束，不能发布 completed 后永久保留草稿。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
-- [ ] 单独取消 session 时只固定该 session 的活动消息；run/session 取消后通用 reserve/finalize 在途结果必须抑制或转换为明确 history-only 审计，不能进入当前 GET/SSE/下游，也不能留下未定稿 reservation 造成 pending。（[设计 §7.3](m3_transcript_history_implementation_design.md#73-可见性)；[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)）
-- [ ] 故障与竞态测试覆盖 workflow 抛错、正常返回但遗留草稿、run cancel 后 generic finalize、单 session cancel 后继续 delta/finalize；最终必须 session/run SSE 结束、partial 正文可保存、persistence 可收敛且 live state 可清理。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] run 进入 failed/cancelled 时在同一终态边界固定全部活动消息，并把所有未终态 session 分别转为 failed/cancelled；消息 finalization 必须先于对应 session 终态过程事件。（[设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)）
+- [x] workflow 正常返回前检查没有活动消息或未终态 session；违反内部 workflow 契约时按失败收束，不能发布 completed 后永久保留草稿。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
+- [x] 单独取消 session 时只固定该 session 的活动消息；run/session 取消后通用 reserve/finalize 在途结果必须抑制或转换为明确 history-only 审计，不能进入当前 GET/SSE/下游，也不能留下未定稿 reservation 造成 pending。（[设计 §7.3](m3_transcript_history_implementation_design.md#73-可见性)；[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)）
+- [x] 故障与竞态测试覆盖 workflow 抛错、正常返回但遗留草稿、run cancel 后 generic finalize、单 session cancel 后继续 delta/finalize；最终必须 session/run SSE 结束、partial 正文可保存、persistence 可收敛且 live state 可清理。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：中断不会伪造完成、保存或恢复；正常结束后可释放资源而保持全文历史。
 
@@ -524,6 +524,8 @@ git diff --check
 - 启动与修复：正式 lifespan 严格执行数据库连接、Alembic head 检查、逐 run 原子修复，再创建 coordinator 接收流量。遗留 pending/running run/session 记为 `failed/service_interrupted`，包括终态父 run 下的活动子 session；保留原身份、正文、回执和既有终态，重复启动不重复追加。
 - 清理与关闭：live state 仅在业务终态、workflow quiesced、晚到消息收敛、全部必需写入确认后开始完整 grace；条件变化使计时失效，锁内复查后释放，失败重新等待并重试。服务 stop 与用户 cancel 分离，关闭收敛 workflow、writer 和 engine，不恢复 Agent。
 - 验证：取消/脱敏、失败中途修复、重复启动、终态父/活动子、cleanup 失败重试均进入完整 `735 passed` 回归；真实 PostgreSQL 重启 smoke 进一步验证 history 可读、SSE 410 和不重跑 workflow。
+- 审查回补：run 失败/取消会在同一锁内先以 error/cancelled 原因安全定稿全部活动消息，再分别收束未终态 sessions；单 session 失败/取消仅处理自身输出。workflow 正常返回时若仍有活动消息、未终态 session 或未完成 reservation，将按 `workflow_failed` 失败收束；取消边界后的通用 finalize 通过原 reservation tombstone 幂等抑制，不进入 live、SSE、下游或持久化待写集合。
+- 审查回补验证：focused workflow/session/message/SSE 用例为 `83 passed`，不含真实 PostgreSQL 的 application/persistence/API 回归为 `438 passed`；macOS、Python 3.12.14、隔离 PostgreSQL 17.10 下完整 `backend/tests` 为 `760 passed`，无 skip。动态 Uvicorn SSE smoke 输出 `{"completed":"passed","cancelled":"passed"}`；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 
 ## Milestone 9：完整集成、三平台 smoke 与运行手册
 
