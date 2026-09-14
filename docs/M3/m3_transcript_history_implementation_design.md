@@ -1,8 +1,8 @@
 # M3 Transcript Store + History APIs 实施详细设计
 
-更新日期：2026-09-14
+更新日期：2026-09-15
 
-状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–13 已完成本机实现与适用验证，Milestone 14–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -199,6 +199,7 @@ session 完成不代表 run 完成；run 取消保留已经完成/失败的 sess
 - 初版不为 confidence、provenance、tags、工具名等预建筛选索引；不存 scope/correlation JSON、额外公开 content_ref 或关联表。
 - 所有业务内容只追加，冲突时不能 `DO UPDATE` 覆盖正文。相同身份且各不可变字段/正文相同才视为同一事实；同 ID 不同内容形成 run 级 `persistence_write_conflict` warning 并保留待写与诊断，不能吞冲突。
 - 记录和所需同批引用、状态、全文形成原子组，先验证再提交；事务中的引用目标必须已存在于同 run 或在本批。引用生成不能指向仍在生成且不在本批的草稿；这种有依赖的组等待目标定稿，无关可写组照常保存。
+- terminal 收束前从所有尚未确认持久化的 finalized typed content 汇总引用；被引用的 reserved target 使用原 item_id 定稿为 history-only suppression fact，无人引用的 reserved item 不造记录。suppression target 与 dependent source 仍按引用顺序验证和提交，不增加关联表或特殊外键旁路。
 - 明确引用在原 typed content、AnalysisDetail、AnalysisStep 中保留；注册器唯一实现提取/验证。首版不做反向索引，M6/M7 按真实查询需求评估。
 
 ## 5. Typed content 与读取表示
@@ -224,6 +225,7 @@ M2 版本 1 的事件保留 reader 支持，原字段不改写，不把旧整体
 |---|---|
 | workflow_quiesced | 无额外正文；所有执行方收敛时追加一次，归属由 item 决定。 |
 | persistence_recovered | `error_id`：关联该轮实际保存故障，恢复后追加一次，不在保存恢复记录自身成功时递归新增。 |
+| suppressed_transcript_item | `reason`（cancelled/error）；只为 terminal 时已被 finalized 内容引用、但尚未定稿的草稿生成，沿用原 item_id，是历史审计。 |
 | late_message_output | `original_item_id`、`text`、`end_reason`（completed/cancelled/error/truncated）；只含取消后的新增文本，是历史审计。 |
 
 进程遗留修复使用 failed 生命周期及 `PublicError(code=service_interrupted)`，不复制 runtime interruption 记录。BFS、业务输入、LLM、tool、skill、hook、结果由实际生产阶段注册类型。M3 的消息能力通过测试专用严格 `fixture_message`（text、generation_status、可选 end_reason）验证，它不注册进生产，也不作为公开业务 payload 承诺。
@@ -269,6 +271,8 @@ reader 返回 item 的 `parse_status=ok/unsupported/corrupt`。unsupported 保�
 live buffer 保存原事实；writer 待写集合只持有原对象身份和必要状态更新，不另复制正文队列。每 run 一个 task、一个活动事务，多个 run 可并发。状态锁内选取原子组和冻结批次，在锁外等待数据库。
 
 空闲收到可写组或独立状态更新立即开始；默认目标 100 items，不等凑满，不做空事务。不能拆散同一变化的状态/事件/全文/引用目标；大于目标的原子组独立提交。生成中草稿不是可写组，但已产生的必需正文计入 pending。失败后冻结原批次，新事实排在后续；无依赖的新组可越过未定稿草稿，不能越过已失败的活动批次。
+
+run/session 取消或失败抑制草稿前，coordinator 先遍历所有 finalized 且尚未确认持久化的 typed content；其显式引用所命中的 reserved target 构成待收束引用闭包。每个 target 以原身份形成独立 suppression 组并继续留在依赖解析视图，writer 因而先提交 target，再解除 dependent source 的等待。无人引用草稿不进入待写集合；late finalize 命中 suppression identity 时只幂等返回，不产生第二份正文。该过程复用既有批次合并、事务回滚和有限重试，不要求人工补写。
 
 状态变更的内存确认使用具体 mutation 身份与目标快照；它不对外暴露，也不增加 DB state_revision。适用状态与事件同事务提交；一个批次包含同一行多次变化时按原顺序验证/应用，数据库最终保存最后状态，全部原事件仍保留。独立 running 更新也需确认，不能因没有公开事件而漏存。
 
@@ -323,7 +327,7 @@ session transcript 先读取本 session 的全部可见原记录，按 run trans
 
 ### 7.3 可见性
 
-取消后的 `late_message_output` 以及后续注册的仅审计类型，从类型规则决定 history-only，不增加 after-cancel 字段。auto 的列表、详情、全文、引用和 SSE 都执行同一过滤，包括 auto 回退 PostgreSQL。直接请求被隐藏 item 返回 404 `transcript_item_not_found`；history 可读取已提交审计及原前缀，但不把它拼回当前消息。
+取消后的 `late_message_output`、`suppressed_transcript_item` 以及后续注册的仅审计类型，从类型规则决定 history-only，不增加 after-cancel 字段。auto 的列表、详情、全文、引用和 SSE 都执行同一过滤，包括 auto 回退 PostgreSQL。直接请求被隐藏 item 返回 404 `transcript_item_not_found`；history 可读取已提交审计、suppression 原因及原前缀，但不把它们拼回当前消息。
 
 ### 7.4 run 历史分页
 
@@ -372,6 +376,8 @@ stream_end 只表明这条流正常结束；未收到而 EOF 是中断。网络�
 run cancel 在统一状态边界关闭调度入口，固定全部生成中原消息为 incomplete，再调用内部 session cancel 能力覆盖未终态 sessions。返回立即选定的 run 状态，不等待模型停止或落库。这个临界区中不做数据库/网络等待。
 
 取消边界前已接收的文本属于原 item，保留身份/序号/时间；尚在脱敏私有缓冲中的不确定敏感区安全替换后纳入原文，不能直接 flush 原始字节。其后接收的新片段按原消息聚合一个 late_message_output 审计，独立分配身份/序号/时间，只存新尾部并引用原消息；空尾部不创建假审计。待执行方收敛后定稿入库，引用原文必须已保存或同批保存。原前缀不再改写，也不因历史查看拼接成实时消息。
+
+普通 reserved item 在取消/失败时仍被抑制且不落库；如果它已经成为尚未持久化 finalized 内容的合法引用目标，则以原 item_id 固定为 `suppressed_transcript_item`。该 history-only fact 只说明目标因 cancelled/error 未产生业务正文，先于依赖它的 source 持久化；后续提供方再尝试定稿只幂等返回原 identity，不能覆盖 suppression 正文。run/session 终态 mutation、原 terminal transcript 与依赖组继续使用既有原子提交和重试边界。
 
 ### 9.2 凭据边界
 

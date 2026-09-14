@@ -101,6 +101,11 @@ def test_analysis_request_round_trip_preserves_resolution_presence() -> None:
         (
             "runtime_fact",
             1,
+            {"fact": "suppressed_transcript_item", "reason": "completed"},
+        ),
+        (
+            "runtime_fact",
+            1,
             {
                 "fact": "late_message_output",
                 "original_item_id": str(ITEM_ID),
@@ -185,6 +190,11 @@ def test_runtime_fact_union_has_exact_fields_references_and_visibility() -> None
     recovered = registry.encode(
         "runtime_fact", 1, {"fact": "persistence_recovered", "error_id": str(ERROR_ID)}
     )
+    suppressed = registry.encode(
+        "runtime_fact",
+        1,
+        {"fact": "suppressed_transcript_item", "reason": "cancelled"},
+    )
     late = registry.encode(
         "runtime_fact",
         1,
@@ -196,8 +206,14 @@ def test_runtime_fact_union_has_exact_fields_references_and_visibility() -> None
         },
     )
 
-    assert normal.references == recovered.references == ()
+    assert (
+        normal.references
+        == recovered.references
+        == suppressed.references
+        == ()
+    )
     assert late.references == (ITEM_ID,)
+    assert suppressed.visibility is ContentVisibility.HISTORY_ONLY
     assert late.visibility is ContentVisibility.HISTORY_ONLY
     assert normal.metadata.tags == ()
     assert normal.metadata.rag_eligible is False

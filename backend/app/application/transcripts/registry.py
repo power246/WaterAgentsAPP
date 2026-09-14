@@ -16,11 +16,11 @@ from app.application.transcripts.models import (
     AnalysisRequestV1,
     ContentVisibility,
     FixtureMessageV1,
-    LateMessageOutputFact,
     GenerationStatus,
+    LateMessageOutputFact,
     LegacyLifecycleEventV1,
-    MessageProjection,
     MessageEndReason,
+    MessageProjection,
     ParseStatus,
     ReadTranscriptItem,
     ReferenceResolution,
@@ -28,6 +28,7 @@ from app.application.transcripts.models import (
     RegisteredContent,
     RuntimeFact,
     StoredTranscriptItem,
+    SuppressedTranscriptItemFact,
     TranscriptContentRef,
     TranscriptMetadata,
 )
@@ -421,7 +422,7 @@ def _runtime_references(body: object) -> tuple[UUID, ...]:
 def _runtime_visibility(body: object) -> ContentVisibility:
     return (
         ContentVisibility.HISTORY_ONLY
-        if isinstance(body, LateMessageOutputFact)
+        if isinstance(body, (LateMessageOutputFact, SuppressedTranscriptItemFact))
         else ContentVisibility.AUTO
     )
 

@@ -1,10 +1,10 @@
 # M3 Transcript Store + History APIs Implementation TODO
 
-更新日期：2026-09-14
+更新日期：2026-09-15
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成取消引用依赖、retry/cleanup 原子性、corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
+**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–13 已完成本机实现与适用验证，Milestone 14–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成 retry/cleanup 原子性、corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
 
 ## 阶段与设计导航
 
@@ -752,25 +752,33 @@ git diff --check
 
 ### 工作
 
-- [ ] 在抑制 reserved item 前，从 finalized、尚未持久化的 typed content 提取引用闭包，区分“无人引用的草稿”和“已成为合法依赖目标的草稿”。
-- [ ] 只为已被引用的草稿以原 item_id 生成独立版本、history-only 的 suppression fact，记录 cancelled/error 原因；不为无人引用的草稿制造占位记录，不修改四表或增加数据库 migration。
-- [ ] suppression fact 对 late finalize 保持幂等抑制，同时在 writer 依赖解析中保持可见；writer 必须先保存 target suppression fact，再保存 dependent source，不能把目标误判为不存在或形成不可重试 `ValueError`。
-- [ ] run/session terminal mutation、原取消/失败 transcript 与依赖组继续按原事务边界保存；这类可收敛依赖不能耗尽唯一 writer，手动补写也不得成为正常完成取消的必要步骤。
-- [ ] 同 run/跨 session 合法引用、跨 run/未知引用拒绝、普通生成中等待和已持久化目标行为保持不变。
+- [x] 在抑制 reserved item 前，从 finalized、尚未持久化的 typed content 提取引用闭包，区分“无人引用的草稿”和“已成为合法依赖目标的草稿”。
+- [x] 只为已被引用的草稿以原 item_id 生成独立版本、history-only 的 suppression fact，记录 cancelled/error 原因；不为无人引用的草稿制造占位记录，不修改四表或增加数据库 migration。
+- [x] suppression fact 对 late finalize 保持幂等抑制，同时在 writer 依赖解析中保持可见；writer 必须先保存 target suppression fact，再保存 dependent source，不能把目标误判为不存在或形成不可重试 `ValueError`。
+- [x] run/session terminal mutation、原取消/失败 transcript 与依赖组继续按原事务边界保存；这类可收敛依赖不能耗尽唯一 writer，手动补写也不得成为正常完成取消的必要步骤。
+- [x] 同 run/跨 session 合法引用、跨 run/未知引用拒绝、普通生成中等待和已持久化目标行为保持不变。
 
 ### Tests
 
-- [ ] `test_run_writer.py` 构造 finalized source 引用 reserved target，分别在 target 定稿前触发 run cancel、run failure 与单 session cancel；验证 persistence 最终 `up_to_date`，terminal 状态、source 和 suppression target 全部可读。
-- [ ] 断言 target 使用原 item_id、先于 dependent 满足外键/引用约束、late finalize 不覆盖 suppression fact，且 writer 仍存活、没有不可重试 warning。
-- [ ] 验证无人引用的 reserved item 仍不落库；已有生成中引用等待、同批提交、跨 run/未知目标拒绝测试继续通过。
-- [ ] 在真实 PostgreSQL 上复现取消依赖组，检查事务回滚、重试、引用顺序和进程重启后的 history。
+- [x] `test_run_writer.py` 构造 finalized source 引用 reserved target，分别在 target 定稿前触发 run cancel、run failure 与单 session cancel；验证 persistence 最终 `up_to_date`，terminal 状态、source 和 suppression target 全部可读。
+- [x] 断言 target 使用原 item_id、先于 dependent 满足外键/引用约束、late finalize 不覆盖 suppression fact，且 writer 仍存活、没有不可重试 warning。
+- [x] 验证无人引用的 reserved item 仍不落库；已有生成中引用等待、同批提交、跨 run/未知目标拒绝测试继续通过。
+- [x] 在真实 PostgreSQL 上复现取消依赖组，检查事务回滚、重试、引用顺序和进程重启后的 history。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application/test_run_writer.py backend/tests/application/test_milestone8_runtime.py backend/tests/persistence/test_postgres_persistence.py -q`。
-- [ ] run/history smoke 覆盖保存后重启读取，确认不会恢复 Agent 或生成缺失业务正文。
+- [x] `python -m pytest backend/tests/application/test_run_writer.py backend/tests/application/test_milestone8_runtime.py backend/tests/persistence/test_postgres_persistence.py -q`。
+- [x] run/history smoke 覆盖保存后重启读取，确认不会恢复 Agent 或生成缺失业务正文。
 
 阶段出口：取消或失败不会把合法引用变成永久坏引用；被引用 target 的身份可审计，终态与 transcript 无需人工补写即可收敛。
+
+### Milestone 13 完成记录（2026-09-15）
+
+- 实现：terminal 收束 reserved item 前，从所有尚未确认持久化的 finalized typed content 汇总显式引用；只有命中的草稿使用原 item_id 定稿为严格 `suppressed_transcript_item` runtime fact，并记录 `cancelled/error`，无人引用草稿仍直接丢弃，四表和 migration 均未变化。
+- 收敛：suppression fact 在 history 中可审计、在 auto/SSE 中不可见，并继续作为 writer 的真实 target；writer 先确认 target 再提交 dependent。suppressed identity 优先于普通定稿查找，因此取消后的 late finalize 幂等返回原 identity，不覆盖已冻结事实。
+- 测试：新增 run cancel、run failure、session cancel 三条内存 writer 回归，覆盖原 item_id、target/source 顺序、orphan 不落库、writer 存活和 warning 为空；真实 PostgreSQL 故障注入在同一事务写入后抛错，确认 run mutation 与 target 均回滚，随后自动重试并在新 engine 中读取 cancelled history。
+- 验证：真实 PostgreSQL 17.10 隔离测试库上，Milestone 13 指定 focused tests 为 47 passed，新增回滚/重启用例单独为 1 passed；run/history smoke 输出 `history=passed`、`independent_process_restart=passed`、`restart_repair=passed`。允许 loopback bind、排除需要外部测试库的 PostgreSQL 文件后，后端完整回归为 790 passed；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
+- 限制：Milestone 14–16、Ubuntu/macOS/Windows 实际 CI 与同库跨系统迁移证据仍未完成；整体状态继续保持 `partial / request changes`。
 
 ## Milestone 14：手动补写与 live cleanup 原子性
 

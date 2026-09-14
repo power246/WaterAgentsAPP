@@ -85,6 +85,7 @@ from app.application.transcripts.models import (
     LateMessageOutputFact,
     MessageEndReason,
     PersistenceRecoveredFact,
+    SuppressedTranscriptItemFact,
     TranscriptContentRef,
     TranscriptItem,
     TranscriptMetadata,
@@ -1757,14 +1758,14 @@ class RunCoordinator:
         runtime = await self._lookup(run_id)
         key = _UUID.validate_python(item_id)
         async with runtime.condition:
+            suppressed = runtime.suppressed_transcript_items.get(key)
+            if suppressed is not None:
+                return suppressed
             identity = next(
                 (item for item in runtime.transcript_items if item.item_id == key),
                 None,
             )
             if identity is None:
-                suppressed = runtime.suppressed_transcript_items.get(key)
-                if suppressed is not None:
-                    return suppressed
                 raise ValueError("transcript item identity is not reserved in this run")
             reserved_references = tuple(
                 TranscriptContentRef(
@@ -2090,14 +2091,20 @@ class RunCoordinator:
                 item_ids=(message.item_id,),
             )
 
-    @staticmethod
     def _suppress_pending_transcript_items_locked(
+        self,
         runtime: RunRuntime,
         *,
         session_id: UUID | None = None,
+        reason: MessageEndReason,
     ) -> None:
-        finalized_item_ids = {
-            item.item_id for item in runtime.transcript_buffer.items
+        finalized_items = runtime.transcript_buffer.items
+        finalized_item_ids = {item.item_id for item in finalized_items}
+        referenced_item_ids = {
+            reference_id
+            for item in finalized_items
+            if item.item_id not in runtime.persisted_item_ids
+            for reference_id in item.content.references
         }
         retained: list[TranscriptItemIdentity] = []
         for item in runtime.transcript_items:
@@ -2106,6 +2113,18 @@ class RunCoordinator:
                 and (session_id is None or item.session_id == session_id)
             ):
                 runtime.suppressed_transcript_items[item.item_id] = item
+                if item.item_id in referenced_item_ids:
+                    runtime.transcript_buffer.append(
+                        item,
+                        "runtime_fact",
+                        1,
+                        SuppressedTranscriptItemFact(reason=reason.value),
+                    )
+                    self._enqueue_persistence_group_locked(
+                        runtime,
+                        item_ids=(item.item_id,),
+                    )
+                    retained.append(item)
             else:
                 retained.append(item)
         runtime.transcript_items[:] = retained
@@ -2663,7 +2682,10 @@ class RunCoordinator:
                             )
                         )
                     session_runtime.stop_requested.set()
-                self._suppress_pending_transcript_items_locked(runtime)
+                self._suppress_pending_transcript_items_locked(
+                    runtime,
+                    reason=end_reason,
+                )
             runtime.condition.notify_all()
         self._log_run_transition(current.status, snapshot, event)
         for previous, summary, session_event in session_transitions:
@@ -2741,18 +2763,20 @@ class RunCoordinator:
             AgentSessionStatus.FAILED,
             AgentSessionStatus.CANCELLED,
         }:
+            end_reason = (
+                MessageEndReason.CANCELLED
+                if resolved is AgentSessionStatus.CANCELLED
+                else MessageEndReason.ERROR
+            )
             self._freeze_streaming_messages_locked(
                 runtime,
                 session_id=current.session_id,
-                end_reason=(
-                    MessageEndReason.CANCELLED
-                    if resolved is AgentSessionStatus.CANCELLED
-                    else MessageEndReason.ERROR
-                ),
+                end_reason=end_reason,
             )
             self._suppress_pending_transcript_items_locked(
                 runtime,
                 session_id=current.session_id,
+                reason=end_reason,
             )
         if timestamp is None:
             timestamp = self._clock.now()

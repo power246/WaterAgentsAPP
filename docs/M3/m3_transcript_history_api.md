@@ -1,8 +1,8 @@
 # M3 Transcript、History 与两层 SSE API / 搭建排障指南
 
-更新日期：2026-09-14
+更新日期：2026-09-15
 
-**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–12 已完成本机实现与适用验证，Milestone 13–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL 与取消边界的敏感状态已经统一安全化；取消时的引用依赖、手动补写竞争及 corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–13 已完成本机实现与适用验证，Milestone 14–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态及取消时的引用依赖已经收敛；手动补写竞争与 corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
@@ -242,7 +242,7 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
 
 内联与外置使用同一入口。当前 live 数据库故障时仍可读内存全文并保留 warning；live 释放后相同身份自动读 PG。history 模式只返回已保存文本。引用与全文请求必须继续传原 view。
 
-auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 late_message_output。隐藏或不属于 run 的 item 返回 404；外置正文缺失返回明确 500/transcript_content_unreadable，不返回空字符串。
+auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 `late_message_output` 和 `suppressed_transcript_item`。隐藏或不属于 run 的 item 返回 404；外置正文缺失返回明确 500/transcript_content_unreadable，不返回空字符串。
 
 ## 5. 两层 SSE
 
@@ -323,6 +323,8 @@ M9 使用基于 fetch 的统一 SSE 客户端，才能读取握手错误状态�
 仅历史存在时按已保存终态使用同样规则：cancelled 返回 200，其他终态返回 409/run_already_terminal，persistence=null。没有可执行 live、历史非终态的异常窗口先收敛创建所有权或返回安全 409 `run_not_live`，不能创建伪造取消结果。不存在 404，必要数据库查询失败 503。
 
 用户只能停止整次 run，不能给 Agent 追加消息；没有单 session cancel HTTP。取消受理不等在途请求完成、数据库写完或 SSE 关闭。受理时原生成中消息固定为 incomplete，晚到新片段只形成 history-only 审计。auto/SSE 不继续显示晚到内容，history 可读已保存审计。
+
+取消或失败时，无人引用的 reserved item 不生成历史占位。如果尚未定稿的 reserved item 已被 finalized、尚未保存的内容引用，后端会用原 item_id 写入 history-only `runtime_fact`：`{"fact":"suppressed_transcript_item","reason":"cancelled"}`（失败时 reason 为 `error`），并先确认该 target 再保存 dependent source。该事实不出现在 auto/SSE；history 可用于解释引用为何没有业务正文。取消后的 late finalize 不覆盖它，正常收敛不要求调用 persistence/retry。
 
 ### 6.2 persistence/retry
 

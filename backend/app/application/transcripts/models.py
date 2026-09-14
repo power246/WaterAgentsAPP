@@ -138,6 +138,11 @@ class PersistenceRecoveredFact(DomainModel):
     error_id: UUID
 
 
+class SuppressedTranscriptItemFact(DomainModel):
+    fact: Literal["suppressed_transcript_item"] = "suppressed_transcript_item"
+    reason: Literal["cancelled", "error"]
+
+
 class MessageEndReason(str, Enum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -160,7 +165,10 @@ class LateMessageOutputFact(DomainModel):
 
 
 RuntimeFact: TypeAlias = Annotated[
-    WorkflowQuiescedFact | PersistenceRecoveredFact | LateMessageOutputFact,
+    WorkflowQuiescedFact
+    | PersistenceRecoveredFact
+    | SuppressedTranscriptItemFact
+    | LateMessageOutputFact,
     Field(discriminator="fact"),
 ]
 

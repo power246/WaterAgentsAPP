@@ -6,13 +6,19 @@ from uuid import UUID
 import pytest
 
 from app.application.analysis_runs.coordinator import RunCoordinator
-from app.application.analysis_runs.models import AgentRole, PublicError, RunStatus
+from app.application.analysis_runs.models import (
+    AgentRole,
+    AgentSessionStatus,
+    PublicError,
+    RunStatus,
+)
 from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceState,
     PersistenceWriteBatch,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
+from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 
 
@@ -444,6 +450,134 @@ def test_reference_waiting_does_not_block_independent_ready_facts() -> None:
             assert store._items[target.item_id].transcript_sequence < store._items[
                 dependent.item_id
             ].transcript_sequence
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+@pytest.mark.parametrize(
+    "terminal",
+    ("run_cancel", "run_failure", "session_cancel"),
+)
+def test_terminal_suppresses_referenced_draft_without_stranding_dependent(
+    terminal: str,
+) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = HoldingWorkflow()
+        registry = create_production_registry()
+        coordinator = coordinator_for(
+            store,
+            workflow,
+            transcript_registry=registry,
+        )
+        try:
+            created = await coordinator.create_run(b'{"query":"lake"}')
+            await workflow.calls.get()
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            session = None
+            if terminal == "session_cancel":
+                session = await coordinator.prepare_agent_session(
+                    created.run_id,
+                    agent_role=AgentRole.QUERY_PARSER,
+                )
+                await wait_for_state(
+                    coordinator,
+                    created.run_id,
+                    PersistenceState.UP_TO_DATE,
+                )
+            target = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id if session is not None else None,
+            )
+            orphan = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id if session is not None else None,
+            )
+            dependent = await coordinator.reserve_transcript_item(created.run_id)
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                dependent.item_id,
+                "runtime_fact",
+                1,
+                {
+                    "fact": "late_message_output",
+                    "original_item_id": str(target.item_id),
+                    "text": "late",
+                    "end_reason": "cancelled",
+                },
+            )
+            await asyncio.sleep(0)
+            assert dependent.item_id not in store._items
+
+            if terminal == "run_cancel":
+                snapshot = await coordinator.cancel_run(created.run_id)
+                assert snapshot.status is RunStatus.CANCELLED
+                reason = "cancelled"
+            elif terminal == "run_failure":
+                snapshot = await coordinator.fail_run(
+                    created.run_id,
+                    PublicError(
+                        error_id=UUID(int=1300),
+                        code="workflow_failed",
+                        message="The workflow failed.",
+                        failed_stage="workflow",
+                        retryable=False,
+                    ),
+                )
+                assert snapshot.status is RunStatus.FAILED
+                reason = "error"
+            else:
+                assert session is not None
+                summary = await coordinator.cancel_agent_session(
+                    created.run_id,
+                    session.session_id,
+                )
+                assert summary.status is AgentSessionStatus.CANCELLED
+                reason = "cancelled"
+
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            info = await coordinator.get_persistence_info(created.run_id)
+            runtime = coordinator._runs[created.run_id]
+            assert info.warning is None
+            assert runtime.writer_task is not None and not runtime.writer_task.done()
+
+            stored = await store.read_run(created.run_id)
+            assert stored is not None
+            stored_by_id = {item.item_id: item for item in stored.items}
+            assert target.item_id in stored_by_id
+            assert dependent.item_id in stored_by_id
+            assert orphan.item_id not in stored_by_id
+            target_row = stored_by_id[target.item_id]
+            assert target_row.inline_body is not None
+            parsed = registry.parse(target_row, target_row.inline_body)
+            assert parsed.parse_status.value == "ok"
+            assert parsed.body is not None
+            assert parsed.body.model_dump(mode="json") == {
+                "fact": "suppressed_transcript_item",
+                "reason": reason,
+            }
+            assert registry.visibility_from_read(parsed).value == "history_only"
+
+            written_ids = [
+                item_id
+                for batch in store.write_batches
+                for item_id in batch.item_ids
+            ]
+            assert written_ids.index(target.item_id) < written_ids.index(
+                dependent.item_id
+            )
+            original_body = target_row.inline_body
+            assert await coordinator.finalize_transcript_item(
+                created.run_id,
+                target.item_id,
+                "analysis_request",
+                1,
+                {"query": "late finalize must stay suppressed"},
+            ) is target
+            assert store._items[target.item_id].inline_body == original_body
         finally:
             workflow.release.set()
             await coordinator.shutdown()

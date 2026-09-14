@@ -1,4 +1,5 @@
 import asyncio
+import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -33,6 +34,7 @@ from app.application.analysis_runs.persistence import (
     PersistenceWriteConflictError,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
+from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -53,6 +55,7 @@ from app.infrastructure.persistence.schema import (
     transcript_contents,
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
+from app.infrastructure.runtime.system_clock import SystemClock
 from app.main import create_app
 from scripts.test_database import temporary_migrated_schema
 
@@ -61,6 +64,51 @@ from scripts.test_database import temporary_migrated_schema
 def postgres_settings() -> Iterator[AppSettings]:
     with temporary_migrated_schema() as settings:
         yield settings
+
+
+class RollbackOncePostgresStore(PostgresTranscriptStore):
+    def __init__(self, engine: AsyncEngine, *, operation_timeout_seconds: float) -> None:
+        super().__init__(
+            engine,
+            operation_timeout_seconds=operation_timeout_seconds,
+        )
+        self.fail_item_id: UUID | None = None
+        self.rollback_observed = False
+        self.failed_attempts = 0
+        self.committed_batches: list[PersistenceWriteBatch] = []
+
+    async def write_batch(self, batch: PersistenceWriteBatch) -> None:
+        if (
+            self.fail_item_id is not None
+            and self.fail_item_id in batch.item_ids
+            and self.failed_attempts == 0
+        ):
+            self.failed_attempts += 1
+            try:
+                async with self._run_transaction(batch.run_id) as connection:
+                    await self._apply_state_mutations(connection, batch)
+                    await self._execute_transcript_batch(connection, batch)
+                    raise OSError("injected rollback after batch writes")
+            except OSError:
+                async with self._engine.connect() as connection:
+                    stored_item = (
+                        await connection.execute(
+                            select(transcript_items.c.item_id).where(
+                                transcript_items.c.item_id == self.fail_item_id
+                            )
+                        )
+                    ).scalar_one_or_none()
+                    stored_status = await connection.scalar(
+                        select(analysis_runs.c.status).where(
+                            analysis_runs.c.run_id == batch.run_id
+                        )
+                    )
+                self.rollback_observed = (
+                    stored_item is None and stored_status == "running"
+                )
+                raise
+        await super().write_batch(batch)
+        self.committed_batches.append(batch)
 
 
 def _item(
@@ -705,6 +753,119 @@ def test_incremental_writer_reuses_one_engine_across_batches(
                 ))
         finally:
             await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_referenced_cancelled_draft_rolls_back_retries_and_survives_restart(
+    postgres_settings: AppSettings,
+) -> None:
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise() -> None:
+        engine = create_database_engine(postgres_settings)
+        store = RollbackOncePostgresStore(
+            engine,
+            operation_timeout_seconds=(
+                postgres_settings.db_operation_timeout_seconds
+            ),
+        )
+        workflow = Workflow()
+        registry = create_production_registry()
+        coordinator = RunCoordinator(
+            SystemClock(),
+            transcript_store=store,
+            workflow=workflow,
+            shutdown_grace_period=0,
+            shutdown_save_grace_period=0,
+            persistence_retry_delays=(0, 0, 0, 0, 0),
+            transcript_registry=registry,
+        )
+        try:
+            created = await coordinator.create_run(
+                b'{"query":"referenced cancellation"}'
+            )
+            await workflow.calls.get()
+            await _wait_persistence(coordinator, created.run_id)
+            target = await coordinator.reserve_transcript_item(created.run_id)
+            orphan = await coordinator.reserve_transcript_item(created.run_id)
+            dependent = await coordinator.reserve_transcript_item(created.run_id)
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                dependent.item_id,
+                "runtime_fact",
+                1,
+                {
+                    "fact": "late_message_output",
+                    "original_item_id": str(target.item_id),
+                    "text": "late",
+                    "end_reason": "cancelled",
+                },
+            )
+            store.fail_item_id = target.item_id
+            cancelled = await coordinator.cancel_run(created.run_id)
+            assert cancelled.status is RunStatus.CANCELLED
+            await _wait_persistence(coordinator, created.run_id)
+
+            assert store.failed_attempts == 1
+            assert store.rollback_observed
+            committed_ids = [
+                item_id
+                for batch in store.committed_batches
+                for item_id in batch.item_ids
+            ]
+            assert committed_ids.index(target.item_id) < committed_ids.index(
+                dependent.item_id
+            )
+            info = await coordinator.get_persistence_info(created.run_id)
+            assert info.state is PersistenceState.UP_TO_DATE
+            assert info.warning is None
+            assert await coordinator.finalize_transcript_item(
+                created.run_id,
+                target.item_id,
+                "analysis_request",
+                1,
+                {"query": "late finalize must stay suppressed"},
+            ) is target
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+            await engine.dispose()
+
+        restarted_engine = create_database_engine(postgres_settings)
+        restarted_store = PostgresTranscriptStore(
+            restarted_engine,
+            operation_timeout_seconds=(
+                postgres_settings.db_operation_timeout_seconds
+            ),
+        )
+        try:
+            stored = await restarted_store.read_run(created.run_id)
+            assert stored is not None
+            assert stored.run.status is RunStatus.CANCELLED
+            stored_by_id = {item.item_id: item for item in stored.items}
+            assert target.item_id in stored_by_id
+            assert dependent.item_id in stored_by_id
+            assert orphan.item_id not in stored_by_id
+            target_row = stored_by_id[target.item_id]
+            assert target_row.inline_body is not None
+            assert json.loads(target_row.inline_body) == {
+                "fact": "suppressed_transcript_item",
+                "reason": "cancelled",
+            }
+            parsed = registry.parse(target_row, target_row.inline_body)
+            assert parsed.parse_status.value == "ok"
+            assert registry.visibility_from_read(parsed).value == "history_only"
+        finally:
+            await restarted_engine.dispose()
 
     asyncio.run(exercise())
 
