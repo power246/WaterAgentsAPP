@@ -38,6 +38,11 @@ from app.application.transcripts.reader import (
 )
 
 _UUID = TypeAdapter(UUID)
+_UUID_V4_PATTERN = (
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-"
+    r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+_ASCII_DECIMAL_PATTERN = r"^[0-9]+$"
 
 REQUEST_ID_HEADERS = {
     "X-Request-ID": {
@@ -87,6 +92,10 @@ async def create_run(
         Header(
             alias="Idempotency-Key",
             description="Optional client-generated UUID v4, reused with identical bytes.",
+            json_schema_extra={
+                "format": "uuid",
+                "pattern": _UUID_V4_PATTERN,
+            },
         ),
     ] = None,
 ) -> AnalysisRunSnapshot:
@@ -284,7 +293,14 @@ async def subscribe_session_events(
     request: Request,
     run_id: UUID,
     session_id: UUID,
-    last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    last_event_id: Annotated[
+        str | None,
+        Header(
+            alias="Last-Event-ID",
+            description="Non-negative ASCII decimal session event cursor.",
+            json_schema_extra={"pattern": _ASCII_DECIMAL_PATTERN},
+        ),
+    ] = None,
 ) -> Response:
     _reject_unknown_query_parameters(request, set())
     request.state.run_id = run_id

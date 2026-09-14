@@ -8,6 +8,7 @@ from app.application.analysis_runs.models import (
     PublicError,
     StableCode,
 )
+from app.application.transcripts.models import AnalysisQuery
 from app.application.transcripts.read_models import (
     PersistenceRetryResponse,
     RunDetailResponse,
@@ -24,7 +25,7 @@ from app.domain.time.time_resolution_source import TimeResolutionSource
 
 
 class CreateAnalysisRunRequest(DomainModel):
-    query: NonEmptyString = Field(repr=False)
+    query: AnalysisQuery = Field(repr=False)
     time_resolution: TimeResolution = DEFAULT_TIME_RESOLUTION
 
     def to_configuration_snapshot(

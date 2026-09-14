@@ -245,6 +245,50 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
     run(exercise)
 
 
+def test_authorization_text_round_trips_through_history_and_full_content() -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        query = "Authorization: [REDACTED]"
+        async with app_client(store=store) as (application, client):
+            created = await client.post(BASE, json={"query": query})
+            assert created.status_code == 201
+            run_id = UUID(created.json()["run_id"])
+            await wait_saved(application, run_id)
+
+            listing = await client.get(BASE)
+            listed = next(
+                item for item in listing.json()["items"]
+                if item["run_id"] == str(run_id)
+            )
+            assert listed["query"] == query
+            assert listed["issues"] == []
+
+            detail = await client.get(f"{BASE}/{run_id}?view=history")
+            request_item = next(
+                item for item in detail.json()["items"]
+                if item["content_type"] == "analysis_request"
+            )
+            assert request_item["parse_status"] == "ok"
+            assert request_item["content"] == {
+                "kind": "inline",
+                "body": {"query": query},
+            }
+            assert detail.json()["issues"] == []
+
+            content = await client.get(
+                f"{BASE}/{run_id}/transcript/{request_item['item_id']}/content"
+                "?view=history"
+            )
+            assert content.status_code == 200
+            assert json.loads(content.json()["text"]) == {"query": query}
+            assert request_item["content_bytes"] == content.json()["content_bytes"]
+            assert len(content.json()["text"].encode("utf-8")) == content.json()[
+                "content_bytes"
+            ]
+
+    run(exercise)
+
+
 def test_history_cursor_is_stable_strict_and_uses_uuid_tie_breaks() -> None:
     async def exercise() -> None:
         store = InMemoryTranscriptStore()
@@ -442,9 +486,8 @@ def test_corrupt_items_remain_visible_and_missing_fulltext_is_not_empty() -> Non
             content = await client.get(
                 f"{BASE}/{run_id}/transcript/{candidate.created_item_id}/content?view=history"
             )
-            assert content.status_code == 200
-            assert content.json()["text"] == "{"
-            assert content.json()["issues"]
+            assert content.status_code == 500
+            assert content.json()["error"]["code"] == "transcript_content_unreadable"
 
             store._contents.pop(item.item_id)
             unreadable = await client.get(

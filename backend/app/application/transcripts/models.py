@@ -3,6 +3,7 @@ from typing import Annotated, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import (
+    AfterValidator,
     Field,
     SerializeAsAny,
     StrictBool,
@@ -25,8 +26,20 @@ DEFAULT_INLINE_CONTENT_BYTES = 64 * 1024
 DEFAULT_PREVIEW_BYTES = 1024
 
 
+def _reject_nul_character(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("query must not contain NUL characters")
+    return value
+
+
+AnalysisQuery: TypeAlias = Annotated[
+    NonEmptyString,
+    AfterValidator(_reject_nul_character),
+]
+
+
 class AnalysisRequestV1(DomainModel):
-    query: NonEmptyString
+    query: AnalysisQuery
     time_resolution: TimeResolution | None = None
 
     @model_validator(mode="before")

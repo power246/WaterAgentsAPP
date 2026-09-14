@@ -49,6 +49,18 @@ MessageFinalizer = Callable[[str, GenerationStatus, MessageEndReason | None], ob
 ErrorExtractor = Callable[[object], tuple[UUID, ...]]
 
 
+def _serialize_safe_json(
+    value: object,
+    private_values: tuple[str, ...] = (),
+) -> str:
+    return json.dumps(
+        redact(value, private_values),
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    )
+
+
 def _no_references(body: object) -> tuple[UUID, ...]:
     del body
     return ()
@@ -142,13 +154,7 @@ class TranscriptRegistry:
             mode="json",
             exclude_unset=registration.preserve_unset,
         )
-        safe_value = redact(serialized, private_values)
-        safe_body = json.dumps(
-            safe_value,
-            ensure_ascii=False,
-            allow_nan=False,
-            separators=(",", ":"),
-        )
+        safe_body = _serialize_safe_json(serialized, private_values)
         safe_model = registration.adapter.validate_json(safe_body)
         references = registration.references(safe_model)
         if len(references) != len(set(references)):
@@ -162,6 +168,28 @@ class TranscriptRegistry:
             metadata=registration.metadata(safe_model),
             visibility=registration.visibility(safe_model),
         )
+
+    def safe_read_body(
+        self,
+        content_type: str,
+        content_schema_version: int,
+        body: str,
+    ) -> str:
+        registration = self._registrations.get(
+            (content_type, content_schema_version)
+        )
+        decoded = json.loads(body)
+        if registration is not None:
+            validated = registration.adapter.validate_python(decoded)
+            decoded = registration.adapter.dump_python(
+                validated,
+                mode="json",
+                exclude_unset=registration.preserve_unset,
+            )
+        safe_body = _serialize_safe_json(decoded)
+        if registration is not None:
+            registration.adapter.validate_json(safe_body)
+        return safe_body
 
     def parse(
         self,

@@ -438,6 +438,18 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
     run(exercise)
 
 
+def test_nul_query_is_a_stable_validation_error_before_persistence() -> None:
+    async def exercise() -> None:
+        async with http_application() as (app, client):
+            response = await client.post(BASE, json={"query": "lake\x00level"})
+            envelope = assert_error(response, 422, "validation_error")
+            assert envelope.validation[0].field == ("body", "query")
+            assert envelope.validation[0].type == "value_error"
+            assert app.state.run_coordinator._runs == {}
+
+    run(exercise)
+
+
 @pytest.mark.parametrize("running", [False, True])
 def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO, logger="wateragents.analysis_runs")
@@ -760,6 +772,15 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     assert create["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisRunResponse")
     assert create["requestBody"]["required"] is True
     assert create["requestBody"]["content"]["application/json"]["schema"]["$ref"].endswith("/CreateAnalysisRunRequest")
+    idempotency_key = next(
+        parameter for parameter in create["parameters"]
+        if parameter["name"] == "Idempotency-Key"
+    )
+    assert idempotency_key["schema"]["format"] == "uuid"
+    assert idempotency_key["schema"]["pattern"] == (
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-"
+        r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    )
     cancel = paths[BASE + "/{run_id}/cancel"]["post"]
     assert "requestBody" not in cancel
     history = paths[BASE]["get"]
@@ -787,10 +808,11 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     assert set(schema["components"]["schemas"]["CreateAnalysisRunRequest"]["properties"]) == {"query", "time_resolution"}
     assert "HTTPValidationError" not in schema["components"]["schemas"]
     session_events = paths[BASE + "/{run_id}/sessions/{session_id}/events"]["get"]
-    assert any(
-        parameter["in"] == "header" and parameter["name"] == "Last-Event-ID"
-        for parameter in session_events["parameters"]
+    last_event_id = next(
+        parameter for parameter in session_events["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Last-Event-ID"
     )
+    assert last_event_id["schema"]["pattern"] == r"^[0-9]+$"
     assert "/api/analysis/sessions" not in paths
     for path in paths.values():
         for operation in path.values():

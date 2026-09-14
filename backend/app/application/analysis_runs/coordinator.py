@@ -77,6 +77,7 @@ from app.application.transcripts.buffer import (
     TranscriptBuffer,
 )
 from app.application.transcripts.models import (
+    AnalysisQuery,
     AnalysisRequestV1,
     ContentVisibility,
     GenerationStatus,
@@ -115,7 +116,7 @@ from app.ports.clock import ClockPort
 from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
-_QUERY = TypeAdapter(NonEmptyString)
+_QUERY = TypeAdapter(AnalysisQuery)
 _ROLE = TypeAdapter(AgentRole)
 _COMID = TypeAdapter(NonEmptyString)
 _RUN_TRANSITIONS = {

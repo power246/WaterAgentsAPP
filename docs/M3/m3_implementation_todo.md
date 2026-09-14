@@ -406,10 +406,10 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] 读取侧不再对序列化 JSON 整体执行 plain-text 正则；解析 JSON 后递归安全复核并按 registry 的规范格式重编码，无法解析时诚实返回 corrupt/unreadable。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
-- [ ] create query 在 HTTP/应用输入边界拒绝 PostgreSQL TEXT 无法保存的 NUL 字符并返回稳定 4xx，不包装成可重试数据库 503。（[API §2](m3_transcript_history_api.md#2-创建与幂等)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
-- [ ] OpenAPI 表达 `Idempotency-Key` 的 UUID v4 和 `Last-Event-ID` 的 ASCII 十进制约束，同时保持既定错误响应语义。（[API §2](m3_transcript_history_api.md#2-创建与幂等)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
-- [ ] 增加含 `Authorization:` 字样的合法 JSON 在 list/detail/full-content 的往返测试、NUL 输入测试和 OpenAPI schema 断言，确保结构、字节数和错误分类一致。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 读取侧不再对序列化 JSON 整体执行 plain-text 正则；解析 JSON 后递归安全复核并按 registry 的规范格式重编码，无法解析时诚实返回 corrupt/unreadable。（[设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
+- [x] create query 在 HTTP/应用输入边界拒绝 PostgreSQL TEXT 无法保存的 NUL 字符并返回稳定 4xx，不包装成可重试数据库 503。（[API §2](m3_transcript_history_api.md#2-创建与幂等)；[API §7](m3_transcript_history_api.md#7-错误与排查字段)）
+- [x] OpenAPI 表达 `Idempotency-Key` 的 UUID v4 和 `Last-Event-ID` 的 ASCII 十进制约束，同时保持既定错误响应语义。（[API §2](m3_transcript_history_api.md#2-创建与幂等)；[API §5.4](m3_transcript_history_api.md#54-游标与结束)）
+- [x] 增加含 `Authorization:` 字样的合法 JSON 在 list/detail/full-content 的往返测试、NUL 输入测试和 OpenAPI schema 断言，确保结构、字节数和错误分类一致。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：历史可诚实读取全部已保存事实，当前与历史只有来源/可见性差异，没有重复实现。
 
@@ -422,6 +422,9 @@ git diff --check
 - 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55462 ... backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：446 passed，真实 PostgreSQL 测试未跳过。
 - 完整回归：同一隔离 PostgreSQL 下 `backend/.venv/bin/python -m pytest backend/tests -q`：754 passed；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 - 契约结论：live 故障隔离、历史一致性、完整过程/引用、全文归属、安全错误、游标稳定性与取消/补写各分支均有可执行测试；两层 SSE、消息生命周期、启动遗留修复与清理继续由 Milestone 7–8 承接。
+- 审查回补聚焦验证：`backend/.venv/bin/python -m pytest backend/tests/api/test_analysis_history.py backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_events.py backend/tests/application/test_run_creation.py backend/tests/application/test_transcript_registry.py -q`：134 passed；覆盖结构化安全复核、NUL 边界及 OpenAPI header 约束。
+- 审查回补指定验证：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：446 passed，无 skip。
+- 审查回补完整回归：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests -q`：755 passed，无 skip；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 
 ## Milestone 7：两层 SSE、消息生命周期与续传
 

@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.exc import OperationalError
 
 from app.application.analysis_runs.coordinator import RunCoordinator
@@ -151,6 +152,21 @@ def test_creation_candidate_has_exact_atomic_facts_and_immutable_receipt() -> No
             assert context.query == "lake"
         finally:
             workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_creation_rejects_nul_query_before_persistence() -> None:
+    async def exercise() -> None:
+        store = RecordingStore()
+        coordinator = coordinator_for(store)
+        try:
+            with pytest.raises(ValidationError):
+                await coordinator.create_run(b'{"query":"lake\\u0000level"}')
+            assert store.candidates == []
+            assert coordinator._runs == {}
+        finally:
             await coordinator.shutdown()
 
     run(exercise)

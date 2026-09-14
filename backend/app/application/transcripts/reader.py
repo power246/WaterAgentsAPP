@@ -43,7 +43,6 @@ from app.application.transcripts.read_models import (
     TranscriptScope,
     UnparsedTranscriptContent,
 )
-from app.application.transcripts.redaction import redact_text
 from app.application.transcripts.registry import TranscriptRegistry
 from app.domain.common import normalize_utc_datetime
 from app.ports.errors import PortError
@@ -268,16 +267,16 @@ class TranscriptReader:
             for candidate in selected.stored.items
             if candidate.item_id == item_id
         )
-        text = self._body(selected.stored, stored_item)
-        if text is None:
+        checked = self._checked_body(selected.stored, stored_item)
+        if checked is None or item.parse_status is ParseStatus.CORRUPT:
             raise TranscriptContentUnreadableError(run_id, item_id)
-        text = redact_text(text)
+        safe_item, text = checked
         return TranscriptContentResponse(
             run_id=run_id,
             item_id=item_id,
-            content_type=item.item.content_type,
-            content_schema_version=item.item.content_schema_version,
-            content_bytes=item.item.content_bytes,
+            content_type=safe_item.content_type,
+            content_schema_version=safe_item.content_schema_version,
+            content_bytes=safe_item.content_bytes,
             text=text,
             source=selected.source,
             persistence=selected.persistence,
@@ -462,8 +461,8 @@ class TranscriptReader:
             stored.items,
             key=lambda candidate: candidate.transcript_sequence,
         ):
-            body = self._body(stored, item)
-            if body is None:
+            checked = self._checked_body(stored, item)
+            if checked is None:
                 parsed.append(ReadTranscriptItem(
                     item=item,
                     content_ref={"run_id": item.run_id, "item_id": item.item_id},
@@ -474,14 +473,31 @@ class TranscriptReader:
                     ),
                 ))
             else:
-                safe_body = redact_text(body)
-                safe_item = self._safe_item(item, body, safe_body)
+                safe_item, safe_body = checked
                 parsed.append(self._registry.parse(
                     safe_item,
                     safe_body,
                     error_id_factory=self._error_id_factory,
                 ))
         return tuple(parsed)
+
+    def _checked_body(
+        self,
+        stored: StoredRunRead,
+        item: StoredTranscriptItem,
+    ) -> tuple[StoredTranscriptItem, str] | None:
+        body = self._body(stored, item)
+        if body is None or len(body.encode("utf-8")) != item.content_bytes:
+            return None
+        try:
+            safe_body = self._registry.safe_read_body(
+                item.content_type,
+                item.content_schema_version,
+                body,
+            )
+        except (TypeError, ValueError):
+            return None
+        return self._safe_item(item, body, safe_body), safe_body
 
     def _safe_item(
         self,
