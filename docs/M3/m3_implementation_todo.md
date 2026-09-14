@@ -303,9 +303,9 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [ ] `create_run` 除明确幂等冲突和任务取消外，所有无法证明事务回滚的连接/驱动异常均进入原候选核实；已提交创建必须注册 live runtime 并且只启动一次 workflow。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] `verify_creation` 按 expected item identity 重排或映射外置正文，不依赖随机 UUID 的 SQL 排序与 transcript 顺序偶然一致。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [ ] 故障注入覆盖“提交成功后抛 `OSError`/驱动连接异常”、确认回滚和核实暂时不可用；真实 PostgreSQL 覆盖小 inline 阈值及逆序 UUID 的创建核实。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] `create_run` 除明确幂等冲突和任务取消外，所有无法证明事务回滚的连接/驱动异常均进入原候选核实；已提交创建必须注册 live runtime 并且只启动一次 workflow。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] `verify_creation` 按 expected item identity 重排或映射外置正文，不依赖随机 UUID 的 SQL 排序与 transcript 顺序偶然一致。（[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
+- [x] 故障注入覆盖“提交成功后抛 `OSError`/驱动连接异常”、确认回滚和核实暂时不可用；真实 PostgreSQL 覆盖小 inline 阈值及逆序 UUID 的创建核实。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：创建路由的持久化保证成立，测试证明数据库唯一性和一次执行，不能仅依赖内存 map。
 
@@ -317,6 +317,10 @@ git diff --check
 - 指定验证：`WATERAGENTS_TEST_POSTGRES_PORT=55433 ... backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：417 passed，真实 PostgreSQL 测试未跳过。
 - 完整回归：`WATERAGENTS_TEST_POSTGRES_PORT=55433 ... backend/.venv/bin/python -m pytest backend/tests -q`：721 passed。
 - 契约结论：Milestone 4 的创建事务、原 bytes 幂等、DB UNIQUE 竞争、未知提交收敛、断连/超时所有权和一次执行在本机真实 PostgreSQL 上满足；无 key 请求的网络重发明确不保证去重。增量 writer、统一历史读取、两层 SSE、启动遗留修复和三平台远端证据仍分别归 Milestone 5–10。
+- 审查回补故障注入：`backend/.venv/bin/python -m pytest backend/tests/application/test_run_creation.py -q`：14 passed；覆盖提交后 timeout、`OSError`、SQLAlchemy 驱动异常，确认回滚及核实暂时不可用。
+- 审查回补 PostgreSQL 验证：`backend/.venv/bin/python -m pytest backend/tests/persistence/test_postgres_persistence.py -q`：12 passed；小 inline 阈值与逆序 UUID 用例强制两份创建正文外置并完成未知提交核实。
+- 审查回补指定验证：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests/api backend/tests/application backend/tests/persistence -q`：439 passed，无 skip。
+- 审查回补完整回归：在同一隔离 PostgreSQL 下运行 `backend/.venv/bin/python -m pytest backend/tests -q`：748 passed，无 skip；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
 
 ## Milestone 5：串行写入、确认集合与有限补写
 

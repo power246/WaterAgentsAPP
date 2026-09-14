@@ -577,13 +577,11 @@ class RunCoordinator:
         try:
             try:
                 result = await self._transcript_store.create_run(candidate)
-            except TimeoutError:
-                owner.commit_unconfirmed.set()
-                result = await self._verify_unknown_creation(candidate)
             except IdempotencyKeyConflictError:
                 raise
-            except Exception as error:
-                raise CreationPersistenceUnavailableError() from error
+            except Exception:
+                owner.commit_unconfirmed.set()
+                result = await self._verify_unknown_creation(candidate)
             if result.disposition is RunCreationDisposition.CREATED:
                 if result.creation.run_id != candidate.snapshot.run_id:
                     raise CreationPersistenceUnavailableError()

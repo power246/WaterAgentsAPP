@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.creation import (
@@ -58,14 +59,22 @@ class GatedStore(RecordingStore):
 
 
 class LostCommitStore(RecordingStore):
-    def __init__(self, *, verification_gate: asyncio.Event | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        creation_error: Exception | None = None,
+        verification_gate: asyncio.Event | None = None,
+    ) -> None:
         super().__init__()
+        self.creation_error = creation_error or TimeoutError(
+            "commit response was lost"
+        )
         self.verification_gate = verification_gate
         self.verify_calls = 0
 
     async def create_run(self, candidate: RunCreationCandidate):
         await super().create_run(candidate)
-        raise TimeoutError("commit response was lost")
+        raise self.creation_error
 
     async def verify_creation(self, candidate: RunCreationCandidate):
         self.verify_calls += 1
@@ -77,7 +86,7 @@ class LostCommitStore(RecordingStore):
 class RolledBackStore(RecordingStore):
     async def create_run(self, candidate: RunCreationCandidate):
         self.candidates.append(candidate)
-        raise TimeoutError("commit outcome was initially unknown")
+        raise OSError("connection closed before commit was confirmed")
 
     async def verify_creation(self, candidate: RunCreationCandidate):
         return None
@@ -200,19 +209,38 @@ def test_in_process_owner_rejects_different_bytes_before_a_second_write() -> Non
     run(exercise)
 
 
-def test_lost_commit_response_is_verified_without_rewrite() -> None:
+@pytest.mark.parametrize(
+    "creation_error",
+    (
+        TimeoutError("commit response was lost"),
+        OSError("connection closed after commit"),
+        OperationalError(
+            "COMMIT",
+            {},
+            OSError("driver connection closed after commit"),
+        ),
+    ),
+    ids=("timeout", "oserror", "driver-error"),
+)
+def test_uncertain_commit_errors_are_verified_without_rewrite(
+    creation_error: Exception,
+) -> None:
     async def exercise() -> None:
-        store = LostCommitStore()
+        store = LostCommitStore(creation_error=creation_error)
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
+        key = uuid4()
+        body = b'{"query":"lake"}'
         try:
-            receipt = await coordinator.create_run(
-                b'{"query":"lake"}', idempotency_key=uuid4()
-            )
+            receipt = await coordinator.create_run(body, idempotency_key=key)
             context = await workflow.calls.get()
             assert context.run.run_id == receipt.run_id
+            replay = await coordinator.create_run(body, idempotency_key=key)
+            assert replay == receipt
+            assert workflow.calls.empty()
             assert len(store.candidates) == 1
             assert store.verify_calls == 1
+            assert len(coordinator._runs) == 1
         finally:
             workflow.release.set()
             await coordinator.shutdown()
@@ -223,7 +251,10 @@ def test_lost_commit_response_is_verified_without_rewrite() -> None:
 def test_unconfirmed_owner_survives_first_response_and_later_converges() -> None:
     async def exercise() -> None:
         verification_gate = asyncio.Event()
-        store = LostCommitStore(verification_gate=verification_gate)
+        store = LostCommitStore(
+            creation_error=OSError("connection closed after commit"),
+            verification_gate=verification_gate,
+        )
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(
             store,

@@ -121,7 +121,6 @@ class PostgresTranscriptStore:
                                     item.item_id for item in expected.items
                                 )
                             )
-                            .order_by(transcript_items.c.transcript_sequence)
                         )
                     ).mappings()
                 )
@@ -134,20 +133,33 @@ class PostgresTranscriptStore:
                                     content.item_id for content in expected.contents
                                 )
                             )
-                            .order_by(transcript_contents.c.item_id)
                         )
                     ).mappings()
                 )
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise CreationVerificationUnavailableError() from error
+        item_rows_by_id = {row["item_id"]: row for row in item_rows}
+        content_rows_by_id = {row["item_id"]: row for row in content_rows}
+        expected_item_ids = {item.item_id for item in expected.items}
+        expected_content_ids = {content.item_id for content in expected.contents}
+        if (
+            set(item_rows_by_id) != expected_item_ids
+            or set(content_rows_by_id) != expected_content_ids
+        ):
+            raise ValueError("stored creation differs from the submitted candidate")
         actual = PersistenceBatch(
             runs=(type(expected.runs[0]).model_validate(dict(run_row)),),
             items=tuple(
-                type(expected.items[0]).model_validate(dict(row)) for row in item_rows
+                type(expected.items[0]).model_validate(
+                    dict(item_rows_by_id[item.item_id])
+                )
+                for item in expected.items
             ),
             contents=tuple(
-                type(expected.contents[0]).model_validate(dict(row))
-                for row in content_rows
+                type(expected.contents[0]).model_validate(
+                    dict(content_rows_by_id[content.item_id])
+                )
+                for content in expected.contents
             ) if expected.contents else (),
         )
         if actual != expected:

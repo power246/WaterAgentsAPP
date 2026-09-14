@@ -12,7 +12,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.application.analysis_runs.coordinator import RunCoordinator
-from app.application.analysis_runs.creation import IdempotencyKeyConflictError
+from app.application.analysis_runs.creation import (
+    CreationCommitUnconfirmedError,
+    IdempotencyKeyConflictError,
+    RunCreationCandidate,
+)
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -397,6 +401,71 @@ def test_concurrent_coordinators_use_database_key_authority_and_execute_once(
             await asyncio.gather(
                 *(coordinator.shutdown() for coordinator in coordinators)
             )
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_creation_verification_maps_external_content_by_expected_item_id(
+    postgres_settings: AppSettings,
+) -> None:
+    class LostCreateResponseStore(PostgresTranscriptStore):
+        async def create_run(self, candidate: RunCreationCandidate):
+            await super().create_run(candidate)
+            raise OSError("connection closed after commit")
+
+    class Clock:
+        def now(self) -> datetime:
+            return datetime.now(UTC)
+
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise() -> None:
+        engine = create_database_engine(postgres_settings)
+        store = LostCreateResponseStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        workflow = Workflow()
+        record_ids = iter(UUID(int=value) for value in (2, 1, 3, 4, 5, 6, 7, 8))
+        coordinator = RunCoordinator(
+            Clock(),
+            transcript_store=store,
+            workflow=workflow,
+            record_id_factory=record_ids.__next__,
+            inline_content_bytes=1,
+            preview_bytes=1,
+            shutdown_grace_period=0,
+        )
+        key = uuid4()
+        body = b'{"query":"external creation content"}'
+        try:
+            try:
+                receipt = await coordinator.create_run(body, idempotency_key=key)
+            except CreationCommitUnconfirmedError:
+                receipt = await coordinator.create_run(body, idempotency_key=key)
+            context = await workflow.calls.get()
+            assert context.run.run_id == receipt.run_id
+            replay = await coordinator.create_run(body, idempotency_key=key)
+            assert replay == receipt
+            assert workflow.calls.empty()
+
+            stored = await store.read_run(receipt.run_id)
+            assert stored is not None
+            assert [item.item_id for item in stored.items] == [UUID(int=2), UUID(int=1)]
+            assert all(item.inline_body is None for item in stored.items)
+            assert len(stored.contents) == 2
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
             await engine.dispose()
 
     asyncio.run(exercise())
