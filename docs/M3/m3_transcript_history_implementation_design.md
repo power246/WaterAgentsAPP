@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-状态：设计已定稿，Milestone 0–9 已完成本机实现与适用验证，三平台实际 CI/跨系统迁移证据仍为 partial，Milestone 10 待实施。本文把已经确认的 D01–D86 收敛为可执行的工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。
+状态：设计已定稿，Milestone 0–10 已完成本机实现、契约审计与适用验证；三平台实际 CI/跨系统迁移证据仍为 partial，中心最终承接暂不登记 `implemented`。本文把已经确认的 D01–D86 收敛为可执行的工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -454,3 +454,5 @@ uv.lock 能描述操作系统、架构和 Python 条件下的依赖选择；本�
 M3 完成需同时满足：四表与环境可搭建；已保存事实可重启读取；创建/取消/补写/唯一终态保证成立；用户能完整读取任一实际 session 和原公共引用；实时两层流与三阶段消息不重复写正文；凭据不进入可见流；中心 M3-C01–C20 和 M3-A01–A12 有实际实现与验证证据。
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
+
+Milestone 10 已逐项审计 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并把 M4/M6/M7/M8/产品 M9 的接入边界和可观察验收登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)。本机完成标准已满足；中心最终验收仍由 GLOBAL-C11 阻塞，待 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据齐备后再登记 `implemented`。
