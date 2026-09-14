@@ -132,7 +132,7 @@ async def check_database_schema(
         async with asyncio.timeout(settings.db_operation_timeout_seconds):
             async with active_engine.connect() as connection:
                 table_name = await connection.scalar(
-                    text("SELECT to_regclass('public.alembic_version')")
+                    text("SELECT to_regclass('alembic_version')")
                 )
                 if table_name is None:
                     raise MissingSchemaError(

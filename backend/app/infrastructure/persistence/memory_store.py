@@ -160,6 +160,24 @@ class InMemoryTranscriptStore:
                 return None
             return self._read_run(run_id, summary_only=False)
 
+    async def list_interrupted_run_ids(self) -> tuple[UUID, ...]:
+        async with self._lock:
+            run_ids = {
+                run_id
+                for run_id, snapshot in self._run_snapshots.items()
+                if snapshot.status.value in {"pending", "running"}
+            }
+            run_ids.update(
+                item.run_id
+                for item in self._items.values()
+                if item.session_id in {
+                    session.session_id
+                    for session in self._sessions.values()
+                    if session.status.value in {"pending", "running"}
+                }
+            )
+            return tuple(sorted(run_ids))
+
     def _mutation_evidence(self, batch: PersistenceWriteBatch) -> list[bool]:
         evidence: list[bool] = []
         if batch.run_mutations:

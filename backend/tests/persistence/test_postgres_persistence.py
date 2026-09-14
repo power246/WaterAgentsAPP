@@ -1,5 +1,5 @@
 import asyncio
-import os
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -16,6 +16,7 @@ from app.application.analysis_runs.creation import IdempotencyKeyConflictError
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
+    RunStatus,
     SessionStateMutation,
     SessionSummary,
     TranscriptItemIdentity,
@@ -47,27 +48,14 @@ from app.infrastructure.persistence.schema import (
     transcript_contents,
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
+from app.main import create_app
+from scripts.test_database import temporary_migrated_schema
 
 
 @pytest.fixture(scope="module")
-def postgres_settings() -> AppSettings:
-    port = os.environ.get("WATERAGENTS_TEST_POSTGRES_PORT")
-    if port is None:
-        pytest.skip("set WATERAGENTS_TEST_POSTGRES_PORT for real PostgreSQL tests")
-    return AppSettings(
-        _env_file=None,
-        db_host=os.environ.get("WATERAGENTS_TEST_POSTGRES_HOST", "127.0.0.1"),
-        db_port=int(port),
-        db_name=os.environ.get("WATERAGENTS_TEST_POSTGRES_DB", "wateragents_m2_pytest"),
-        db_user=os.environ.get("WATERAGENTS_TEST_POSTGRES_USER", "wateragents"),
-        db_password=os.environ.get("WATERAGENTS_TEST_POSTGRES_PASSWORD", "test-only"),
-        db_sslmode="disable",
-    )
-
-
-@pytest.fixture(scope="module", autouse=True)
-def migrated_postgres(postgres_settings: AppSettings) -> None:
-    assert upgrade_database(postgres_settings) == "20260913_01"
+def postgres_settings() -> Iterator[AppSettings]:
+    with temporary_migrated_schema() as settings:
+        yield settings
 
 
 def _item(
@@ -887,6 +875,95 @@ def test_postgres_history_queries_use_ordered_consistent_read_snapshots(
             await engine.dispose()
 
     asyncio.run(exercise())
+
+
+def test_lifespan_repairs_real_postgres_without_restarting_workflow() -> None:
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[tuple[WorkflowContext, asyncio.Event]] = (
+                asyncio.Queue()
+            )
+
+        async def run(self, context: WorkflowContext) -> None:
+            release = asyncio.Event()
+            self.calls.put_nowait((context, release))
+            await release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise(settings: AppSettings) -> None:
+        workflow = Workflow()
+        first_app = create_app(
+            settings,
+            workflow=workflow,
+            shutdown_grace_period=0,
+        )
+        async with first_app.router.lifespan_context(first_app):
+            coordinator = first_app.state.run_coordinator
+            interrupted = await coordinator.create_run(
+                b'{"query":"real PG interrupted"}'
+            )
+            await workflow.calls.get()
+            interrupted_session = await coordinator.prepare_agent_session(
+                interrupted.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                interrupted.run_id,
+                interrupted_session.session_id,
+            )
+            await _wait_persistence(coordinator, interrupted.run_id)
+
+            terminal_parent = await coordinator.create_run(
+                b'{"query":"terminal parent"}'
+            )
+            await workflow.calls.get()
+            terminal_child = await coordinator.prepare_agent_session(
+                terminal_parent.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="44001",
+            )
+            await coordinator.mark_agent_session_running(
+                terminal_parent.run_id,
+                terminal_child.session_id,
+            )
+            await coordinator.complete_run(terminal_parent.run_id)
+            await _wait_persistence(coordinator, terminal_parent.run_id)
+
+            first_store = first_app.state.transcript_store
+            before_interrupted = await first_store.read_run(interrupted.run_id)
+            before_terminal = await first_store.read_run(terminal_parent.run_id)
+            assert before_interrupted is not None and before_terminal is not None
+
+        second_app = create_app(settings, shutdown_grace_period=0)
+        async with second_app.router.lifespan_context(second_app):
+            store = second_app.state.transcript_store
+            repaired = await store.read_run(interrupted.run_id)
+            child_repaired = await store.read_run(terminal_parent.run_id)
+            assert repaired is not None and child_repaired is not None
+            assert repaired.run.status is RunStatus.FAILED
+            assert repaired.sessions[0].status is AgentSessionStatus.FAILED
+            assert child_repaired.run.status is RunStatus.COMPLETED
+            assert child_repaired.sessions[0].status is AgentSessionStatus.FAILED
+            assert repaired.run.created_at == before_interrupted.run.created_at
+            assert child_repaired.run.updated_at == before_terminal.run.updated_at
+            assert [item.transcript_sequence for item in repaired.items] == list(
+                range(1, len(repaired.items) + 1)
+            )
+            repaired_counts = (
+                len(repaired.items),
+                len(child_repaired.items),
+            )
+
+        third_app = create_app(settings, shutdown_grace_period=0)
+        async with third_app.router.lifespan_context(third_app):
+            store = third_app.state.transcript_store
+            repeated = await store.read_run(interrupted.run_id)
+            repeated_child = await store.read_run(terminal_parent.run_id)
+            assert repeated is not None and repeated_child is not None
+            assert (len(repeated.items), len(repeated_child.items)) == repaired_counts
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
 
 
 async def _count_items(engine: AsyncEngine, item_ids: tuple[UUID, ...]) -> int:

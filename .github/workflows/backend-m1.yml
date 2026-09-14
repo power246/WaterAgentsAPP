@@ -1,4 +1,4 @@
-name: Backend M1-M2
+name: Backend M1-M9
 
 on:
   push:
@@ -20,6 +20,14 @@ jobs:
           - ubuntu-latest
           - macos-latest
           - windows-latest
+    env:
+      WATERAGENTS_DB_HOST: 127.0.0.1
+      WATERAGENTS_DB_PORT: "5432"
+      WATERAGENTS_DB_NAME: wateragents_business_guard
+      WATERAGENTS_DB_USER: wateragents
+      WATERAGENTS_DB_PASSWORD: wateragents-ci-password
+      WATERAGENTS_DB_SSLMODE: disable
+      WATERAGENTS_TEST_DB_NAME: wateragents_m9
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,7 +39,7 @@ jobs:
           postgres-version: "17"
           username: wateragents
           password: wateragents-ci-password
-          database: wateragents_m2
+          database: wateragents_m9
           port: "5432"
       - uses: astral-sh/setup-uv@v6
         with:
@@ -40,12 +48,6 @@ jobs:
       - name: Install backend
         run: uv sync --project backend --extra dev --locked
       - name: Run complete test suite
-        env:
-          WATERAGENTS_TEST_POSTGRES_HOST: 127.0.0.1
-          WATERAGENTS_TEST_POSTGRES_PORT: "5432"
-          WATERAGENTS_TEST_POSTGRES_DB: wateragents_m2
-          WATERAGENTS_TEST_POSTGRES_USER: wateragents
-          WATERAGENTS_TEST_POSTGRES_PASSWORD: wateragents-ci-password
         run: uv run --project backend --locked python -m pytest backend/tests -q
       - name: Run Uvicorn health smoke test
         env:
@@ -54,10 +56,10 @@ jobs:
           ALL_PROXY: http://127.0.0.1:1
           NO_PROXY: ""
         run: uv run --project backend --locked python backend/scripts/health_smoke.py
-      - name: Run Uvicorn run and SSE smoke test
+      - name: Run Uvicorn run, SSE, restart, and history smoke test
         env:
           HTTP_PROXY: http://127.0.0.1:1
           HTTPS_PROXY: http://127.0.0.1:1
           ALL_PROXY: http://127.0.0.1:1
           NO_PROXY: ""
-        run: uv run --project backend --locked python backend/scripts/run_sse_smoke.py
+        run: uv run --project backend --locked python backend/scripts/run_history_smoke.py

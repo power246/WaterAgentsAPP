@@ -327,6 +327,26 @@ class PostgresTranscriptStore:
             ),
         )
 
+    async def list_interrupted_run_ids(self) -> tuple[UUID, ...]:
+        active_session_runs = select(analysis_sessions.c.run_id).where(
+            analysis_sessions.c.status.in_(("pending", "running"))
+        )
+        statement = (
+            select(analysis_runs.c.run_id)
+            .where(or_(
+                analysis_runs.c.status.in_(("pending", "running")),
+                analysis_runs.c.run_id.in_(active_session_runs),
+            ))
+            .order_by(analysis_runs.c.run_id)
+        )
+        try:
+            async with self._read_transaction() as connection:
+                return tuple((await connection.execute(statement)).scalars())
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError(
+                "interrupted analysis scan is unavailable"
+            ) from error
+
     async def commit_batch(self, batch: PersistenceBatch) -> None:
         # Re-validating here keeps callers from bypassing cross-table invariants via
         # model_construct. PostgreSQL CHECKs cannot assert existence in another table.

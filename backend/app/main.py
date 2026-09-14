@@ -20,12 +20,16 @@ from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceWriteBatch,
 )
+from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
 from app.infrastructure.config import AppSettings
 from app.infrastructure.observability.json_logging import configure_logging
-from app.infrastructure.persistence.database import create_database_engine
+from app.infrastructure.persistence.database import (
+    check_database_schema,
+    create_database_engine,
+)
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.ports.clock import ClockPort
@@ -60,55 +64,67 @@ def create_app(
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         configure_logging(resolved_settings.log_level)
         engine = None
-        active_store = transcript_store
-        if active_store is None:
-            engine = create_database_engine(resolved_settings)
-            active_store = PostgresTranscriptStore(
-                engine,
-                operation_timeout_seconds=(
+        coordinator = None
+        try:
+            active_store = transcript_store
+            if active_store is None:
+                engine = create_database_engine(resolved_settings)
+                await check_database_schema(resolved_settings, engine=engine)
+                active_store = PostgresTranscriptStore(
+                    engine,
+                    operation_timeout_seconds=(
+                        resolved_settings.db_operation_timeout_seconds
+                    ),
+                )
+            active_registry = transcript_registry or create_production_registry()
+            await repair_interrupted_runs(
+                active_store,
+                active_registry,
+                resolved_clock,
+                id_factory=record_id_factory,
+                inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
+                preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+            )
+            coordinator = RunCoordinator(
+                resolved_clock,
+                transcript_store=active_store,
+                analysis_timezone=resolved_settings.analysis_timezone,
+                workflow=workflow,
+                id_factory=id_factory,
+                record_id_factory=record_id_factory,
+                shutdown_grace_period=shutdown_grace_period,
+                shutdown_save_grace_period=(
+                    resolved_settings.shutdown_save_grace_seconds
+                ),
+                live_state_grace_period=resolved_settings.live_state_grace_seconds,
+                keepalive_interval=keepalive_interval,
+                idempotency_wait_timeout=(
+                    resolved_settings.idempotency_wait_timeout_seconds
+                ),
+                inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
+                preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+                persistence_batch_items=resolved_settings.persistence_batch_items,
+                persistence_attempt_timeout=(
                     resolved_settings.db_operation_timeout_seconds
                 ),
+                workflow_task_factory=workflow_task_factory,
+                transcript_registry=active_registry,
             )
-        active_registry = transcript_registry or create_production_registry()
-        coordinator = RunCoordinator(
-            resolved_clock,
-            transcript_store=active_store,
-            analysis_timezone=resolved_settings.analysis_timezone,
-            workflow=workflow,
-            id_factory=id_factory,
-            record_id_factory=record_id_factory,
-            shutdown_grace_period=shutdown_grace_period,
-            shutdown_save_grace_period=(
-                resolved_settings.shutdown_save_grace_seconds
-            ),
-            keepalive_interval=keepalive_interval,
-            idempotency_wait_timeout=(
-                resolved_settings.idempotency_wait_timeout_seconds
-            ),
-            inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
-            preview_bytes=resolved_settings.transcript_preview_bytes // 2,
-            persistence_batch_items=resolved_settings.persistence_batch_items,
-            persistence_attempt_timeout=(
-                resolved_settings.db_operation_timeout_seconds
-            ),
-            workflow_task_factory=workflow_task_factory,
-            transcript_registry=active_registry,
-        )
-        transcript_reader = TranscriptReader(
-            coordinator,
-            active_store,
-            active_registry,
-            error_id_factory=id_factory,
-            inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
-            preview_bytes=resolved_settings.transcript_preview_bytes // 2,
-        )
-        application.state.run_coordinator = coordinator
-        application.state.transcript_reader = transcript_reader
-        application.state.transcript_store = active_store
-        try:
+            transcript_reader = TranscriptReader(
+                coordinator,
+                active_store,
+                active_registry,
+                error_id_factory=id_factory,
+                inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
+                preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+            )
+            application.state.run_coordinator = coordinator
+            application.state.transcript_reader = transcript_reader
+            application.state.transcript_store = active_store
             yield
         finally:
-            await coordinator.shutdown()
+            if coordinator is not None:
+                await coordinator.shutdown()
             if engine is not None:
                 await engine.dispose()
 

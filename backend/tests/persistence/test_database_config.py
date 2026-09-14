@@ -44,6 +44,12 @@ def test_env_file_supports_unicode_space_paths_and_line_endings(
     tmp_path: Path,
     newline: str,
 ) -> None:
+    for name in (
+        "WATERAGENTS_DB_HOST",
+        "WATERAGENTS_DB_PASSWORD",
+        "WATERAGENTS_DB_SSLMODE",
+    ):
+        monkeypatch.delenv(name, raising=False)
     config_directory = tmp_path / "配置 with space"
     config_directory.mkdir()
     env_file = config_directory / ".env"

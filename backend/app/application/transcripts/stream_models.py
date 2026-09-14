@@ -142,6 +142,7 @@ class StreamingMessage:
     filter: StreamingCredentialFilter
     private_values: tuple[str, ...] = ()
     safe_text: str = ""
+    late_text: str = ""
 
 
 def snapshot_from_state(

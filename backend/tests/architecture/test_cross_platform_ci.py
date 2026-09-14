@@ -18,13 +18,15 @@ def test_ci_runs_install_tests_and_both_smokes_on_all_supported_operating_system
     assert "astral-sh/setup-uv@v6" in workflow
     assert "uv sync --project backend --extra dev --locked" in workflow
     assert "uv run --project backend --locked python -m pytest backend/tests -q" in workflow
-    assert "WATERAGENTS_TEST_POSTGRES_PORT" in workflow
+    assert "WATERAGENTS_TEST_DB_NAME" in workflow
+    assert "WATERAGENTS_DB_HOST" in workflow
+    assert "WATERAGENTS_TEST_POSTGRES" not in workflow
     assert (
         "uv run --project backend --locked python backend/scripts/health_smoke.py"
         in workflow
     )
     assert (
-        "uv run --project backend --locked python backend/scripts/run_sse_smoke.py"
+        "uv run --project backend --locked python backend/scripts/run_history_smoke.py"
         in workflow
     )
     assert "HTTP_PROXY: http://127.0.0.1:1" in workflow
@@ -47,7 +49,7 @@ def test_ci_commands_do_not_require_a_platform_specific_shell() -> None:
 def test_tests_and_direct_async_smoke_share_windows_loop_initialization() -> None:
     test_config = TEST_CONFIG_PATH.read_text(encoding="utf-8")
     direct_smoke = (
-        REPOSITORY_ROOT / "backend" / "scripts" / "run_sse_smoke.py"
+        REPOSITORY_ROOT / "backend" / "scripts" / "run_history_smoke.py"
     ).read_text(encoding="utf-8")
 
     for source in (test_config, direct_smoke):
@@ -128,3 +130,22 @@ def test_run_smoke_uses_dynamic_socket_and_cooperative_server_control() -> None:
     assert "trust_env=False" in source
     assert "workers=1" in source
     assert "sleep(" not in source
+
+
+def test_database_smokes_use_an_explicit_isolated_schema() -> None:
+    helper = (
+        REPOSITORY_ROOT / "backend" / "scripts" / "test_database.py"
+    ).read_text(encoding="utf-8")
+    history = (
+        REPOSITORY_ROOT / "backend" / "scripts" / "run_history_smoke.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WATERAGENTS_TEST_DB_NAME" in helper
+    assert "must differ from WATERAGENTS_DB_NAME" in helper
+    assert "CREATE SCHEMA" in helper
+    assert "DROP SCHEMA" in helper
+    assert "PGOPTIONS" in helper
+    assert "temporary_migrated_schema" in history
+    assert "trust_env=False" in (
+        REPOSITORY_ROOT / "backend" / "scripts" / "run_sse_smoke.py"
+    ).read_text(encoding="utf-8")

@@ -17,8 +17,10 @@ from app.application.transcripts.models import (
     ContentVisibility,
     FixtureMessageV1,
     LateMessageOutputFact,
+    GenerationStatus,
     LegacyLifecycleEventV1,
     MessageProjection,
+    MessageEndReason,
     ParseStatus,
     ReadTranscriptItem,
     ReferenceResolution,
@@ -43,6 +45,7 @@ ReferenceExtractor = Callable[[object], tuple[UUID, ...]]
 MetadataExtractor = Callable[[object], TranscriptMetadata]
 VisibilityExtractor = Callable[[object], ContentVisibility]
 MessageAdapter = Callable[[object], MessageProjection]
+MessageFinalizer = Callable[[str, GenerationStatus, MessageEndReason | None], object]
 ErrorExtractor = Callable[[object], tuple[UUID, ...]]
 
 
@@ -70,6 +73,7 @@ class ContentRegistration:
     metadata: MetadataExtractor = _default_metadata
     visibility: VisibilityExtractor = _auto_visibility
     message_adapter: MessageAdapter | None = None
+    message_finalizer: MessageFinalizer | None = None
     errors: ErrorExtractor = _no_references
     history_only_possible: bool = False
     writable: bool = True
@@ -105,6 +109,12 @@ class TranscriptRegistry:
             raise ValueError("content_schema_version must be positive")
         if registration.key in self._registrations:
             raise ValueError(f"duplicate transcript registration: {registration.key!r}")
+        if (registration.message_adapter is None) != (
+            registration.message_finalizer is None
+        ):
+            raise ValueError(
+                "message registrations require both an adapter and a finalizer"
+            )
         self._registrations[registration.key] = registration
 
     def copy_with(self, registration: ContentRegistration) -> "TranscriptRegistry":
@@ -263,6 +273,25 @@ class TranscriptRegistry:
         body = registration.adapter.validate_json(safe_body)
         return registration.message_adapter(body)
 
+    def finalized_message_body(
+        self,
+        content_type: str,
+        content_schema_version: int,
+        text: str,
+        generation_status: GenerationStatus,
+        end_reason: MessageEndReason | None,
+    ) -> object:
+        registration = self._registrations.get((content_type, content_schema_version))
+        if registration is None or registration.message_finalizer is None:
+            raise UnsupportedTranscriptContentError(
+                f"transcript type is not a message: {content_type} v{content_schema_version}"
+            )
+        return registration.message_finalizer(
+            text,
+            generation_status,
+            end_reason,
+        )
+
     def is_message_type(
         self,
         content_type: str,
@@ -380,12 +409,25 @@ def _fixture_message_adapter(body: object) -> MessageProjection:
     )
 
 
+def _fixture_message_finalizer(
+    text: str,
+    generation_status: GenerationStatus,
+    end_reason: MessageEndReason | None,
+) -> FixtureMessageV1:
+    return FixtureMessageV1(
+        text=text,
+        generation_status=generation_status,
+        end_reason=end_reason,
+    )
+
+
 def fixture_message_registration() -> ContentRegistration:
     return ContentRegistration(
         content_type="fixture_message",
         content_schema_version=1,
         adapter=TypeAdapter(FixtureMessageV1),
         message_adapter=_fixture_message_adapter,
+        message_finalizer=_fixture_message_finalizer,
     )
 
 

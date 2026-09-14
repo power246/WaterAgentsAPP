@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-**状态：Milestone 0–7 已完成本机实现与适用验证。** 创建、历史分页、统一详情/全文读取、取消、手动补写及 `run`/`session` 两层 SSE 以运行时 OpenAPI 和本文为准，旧整体 session 路径及过渡期 M2 生命周期流均未保留兼容别名。取消定稿/晚到审计、启动遗留修复与 live 清理由 Milestone 8 继续完成。
+**状态：Milestone 0–9 已完成本机实现与适用验证；三平台实际 CI 与跨系统迁移证据仍为 partial。** 创建、历史分页、统一详情/全文读取、取消、手动补写、`run`/`session` 两层 SSE、取消晚到审计、启动遗留修复与 live 清理以运行时 OpenAPI 和本文为准，旧整体 session 路径及过渡期 M2 生命周期流均未保留兼容别名。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
@@ -358,7 +358,7 @@ unsupported_content / transcript_content_corrupt 是成功读取中的逐 item p
 
 ## 8. 跨平台搭建与配置
 
-以下文件与命令是 **M3 实现交付要求，当前尚不可执行的新入口**。实现后需同步 `backend/README.md` 和锁文件；所有命令从仓库根运行。已有 PostgreSQL 跳过 Compose，设置同一组连接变量即可。
+以下文件与命令是当前已交付的 **M3 运行入口**；所有命令从仓库根运行。已有 PostgreSQL 可跳过 Compose，设置同一组连接变量即可。
 
 ### 8.1 环境变量
 
@@ -449,7 +449,7 @@ health 保持现有进程健康语义；启动阶段已通过数据库检查，�
 
 ### 8.5 更换操作系统或机器的最短流程
 
-目标是 macOS、Windows、Linux 共用同一份代码、配置模板、依赖锁和 schema；迁移只调整目标环境配置并重新安装依赖。下列步骤同样属于待实现的 M3 运行手册，不表示现在已完成跨系统验证。
+目标是 macOS、Windows、Linux 共用同一份代码、配置模板、依赖锁和 schema；迁移只调整目标环境配置并重新安装依赖。下列运行手册与三平台 CI 入口已实现，但没有三个远端目标系统依次接回同一数据库的本次实跑证据，因此跨系统验收仍为 partial。
 
 迁移前停止旧实例接收新分析。需要完整保留当次分析时，先确认 run 已结束、执行已收敛且必需写入全部保存（正常 run SSE 的 stream_end 可作为对应信号），再关闭旧后端；新后端启动前旧实例必须退出。尚未保存的内存不会随源码迁走，已保存非终态沿原 service_interrupted 规则处理。
 

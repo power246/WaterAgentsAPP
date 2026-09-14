@@ -80,6 +80,8 @@ from app.application.transcripts.models import (
     AnalysisRequestV1,
     ContentVisibility,
     GenerationStatus,
+    LateMessageOutputFact,
+    MessageEndReason,
     PersistenceRecoveredFact,
     TranscriptContentRef,
     TranscriptItem,
@@ -251,6 +253,7 @@ class RunCoordinator:
         persistence_retry_delays: tuple[float, ...] = (1, 2, 4, 8, 16),
         persistence_attempt_timeout: float = 5.0,
         completion_delivery_grace: float = 2.0,
+        live_state_grace_period: float = 60.0,
         persistence_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         transcript_registry: TranscriptRegistry | None = None,
     ) -> None:
@@ -289,6 +292,8 @@ class RunCoordinator:
             raise ValueError("persistence_attempt_timeout must be finite and positive")
         if not isfinite(completion_delivery_grace) or completion_delivery_grace < 0:
             raise ValueError("completion_delivery_grace must be finite and non-negative")
+        if not isfinite(live_state_grace_period) or live_state_grace_period < 0:
+            raise ValueError("live_state_grace_period must be finite and non-negative")
         self._clock = clock
         self._transcript_store = transcript_store
         self._analysis_timezone = analysis_timezone
@@ -328,6 +333,7 @@ class RunCoordinator:
         self._persistence_retry_delays = persistence_retry_delays
         self._persistence_attempt_timeout = persistence_attempt_timeout
         self._completion_delivery_grace = completion_delivery_grace
+        self._live_state_grace_period = live_state_grace_period
         self._persistence_sleep = persistence_sleep
 
     async def create_run(
@@ -629,6 +635,7 @@ class RunCoordinator:
             self._runs[run_id] = runtime
             closing = self._closing
         self._start_run_writer(runtime)
+        self._start_cleanup_monitor(runtime)
         self._log_run_transition(None, runtime.snapshot, prepared.event)
         if closing:
             await self._mark_quiesced(runtime)
@@ -675,6 +682,16 @@ class RunCoordinator:
         runtime.writer_task = task
         task.add_done_callback(
             lambda completed: self._writer_done(runtime, completed)
+        )
+
+    def _start_cleanup_monitor(self, runtime: RunRuntime) -> None:
+        task = asyncio.create_task(
+            self._monitor_live_state_cleanup(runtime),
+            name=f"analysis-run-cleanup-{runtime.snapshot.run_id}",
+        )
+        runtime.cleanup_task = task
+        task.add_done_callback(
+            lambda completed: self._cleanup_done(runtime, completed)
         )
 
     async def _await_creation(
@@ -1120,6 +1137,88 @@ class RunCoordinator:
         if error is not None:
             self._log_activity("persistence_writer_failed", runtime, exception=error)
 
+    def _cleanup_done(
+        self,
+        runtime: RunRuntime,
+        task: asyncio.Task[None],
+    ) -> None:
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            self._log_activity("live_state_cleanup_failed", runtime, exception=error)
+
+    async def _monitor_live_state_cleanup(self, runtime: RunRuntime) -> None:
+        loop = asyncio.get_running_loop()
+        while True:
+            async with runtime.condition:
+                if self._closing:
+                    return
+                if not self._cleanup_eligible_locked(runtime):
+                    runtime.cleanup_eligible_at = None
+                    await runtime.condition.wait()
+                    continue
+                if runtime.cleanup_eligible_at is None:
+                    runtime.cleanup_eligible_at = loop.time()
+                remaining = (
+                    runtime.cleanup_eligible_at
+                    + self._live_state_grace_period
+                    - loop.time()
+                )
+                if remaining > 0:
+                    try:
+                        async with asyncio.timeout(remaining):
+                            await runtime.condition.wait()
+                    except TimeoutError:
+                        pass
+                    continue
+            try:
+                if await self._release_live_state(runtime):
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                self._log_activity(
+                    "live_state_cleanup_failed",
+                    runtime,
+                    exception=error,
+                )
+                async with runtime.condition:
+                    runtime.cleanup_eligible_at = None
+                await asyncio.sleep(max(self._live_state_grace_period, 0.01))
+
+    def _cleanup_eligible_locked(self, runtime: RunRuntime) -> bool:
+        return bool(
+            runtime.snapshot.status not in _RUN_TRANSITIONS
+            and runtime.workflow_quiesced.is_set()
+            and not runtime.late_streaming_messages
+            and self._persistence_info_locked(runtime).state
+            is PersistenceState.UP_TO_DATE
+        )
+
+    async def _release_live_state(self, runtime: RunRuntime) -> bool:
+        async with self._runs_lock:
+            if self._runs.get(runtime.snapshot.run_id) is not runtime:
+                return True
+            async with runtime.condition:
+                eligible_at = runtime.cleanup_eligible_at
+                if (
+                    self._closing
+                    or eligible_at is None
+                    or not self._cleanup_eligible_locked(runtime)
+                    or asyncio.get_running_loop().time()
+                    < eligible_at + self._live_state_grace_period
+                ):
+                    return False
+                self._runs.pop(runtime.snapshot.run_id)
+                runtime.writer_stop.set()
+                runtime.writer_wakeup.set()
+        writer = runtime.writer_task
+        if writer is not None and not writer.done():
+            await writer
+        self._log_activity("live_state_cleaned", runtime)
+        return True
+
     async def shutdown(self) -> None:
         async with self._shutdown_lock:
             async with self._runs_lock:
@@ -1127,6 +1226,14 @@ class RunCoordinator:
                 creation_tasks = tuple(
                     task for task in self._creation_tasks if not task.done()
                 )
+                cleanup_tasks = tuple(
+                    runtime.cleanup_task
+                    for runtime in self._runs.values()
+                    if runtime.cleanup_task is not None
+                    and not runtime.cleanup_task.done()
+                )
+                for task in cleanup_tasks:
+                    task.cancel()
             if creation_tasks:
                 _, pending_creations = await asyncio.wait(
                     creation_tasks,
@@ -1146,6 +1253,8 @@ class RunCoordinator:
                     runtime.stop_requested.set()
                     for session in runtime.agent_sessions.values():
                         session.stop_requested.set()
+            if cleanup_tasks:
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
             if active:
                 _, pending = await asyncio.wait(
                     [task for _, _, task in active],
@@ -1292,6 +1401,8 @@ class RunCoordinator:
         async with runtime.condition:
             if runtime.workflow_quiesced.is_set():
                 return
+            for message in tuple(runtime.late_streaming_messages.values()):
+                self._finalize_late_message_locked(runtime, message)
             runtime.workflow_quiesced.set()
             runtime.condition.notify_all()
         self._log_activity("workflow_quiesced", runtime)
@@ -1699,7 +1810,12 @@ class RunCoordinator:
         async with runtime.condition:
             message = runtime.streaming_messages.get(item_key)
             if message is None:
-                raise ValueError("streamed transcript message is not active")
+                message = runtime.late_streaming_messages.get(item_key)
+                if message is None:
+                    raise ValueError("streamed transcript message is not active")
+                message.late_text += message.filter.feed(text)
+                runtime.condition.notify_all()
+                return ""
             safe_text = message.filter.feed(text)
             if safe_text:
                 self._append_message_delta_locked(runtime, message, safe_text)
@@ -1717,7 +1833,33 @@ class RunCoordinator:
         async with runtime.condition:
             message = runtime.streaming_messages.get(item_key)
             if message is None:
-                raise ValueError("streamed transcript message is not active")
+                message = runtime.late_streaming_messages.get(item_key)
+                if message is None:
+                    raise ValueError("streamed transcript message is not active")
+                encoded = self._registry.encode(
+                    message.content_type,
+                    message.content_schema_version,
+                    body,
+                    private_values=message.private_values,
+                )
+                projection = self._registry.message_projection(
+                    message.content_type,
+                    message.content_schema_version,
+                    encoded.safe_body,
+                )
+                if projection.generation_status is GenerationStatus.GENERATING:
+                    raise ValueError("a finalized transcript message cannot be generating")
+                safe_tail = message.filter.finish()
+                if safe_tail:
+                    message.late_text += safe_tail
+                observed = message.safe_text + message.late_text
+                if projection.text.startswith(observed):
+                    message.late_text += projection.text[len(observed):]
+                self._finalize_late_message_locked(runtime, message)
+                runtime.condition.notify_all()
+                return next(
+                    item for item in runtime.transcript_items if item.item_id == item_key
+                )
             identity = next(
                 item for item in runtime.transcript_items if item.item_id == item_key
             )
@@ -1794,6 +1936,84 @@ class RunCoordinator:
             )
             runtime.condition.notify_all()
             return identity
+
+    def _freeze_streaming_messages_locked(self, runtime: RunRuntime) -> None:
+        for message in tuple(runtime.streaming_messages.values()):
+            safe_tail = message.filter.cancel()
+            if safe_tail:
+                self._append_message_delta_locked(runtime, message, safe_tail)
+            identity = next(
+                item
+                for item in runtime.transcript_items
+                if item.item_id == message.item_id
+            )
+            body = self._registry.finalized_message_body(
+                message.content_type,
+                message.content_schema_version,
+                message.safe_text,
+                GenerationStatus.INCOMPLETE,
+                MessageEndReason.CANCELLED,
+            )
+            finalized = runtime.transcript_buffer.append(
+                identity,
+                message.content_type,
+                message.content_schema_version,
+                body,
+                private_values=message.private_values,
+            )
+            session_runtime = self._lookup_agent_session_locked(
+                runtime,
+                message.session_id,
+            )
+            session_runtime.process_events.append(MessageFinalizedProcessRecord(
+                sequence=len(session_runtime.process_events) + 1,
+                occurred_at=self._clock.now(),
+                item=finalized,
+                generation_status=GenerationStatus.INCOMPLETE,
+            ))
+            runtime.streaming_messages.pop(message.item_id)
+            runtime.late_streaming_messages[message.item_id] = message
+            self._enqueue_persistence_group_locked(
+                runtime,
+                item_ids=(message.item_id,),
+            )
+
+    def _finalize_late_message_locked(
+        self,
+        runtime: RunRuntime,
+        message: StreamingMessage,
+    ) -> None:
+        safe_tail = message.filter.finish()
+        if safe_tail:
+            message.late_text += safe_tail
+        if message.late_text:
+            original = next(
+                item
+                for item in runtime.transcript_items
+                if item.item_id == message.item_id
+            )
+            identity = self._reserve_transcript_item_locked(
+                runtime,
+                session_id=message.session_id,
+                request_id=original.request_id,
+                operation_id=original.operation_id,
+                created_at=self._clock.now(),
+            )
+            runtime.transcript_buffer.append(
+                identity,
+                "runtime_fact",
+                1,
+                LateMessageOutputFact(
+                    original_item_id=message.item_id,
+                    text=message.late_text,
+                    end_reason=MessageEndReason.CANCELLED,
+                ),
+            )
+            self._enqueue_persistence_group_locked(
+                runtime,
+                item_ids=(identity.item_id,),
+            )
+        runtime.late_streaming_messages.pop(message.item_id, None)
 
     def _append_message_delta_locked(
         self,
@@ -2276,6 +2496,7 @@ class RunCoordinator:
             if resolved is RunStatus.CANCELLED:
                 runtime.cancel_requested.set()
                 runtime.stop_requested.set()
+                self._freeze_streaming_messages_locked(runtime)
                 for session_runtime in runtime.agent_sessions.values():
                     session_runtime.stop_requested.set()
                     if session_runtime.summary.status in _SESSION_TRANSITIONS:

@@ -75,9 +75,15 @@ class StreamingCredentialFilter:
             return ""
         output = self._drain(final=False)
         if self._mode == "normal" and self._pending:
-            output += REDACTED
+            candidate_start = self._candidate_start()
+            output += redact_text(
+                self._pending[:candidate_start],
+                self._private_values,
+            )
+            if candidate_start < len(self._pending):
+                output += REDACTED
+                self._mode = "token"
             self._pending = ""
-            self._mode = "token"
         elif self._mode != "normal":
             self._pending = ""
         return output
@@ -239,6 +245,13 @@ class StreamingCredentialFilter:
         return True
 
     def _safe_final_pending(self) -> str:
+        candidate_start = self._candidate_start()
+        safe = redact_text(self._pending[:candidate_start], self._private_values)
+        if candidate_start < len(self._pending):
+            safe += REDACTED
+        return safe
+
+    def _candidate_start(self) -> int:
         lowered = self._pending.lower()
         candidate_start = len(self._pending)
         for index in range(len(lowered)):
@@ -252,7 +265,4 @@ class StreamingCredentialFilter:
             if marker_candidate or private_candidate:
                 candidate_start = index
                 break
-        safe = redact_text(self._pending[:candidate_start], self._private_values)
-        if candidate_start < len(self._pending):
-            safe += REDACTED
-        return safe
+        return candidate_start

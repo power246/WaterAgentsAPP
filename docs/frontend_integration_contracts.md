@@ -4,14 +4,14 @@
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
-M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–7 的 HTTP 路径、DTO 与两层 SSE 后端契约已由运行时 OpenAPI、事件 fixture 和 smoke 验证；正式前端消费仍由 M9 实现。
+M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。M3 Milestone 0–9 的 HTTP 路径、DTO、取消/重启边界与两层 SSE 后端契约已由运行时 OpenAPI、事件 fixture 和本机 smoke 验证；正式前端消费仍由产品阶段 M9 实现。
 
 **领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
-| M3 transcript/history/idempotency/SSE | Milestone 0–7 已完成本机实现与验证 | HTTP 与两层 SSE 以运行时 OpenAPI、M3 API 指南和 raw frame fixture 为准；正式消费由 M9 接入。 |
+| M3 transcript/history/idempotency/SSE | M3 Milestone 0–9 已完成本机实现与验证；三平台实跑 partial | HTTP 与两层 SSE 以运行时 OpenAPI、M3 API 指南和 raw frame fixture 为准；正式消费由产品阶段 M9 接入。 |
 | M4–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -168,7 +168,7 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 
 ## 4. M3 接入约定与分阶段状态
 
-本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–7 已实现创建、统一 HTTP 读取、历史分页、取消、手动补写与实时两层 SSE；取消边界、启动修复、live 清理及后续能力仍按各自 Milestone 状态接入。已确认行为的变更须同步运行时 schema、对应设计与契约。
+本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。M3 Milestone 0–9 已实现创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、严格启动修复、live 清理与实时两层 SSE；后续产品能力仍按各自 Milestone 状态接入。已确认行为的变更须同步运行时 schema、对应设计与契约。
 
 ### 4.1 创建分析：Idempotency-Key
 
@@ -214,7 +214,7 @@ M3 的幂等记录不自动过期，随 run 历史保留。分析结束、服务
 
 - 页面刷新后的客户端 key 保存方式；格式与唯一范围已按 D34 确认。
 - 创建提交结果不确定、HTTP 中断的处理，以及前端 HTTP 重试次数和退避策略；同 key 等待上限及错误码已按 D35 确认。后端数据库补写的重试预算不等于前端 HTTP 重试预算。
-- M3 历史与实时 HTTP 读取 DTO 已在 Milestone 6 冻结；水体按 D64 定位、路径按 D65，列表仅支持 limit/cursor。Milestone 7 已实现 live 不存在时的 `410 live_state_gone` 与 history_url；Milestone 8 再实现正常 live 清理，见 4.6。基于 fetch 的统一客户端由 M9 实现，见 4.7。
+- M3 历史与实时 HTTP 读取 DTO 已在 Milestone 6 冻结；水体按 D64 定位、路径按 D65，列表仅支持 limit/cursor。M3 Milestone 7 实现 `410 live_state_gone` 与 history_url，Milestone 8 已补齐正常 live grace 清理，见 4.6。基于 fetch 的统一客户端由产品阶段 M9 实现，见 4.7。
 
 后续设计确认应同时更新本文与 M3 详细设计。已实现 HTTP 行为以运行时 OpenAPI 为准，两层 SSE 的帧与时序另以 M3 API 指南和可执行 fixture 为准。
 
