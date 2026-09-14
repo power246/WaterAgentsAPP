@@ -18,6 +18,7 @@ from app.application.transcripts.registry import (
     TranscriptRegistry,
     validate_references as validate_registered_references,
 )
+from app.application.transcripts.redaction import redact_tags
 
 
 class PendingTranscriptReferencesError(ValueError):
@@ -87,8 +88,15 @@ class TranscriptBuffer:
             private_values=private_values,
         )
         if metadata is not None:
+            metadata = TranscriptMetadata.model_validate(metadata)
             content = content.model_copy(
-                update={"metadata": TranscriptMetadata.model_validate(metadata)}
+                update={
+                    "metadata": metadata.model_copy(
+                        update={
+                            "tags": redact_tags(metadata.tags, private_values),
+                        },
+                    ),
+                },
             )
         if reserved_references is not None:
             validate_registered_references(

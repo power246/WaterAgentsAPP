@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 的本机实现、分支审查回补与适用验证已经完成；中心最终承接仍因 GLOBAL-C11 保持 `partial`，暂不登记 `implemented`。** Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果尚未取得。十一个阶段的历史命令、环境和影响面记录保留为当时证据，最新本机回归与协议审计见 Milestone 10 完成记录；三平台 PostgreSQL CI 入口只有在远端实际运行后才能补为通过，不能由 macOS 本机结果代替。
+**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11 已完成本机实现与适用验证，Milestone 12–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成流式 URL 状态机、取消引用依赖、retry/cleanup 原子性、corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
 
 ## 阶段与设计导航
 
@@ -23,8 +23,14 @@
 | [Milestone 8：取消、遗留修复、关闭与 live 清理](#milestone-8取消遗留修复关闭与-live-清理) | [设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理) | [API §6.1](m3_transcript_history_api.md#61-cancel)；[API §5.4](m3_transcript_history_api.md#54-游标与结束) |
 | [Milestone 9：完整集成、三平台 smoke 与运行手册](#milestone-9完整集成三平台-smoke-与运行手册) | [设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)；[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性) | [API §8.5](m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)；[API §9](m3_transcript_history_api.md#9-排障与验证) |
 | [Milestone 10：契约验收与后续交接](#milestone-10契约验收与后续交接) | [设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)；[设计 §1.2](m3_transcript_history_implementation_design.md#12-后续阶段承接) | [契约 §13](../deferred_milestone_contracts.md#13-承接记录)；[前端约定 §5](../frontend_integration_contracts.md#5-m4m9-的前端接力边界) |
+| [Milestone 11：认证凭据与公开 metadata 脱敏](#milestone-11认证凭据与公开-metadata-脱敏) | [设计 §5.2](m3_transcript_history_implementation_design.md#52-消息与元信息)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界) | [API §3.3](m3_transcript_history_api.md#33-transcriptitemview)；[前端约定 §4.4](../frontend_integration_contracts.md#44-history-与-transcript) |
+| [Milestone 12：单遍有界流式凭据与 URL 状态机](#milestone-12单遍有界流式凭据与-url-状态机) | [设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界) | [API §5.3](m3_transcript_history_api.md#53-session-过程与三个消息事件) |
+| [Milestone 13：取消时的引用依赖与持久化收敛](#milestone-13取消时的引用依赖与持久化收敛) | [设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)；[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计) | [API §6.1](m3_transcript_history_api.md#61-cancel) |
+| [Milestone 14：手动补写与 live cleanup 原子性](#milestone-14手动补写与-live-cleanup-原子性) | [设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理) | [API §6.2](m3_transcript_history_api.md#62-persistenceretry)；[API §7](m3_transcript_history_api.md#7-错误与排查字段) |
+| [Milestone 15：Corrupt item 的安全全文读取](#milestone-15corrupt-item-的安全全文读取) | [设计 §5.4](m3_transcript_history_implementation_design.md#54-未知版本与损坏)；[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源) | [API §4.4](m3_transcript_history_api.md#44-全文) |
+| [Milestone 16：权威文档同步与最终复审](#milestone-16权威文档同步与最终复审) | [设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力) | [后端架构骨架](../backend_architecture_skeleton.md)；[后端重构里程碑](../backend_refactor_milestones.md)；[契约 §13](../deferred_milestone_contracts.md#13-承接记录) |
 
-以下原任务内容与链接保留用于定位。各 Milestone 的历史完成记录不追溯改写；2026-09-14 审查回补项均在实现和对应测试实际通过后打勾。仍未取得的外部三平台证据继续保持未勾选。
+以下原任务内容与链接保留用于定位。Milestone 0–10 的历史完成记录不追溯改写；追加 Milestone 11–16 只在对应实现和测试实际通过后打勾。仍未取得的外部三平台证据继续保持未勾选。
 
 ## 执行原则
 
@@ -47,14 +53,14 @@
 - [ ] 全新 PostgreSQL 环境能独立初始化/升级，三个平台按文档搭建；启动严格检查并修复遗留后才接收请求。（[设计 §10.2](m3_transcript_history_implementation_design.md#102-配置与命令)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
 - [ ] 三系统分别作为迁移目标，用同版代码和锁安装运行；接回同一测试数据库后原身份、历史游标、回执与全文引用保持有效，不转移未保存内存或自动恢复 Agent。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；[API §8.5](m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)）
 - [x] 创建事务提交后才执行，同 key + 原 body 返回原 201 回执；任意无法证明回滚的提交异常都先核实，响应丢失、并发和未知提交都不会重复执行。（[设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)）
-- [x] 过程增量保存、同批原子、稳定身份及明确提交确认成立；生成中草稿不能被最大序号误判已保存，pending session 的创建核实不能误判终态引用。（[设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；[设计 §6.3](m3_transcript_history_implementation_design.md#63-原子提交超时与核实)）
-- [x] 有限补写、第三次失败后两秒的完成交付窗口、手动恢复和唯一业务终态相互独立；确定性坏引用不能杀死唯一 writer 并留下不可恢复 pending。（[设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)）
-- [x] 当前读取与严格历史共享 DTO/解析/全文实现；PG 故障时 live 可读，history 不混入内存，读取侧安全复核不能破坏合法 JSON。（[设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)）
-- [x] 只有 run 历史列表分页，任一实际 session 的完整过程与显式公共全文都可读取。（[设计 §7.2](m3_transcript_history_implementation_design.md#72-run-详情与-session-完整过程)；[设计 §7.4](m3_transcript_history_implementation_design.md#74-run-历史分页)）
-- [x] 两层 SSE、首次完整过程、整数续传、三阶段消息和明确 stream_end/410 成立；正文不逐帧重复落库，流式正文、最终正文与 metadata 保持一致。（[设计 §8.2](m3_transcript_history_implementation_design.md#82-session-过程)；[设计 §8.3](m3_transcript_history_implementation_design.md#83-续传握手与结束)）
-- [x] 取消即固定原生成中正文，晚到审计仅历史可见；凭据跨片段、取消边界和日志均不泄漏，通用在途结果也不能绕过取消边界。（[设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
-- [x] 只有终态、执行收敛、全部实际保存和完整 grace 后清理；workflow 失败和 session 取消同样收束活动消息，重启不自动恢复 Agent 或补造未保存内容。（[设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；[设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)）
-- [x] 中心全部适用契约有实现位置和重新验证证据，API、OpenAPI、前端约定、fixture 与运行时一致，未完成的跨平台验证或业务后续项准确登记。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)；[契约覆盖矩阵](#契约覆盖矩阵)）
+- [ ] 过程增量保存、同批原子、稳定身份及明确提交确认成立；生成中草稿不能被最大序号误判已保存，pending session 的创建核实不能误判终态引用。（追加验收：[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)）
+- [ ] 有限补写、第三次失败后两秒的完成交付窗口、手动恢复和唯一业务终态相互独立；确定性坏引用不能杀死唯一 writer 并留下不可恢复 pending。（追加验收：[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)）
+- [ ] 当前读取与严格历史共享 DTO/解析/全文实现；PG 故障时 live 可读，history 不混入内存，读取侧安全复核不能破坏合法 JSON。（追加验收：[Milestone 15](#milestone-15corrupt-item-的安全全文读取)）
+- [ ] 只有 run 历史列表分页，任一实际 session 的完整过程与显式公共全文都可读取。（追加验收：[Milestone 15](#milestone-15corrupt-item-的安全全文读取)）
+- [ ] 两层 SSE、首次完整过程、整数续传、三阶段消息和明确 stream_end/410 成立；正文不逐帧重复落库，流式正文、最终正文与 metadata 保持一致。（追加验收：[Milestone 11](#milestone-11认证凭据与公开-metadata-脱敏)；[Milestone 12](#milestone-12单遍有界流式凭据与-url-状态机)）
+- [ ] 取消即固定原生成中正文，晚到审计仅历史可见；凭据跨片段、取消边界和日志均不泄漏，通用在途结果也不能绕过取消边界。（追加验收：[Milestone 12](#milestone-12单遍有界流式凭据与-url-状态机)；[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)）
+- [ ] 只有终态、执行收敛、全部实际保存和完整 grace 后清理；workflow 失败和 session 取消同样收束活动消息，重启不自动恢复 Agent 或补造未保存内容。（追加验收：[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)）
+- [ ] 中心全部适用契约有实现位置和重新验证证据，API、OpenAPI、前端约定、fixture 与运行时一致，未完成的跨平台验证或业务后续项准确登记。（追加验收：[Milestone 16](#milestone-16权威文档同步与最终复审)）
 
 ## Milestone 0：基线、适用契约与工作区
 
@@ -259,9 +265,9 @@ git diff --check
 
 ### 审查回补（2026-09-14）
 
-- [x] 收紧静态脱敏语义：Authorization/header、敏感 key/assignment 和显式 private value 继续遮蔽，普通 `Basic water quality`、`Bearer population estimate` 等业务文本保持原样。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] 收紧静态脱敏语义：Authorization/header、敏感 key/assignment 和显式 private value 继续遮蔽；`Basic <token>`、`Bearer <token>` 采用安全优先语义，纯字母 token 也统一遮蔽，只有不构成认证 scheme 的普通文本保留。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
 - [x] typed content 在 finalize 边界校验引用属于同一 run 且目标已经 reserve；确定不存在或跨 run 的引用同步拒绝，不能先进入 buffer 再由后台 writer 发现。（[设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)）
-- [x] 增加普通 Basic/Bearer 文本、真实 Authorization/header/assignment、显式 private value 和非法/等待引用的边界测试，证明安全与业务正文均不被破坏。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 增加不构成认证 scheme 的单独 Basic/Bearer 词、真实 Authorization/header/assignment、显式 private value 和非法/等待引用边界测试；形如 `Basic <token>`、`Bearer <token>` 的文本按 Milestone 11 安全优先遮蔽。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
 
 阶段出口：一份安全原正文贯穿 live、存储和读取模型；registry 为后续生产方提供明确接入点。
 
@@ -596,46 +602,46 @@ git diff --check
 
 ### 契约覆盖矩阵
 
-下表逐项覆盖全部 M3 contract ID；同一行只合并共享实现边界与验收用例的条目。`本机已验证` 表示当前代码、focused/regression、真实 PostgreSQL 与正式进程 smoke 均有证据，但不等于中心最终 `implemented`；所有行仍共同等待 GLOBAL-C11 的三平台实际结果。
+下表逐项覆盖全部 M3 contract ID；同一行只合并共享实现边界与验收用例的条目。`追加修复待验证` 表示提交 `452749b` 后的审查 finding 已破坏该行的一项或多项保证，须完成所指 Milestone 后重新取得证据；`本机已验证` 只表示未被本轮 finding 推翻的本机保证。两者都不等于中心最终 `implemented`，所有行仍共同等待 GLOBAL-C11 的三平台实际结果。
 
 | 契约 | 状态 | 实现位置 | 重点测试位置 | 文档与剩余风险 |
 |---|---|---|---|---|
 | GLOBAL-C11 | partial | `backend/app/infrastructure/config/`、`runtime/event_loop.py`、`scripts/test_database.py`、两条 smoke、三平台 workflow | `test_cross_platform_ci.py`、`test_database_config.py`、两条 smoke | [设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)；缺 Ubuntu/macOS/Windows 远端实际 CI 与同库依次切换证据。 |
-| M3-C01 / M3-A01 | 本机已验证 | `application/transcripts/buffer.py`、`analysis_runs/persistence.py`、`infrastructure/persistence/schema.py`、`store.py` | `test_transcript_buffer.py`、`test_run_writer.py`、`test_postgres_persistence.py` | [设计 §3.1](m3_transcript_history_implementation_design.md#31-身份与顺序)；四表、live buffer、append-only item 与单份正文均有真实 PG 证据。 |
-| M3-C02 / M3-A02 | 本机已验证 | `application/transcripts/models.py`、`registry.py`、`reader.py` | `test_transcript_registry.py`、`test_run_models.py`、`test_analysis_history.py`、`test_m3_documented_protocol.py` | [设计 §5](m3_transcript_history_implementation_design.md#5-typed-content-与读取表示)；严格 registry、结构化安全复核与文档 golden 已重验。 |
+| M3-C01 / M3-A01 | 追加修复待验证 | `application/transcripts/buffer.py`、`analysis_runs/persistence.py`、`infrastructure/persistence/schema.py`、`store.py` | `test_transcript_buffer.py`、`test_run_writer.py`、`test_postgres_persistence.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；取消不能删除已成为合法引用目标的身份。 |
+| M3-C02 / M3-A02 | 追加修复待验证 | `application/transcripts/models.py`、`registry.py`、`reader.py` | `test_transcript_registry.py`、`test_run_models.py`、`test_analysis_history.py`、`test_m3_documented_protocol.py` | [Milestone 15](#milestone-15corrupt-item-的安全全文读取)；corrupt 解析状态不得阻断仍可安全取得的 JSON 全文。 |
 | M3-C03 / M3-C07 | 本机已验证 | `application/analysis_runs/models.py`、`coordinator.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_agent_session_models.py`、`test_agent_session_runtime.py`、`test_analysis_history.py`、`test_milestone8_runtime.py` | [设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；run 六态、session 五态及 workflow 父子终态收束已重验。 |
-| M3-C04 | 本机已验证 | `api/http/analysis_runs.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_analysis_history.py`、`test_analysis_runs.py`、`test_analysis_events.py`、`test_m3_documented_protocol.py` | [API §4](m3_transcript_history_api.md#4-get-读取接口)；读取安全、实际 OpenAPI 与公开错误码已重验。 |
-| M3-C05 / M3-C06 / M3-A03 | 本机已验证 | `application/transcripts/buffer.py`、`streaming.py`、`redaction.py`、`reader.py` | `test_transcript_buffer.py`、`test_streaming_redaction.py`、`test_analysis_history.py`、`test_json_logging.py` | [设计 §5.3](m3_transcript_history_implementation_design.md#53-单份正文与大内容)、[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)；跨 chunk 凭据与合法业务正文边界已重验。 |
-| M3-C08 | 本机已验证 | `application/analysis_runs/models.py`、`coordinator.py`、`creation.py`、`startup_repair.py` | `test_run_state_machine.py`、`test_run_creation.py`、`test_milestone8_runtime.py` | [设计 §6.1](m3_transcript_history_implementation_design.md#61-创建与所有权)；workflow 失败、返回与取消的 run/session 收束已重验。 |
+| M3-C04 | 追加修复待验证 | `api/http/analysis_runs.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_analysis_history.py`、`test_analysis_runs.py`、`test_analysis_events.py`、`test_m3_documented_protocol.py` | [Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)、[Milestone 15](#milestone-15corrupt-item-的安全全文读取)；retry 错误分类和全文响应须重新验证。 |
+| M3-C05 / M3-C06 / M3-A03 | 追加修复待验证 | `application/transcripts/buffer.py`、`streaming.py`、`redaction.py`、`reader.py` | `test_transcript_buffer.py`、`test_streaming_redaction.py`、`test_analysis_history.py`、`test_json_logging.py` | [Milestone 11](#milestone-11认证凭据与公开-metadata-脱敏)、[Milestone 12](#milestone-12单遍有界流式凭据与-url-状态机)；纯字母认证凭据、metadata 和跨取消边界须重验。 |
+| M3-C08 | 追加修复待验证 | `application/analysis_runs/models.py`、`coordinator.py`、`creation.py`、`startup_repair.py` | `test_run_state_machine.py`、`test_run_creation.py`、`test_milestone8_runtime.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；取消/失败终态及其 transcript 必须共同持久化收敛。 |
 | M3-C09 / M3-A04 | 本机已验证 | `application/analysis_runs/creation.py`、`coordinator.py`、`infrastructure/persistence/store.py`、创建路由 | `test_run_creation.py`、`test_analysis_runs.py`、`test_postgres_persistence.py`、run/history smoke | [API §2](m3_transcript_history_api.md#2-创建与幂等)；非超时提交未知、并发接管、原回执及外置正文顺序已重验。 |
-| M3-C10 / M3-A05 | 本机已验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/streaming.py`、`registry.py` | `test_milestone8_runtime.py`、`test_streaming_redaction.py`、`test_analysis_history.py` | [设计 §9.1](m3_transcript_history_implementation_design.md#91-原消息与晚到审计)；通用结果、消息定稿与单 session 取消边界已重验。 |
-| M3-C11 / M3-A07 | 本机已验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、`application/transcripts/reader.py` | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_events.py` | [设计 §6.4](m3_transcript_history_implementation_design.md#64-重试和交付窗口)；活动草稿、run 保存 warning、writer 退出与交付收敛已重验。 |
-| M3-C12 / M3-C13 / M3-A06 | 本机已验证 | `application/analysis_runs/coordinator.py`、`runtime.py`、`main.py` | `test_milestone8_runtime.py`、`test_run_workflow.py`、`test_run_writer.py`、两条 smoke | [设计 §6.5](m3_transcript_history_implementation_design.md#65-保存状态手动恢复与清理)；失败 quiescence、SSE 结束、完整 grace 与 cleanup 重试已重验。 |
+| M3-C10 / M3-A05 | 追加修复待验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/streaming.py`、`registry.py` | `test_milestone8_runtime.py`、`test_streaming_redaction.py`、`test_analysis_history.py` | [Milestone 12](#milestone-12单遍有界流式凭据与-url-状态机)、[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；晚到文本安全与取消依赖须共同重验。 |
+| M3-C11 / M3-A07 | 追加修复待验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、`application/transcripts/reader.py` | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_events.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；合法依赖不能杀死 writer 或永久耗尽补写。 |
+| M3-C12 / M3-C13 / M3-A06 | 追加修复待验证 | `application/analysis_runs/coordinator.py`、`runtime.py`、`main.py` | `test_milestone8_runtime.py`、`test_run_workflow.py`、`test_run_writer.py`、两条 smoke | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)、[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)；持久化 pending 和 cleanup/retry 线性化须重验。 |
 | M3-C14 | 本机已验证 | `main.py`、`application/analysis_runs/startup_repair.py`、`infrastructure/persistence/database.py`、`store.py` | `test_database_config.py`、`test_milestone8_runtime.py`、`test_postgres_persistence.py`、run/history smoke | [设计 §10.3](m3_transcript_history_implementation_design.md#103-启动恢复和关闭)；独立 OS 子进程 restart、严格门禁与幂等修复已重验。 |
-| M3-C15 / M3-A08 | 本机已验证 | `application/analysis_runs/coordinator.py`、`api/sse/encoder.py`、`response.py`、两层 SSE 路由 | `test_analysis_events.py`、`test_analysis_runs.py`、`test_run_sse_smoke.py`、`test_m3_documented_protocol.py`、run/history smoke | [API §5](m3_transcript_history_api.md#5-两层-sse)；wrapper golden、消息一致性、失败关闭和 chunk 安全已重验。 |
-| M3-C16 / M3-A09 | 本机已验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/registry.py`、`reader.py` | `test_agent_session_runtime.py`、`test_transcript_registry.py`、`test_analysis_history.py` | [设计 §4.5](m3_transcript_history_implementation_design.md#45-索引引用及事务边界)；引用入口、归属与消息 metadata 单源已重验。 |
-| M3-C17 | 本机已验证 | `application/transcripts/reader.py`、统一详情/过程/全文路由 | `test_analysis_history.py`、`test_analysis_events.py` | [设计 §7.1](m3_transcript_history_implementation_design.md#71-一次选择来源)；JSON 安全读取、auto/history 与取消可见性已重验。 |
-| M3-C18 / M3-A10 | 本机已验证 | `application/analysis_runs/persistence.py`、`coordinator.py`、`infrastructure/persistence/store.py`、`records.py` | `test_run_writer.py`、`test_postgres_persistence.py`、`test_records.py` | [设计 §6.2](m3_transcript_history_implementation_design.md#62-runwriter)；session terminal 核实、原子回滚与 memory/PG parity 已重验。 |
-| M3-C19 / M3-A11 | 本机已验证 | `infrastructure/observability/redaction.py`、`json_logging.py`、`application/transcripts/streaming.py` | `test_json_logging.py`、`test_log_correlation.py`、`test_streaming_redaction.py` | [设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)；全切分流式安全、普通文本保留和 warning 关联已重验。 |
-| M3-C20 / M3-A12 | 本机已验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、补写路由 | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_runs.py` | [API §6.2](m3_transcript_history_api.md#62-persistenceretry)；异常 writer、唯一恢复所有者与手动补写预算已重验。 |
+| M3-C15 / M3-A08 | 追加修复待验证 | `application/analysis_runs/coordinator.py`、`api/sse/encoder.py`、`response.py`、两层 SSE 路由 | `test_analysis_events.py`、`test_analysis_runs.py`、`test_run_sse_smoke.py`、`test_m3_documented_protocol.py`、run/history smoke | [Milestone 11](#milestone-11认证凭据与公开-metadata-脱敏)、[Milestone 12](#milestone-12单遍有界流式凭据与-url-状态机)；SSE metadata、URL 和 final body 一致性须重验。 |
+| M3-C16 / M3-A09 | 追加修复待验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/registry.py`、`reader.py` | `test_agent_session_runtime.py`、`test_transcript_registry.py`、`test_analysis_history.py` | [Milestone 11](#milestone-11认证凭据与公开-metadata-脱敏)、[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；metadata 单源和被取消引用目标须重验。 |
+| M3-C17 | 追加修复待验证 | `application/transcripts/reader.py`、统一详情/过程/全文路由 | `test_analysis_history.py`、`test_analysis_events.py` | [Milestone 15](#milestone-15corrupt-item-的安全全文读取)；可安全读取的 corrupt JSON 不得固定返回 500。 |
+| M3-C18 / M3-A10 | 追加修复待验证 | `application/analysis_runs/persistence.py`、`coordinator.py`、`infrastructure/persistence/store.py`、`records.py` | `test_run_writer.py`、`test_postgres_persistence.py`、`test_records.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；取消终态与依赖 target/source 的原子持久化须重验。 |
+| M3-C19 / M3-A11 | 追加修复待验证 | `infrastructure/observability/redaction.py`、`json_logging.py`、`application/transcripts/streaming.py` | `test_json_logging.py`、`test_log_correlation.py`、`test_streaming_redaction.py` | [Milestone 11](#milestone-11认证凭据与公开-metadata-脱敏)、[Milestone 12](#milestone-12单遍有界流式凭据与-url-状态机)；静态、流式、取消和 metadata 安全边界须重验。 |
+| M3-C20 / M3-A12 | 追加修复待验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、补写路由 | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_runs.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)、[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)；不可恢复依赖与 cleanup 竞态须修复。 |
 
 ### GLOBAL / MR 门禁审计
 
-本次逐项复核 `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` 以及当前适用的 `MR-G01`–`MR-G14`。没有新增、拆分、替换或取消 contract，也没有把本机证据冒充远端 MR/CI 结果；本节只为后续提交 MR 提供可复核入口。
+提交 `452749b` 后的分支审查重新复核 `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` 以及当前适用的 `MR-G01`–`MR-G14`，确认 4 个 P1、5 个 P2。没有新增、拆分、替换或取消 contract，也没有把本机证据冒充远端 MR/CI 结果；受影响门禁须在 Milestone 11–16 完成后重新审计。
 
 | 门禁范围 | 结论 | 证据或限制 |
 |---|---|---|
 | GLOBAL-C01–C03 | 满足本阶段适用范围 | 新后端、run/session/COMID 身份与当前 DTO 均由 production 路径、OpenAPI 和契约测试约束；未读取或兼容归档实现，也未引入通用 Waterbody。 |
 | GLOBAL-C04、C09 | 本机已验证 | UTC/IANA 时间事实、typed DTO 与同源边界模型由 domain/application 原事实装配，不维护语义不同的重复状态。 |
 | GLOBAL-C05–C06 | 保留并已登记接力 | M3 保存 UTC 时间、typed facts 与原引用；真实日期窗口和水质 evidence 闭包由 M4/M6 按下方入口验收，不用 fixture 冒充。 |
-| GLOBAL-C07 | 本机已验证 | 写前、持久化出口、SSE、日志与异常诊断共同执行凭据脱敏，focused 与完整回归均覆盖。 |
+| GLOBAL-C07 | 追加修复待验证 | 纯字母认证凭据、跨取消敏感状态、长 URL 和 tags 泄漏由 Milestone 11–12 修复。 |
 | GLOBAL-C08 | 保留并已登记接力 | 当前后端契约已冻结；最终前端仍由产品 M9 按届时设计、OpenAPI 和 SSE 契约独立实现，不复用归档前端。 |
 | GLOBAL-C10 | 已登记接力 | 下方 M4/M6/M7/M8/产品 M9 表给出入口、保留约束和可观察验收。 |
 | GLOBAL-C11 | partial | 同一代码/锁/config/schema 与三平台 workflow 已交付；缺三平台远端实跑及同库依次切换证据。 |
-| MR-G01–G02 | 证据就绪 | 清单包含 contract 范围、实现/测试位置、实际命令和未完成项；最终 MR 仍需引用真实 CI。 |
-| MR-G03–G10 | 本机满足 | 设计、API、OpenAPI、fixture、smoke 同步；真实 PG 覆盖并发/回滚/恢复，安全、范围和竞态有专项用例。 |
+| MR-G01–G02 | 修复计划就绪 | 本清单已登记 finding、实现边界、测试和未完成项；实际证据须随 Milestone 11–16 逐项补齐。 |
+| MR-G03–G10 | request changes | 安全、引用收敛、竞态、读取和文档存在审查缺口，须完成 Milestone 11–16 及真实 PG/回归后再恢复。 |
 | MR-G11–G12 | partial | 本机回归与 smoke 通过，但三平台实际 CI 未取得；因此中心最终表不写 `implemented`。 |
-| MR-G13–G14 | 满足 | 未引入兼容层、第二套状态/正文或与明确验收无关的抽象；未新增 deferred contract。 |
+| MR-G13–G14 | 待最终复核 | 修复不得引入兼容层、第二套状态/正文或无关抽象；由 Milestone 16 结合最终 diff 复核。 |
 
 ### 后续阶段交接
 
@@ -671,4 +677,160 @@ git diff --check
 | 契约结论 | 已满足、partial 或未满足，缺少的具体证据。 |
 | 后续接力 | 所属 Milestone/contract、入口、未实现业务边界。 |
 
-Milestone 0–10 的本机实现、2026-09-14 审查回补、契约复审与适用验证均已完成。Milestone 2/9 的三平台实际 CI 和跨系统迁移证据仍为 partial，不能由本机结果替代；中心最终承接须在这些外部证据齐备后更新。
+以上是提交 `452749b` 形成时的 Milestone 0–10 历史证据。后续审查发现的 4 个 P1、5 个 P2 由下方 Milestone 11–16 承接；中心最终承接须同时等待这些本机修复、重新复审，以及 Milestone 2/9 的三平台实际 CI 和跨系统迁移证据，不能以既有记录替代。
+
+## Milestone 11：认证凭据与公开 metadata 脱敏
+
+本阶段承接审查 finding P1-2 与 P2-6，先统一非流式正文、日志和公开 metadata 的安全边界，再进入流式状态机修复。
+
+### 工作
+
+- [x] 修改 `application/transcripts/redaction.py` 的认证 scheme 规则，合法的纯字母 `Bearer` token 与纯字母 Base64 `Basic` 值也必须脱敏，不再要求 token 至少包含数字或标点。（[设计 §9.2](m3_transcript_history_implementation_design.md#92-凭据边界)）
+- [x] 对无法从语法区分的 `Bearer <token>` 采用安全优先策略：构成认证 scheme 的文本统一遮蔽；修正此前把 `Bearer population estimate`、`Basic water quality` 当成必须原样保留的测试和清单描述，普通业务文本只在不构成认证 scheme 时保留。
+- [x] 在 `start_transcript_message()` 生成 `message_started` header 前，用与正文相同的 `private_values` 安全化 tags；live header、最终 item 和数据库记录复用同一份安全 metadata，不在各出口分别计算。
+- [x] `TranscriptBuffer`/registry 的持久化复核同时覆盖显式 metadata，防止未来调用方绕过 coordinator；安全化导致重复 tag 时稳定去重，不保留原 secret 副本，不扩展数据库 schema。
+- [x] 检查静态 transcript、异常日志、SSE header、live/history DTO 与 `StoredTranscriptItem.tags` 的全部调用链，删除或修正只覆盖正文、不覆盖 metadata 的假设。
+
+### Tests
+
+- [x] `test_transcript_buffer.py` 与 `test_json_logging.py` 覆盖 `Bearer abcdefgh`、`Basic dXNlcjpwYXNz`、大小写变体、行尾/结构化值和不构成 scheme 的普通文本。
+- [x] `test_analysis_events.py`/`test_milestone8_runtime.py` 使用包含显式 private value 的 tags，确认 `message_started`、live GET、history GET、最终正文和存储记录均不含原值。
+- [x] 覆盖多个 tag 脱敏为同一值、空 private value、Unicode/转义变体和普通非敏感 tags，证明顺序稳定且不会产生重复 metadata。
+
+### Verify
+
+- [x] `python -m pytest backend/tests/application/test_transcript_buffer.py backend/tests/observability/test_json_logging.py backend/tests/api/test_analysis_events.py backend/tests/application/test_milestone8_runtime.py -q`。
+- [x] `python -m compileall -q backend/app backend/tests` 与 `git diff --check`。
+
+阶段出口：认证 scheme 与显式 private value 在正文、日志和公开 metadata 使用同一安全语义；任何进入 SSE 或存储的 tag 都已安全化。
+
+### Milestone 11 完成记录（2026-09-14）
+
+- 实现：`AUTH_CREDENTIAL` 不再依赖数字或标点判定 token，纯字母 Bearer/Basic 凭据采用安全优先遮蔽；新增唯一的 `redact_tags()` 入口，按原顺序安全化并稳定去重。
+- 边界：registry 派生 metadata、`TranscriptBuffer` 显式 metadata、streaming message 创建和持久化 recheck 共用同一 tag 规则；`message_started`、finalized item、live/history DTO 与 `StoredTranscriptItem.tags` 复用已安全化值，没有新增 schema 或旁路字段。
+- 测试：新增纯字母认证凭据、大小写、行尾/JSON、普通非 scheme 文本、Unicode/JSON 转义、空 private value、脱敏后重复 tag，以及 SSE/live/history/storage 全链路回归。
+- 验证：Milestone 11 指定 focused tests 为 121 passed；application + API + observability 相关回归为 489 passed；排除真实 PostgreSQL 和 socket tests 后核心回归为 719 passed；允许 loopback bind 后 18 项 socket smoke 全部通过；`python -m compileall -q backend/app backend/tests` 与 `git diff --check` 通过。
+- 限制：本阶段没有修改流式 URL/取消状态机；对应 P1-3、P1-4、P2-5 仍由 Milestone 12 承接，整体 M3 状态保持 `partial / request changes`。
+
+## Milestone 12：单遍有界流式凭据与 URL 状态机
+
+本阶段承接审查 finding P1-3、P1-4 与 P2-5；三项共享同一个流式解析根因，必须一次替换，不能在现有整段 URL 缓冲上继续叠加正则分支。
+
+### 工作
+
+- [ ] 将 `StreamingCredentialFilter` 重构为单遍状态机；每个输入字符只进入一次状态转换，不在每个 chunk 上重新扫描不断增长的完整 URL。
+- [ ] URL 只在 authority 判定期保留有明确上限的缓冲：遇到 `/`、`?`、`#` 或空白后立即释放普通 host/path；超过上限时保守遮蔽 authority 并继续消费，内存不随攻击输入增长。
+- [ ] authority 以 `@` 判定 userinfo；有 userinfo 时遮蔽凭据并保留安全 host/port，无 userinfo 时原样保留 `https://example.com:8443/path`，同时覆盖 IPv6 host 与端口。
+- [ ] `cancel()` 作为原消息与晚到审计的分界而不是过滤器重置：`api_key=`、header value、quoted value、`Bearer/Basic` token 和 URL `user:` 的未完成遮蔽状态必须跨边界保留。
+- [ ] 原消息、late audit 与最终 typed message 使用同一安全文本；普通端口 URL 不再导致 streamed/final body mismatch，也不把正常完成消息降级为 `incomplete/error`。
+
+### Tests
+
+- [ ] 在不传 `private_values` 时，对 `feed("api_key=") → cancel() → feed("abcdef") → finish()` 和 `https://user:` 跨取消序列逐切分验证，原消息、晚到审计和拼接结果均不含凭据。
+- [ ] 对 userinfo URL、普通 host:port、IPv4、IPv6、query/fragment、无 path URL 和所有 chunk split 验证流式结果与静态安全正文一致。
+- [ ] 逐字符输入至少 128 KiB 的无空白 URL/path，每次断言 `buffered_characters` 不超过固定上限；不使用易抖动的耗时阈值，以有界状态直接守卫空间与扫描复杂度。
+- [ ] 经真实 coordinator/SSE 路径验证普通 URL 消息保持 `completed` 且 streamed text 等于 final body；取消后的敏感后缀只进入已脱敏 history-only audit。
+
+### Verify
+
+- [ ] `python -m pytest backend/tests/application/test_streaming_redaction.py backend/tests/api/test_analysis_events.py backend/tests/application/test_milestone8_runtime.py -q`。
+- [ ] 运行 SSE socket smoke，确认长消息不会阻塞其他 run、keepalive 或 `stream_end`。
+
+阶段出口：流式过滤的内部缓冲有明确上限，长 URL 处理为线性；userinfo、host:port 和取消边界同时满足安全性与正文一致性。
+
+## Milestone 13：取消时的引用依赖与持久化收敛
+
+本阶段承接审查 finding P1-1，修复 finalized source 引用尚未定稿 target 时发生 run/session 取消或失败的持久化死路。
+
+### 工作
+
+- [ ] 在抑制 reserved item 前，从 finalized、尚未持久化的 typed content 提取引用闭包，区分“无人引用的草稿”和“已成为合法依赖目标的草稿”。
+- [ ] 只为已被引用的草稿以原 item_id 生成独立版本、history-only 的 suppression fact，记录 cancelled/error 原因；不为无人引用的草稿制造占位记录，不修改四表或增加数据库 migration。
+- [ ] suppression fact 对 late finalize 保持幂等抑制，同时在 writer 依赖解析中保持可见；writer 必须先保存 target suppression fact，再保存 dependent source，不能把目标误判为不存在或形成不可重试 `ValueError`。
+- [ ] run/session terminal mutation、原取消/失败 transcript 与依赖组继续按原事务边界保存；这类可收敛依赖不能耗尽唯一 writer，手动补写也不得成为正常完成取消的必要步骤。
+- [ ] 同 run/跨 session 合法引用、跨 run/未知引用拒绝、普通生成中等待和已持久化目标行为保持不变。
+
+### Tests
+
+- [ ] `test_run_writer.py` 构造 finalized source 引用 reserved target，分别在 target 定稿前触发 run cancel、run failure 与单 session cancel；验证 persistence 最终 `up_to_date`，terminal 状态、source 和 suppression target 全部可读。
+- [ ] 断言 target 使用原 item_id、先于 dependent 满足外键/引用约束、late finalize 不覆盖 suppression fact，且 writer 仍存活、没有不可重试 warning。
+- [ ] 验证无人引用的 reserved item 仍不落库；已有生成中引用等待、同批提交、跨 run/未知目标拒绝测试继续通过。
+- [ ] 在真实 PostgreSQL 上复现取消依赖组，检查事务回滚、重试、引用顺序和进程重启后的 history。
+
+### Verify
+
+- [ ] `python -m pytest backend/tests/application/test_run_writer.py backend/tests/application/test_milestone8_runtime.py backend/tests/persistence/test_postgres_persistence.py -q`。
+- [ ] run/history smoke 覆盖保存后重启读取，确认不会恢复 Agent 或生成缺失业务正文。
+
+阶段出口：取消或失败不会把合法引用变成永久坏引用；被引用 target 的身份可审计，终态与 transcript 无需人工补写即可收敛。
+
+## Milestone 14：手动补写与 live cleanup 原子性
+
+本阶段承接审查 finding P2-7，修复 retry 路由两次独立 live lookup 与 cleanup 删除之间的竞态。
+
+### 工作
+
+- [ ] 将“live owner 是否存在”和“必要时重启原 writer”合并进 coordinator 的单次原子操作，统一使用 `_runs_lock → runtime.condition` 锁顺序，与 `_release_live_state()` 保持一致。
+- [ ] coordinator 以明确的 absent 结果表示 live 已释放，不把 cleanup 后的正常状态抛成 `RunNotFoundError`；原 `up_to_date`、`pending`、`retry_exhausted` 预算语义保持不变。
+- [ ] HTTP 路由只调用一次原子 retry；absent 后查询 history，存在则返回 `409/persistence_retry_unavailable`，完全不存在返回 404，数据库不可用返回 503。
+- [ ] retry 与 cleanup 同时获胜时只允许两种线性化结果：retry 在释放前受理并返回 200/202，或 cleanup 先完成并按历史返回 409；不得返回错误 404、启动第二个 writer 或重置执行中的预算。
+
+### Tests
+
+- [ ] 用 gate 精确控制 retry 与 `_release_live_state()` 的交错，覆盖两种锁顺序结果，不用 sleep 猜竞态。
+- [ ] API 覆盖 history 已存在时 409、完全不存在时 404、history 查询失败时 503，以及 live `up_to_date` 200、pending/重新受理 202。
+- [ ] 保留并发重复点击只复用一个 writer/一轮预算的现有测试，增加 cleanup 竞争后无额外 recovery fact 的断言。
+
+### Verify
+
+- [ ] `python -m pytest backend/tests/api/test_analysis_history.py backend/tests/application/test_run_writer.py backend/tests/application/test_milestone8_runtime.py -q`。
+- [ ] `python -m compileall -q backend/app backend/tests` 与 `git diff --check`。
+
+阶段出口：手动补写与 cleanup 有唯一线性化点；历史存在时永不因竞态误报 404，重复点击不创建额外保存任务。
+
+## Milestone 15：Corrupt item 的安全全文读取
+
+本阶段承接审查 finding P2-8，使 `parse_status=corrupt` 与“原正文无法安全读取”保持两个独立事实。
+
+### 工作
+
+- [ ] 将 registry 的安全 JSON decode/递归脱敏/规范序列化与已知 content schema 校验分离；schema 校验仍决定 `ok/unsupported/corrupt`，不能决定全文是否可返回。
+- [ ] `_checked_body()` 在正文存在且为合法 JSON 时返回安全文本，即使 schema 不匹配或存储的 `content_bytes` 不一致；`parse_status` 和 issue 仍保持 `corrupt`，不得伪装为正常 typed body。
+- [ ] 全文响应的 `content_bytes` 按实际返回的安全 UTF-8 文本计算；嵌套敏感 key/value 必须脱敏，不能直接回传数据库原文。
+- [ ] 只有外置正文缺失或正文不是可安全解析的 JSON 时返回 `500/transcript_content_unreadable`；邻近 item、列表和详情继续可读。
+
+### Tests
+
+- [ ] 构造合法 JSON 但已知 schema 非法的 item：详情显示 `corrupt/unparsed`，全文接口返回 200 和安全规范 JSON。
+- [ ] 构造 byte count 不匹配但正文完整的 item，确认 parse issue 保留、全文可读且响应字节数与文本一致。
+- [ ] corrupt JSON 内嵌 `api_key`/Authorization/private value，确认全文、preview、日志均不含原值。
+- [ ] 保留 malformed JSON、外置正文缺失返回 500，以及 unsupported 类型仅在严格 history 可读取的既有边界。
+
+### Verify
+
+- [ ] `python -m pytest backend/tests/api/test_analysis_history.py backend/tests/application/test_transcript_registry.py -q`。
+- [ ] 在真实 PostgreSQL 的 inline/外置两种正文位置执行同样用例。
+
+阶段出口：corrupt 描述业务解析失败，500 只描述正文缺失或无法安全读取；安全可得的原 JSON 始终可通过全文接口审计。
+
+## Milestone 16：权威文档同步与最终复审
+
+本阶段承接审查 finding P2-9，并在 Milestone 11–15 全部完成后重新建立文档、实现与中心契约的一致状态。
+
+### 工作
+
+- [ ] 更新 `docs/backend_architecture_skeleton.md` 的当前状态、M2 旧整体 session 说明和 §5.1 路由描述，明确 M3 run 根路由、PostgreSQL、history 与两层 SSE 已实现，不再保留“后端尚未实现”“当前代码尚未迁移”。
+- [ ] 更新 `docs/backend_refactor_milestones.md` 的 M3 状态，区分本机实现/复审证据与仍为 partial 的三平台实际 CI、同一 PostgreSQL 跨系统迁移。
+- [ ] 全文搜索两个权威父文档中的 `当前 M2`、`尚未实现`、`尚未迁移`、`实现时`、`继续定型` 等时态；只修正已经由运行时/OpenAPI 冻结的 M3 描述，保留真正属于 M4–M9 的后续边界。
+- [ ] 同步本清单、实施设计、API 指南、前端约定和中心待验收索引；Milestone 11–15 未全部验证前不得恢复“本机全部完成”或把中心状态写为 `implemented`。
+- [ ] 重新逐项审计 M3-C01–C20、M3-A01–A12、GLOBAL-C01–C11 与 MR-G01–G14，将受本轮 finding 影响的矩阵行恢复为有实际证据的状态。
+- [ ] 扩展 `test_m3_documented_protocol.py`，守卫两个权威父文档不再宣称 M3 未实现，并继续从实际 OpenAPI、production registry 与 SSE encoder 验证公开契约。
+
+### Verify
+
+- [ ] 运行 Milestone 11–15 全部 focused tests，再运行完整 `backend/tests`，记录实际 pass/skip 数量。
+- [ ] 在隔离真实 PostgreSQL 上运行 persistence tests、health smoke、独立进程 run/history smoke，确认无测试 schema 或子进程残留。
+- [ ] 校验 M3 32 个 contract ID 精确集合、GLOBAL/MR 分组、全部相对文档链接、OpenAPI、compileall 与 `git diff --check`。
+- [ ] Ubuntu/macOS/Windows 实际 CI 和同库跨系统迁移没有真实结果时继续保持 GLOBAL-C11、Milestone 2/9 与中心最终承接为 `partial`。
+
+阶段出口：9 个 review finding 均有实现、回归和文档证据；本机契约重新满足后才允许清除 `request changes`，外部三平台缺口仍按真实结果单独处理。

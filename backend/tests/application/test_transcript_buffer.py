@@ -11,7 +11,7 @@ from app.application.transcripts.buffer import (
     TranscriptBuffer,
     locate_content,
 )
-from app.application.transcripts.models import TranscriptContentRef
+from app.application.transcripts.models import TranscriptContentRef, TranscriptMetadata
 from app.application.transcripts.registry import (
     create_production_registry,
     fixture_message_registration,
@@ -137,14 +137,8 @@ def test_large_non_sensitive_text_skips_complex_redaction_patterns(
     assert redaction.redact_text(value) == value
 
 
-@pytest.mark.parametrize(
-    "value",
-    (
-        "Basic water quality is acceptable",
-        "Bearer population estimate",
-    ),
-)
-def test_business_text_that_uses_auth_words_is_preserved(value: str) -> None:
+@pytest.mark.parametrize("value", ("Basic", "Bearer", "basic-water"))
+def test_auth_words_without_a_credential_are_preserved(value: str) -> None:
     registry = create_production_registry()
 
     content = registry.encode("analysis_request", 1, {"query": value})
@@ -165,6 +159,20 @@ def test_business_text_that_uses_auth_words_is_preserved(value: str) -> None:
             (),
             "upstream rejected [REDACTED]",
         ),
+        ("Bearer abcdefgh", (), "[REDACTED]"),
+        ("Basic dXNlcjpwYXNz", (), "[REDACTED]"),
+        ("bEaReR alphabetic", (), "[REDACTED]"),
+        ("BASIC alphabetic", (), "[REDACTED]"),
+        (
+            "Bearer population estimate",
+            (),
+            "[REDACTED] estimate",
+        ),
+        (
+            "Basic water quality",
+            (),
+            "[REDACTED] quality",
+        ),
         ("Cookie: sid=synthetic-cookie", (), "Cookie: [REDACTED]"),
         ("api_key=synthetic-key", (), "api_key=[REDACTED]"),
         (
@@ -180,6 +188,83 @@ def test_static_redaction_keeps_explicit_credential_boundaries(
     expected: str,
 ) -> None:
     assert redaction.redact_text(value, private_values) == expected
+
+
+@pytest.mark.parametrize(
+    "credential",
+    ("Bearer abcdefgh", "Basic dXNlcjpwYXNz"),
+)
+def test_registered_json_redacts_alphabetic_auth_credentials(
+    credential: str,
+) -> None:
+    content = create_production_registry().encode(
+        "analysis_request",
+        1,
+        {"query": f"provider returned {credential}\nnext line"},
+    )
+
+    assert json.loads(content.safe_body) == {
+        "query": "provider returned [REDACTED]\nnext line",
+    }
+
+
+def test_tags_are_redacted_deduplicated_and_rechecked_for_storage() -> None:
+    first_secret = "first-private-value"
+    second_secret = "second-private-value"
+    registry = create_production_registry()
+    buffer = TranscriptBuffer(registry)
+    item = buffer.append(
+        _identity(ITEM_ID, 1),
+        "analysis_request",
+        1,
+        {"query": "safe query"},
+        private_values=(first_secret, second_secret, ""),
+        metadata=TranscriptMetadata(
+            tags=(
+                f"source:{first_secret}",
+                f"source:{second_secret}",
+                "water-quality",
+            ),
+            rag_eligible=True,
+        ),
+    )
+
+    assert item.content.metadata.tags == (
+        "source:[REDACTED]",
+        "water-quality",
+    )
+    batch = buffer.to_storage_batch(
+        private_values=(first_secret, second_secret, ""),
+    )
+    assert batch.items[0].tags == item.content.metadata.tags
+    assert batch.items[0].rag_eligible is True
+
+    unsafe = item.content.model_copy(
+        update={"metadata": TranscriptMetadata(tags=(first_secret,))},
+    )
+    with pytest.raises(ValueError, match="readable live metadata"):
+        registry.recheck(unsafe, private_values=(first_secret,))
+
+
+def test_tag_redaction_handles_unicode_json_escapes_and_empty_private_values() -> None:
+    secret = '私密"位置'
+    escaped = json.dumps(secret)[1:-1]
+
+    assert redaction.redact_tags(
+        (
+            f"raw:{secret}",
+            f"escaped:{escaped}",
+            "auth:Bearer abcdefgh",
+            "public",
+        ),
+        (secret, ""),
+    ) == (
+        "raw:[REDACTED]",
+        "escaped:[REDACTED]",
+        "auth:[REDACTED]",
+        "public",
+    )
+    assert redaction.redact_tags(("public",), ("",)) == ("public",)
 
 
 def test_reference_targets_must_be_persisted_same_batch_or_waited_for() -> None:

@@ -582,13 +582,22 @@ def test_streamed_message_metadata_matches_started_finalized_get_and_storage() -
                 created.run_id,
                 session.session_id,
             )
+            first_secret = "first-private-tag"
+            second_secret = "second-private-tag"
+            expected_tags = ["answer", "source:[REDACTED]", "water-quality"]
             message = await coordinator.start_transcript_message(
                 created.run_id,
                 session.session_id,
                 "fixture_message",
                 1,
-                tags=("answer", "water-quality"),
+                tags=(
+                    "answer",
+                    f"source:{first_secret}",
+                    f"source:{second_secret}",
+                    "water-quality",
+                ),
                 rag_eligible=True,
+                private_values=(first_secret, second_secret),
             )
             await coordinator.append_transcript_message_delta(
                 created.run_id,
@@ -624,33 +633,39 @@ def test_streamed_message_metadata_matches_started_finalized_get_and_storage() -
                 data for name, _, data in events if name == "message_finalized"
             )
             for payload in (started, finalized):
-                assert payload["payload"]["item"]["tags"] == [
-                    "answer",
-                    "water-quality",
-                ]
+                assert payload["payload"]["item"]["tags"] == expected_tags
                 assert payload["payload"]["item"]["rag_eligible"] is True
+            assert first_secret not in json.dumps(events)
+            assert second_secret not in json.dumps(events)
 
             stored = await store.read_run(created.run_id)
             stored_message = next(
                 item for item in stored.items if item.item_id == message.item_id
             )
-            assert stored_message.tags == ("answer", "water-quality")
+            assert stored_message.tags == tuple(expected_tags)
             assert stored_message.rag_eligible is True
 
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://test",
             ) as client:
-                history = await client.get(
-                    f"/api/analysis/runs/{created.run_id}/sessions/"
-                    f"{session.session_id}/transcript?view=history"
+                responses = [
+                    await client.get(
+                        f"/api/analysis/runs/{created.run_id}/sessions/"
+                        f"{session.session_id}/transcript{suffix}"
+                    )
+                    for suffix in ("", "?view=history")
+                ]
+            for response in responses:
+                assert response.status_code == 200
+                assert first_secret not in response.text
+                assert second_secret not in response.text
+                response_message = next(
+                    item for item in response.json()["items"]
+                    if item["item_id"] == str(message.item_id)
                 )
-            history_message = next(
-                item for item in history.json()["items"]
-                if item["item_id"] == str(message.item_id)
-            )
-            assert history_message["tags"] == ["answer", "water-quality"]
-            assert history_message["rag_eligible"] is True
+                assert response_message["tags"] == expected_tags
+                assert response_message["rag_eligible"] is True
 
     run(exercise)
 

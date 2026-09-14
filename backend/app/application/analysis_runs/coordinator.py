@@ -93,6 +93,7 @@ from app.application.transcripts.registry import (
     TranscriptRegistry,
     create_production_registry,
 )
+from app.application.transcripts.redaction import redact_tags
 from app.application.transcripts.read_models import (
     LiveRunRead,
     TranscriptCorrelation,
@@ -1847,6 +1848,11 @@ class RunCoordinator:
                 created_at=timestamp,
             )
             metadata = TranscriptMetadata(tags=tags, rag_eligible=rag_eligible)
+            metadata = metadata.model_copy(
+                update={
+                    "tags": redact_tags(metadata.tags, private_values),
+                },
+            )
             header = TranscriptItemHeader(
                 item_id=identity.item_id,
                 run_id=identity.run_id,

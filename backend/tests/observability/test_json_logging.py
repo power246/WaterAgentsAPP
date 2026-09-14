@@ -38,11 +38,16 @@ def test_nested_redaction_is_case_insensitive_and_does_not_mutate(name):
     'https://user:hidden-credential@provider.test/run',
     'upstream rejected bEaReR hidden-credential',
     'proxy rejected BASIC hidden-credential',
+    'upstream rejected Bearer abcdefgh',
+    'proxy rejected Basic dXNlcjpwYXNz',
     'password=hidden-credential\nnext safe line',
 ])
 def test_credentials_in_diagnostic_text_are_redacted(text):
     result = redact_text(text)
-    assert "hidden-credential" not in result
+    assert not any(
+        credential in result
+        for credential in ("hidden-credential", "abcdefgh", "dXNlcjpwYXNz")
+    )
     assert REDACTED in result
 
 

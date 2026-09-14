@@ -31,7 +31,7 @@ from app.application.transcripts.models import (
     TranscriptContentRef,
     TranscriptMetadata,
 )
-from app.application.transcripts.redaction import redact
+from app.application.transcripts.redaction import redact, redact_tags
 from app.domain.attribution.analysis_detail import AnalysisDetail
 from app.domain.common import JsonValue
 from app.domain.domain_model import DomainModel
@@ -159,13 +159,17 @@ class TranscriptRegistry:
         references = registration.references(safe_model)
         if len(references) != len(set(references)):
             raise ValueError("registered reference extractor returned duplicates")
+        metadata = registration.metadata(safe_model)
+        metadata = metadata.model_copy(
+            update={"tags": redact_tags(metadata.tags, private_values)},
+        )
         return RegisteredContent(
             content_type=content_type,
             content_schema_version=content_schema_version,
             safe_body=safe_body,
             content_bytes=len(safe_body.encode("utf-8")),
             references=references,
-            metadata=registration.metadata(safe_model),
+            metadata=metadata,
             visibility=registration.visibility(safe_model),
         )
 
@@ -274,7 +278,16 @@ class TranscriptRegistry:
         )
         if checked.safe_body != content.safe_body:
             raise ValueError("persistence redaction differs from the readable live body")
-        return checked.model_copy(update={"metadata": content.metadata})
+        metadata = content.metadata.model_copy(
+            update={
+                "tags": redact_tags(content.metadata.tags, private_values),
+            },
+        )
+        if metadata != content.metadata:
+            raise ValueError(
+                "persistence redaction differs from the readable live metadata"
+            )
+        return checked.model_copy(update={"metadata": metadata})
 
     def parse_many(
         self,

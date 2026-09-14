@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-状态：设计已定稿，Milestone 0–10 已完成本机实现、契约审计与适用验证；三平台实际 CI/跨系统迁移证据仍为 partial，中心最终承接暂不登记 `implemented`。本文把已经确认的 D01–D86 收敛为可执行的工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。
+状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11 已完成本机实现与适用验证，Milestone 12–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -375,7 +375,9 @@ run cancel 在统一状态边界关闭调度入口，固定全部生成中原消
 
 ### 9.2 凭据边界
 
-复用并扩展现有 redaction：结构化敏感键、Authorization/Cookie、URL userinfo、已知实际凭据，以及常见凭据标记后的值。普通业务 query 不整段隐藏；HTTP、workflow、异常 repr/JSON 转义、driver 错误、日志及 safe preview 都走相同规则。原 Agent 实际输入不因日志脱敏而被改写。
+复用并扩展现有 redaction：结构化敏感键、Authorization/Cookie、URL userinfo、已知实际凭据，以及常见凭据标记后的值。`Bearer <token>` 与 `Basic <token>` 采用安全优先语义，token 即使只含字母也遮蔽；无法与认证 scheme 区分的短语不以业务文本为由放行，只有不构成 scheme 的普通 query 原样保留。HTTP、workflow、异常 repr/JSON 转义、driver 错误、日志及 safe preview 都走相同规则。原 Agent 实际输入不因日志脱敏而被改写。
+
+公开 tags 与正文使用同一 `private_values` 和静态凭据规则，在 `message_started` 可见前完成安全化；脱敏后重复的 tag 按原顺序稳定去重。finalized item、live/history DTO 和数据库记录复用这一份安全 metadata，持久化边界再次复核，不能把未安全化 tags 写入存储。
 
 流式过滤器在不可读的私有缓冲中维护已知 secret 前缀和敏感字段识别状态：仅释放已经排除匹配可能的安全前缀；凭据值进入遮蔽状态后不缓存或发送原值，直到确定分隔边界。known secret 的后缀前缀保留到后片段确定；敏感标记可能跨片段时同样保留。结束/取消时未能判定的敏感候选按安全替换收尾，不能原样放行。取消之后保留遮蔽状态，避免跨边界剩余凭据出现在历史尾部；不保留一份未脱敏全文。
 
@@ -456,4 +458,4 @@ M3 完成需同时满足：四表与环境可搭建；已保存事实可重启�
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
 
-Milestone 10 在 Milestone 2–9 审查回补完成后重新逐项审计 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并通过可执行文档 golden 对齐实际 OpenAPI、production registry 和 SSE encoder；M4/M6/M7/M8/产品 M9 的接入边界和可观察验收登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)。本机完成标准已满足；中心最终验收仍由 GLOBAL-C11 阻塞，待 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据齐备后再登记 `implemented`。
+Milestone 10 曾在 Milestone 2–9 审查回补完成后逐项审计 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并通过可执行文档 golden 对齐实际 OpenAPI、production registry 和 SSE encoder。提交 `452749b` 的后续审查重新发现 4 个 P1、5 个 P2，现由 [Milestone 11–16](m3_implementation_todo.md#milestone-11认证凭据与公开-metadata-脱敏) 承接；这些追加里程碑完成并复审前，本机完成标准不成立。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；之后还须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。

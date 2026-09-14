@@ -92,7 +92,7 @@ Contract changes:
 
 ## 5. M3：Transcript Store + History APIs
 
-当前工程规范见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)，对外表示与搭建命令见 [API 指南](M3/m3_transcript_history_api.md)，实施与证据分解见 [Milestone 0–10 清单](M3/m3_implementation_todo.md)。D01–D86 保留确认依据；其早期整体 session 术语映射为 run，真实 Agent session 保留独立语义。Milestone 0–10 已完成本机实现、契约审计及适用验证；由于 GLOBAL-C11 的三平台实际 CI 与同库跨系统迁移证据仍缺，以下 M3 contract 暂列待验收索引，不进入最终 `implemented` 表。
+当前工程规范见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)，对外表示与搭建命令见 [API 指南](M3/m3_transcript_history_api.md)，实施与证据分解见 [Milestone 0–16 清单](M3/m3_implementation_todo.md)。D01–D86 保留确认依据；其早期整体 session 术语映射为 run，真实 Agent session 保留独立语义。Milestone 0–10 的历史实现和验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11 已完成本机实现与适用验证，Milestone 12–16 尚未完成。受影响的 M3 contract 继续保持待验证，且 GLOBAL-C11 的三平台实际 CI 与同库跨系统迁移证据仍缺，因此不进入最终 `implemented` 表。
 
 工程定型补充：四表采用原身份/联合归属约束、单份正文及 Alembic 单 head；当前状态不通过事件回放重建。新生命周期正文版本 2 区分 run_* 与 session_*，历史版本 1 保留解析；run_snapshot 与 stream_end 是控制通知，session 的 transcript_item/message_started/message_delta/message_finalized 使用独立过程整数序号，不逐帧落库。run 详情提供全部 run-owned 原记录，所选 session 的完整过程另读；未知/损坏内容显式表示。配置、严格来源、取消可见性、创建未知提交核实和逐项保存确认按实施详细设计执行，不能用最大已保存序号推断草稿已保存。
 
@@ -482,13 +482,13 @@ cancelled
 
 ### M3 待验收索引
 
-本节只索引本机实现与契约审计证据，不属于上表的最终承接记录。当前分支为 `codex/m3-milestone`；Milestone 2–9 审查回补对应本地提交 `6c3a515`–`01e8f07`，Milestone 10 以当前可复核 diff 登记。`M3-C01`–`M3-C20` 与 `M3-A01`–`M3-A12` 的审查回补均已完成，具备本机完整回归、真实 PostgreSQL、正式独立进程 smoke 及协议文档 golden 证据；它们仍共同依赖 GLOBAL-C11 的三平台实际结果，因此保持未最终承接。
+本节只索引本机实现与契约审计证据，不属于上表的最终承接记录。当前分支为 `codex/m3-milestone`；Milestone 2–9 审查回补对应本地提交 `6c3a515`–`01e8f07`，Milestone 10 的历史证据收敛于提交 `452749b`。该提交的后续审查发现 4 个 P1、5 个 P2，修复已按功能登记到 Milestone 11–16；Milestone 11 已完成本机实现与适用验证，Milestone 12–16 尚未完成。因此受影响的 `M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` 和 MR 门禁仍待最终复审；GLOBAL-C11 的三平台实际结果也仍缺，M3 保持未最终承接。
 
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
-| `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。本机完整回归、真实 PostgreSQL persistence、health、独立进程 run/history smoke 及 `test_m3_documented_protocol.py` golden 的实际结果见 [Milestone 10 完成记录](M3/m3_implementation_todo.md#milestone-10-完成记录2026-09-14)。 | Ubuntu/macOS/Windows 以 Python 3.11 和同一代码/锁分别跑完整测试及两项 smoke；三系统停止旧实例后依次接入同一已保存测试 PostgreSQL，核对原身份、历史游标、回执、全文引用和不恢复 Agent。全部取得实际证据后，才能在最终承接表追加 `implemented` 行及提交/MR/CI 引用。 |
+| `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。提交 `452749b` 以前的本机回归、真实 PostgreSQL persistence、smoke 与 protocol golden 结果仅作为 [Milestone 10 历史证据](M3/m3_implementation_todo.md#milestone-10-完成记录2026-09-14)；新增安全证据见 [Milestone 11 完成记录](M3/m3_implementation_todo.md#milestone-11-完成记录2026-09-14)。 | 继续完成并验证 Milestone 12–16 的流式状态机、引用持久化、补写原子性、corrupt 全文与文档修复，再重跑完整本机/真实 PostgreSQL/socket smoke 和契约审计；之后补齐 Ubuntu/macOS/Windows 完整测试、两项 smoke 及同一已保存 PostgreSQL 的跨系统核对，才可登记 `implemented`。 |
 
-未新增、拆分、替换或取消 contract。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
+未新增、拆分、替换或取消 contract；Milestone 11–16 是既有 M3/Global/MR 约束的审查修复分解。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
 ## 14. 维护规则
 

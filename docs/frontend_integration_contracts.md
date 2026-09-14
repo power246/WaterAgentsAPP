@@ -4,14 +4,14 @@
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
-M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。M3 Milestone 0–10 的 HTTP 路径、DTO、取消/重启边界、两层 SSE 后端契约与后续交接已由运行时 OpenAPI、事件 fixture、本机 smoke 和契约审计验证；正式前端消费仍由产品阶段 M9 实现。
+M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–10 的历史实现证据已经保留；Milestone 11 的凭据与 metadata 修复已完成本机实现与适用验证，Milestone 12–16 尚未完成。前端仍不能把取消边界、引用依赖、补写竞争和 corrupt 全文行为视为已验收；正式消费由产品阶段 M9 实现。
 
 **领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
-| M3 transcript/history/idempotency/SSE | M3 Milestone 0–10 已完成本机实现、契约审计与验证；三平台实跑 partial | HTTP 与两层 SSE 以运行时 OpenAPI、M3 API 指南和 raw frame fixture 为准；正式消费由产品阶段 M9 接入。 |
+| M3 transcript/history/idempotency/SSE | Milestone 0–10 历史证据保留；Milestone 11 已本机完成，Milestone 12–16 待实现，当前 request changes；三平台实跑 partial | 纯字母认证凭据与公开 tags 已安全化；其余追加里程碑完成前，不依赖受剩余 finding 影响的边界行为。正式消费由产品阶段 M9 接入。 |
 | M4–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -168,7 +168,7 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 
 ## 4. M3 接入约定与分阶段状态
 
-本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。M3 Milestone 0–10 已完成本机实现、契约审计与适用验证，覆盖创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、严格启动修复、live 清理与实时两层 SSE；后续产品能力仍按各自 Milestone 状态接入。已确认行为的变更须同步运行时 schema、对应设计与契约。
+本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–10 的创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、严格启动修复、live 清理与实时两层 SSE 历史实现证据已经保留；后续审查发现的 4 个 P1、5 个 P2 已拆入 Milestone 11–16，其中 Milestone 11 已完成本机实现与适用验证，其余相关契约保持待验证。后续产品能力仍按各自 Milestone 状态接入；已确认行为的变更须同步运行时 schema、对应设计与契约。
 
 ### 4.1 创建分析：Idempotency-Key
 

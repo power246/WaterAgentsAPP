@@ -13,7 +13,7 @@ ASSIGNMENT = re.compile(
     re.IGNORECASE,
 )
 AUTH_CREDENTIAL = re.compile(
-    r"\b(?:Bearer|Basic)\s+(?=[^\s,;\"'}]*[\d._~+/=-])[^\s,;\"'}]+",
+    r"\b(?:Bearer|Basic)\s+[^\s,;\"'}]+",
     re.IGNORECASE,
 )
 HEADER_VALUE = re.compile(
@@ -65,6 +65,20 @@ def redact_text(value: str, private_values: tuple[str, ...] = ()) -> str:
     if "http://" in lowered or "https://" in lowered:
         value = URL_CREDENTIAL.sub(r"\1[REDACTED]@", value)
     return value
+
+
+def redact_tags(
+    tags: tuple[str, ...],
+    private_values: tuple[str, ...] = (),
+) -> tuple[str, ...]:
+    safe_tags: list[str] = []
+    seen: set[str] = set()
+    for tag in tags:
+        safe_tag = redact_text(tag, private_values)
+        if safe_tag not in seen:
+            seen.add(safe_tag)
+            safe_tags.append(safe_tag)
+    return tuple(safe_tags)
 
 
 def redact(value: object, private_values: tuple[str, ...] = ()) -> object:

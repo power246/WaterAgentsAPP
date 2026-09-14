@@ -2,7 +2,7 @@
 
 更新日期：2026-09-14
 
-**状态：Milestone 0–10 已完成本机实现、契约审计与适用验证；三平台实际 CI 与跨系统迁移证据仍为 partial，中心最终承接暂不登记 `implemented`。** 创建、历史分页、统一详情/全文读取、取消、手动补写、`run`/`session` 两层 SSE、取消晚到审计、启动遗留修复与 live 清理以运行时 OpenAPI 和本文为准，旧整体 session 路径及过渡期 M2 生命周期流均未保留兼容别名。
+**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11 已完成本机实现与适用验证，Milestone 12–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic 凭据与显式 private value tags 已在正文、日志、SSE、live/history 和存储边界统一安全化；取消边界、引用依赖、手动补写竞争及 corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
