@@ -2,17 +2,17 @@
 
 更新日期：2026-09-15
 
-状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–16 实施清单](m3_implementation_todo.md)。Milestone 0–10 的历史实现记录已经保留；针对提交 `452749b` 的审查修复按功能追加为 Milestone 11–16，Milestone 11–15 已完成本机实现与适用验证，Milestone 16 须在实现和验证后再勾选，实际状态以清单为准。
+状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–16 实施清单](m3_implementation_todo.md)。Milestone 0–16 已完成本机实现、适用验证和最终复审；三平台实际 CI 与同库跨系统迁移仍为 `partial`，实际状态以清单为准。
 
 本文保留确认过程与原 D 编号，供追溯设计依据。当前工程字段、约束、DTO、事件和配置以实施详细设计及 API 指南为入口；下面决策原文中的“继续定型”表示当时的工程待办，现已在新文档收敛，不要求重新逐项询问用户，也不另形成一套实现规范。
 
-D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run SSE，通知 run 状态、新 session、各 Agent 状态和保存情况；打开水体实时过程时按需连接对应 session SSE。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。GET 用于首次加载、断线后核对和历史读取，前面提出的轮询方案不采用。D65 路由表已按 D69 补入 session SSE；关闭时机按 D70、续传按 D73/D78、握手按 D77、消息流按 D85/D86 确认。剩余字段和命名映射由实现者统一定型，保留既定行为，不将未实现协议当作现有接口。
+D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run SSE，通知 run 状态、新 session、各 Agent 状态和保存情况；打开水体实时过程时按需连接对应 session SSE。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。GET 用于首次加载、断线后核对和历史读取，前面提出的轮询方案不采用。D65 路由表已按 D69 补入 session SSE；关闭时机按 D70、续传按 D73/D78、握手按 D77、消息流按 D85/D86 确认。当前字段和命名映射以实施详细设计、API 指南、OpenAPI 与运行时 serializer 为准。
 
 当前领域边界以 D50/D51 为准：run 是一次用户提交的完整分析，session 是单个 Agent 的独立上下文和完整执行 loop，包括问题解析 session 和各水体 session。D01–D49 中把整次分析称为 session 的部分属于旧术语；其中创建幂等、整体状态、SSE、取消、保存重试、清理和历史分页职责应映射到 run。总体流程见 [总体设计第 1.2 节](../backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。
 
 执行身份按 D52：session_id 统一标识独立 Agent 上下文及本次执行，取消原 D32 中同义的执行 agent_id；agent_role 表达职责，target_comid 表达适用水体，operation_id 继续标识一次调用。
 
-表职责以 D53 为准：analysis_runs、analysis_sessions、transcript_items、transcript_contents 四张核心表，分别维护 run 当前信息、独立 Agent session 当前信息、原记录和独立大正文。D33 的去重、单一事实及原子性原则保留；通用时间列按 D55、session 五态按 D60 确定，路径按 D65 确认。Milestone 0–6 已落实这些身份、存储和 HTTP 读取 DTO；两层 SSE 仍由 Milestone 7 承接。
+表职责以 D53 为准：analysis_runs、analysis_sessions、transcript_items、transcript_contents 四张核心表，分别维护 run 当前信息、独立 Agent session 当前信息、原记录和独立大正文。D33 的去重、单一事实及原子性原则保留；通用时间列按 D55、session 五态按 D60 确定，路径按 D65 确认。Milestone 0–16 已落实这些身份、存储、HTTP 读取 DTO、两层 SSE 与审查修复。
 
 ## 1. 依据与当前基线
 
@@ -1574,4 +1574,4 @@ message_finalized 从原消息定稿事实生成，不额外追加一条同义 t
 
 ## 5. 当前交付状态
 
-本次交付决策记录、实施详细设计、API/搭建指南与分阶段实施清单，并同步上层契约入口。未修改后端行为、安装数据库、启动容器或创建数据库对象。配置文件、schema 命令、路由和测试均是 M3 必需实施项，尚未实现；任何 contract 均未因文档完成而标为已承接。
+本决策记录保留 M3 形成过程；当前交付已实现实施详细设计、API/搭建指南、分阶段清单、配置、schema、路由和测试，并同步上层契约入口。Milestone 16 已清除本机 review finding；由于 GLOBAL-C11 的外部证据仍缺，中心 contract 仍未登记为最终 `implemented`。

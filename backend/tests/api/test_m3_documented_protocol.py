@@ -33,6 +33,8 @@ IMPLEMENTATION_CHECKLIST = (
     REPOSITORY_ROOT / "docs" / "M3" / "m3_implementation_todo.md"
 )
 CENTRAL_CONTRACTS = REPOSITORY_ROOT / "docs" / "deferred_milestone_contracts.md"
+ARCHITECTURE_GUIDE = REPOSITORY_ROOT / "docs" / "backend_architecture_skeleton.md"
+MILESTONE_GUIDE = REPOSITORY_ROOT / "docs" / "backend_refactor_milestones.md"
 RUN_ID = UUID("10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c")
 ITEM_ID = UUID("c5677c98-27ac-4881-b7ba-b06cc2e85482")
 SESSION_ID = UUID("7d0a9cea-d754-4d88-8271-f4a38b8fa71f")
@@ -210,3 +212,45 @@ def test_m3_contract_audit_covers_every_id_without_claiming_platform_evidence() 
     assert "GLOBAL-C11 | partial" in checklist
     assert "三平台实际结果" in central
     assert "保持未最终承接" in central
+
+
+def test_parent_docs_describe_the_implemented_m3_public_protocol() -> None:
+    schema = create_app().openapi()
+    actual_routes = {
+        path: {method for method in operations if method in {"get", "post"}}
+        for path, operations in schema["paths"].items()
+        if path.startswith("/api/analysis/runs")
+    }
+    expected_routes = {
+        "/api/analysis/runs": {"get", "post"},
+        "/api/analysis/runs/{run_id}": {"get"},
+        "/api/analysis/runs/{run_id}/sessions/{session_id}": {"get"},
+        "/api/analysis/runs/{run_id}/sessions/{session_id}/transcript": {"get"},
+        "/api/analysis/runs/{run_id}/transcript/{item_id}/content": {"get"},
+        "/api/analysis/runs/{run_id}/events": {"get"},
+        "/api/analysis/runs/{run_id}/sessions/{session_id}/events": {"get"},
+        "/api/analysis/runs/{run_id}/cancel": {"post"},
+        "/api/analysis/runs/{run_id}/persistence/retry": {"post"},
+    }
+    assert actual_routes == expected_routes
+
+    documents = {
+        "architecture": ARCHITECTURE_GUIDE.read_text(encoding="utf-8"),
+        "milestones": MILESTONE_GUIDE.read_text(encoding="utf-8"),
+    }
+    stale_m3_claims = (
+        "当前 M2 以旧 session 命名实现整次分析及 SSE",
+        "本次是文档交付，后端尚未实现",
+        "当前代码尚未迁移",
+        "本阶段尚未实现",
+        "本次没有修改代码",
+    )
+    for document in documents.values():
+        assert not any(claim in document for claim in stale_m3_claims)
+        for path in expected_routes:
+            assert path in document
+        for event_name in ("message_started", "message_delta", "message_finalized"):
+            assert event_name in document
+        assert "M3 已在 `backend/` 实现" in document
+        assert "GLOBAL-C11" in document
+        assert "partial" in document

@@ -1,17 +1,17 @@
 # 前端接入约定
 
-更新日期：2026-09-14
+更新日期：2026-09-15
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
-M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–10 的历史实现证据已经保留；Milestone 11 的凭据与 metadata 修复已完成本机实现与适用验证，Milestone 12–16 尚未完成。前端仍不能把取消边界、引用依赖、补写竞争和 corrupt 全文行为视为已验收；正式消费由产品阶段 M9 实现。
+M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 0–16 已完成本机实现、适用验证和最终复审，取消边界、引用依赖、补写竞争与 corrupt 全文均已有回归证据；正式前端消费仍由产品阶段 M9 实现。三平台实际 CI 与同库跨系统迁移保持 `partial`，不影响前端以当前 M3 OpenAPI/SSE 契约开展 M9 接入。
 
 **领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
-| M3 transcript/history/idempotency/SSE | Milestone 0–10 历史证据保留；Milestone 11 已本机完成，Milestone 12–16 待实现，当前 request changes；三平台实跑 partial | 纯字母认证凭据与公开 tags 已安全化；其余追加里程碑完成前，不依赖受剩余 finding 影响的边界行为。正式消费由产品阶段 M9 接入。 |
+| M3 transcript/history/idempotency/SSE | Milestone 0–16 本机已完成并清除 review finding；三平台实跑与同库迁移仍为 `partial` | 以当前 OpenAPI、API 指南和 SSE frame 接入；纯字母认证凭据、公开 tags、流式取消、引用、补写竞态及安全全文边界均已验证。正式消费由产品阶段 M9 接入。 |
 | M4–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -22,9 +22,9 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 
 用户不能给 Agent 追加消息，但可以通过 POST /api/analysis/runs/{run_id}/cancel 停止整个 run；停止范围不取决于当前查看或订阅了哪些水体。关闭或切换查看连接不会取消分析。按 [D67](M3/m3_transcript_history_design.md#d67只公开-run-取消由后端传递到各-session)，前端只调用一次 run cancel，由后端阻止后续调度并通过内部能力取消所有已创建的未终态 session；首版不公开单独 Agent cancel HTTP 接口，前端不遍历会话取消。受理取消不代表在途调用已立即停止，各 session 原终态保留，晚到输出遵守既有可见性限制。D69 两层 SSE 的路径、事件、续传、握手与关闭协议已由 Milestone 7 实现，见 M3 API 指南；下文 M2 契约只作为历史基线。
 
-按 [D68](M3/m3_transcript_history_design.md#d68按查看需要订阅水体-session已结束与历史使用统一读取)，打开水体实时过程时才订阅对应 session，切换水体时关闭旧订阅，关闭过程视图也关闭连接；进入 run 页面不自动订阅所有 Agent。后台执行及保存不依赖查看连接。Agent 已结束或正在查阅历史时，使用统一读取接口取得完整记录；当前读取保留 auto 和持久化警告，严格历史保持 view=history。打开前已经产生的全部可见过程也必须可读，不能仅展示连接后的消息；已有过程与实时上报的衔接按后续协议实现。
+按 [D68](M3/m3_transcript_history_design.md#d68按查看需要订阅水体-session已结束与历史使用统一读取)，打开水体实时过程时才订阅对应 session，切换水体时关闭旧订阅，关闭过程视图也关闭连接；进入 run 页面不自动订阅所有 Agent。后台执行及保存不依赖查看连接。Agent 已结束或正在查阅历史时，使用统一读取接口取得完整记录；当前读取保留 auto 和持久化警告，严格历史保持 view=history。打开前已经产生的全部可见过程也必须可读，不能仅展示连接后的消息；已有过程与实时上报按 M3 API §5.3 的首次订阅和整数游标协议衔接。
 
-按 [D69](M3/m3_transcript_history_design.md#d69run-通知与-session-过程使用两层-sse)，打开当前 run 页面还要连接一条轻量 run SSE，接收 run 状态、新 session、各 Agent 状态和保存变化；打开水体实时过程时再加对应 session SSE。通常是一条整体通知流加一条所选 Agent 过程流，切换水体保持 run 连接，离开 run 页面才关闭页面持有的两类连接。普通 GET 用于首次加载、断线状态核对与历史读取，不持续轮询 run 详情。run 通知从已有状态生成，不携带完整 Agent 消息；关闭时机按 D70，事件、续传和 GET 衔接随后定型。
+按 [D69](M3/m3_transcript_history_design.md#d69run-通知与-session-过程使用两层-sse)，打开当前 run 页面还要连接一条轻量 run SSE，接收 run 状态、新 session、各 Agent 状态和保存变化；打开水体实时过程时再加对应 session SSE。通常是一条整体通知流加一条所选 Agent 过程流，切换水体保持 run 连接，离开 run 页面才关闭页面持有的两类连接。普通 GET 用于首次加载、断线状态核对与历史读取，不持续轮询 run 详情。run 通知从已有状态生成，不携带完整 Agent 消息；关闭时机、事件、续传和 GET 衔接以 D70 及当前 M3 API 指南为准。
 
 分析完成后，地图显示每个实际参与推理的水体。点击水体后展示该水体的分时段预测、总体预测值，以及推理概述和总结；从预测结果入口进入对应的具体推理流程，以类似 Codex 的方式阅读上下文。
 
@@ -48,7 +48,7 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 
 按 D51，问题解析 Agent 也拥有属于该 run 的独立 session，保存输入、调用过程与结构化输出。它不绑定水体 COMID，不作为地图上的水体节点；其输出可以包含目标位置和 COMID。该归属确认不新增独立前端入口，也不改变先选水体再阅读完整分析过程的交互。
 
-按 [D53](M3/m3_transcript_history_design.md#d53四张核心表会话状态与两层记录归属)，run 与各 session 保留各自必要的状态和时间，前端不能从 run 状态直接推断所有 Agent 都已开始、完成或失败；状态枚举按 D60，完整返回字段待定型。原请求、run 创建事件、BFS 等公共过程属于 run，解析与水体 Agent 的消息属于各自 session。角色和水体归属由后端从 session 等权威事实装配，前端按原引用读取完整过程，不将全部公共内容归到解析 session，也不复制成每个水体的过程。
+按 [D53](M3/m3_transcript_history_design.md#d53四张核心表会话状态与两层记录归属)，run 与各 session 保留各自必要的状态和时间，前端不能从 run 状态直接推断所有 Agent 都已开始、完成或失败；状态枚举和 M3 返回字段以当前 OpenAPI 为准。原请求、run 创建事件、BFS 等公共过程属于 run，解析与水体 Agent 的消息属于各自 session。角色和水体归属由后端从 session 等权威事实装配，前端按原引用读取完整过程，不将全部公共内容归到解析 session，也不复制成每个水体的过程。
 
 按 [D54](M3/m3_transcript_history_design.md#d54所有业务表的每条记录都保留时间信息) 和 [D55](M3/m3_transcript_history_design.md#d55通用时间最多两列occurred_at-复用创建时间)，每条数据库记录保留时间。run/session 表使用 created_at、updated_at，不可变原记录/大正文表仅使用 created_at；transcript 的 API occurred_at 从原创建时间装配，仍表达原过程发生时间。前端不因数据库列精简更换字段或排序规则：历史继续按 run 创建顺序分页，过程按 transcript_sequence 展示。读取和补写不更新时间，不能把 updated_at 一律当作完成时间。
 
@@ -64,21 +64,21 @@ skill、tool、hook 等按语义组织为默认折叠的块，用户点击后展
 
 “总体预测值”已明确为**跨多个参数的综合水质指标**。具体指标、计算规则和缺失参数处理由 M6 定型；不能用总体置信度、分时段均值或存储 preview 临时代替。具体设计与阶段责任见 [M3 D21](M3/m3_transcript_history_design.md#d21按水体进入预测与推理上下文展示规则独立于存储大小)。
 
-按 [M3 D22](M3/m3_transcript_history_design.md#d22单份-session-transcript按水体与调用关系关联读取)，一次分析保留一份完整 transcript，水体记录明确关联 COMID，工具开始/结束及相关 hook 通过稳定调用 ID 配对。水体结果关联其完整过程，公共上下文通过引用读取；前端按这些关联组织上下文，不靠日志文本或记录相邻关系猜测归属，不将每个水体的过程视为独立复制的全文。具体 DTO 尚未冻结。
+按 [M3 D22](M3/m3_transcript_history_design.md#d22单份-session-transcript按水体与调用关系关联读取)，一次分析保留一份完整 transcript，水体记录明确关联 COMID，工具开始/结束及相关 hook 通过稳定调用 ID 配对。水体结果关联其完整过程，公共上下文通过引用读取；前端按这些关联组织上下文，不靠日志文本或记录相邻关系猜测归属，不将每个水体的过程视为独立复制的全文。M3 DTO 以当前 OpenAPI 与 API 指南为准；M4–M9 只扩展所属真实业务字段。
 
 ## 1. 事实来源与版本边界
 
 1. 普通 HTTP 的路径、方法、request/response schema 和 status code 以运行时 `/openapi.json` 为可执行事实源。
-2. SSE framing、回放、keepalive、断线和关闭语义以 [M2 API 与排障指南](M2/m2_analysis_session_sse_api.md) 及后续同类事件文档为准；OpenAPI 只能描述握手响应，不能完整表达流行为。
+2. SSE framing、回放、keepalive、断线和关闭语义以 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md#5-两层-sse) 为准；OpenAPI 只能描述握手响应，不能完整表达流行为。M2 指南仅保留历史证据。
 3. 本文规定客户端行为和跨接口不变量。标为“尚未实现”或“待定型”的内容不得出现在生产前端调用中。
-4. M4 会直接替换阶段性的 M2 create request，M6 会直接替换空的 completed payload；前端不得为阶段性结构保留兼容分支。
+4. M4 会在当前 M3 create request 上增加真实 AnalysisContext 输入，M6 会扩展真实 reasoning/result payload；前端不得为历史 M2 结构保留兼容分支。
 5. 发送请求时只包含 OpenAPI 声明的字段。消费事件时按 `schema_version` 和 `type` 解析；不支持的版本或类型不得被解释成其他业务状态，应保留关联 ID 并产生可排查的客户端诊断。
 
 ## 2. 跨接口必须保留的身份与安全边界
 
 | 字段 | 身份范围 | 前端要求 |
 |---|---|---|
-| M2 接口中的 `session_id` | 整次分析的旧命名 | 仅解释当前 M2 协议；在 D50 新模型中对应 run 层，迁移后的字段和路径以最终 API 为准。 |
+| M2 接口中的 `session_id` | 整次分析的旧命名 | 仅解释历史 M2 协议；在 D50 新模型中对应 run 层，当前字段和路径以 M3 OpenAPI 为准。 |
 | `run_id`（D50/D51 新模型） | 一次用户提交的完整分析 | 关联历史列表、整次分析状态、问题解析 session 与水体 sessions。 |
 | `session_id`（D50/D51 新模型） | 单个 Agent 的独立上下文和完整 loop | 问题解析与水体推理各有独立 session；选中水体后按 D64 定位其结果与完整消息，路径按 D65。 |
 | `agent_role`（D52） | 问题解析或水体推理职责 | 用于识别职责，不作为唯一执行身份；角色的具体枚举编码随最终 DTO 定型。 |
@@ -89,18 +89,18 @@ skill、tool、hook 等按语义组织为默认折叠的块，用户点击后展
 | `item_id` | 单条 transcript 记录；也是流式消息身份 | 按 D81 在消息开始生成时分配，片段和最终正文复用；前端持续更新同一消息，内存读取、保存和补写保留身份；不按 UUID 排序，也不据此判断已保存。 |
 | `transcript_sequence` | run 内统一的过程追加顺序 | 按 D56，查询 session 保留筛选后的原序号，缺口正常，不重新编号；不是 SSE cursor，不得写入 `Last-Event-ID`，Agent 记录不分页。 |
 | `content_ref` | 原 transcript item 的全文 | 按 M3 D57 统一使用 run_id + item_id，公共记录与 session 记录共用；沿用后端给出的引用读取，不另行拼接公开 content_id 或底层存储路径。 |
-| `scope` | transcript 的水体与操作归属 | 配合所属 run/session 及适用的 target_comid/operation_id 组织过程，Agent 执行不再另用 agent_id，公共记录不强行归到某个水体；完整 DTO 层级继续定型。 |
+| `scope` | transcript 的水体与操作归属 | 配合所属 run/session 及适用的 target_comid/operation_id 组织过程，Agent 执行不再另用 agent_id，公共记录不强行归到某个水体；M3 DTO 层级以 OpenAPI 与 API 指南为准。 |
 | `correlation` | transcript 的 HTTP 请求与错误关联 | 通过适用的 request_id/error_id 排障，不代替水体或操作归属。 |
 
 前端错误上报至少应包含 HTTP status、route、`request_id`、适用时的 `session_id`、`error_id` 和最后处理的 event `sequence`。按 [M3 D26](M3/m3_transcript_history_design.md#d26日志保留-query-正文仅对其中凭据脱敏)，日志允许保留业务 query 正文，但须移除其中凭据；不能因字段名为 query 就整段隐藏。不得为了排障输出完整 request body、Authorization、Cookie、API key 或未脱敏的服务端响应。
 
 所有时间戳作为 UTC instant 解析；用户时间语义和窗口标签按 session 固化的 `analysis_timezone` 展示。全局设置变化不得改写已有 session snapshot。DST 可能产生 5/7 小时或 23/25 小时的实际时长，前端不得用固定毫秒数推导“当地 6h/24h”窗口。
 
-## 3. 当前已实现：M2 session 生命周期
+## 3. 历史基线：M2 session 生命周期
 
 ### 3.1 创建分析
 
-当前接口为 `POST /api/analysis/sessions`，成功返回 `201`。M2 request 只有：
+历史接口为 `POST /api/analysis/sessions`，成功返回 `201`。M2 request 只有：
 
 - `query`：必填，trim 后必须非空。
 - `time_resolution`：可省略，只允许 `6h`、`12h`、`24h`；显式 `null` 非法。
@@ -110,7 +110,7 @@ skill、tool、hook 等按语义组织为默认折叠的块，用户点击后展
 
 configuration 是 session 创建时固化的事实：显式传 `time_resolution` 时 source 为 `frontend`，省略时由服务端使用默认值并返回 source `default`；`analysis_timezone` 来自服务端配置。前端不能用浏览器本地时区或自己的默认粒度覆盖 response。
 
-M2 尚未实现持久化幂等创建。没有收到 POST 响应不能证明服务器未创建 session，自动重试可能重复创建；接入 M3 `Idempotency-Key` 前，前端不得把 create 当作可安全重试操作。
+历史 M2 没有实现持久化幂等创建。当前 M3 已提供 `Idempotency-Key`，新前端必须按 §4.1 管理主动提交与同次重试；本段只解释旧协议风险。
 
 ### 3.2 状态与展示
 
@@ -164,11 +164,11 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 - 只有 `error.retryable=true` 才能进入重试判断；同时还必须确认该操作自身幂等。M2 create 即使遇到网络错误也不满足此条件。
 - 保留 response header 的 `X-Request-ID`。公开错误中的 `error.request_id` 是相同请求的排障身份。
 
-当前关键 error code 和处理方式以 [M2 错误码表](M2/m2_analysis_session_sse_api.md#6-http-error) 为准。接口不自动重定向尾斜杠，前端必须使用 OpenAPI 中的准确路径和方法。
+当前 M3 关键 error code 和处理方式以 [M3 错误与排查字段](M3/m3_transcript_history_api.md#7-错误与排查字段) 为准；M2 错误码只解释本节历史协议。接口不自动重定向尾斜杠，前端必须使用 OpenAPI 中的准确路径和方法。
 
 ## 4. M3 接入约定与分阶段状态
 
-本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–10 的创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、严格启动修复、live 清理与实时两层 SSE 历史实现证据已经保留；后续审查发现的 4 个 P1、5 个 P2 已拆入 Milestone 11–16，其中 Milestone 11 已完成本机实现与适用验证，其余相关契约保持待验证。后续产品能力仍按各自 Milestone 状态接入；已确认行为的变更须同步运行时 schema、对应设计与契约。
+本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。Milestone 0–16 的创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、严格启动修复、live 清理与实时两层 SSE 已完成本机实现和最终复审；后续审查发现的 4 个 P1、5 个 P2 均已关闭。后续产品能力仍按各自 Milestone 状态接入；已确认行为的变更须同步运行时 schema、对应设计与契约。
 
 ### 4.1 创建分析：Idempotency-Key
 
@@ -279,7 +279,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 - 当前 OpenAPI 中只有 run 可以进入 `completed_with_persistence_error`；Agent session 始终只使用五态 pending/running/completed/failed/cancelled。run 的保存进度和 warning 不新增或改写 session 状态，session terminal event 不携带 run 级保存 warning。
 - 按 [M3 D36](M3/m3_transcript_history_design.md#d36单次数据库写入共用-5-秒执行预算)，后端单次数据库写入默认采用 5 秒执行预算，可配置；该预算不表示整个分析应在 5 秒完成，也不替代后台重试与终态交付窗口。前端仍依据实际状态、warning 和 HTTP 错误处理，不自行倒计时将分析标为失败。
 - 按 [M3 D38](M3/m3_transcript_history_design.md#d38终态选定前检查既有写入后续保存失败保留终态)，后端在成功分析结束时固定此前已产生的必需结果、过程和状态的保存范围；该范围在既定交付窗口到期时仍未保存完整，则 run 为 `completed_with_persistence_error`，仍通过唯一 `run_completed` 交付当前结果，并带安全 warning/`error_id`。前端应显示结果和持久化警告，不能归类为 `run_failed`；各 Agent session 保留自己的原五态和 terminal event。
-- run 的 completed 表示业务分析完成，不保证完成事件自身和所有后续收尾记录均已保存。它们的保存随后失败时，后端保持原 run 终态，通过当前读取接口及 D69 的 run SSE 通知保存情况和警告/`error_id`；前端保留完成结果并展示该警告，不能自行改写业务终态。保存变化不产生第二个 run terminal event，也不产生 session terminal event，不能在业务终态到达时直接认定 run 通知流结束；关闭时机按 D70，具体通知 DTO 继续定型。
+- run 的 completed 表示业务分析完成，不保证完成事件自身和所有后续收尾记录均已保存。它们的保存随后失败时，后端保持原 run 终态，通过当前读取接口及 D69 的 run SSE 通知保存情况和警告/`error_id`；前端保留完成结果并展示该警告，不能自行改写业务终态。保存变化不产生第二个 run terminal event，也不产生 session terminal event，不能在业务终态到达时直接认定 run 通知流结束；关闭时机和通知 DTO 以 D70 及当前 M3 API 指南为准。
 - 内存仍保留时，统一读取入口可读取当前结果及尚未保存的完整上下文；展开大内容不要求 PostgreSQL 已恢复。成功读取不代表保存成功，仍展示后端提供的持久化警告。进程退出后未保存内容可能丢失，不能把本地读过的内容标成后端已保存。
 - 后台补写恢复后不改变原 run 终态，也不再发送第二个 `run_completed`。前端不得等待 run 状态从 `completed_with_persistence_error` 自动变成 `completed`；session 状态和 terminal event 同样不因 run 保存恢复而变化。
 - 按 [M3 D39](M3/m3_transcript_history_design.md#d39自动补写耗尽后允许用户手动开启新一轮)，每轮 5 次自动重试耗尽后停止。M3 提供“重试保存”接口，M9 在保存警告处接入按钮：仅用户主动操作可在后端仍保留待写内容时开启新一轮，首次立即尝试，失败后最多自动重试 5 次。数据库恢复、页面刷新或新内容到来不自动重置耗尽预算。
@@ -373,9 +373,9 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 | Milestone | 前端必须遵守的语义 |
 |---|---|
-| M4 query/context | 最终 create request 会加入位置/COMID、参数、日期范围、mode、memory mode 和粒度并直接替换 M2 request。第一版日期为 date-only，结束日期包含整天，由后端按 session IANA timezone 转 UTC；不要在浏览器端自行转换边界。`time_resolution_source=auto` 只接受后端实际自动选择的结果。参数身份是 `ParameterKey(code_system, code)`，不能只用裸 code。解析和拓扑内容保持原归属，公开表示按 D69 两层流定型，不强制共用旧 M2 单流 envelope/sequence。 |
+| M4 query/context | 在当前 M3 create request 上加入位置/COMID、参数、日期范围、mode、memory mode 和粒度。第一版日期为 date-only，结束日期包含整天，由后端按 session IANA timezone 转 UTC；不要在浏览器端自行转换边界。`time_resolution_source=auto` 只接受后端实际自动选择的结果。参数身份是 `ParameterKey(code_system, code)`，不能只用裸 code。解析和拓扑内容保持原归属，继续使用 M3 两层流，不兼容旧 M2 单流 envelope/sequence。 |
 | M5 evidence | 区分 `available / empty / unavailable / invalid`，不能把无数据与取数失败合并。大 evidence 只在事件中提供 preview/reference；前端不得要求无界 raw payload 进入 SSE。单位、换算和 provenance 由后端确定性逻辑提供，前端不自行猜测单位。 |
-| M6 reasoning/result | 每个计划窗口都有 quantified、directional 或 indeterminate 之一；前端不能丢弃 indeterminate point，也不能根据 confidence 自行改写结果类别。展示值、单位、confidence、evidence refs 和 attribution 时保留后端 identity；`basis` 为 observed/correlated/inferred/hypothesized。最终 completed payload 会直接替换 M2 空 payload。 |
+| M6 reasoning/result | 每个计划窗口都有 quantified、directional 或 indeterminate 之一；前端不能丢弃 indeterminate point，也不能根据 confidence 自行改写结果类别。展示值、单位、confidence、evidence refs 和 attribution 时保留后端 identity；`basis` 为 observed/correlated/inferred/hypothesized。真实 completed payload 在当前 M3 envelope 上扩展。 |
 | M7 workflow | Agent/tool 事件仍以 session 为根关联。cancel 后不得展示晚到 result 或启动新的前端下游动作；`workflow_quiesced` 保持内部审计事实。 |
 | M8 RAG | 历史推理必须显示原 session、原 confidence、schema version、RAG score 和 provenance；当前有效观测优先，前端不得把历史推理伪装成当前 observation。 |
 | M9 settings/admin | 修改默认 timezone 只影响新 session。API key 只能通过 secret endpoint 保存/清除并以 masked status 展示，不能回显或进入普通日志。全局单位变更必须经过用户显式确认。Admin 清理 history/transcript/index/memory/cache 时不得暗示 API key 也被删除。最终 demo 仍是单进程、单 worker。 |
@@ -431,7 +431,7 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 - [ ] 按 D85 处理 message_finalized：正常或未完整生成更新原消息、结束其打字状态，重复投递按原 SSE id 去重；数据库未保存也可收到，不据此关闭 Agent 流或显示已保存。大正文预览不代替全文，取消定稿不混入晚到审计，定稿先于 session stream_end。
 - [ ] 手动补写使用 D41 的无请求体 POST；202 与实际保存完成区分，200/409 按当前情况展示，404/503 不混淆。响应丢失后先查询保存状态、不自动重发 POST，不取消已经受理的补写或自动开启另一轮。
 - [ ] 地图展示所有实际参与推理的水体，点击能查看对应水体的分时段/总体结果和推理概述总结，并从预测结果进入对应上下文。总体预测值按 M6 定型的语义展示。
-- [ ] 历史分页以 run 为单位，完整过程只在用户选中水体后展示其独立 session；未选水体时不展示混合的全分析过程。D50 的 run/session 身份不能与旧 M2 整体 session_id 混用，查询路径按后续冻结的 API 接入。
+- [ ] 历史分页以 run 为单位，完整过程只在用户选中水体后展示其独立 session；未选水体时不展示混合的全分析过程。D50 的 run/session 身份不能与旧 M2 整体 session_id 混用，查询路径按当前 M3 OpenAPI 接入。
 - [ ] 总体预测值展示跨参数综合水质指标，保留 M6 定型的指标含义、单位/尺度、可用性和依据；不把总体置信度显示成综合水质指标。
 - [ ] skill/tool/hook 操作块按语义默认折叠，小内容 inline 不导致自动展开，大内容按需读取；摘要/总结来自真实结果，不使用存储 preview 替代。
 - [ ] 按 COMID 进入的上下文包含对应水体完整过程及适用的公共引用，包括未被最终总结挑选的记录和大正文关联的上下文；工具开始/结束/hook 按调用 ID 正确配对，同名工具多次调用不会混合，公共内容沿用原 item 读取。

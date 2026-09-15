@@ -2,9 +2,9 @@
 
 更新日期：2026-09-15
 
-状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–15 已完成本机实现与适用验证，Milestone 16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+状态：D01–D86 的主体设计与 Milestone 0–16 本机实现、适用验证和最终复审均已完成；针对提交 `452749b` 发现的 4 个 P1、5 个 P2 已按功能修复并取得回归证据，本机 `request changes` 已清除。本文描述当前实现方案；逐阶段证据见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/同库跨系统迁移仍为 `partial`，中心最终承接暂不登记 `implemented`。
 
-本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
+本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。当前功能完成状态只以实施清单中的实际测试和环境证据为准。
 
 ## 1. 核心结论与交付边界
 
@@ -466,4 +466,4 @@ M3 完成需同时满足：四表与环境可搭建；已保存事实可重启�
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
 
-Milestone 10 曾在 Milestone 2–9 审查回补完成后逐项审计 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并通过可执行文档 golden 对齐实际 OpenAPI、production registry 和 SSE encoder。提交 `452749b` 的后续审查重新发现 4 个 P1、5 个 P2，现由 [Milestone 11–16](m3_implementation_todo.md#milestone-11认证凭据与公开-metadata-脱敏) 承接；这些追加里程碑完成并复审前，本机完成标准不成立。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；之后还须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。
+Milestone 16 已在 Milestone 11–15 修复完成后逐项重审 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并通过可执行文档 golden 对齐实际 OpenAPI、production registry 和 SSE encoder。提交 `452749b` 后发现的 4 个 P1、5 个 P2 均已有实现、回归和文档证据，本机完成标准重新满足。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；M3 还须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。

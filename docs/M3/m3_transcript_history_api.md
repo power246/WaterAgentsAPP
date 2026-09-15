@@ -2,9 +2,9 @@
 
 更新日期：2026-09-15
 
-**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–15 已完成本机实现与适用验证，Milestone 16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态、取消引用依赖、手动补写/cleanup 竞态及 corrupt 安全文读取已经收敛。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+**状态：Milestone 0–16 已完成本机实现、适用验证和最终复审；针对提交 `452749b` 发现的 4 个 P1、5 个 P2 均已关闭，本机 `request changes` 已清除。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态、取消引用依赖、手动补写/cleanup 竞态及 corrupt 安全文读取已经收敛。三平台实际 CI 与跨系统迁移证据仍为 `partial`，中心最终承接暂不登记 `implemented`。
 
-工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
+工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。普通 HTTP 以当前 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
 ## 1. 基础约定与路由
 
@@ -499,7 +499,7 @@ uv run --project backend --locked wateragents-db upgrade
 | SSE 返回 410 | 停止重连，读取明确 history URL，不能创建新分析“恢复”。 |
 | query 日志消失或凭据出现 | 检查实际日志入口与安全过滤；普通 query 保留，凭据始终过滤。 |
 
-M3 实现后，基于独立测试数据库执行：
+验证当前 M3 实现时，基于独立测试数据库执行：
 
 ```text
 uv run --project backend --extra dev python -m pytest backend/tests -q
