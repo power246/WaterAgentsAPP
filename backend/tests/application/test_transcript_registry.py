@@ -260,6 +260,39 @@ def test_read_detects_body_byte_count_corruption() -> None:
     assert parsed.parse_error.code == "transcript_content_corrupt"
 
 
+def test_safe_read_body_redacts_valid_json_without_enforcing_known_schema() -> None:
+    registry = create_production_registry()
+    unsafe_body = json.dumps(
+        {
+            "query": 7,
+            "nested": {
+                "api_key": "nested-secret",
+                "note": "Authorization: Basic dXNlcjpwYXNz",
+            },
+            "private_key": "private-secret",
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+
+    safe_body = registry.safe_read_body("analysis_request", 1, unsafe_body)
+
+    assert safe_body == (
+        '{"query":7,"nested":{"api_key":"[REDACTED]",'
+        '"note":"Authorization: [REDACTED]"},"private_key":"[REDACTED]"}'
+    )
+    assert "nested-secret" not in safe_body
+    assert "dXNlcjpwYXNz" not in safe_body
+    assert "private-secret" not in safe_body
+    parsed = registry.parse(
+        _stored(ITEM_ID, body=safe_body),
+        safe_body,
+        error_id_factory=lambda: UUID(int=1),
+    )
+    assert parsed.parse_status is ParseStatus.CORRUPT
+    assert parsed.parse_error.code == "transcript_content_corrupt"
+
+
 def test_standalone_error_is_strict_and_lifecycle_error_needs_no_copy() -> None:
     registry = create_production_registry()
     error = PublicError(

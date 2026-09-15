@@ -268,9 +268,9 @@ class TranscriptReader:
             if candidate.item_id == item_id
         )
         checked = self._checked_body(selected.stored, stored_item)
-        if checked is None or item.parse_status is ParseStatus.CORRUPT:
+        if checked is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
-        safe_item, text = checked
+        safe_item, text, _ = checked
         return TranscriptContentResponse(
             run_id=run_id,
             item_id=item_id,
@@ -473,21 +473,35 @@ class TranscriptReader:
                     ),
                 ))
             else:
-                safe_item, safe_body = checked
-                parsed.append(self._registry.parse(
-                    safe_item,
-                    safe_body,
-                    error_id_factory=self._error_id_factory,
-                ))
+                safe_item, safe_body, stored_bytes_match = checked
+                if not stored_bytes_match:
+                    parsed.append(ReadTranscriptItem(
+                        item=safe_item,
+                        content_ref={
+                            "run_id": item.run_id,
+                            "item_id": item.item_id,
+                        },
+                        parse_status=ParseStatus.CORRUPT,
+                        parse_error=self._read_error(
+                            "transcript_content_corrupt",
+                            "This transcript item contains invalid content.",
+                        ),
+                    ))
+                else:
+                    parsed.append(self._registry.parse(
+                        safe_item,
+                        safe_body,
+                        error_id_factory=self._error_id_factory,
+                    ))
         return tuple(parsed)
 
     def _checked_body(
         self,
         stored: StoredRunRead,
         item: StoredTranscriptItem,
-    ) -> tuple[StoredTranscriptItem, str] | None:
+    ) -> tuple[StoredTranscriptItem, str, bool] | None:
         body = self._body(stored, item)
-        if body is None or len(body.encode("utf-8")) != item.content_bytes:
+        if body is None:
             return None
         try:
             safe_body = self._registry.safe_read_body(
@@ -497,7 +511,11 @@ class TranscriptReader:
             )
         except (TypeError, ValueError):
             return None
-        return self._safe_item(item, body, safe_body), safe_body
+        return (
+            self._safe_item(item, body, safe_body),
+            safe_body,
+            len(body.encode("utf-8")) == item.content_bytes,
+        )
 
     def _safe_item(
         self,
@@ -505,7 +523,8 @@ class TranscriptReader:
         original_body: str,
         safe_body: str,
     ) -> StoredTranscriptItem:
-        if safe_body == original_body:
+        safe_content_bytes = len(safe_body.encode("utf-8"))
+        if safe_body == original_body and safe_content_bytes == item.content_bytes:
             return item
         location = locate_content(
             safe_body,
@@ -527,7 +546,7 @@ class TranscriptReader:
             inline_body=location.inline_body,
             preview_head=location.preview_head,
             preview_tail=location.preview_tail,
-            content_bytes=len(safe_body.encode("utf-8")),
+            content_bytes=safe_content_bytes,
         )
 
     @staticmethod

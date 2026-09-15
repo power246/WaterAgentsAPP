@@ -2,7 +2,7 @@
 
 更新日期：2026-09-15
 
-**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–14 已完成本机实现与适用验证，Milestone 15–16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态、取消引用依赖及手动补写/cleanup 竞态已经收敛；corrupt 全文读取仍不能视为已验收。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+**状态：Milestone 0–10 的历史实现与本机验证证据已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，Milestone 11–15 已完成本机实现与适用验证，Milestone 16 尚未完成，当前保持 `partial / request changes`。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态、取消引用依赖、手动补写/cleanup 竞态及 corrupt 安全文读取已经收敛。三平台实际 CI 与跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
@@ -240,9 +240,9 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
 
 `GET /api/analysis/runs/{run_id}/transcript/{item_id}/content[?view=history]` 返回 `{run_id,item_id,content_type,content_schema_version,content_bytes,text,source,persistence,issues}`。text 是完整安全 UTF-8 JSON 原文本，经过 JSON HTTP 字符串转义后传输；客户端应根据类型/版本解析它，不把 HTTP wire bytes 当 content_bytes。
 
-内联与外置使用同一入口。当前 live 数据库故障时仍可读内存全文并保留 warning；live 释放后相同身份自动读 PG。history 模式只返回已保存文本。引用与全文请求必须继续传原 view。
+内联与外置使用同一入口。当前 live 数据库故障时仍可读内存全文并保留 warning；live 释放后相同身份自动读 PG。history 模式只返回已保存文本。引用与全文请求必须继续传原 view。`parse_status=corrupt` 表示 typed schema 或存储字节完整性校验失败，不等于正文不可读：原正文只要是合法 JSON，接口仍返回递归脱敏、规范序列化后的 200 文本，issues 保留原 corrupt 问题，`content_bytes` 按该安全文本的实际 UTF-8 长度返回。
 
-auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 `late_message_output` 和 `suppressed_transcript_item`。隐藏或不属于 run 的 item 返回 404；外置正文缺失返回明确 500/transcript_content_unreadable，不返回空字符串。
+auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 `late_message_output` 和 `suppressed_transcript_item`。隐藏或不属于 run 的 item 返回 404；外置正文缺失或正文不是可安全解析的 JSON 返回明确 500/transcript_content_unreadable，不返回空字符串。未知类型仍只有严格 history 可以读取原安全 JSON，不能借全文入口绕过 auto 可见性。
 
 ## 5. 两层 SSE
 

@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–14 已完成本机实现与适用验证，Milestone 15–16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成 corrupt 全文读取和权威文档同步，再重新执行契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
+**当前状态：Milestone 0–10 的历史实现与本机验证记录已经保留；针对提交 `452749b` 的分支审查新增 4 个 P1、5 个 P2，现按功能追加 Milestone 11–16。Milestone 11–15 已完成本机实现与适用验证，Milestone 16 仍待完成，整体保持 `partial / request changes`，暂不建议合并。** 当前还须完成权威文档同步和最终契约审计。Milestone 2/9 的 Ubuntu/macOS/Windows 实际 CI 与同一数据库跨系统迁移结果也仍未取得，中心最终承接继续不登记 `implemented`。
 
 ## 阶段与设计导航
 
@@ -818,24 +818,32 @@ git diff --check
 
 ### 工作
 
-- [ ] 将 registry 的安全 JSON decode/递归脱敏/规范序列化与已知 content schema 校验分离；schema 校验仍决定 `ok/unsupported/corrupt`，不能决定全文是否可返回。
-- [ ] `_checked_body()` 在正文存在且为合法 JSON 时返回安全文本，即使 schema 不匹配或存储的 `content_bytes` 不一致；`parse_status` 和 issue 仍保持 `corrupt`，不得伪装为正常 typed body。
-- [ ] 全文响应的 `content_bytes` 按实际返回的安全 UTF-8 文本计算；嵌套敏感 key/value 必须脱敏，不能直接回传数据库原文。
-- [ ] 只有外置正文缺失或正文不是可安全解析的 JSON 时返回 `500/transcript_content_unreadable`；邻近 item、列表和详情继续可读。
+- [x] 将 registry 的安全 JSON decode/递归脱敏/规范序列化与已知 content schema 校验分离；schema 校验仍决定 `ok/unsupported/corrupt`，不能决定全文是否可返回。
+- [x] `_checked_body()` 在正文存在且为合法 JSON 时返回安全文本，即使 schema 不匹配或存储的 `content_bytes` 不一致；`parse_status` 和 issue 仍保持 `corrupt`，不得伪装为正常 typed body。
+- [x] 全文响应的 `content_bytes` 按实际返回的安全 UTF-8 文本计算；嵌套敏感 key/value 必须脱敏，不能直接回传数据库原文。
+- [x] 只有外置正文缺失或正文不是可安全解析的 JSON 时返回 `500/transcript_content_unreadable`；邻近 item、列表和详情继续可读。
 
 ### Tests
 
-- [ ] 构造合法 JSON 但已知 schema 非法的 item：详情显示 `corrupt/unparsed`，全文接口返回 200 和安全规范 JSON。
-- [ ] 构造 byte count 不匹配但正文完整的 item，确认 parse issue 保留、全文可读且响应字节数与文本一致。
-- [ ] corrupt JSON 内嵌 `api_key`/Authorization/private value，确认全文、preview、日志均不含原值。
-- [ ] 保留 malformed JSON、外置正文缺失返回 500，以及 unsupported 类型仅在严格 history 可读取的既有边界。
+- [x] 构造合法 JSON 但已知 schema 非法的 item：详情显示 `corrupt/unparsed`，全文接口返回 200 和安全规范 JSON。
+- [x] 构造 byte count 不匹配但正文完整的 item，确认 parse issue 保留、全文可读且响应字节数与文本一致。
+- [x] corrupt JSON 内嵌 `api_key`/Authorization/private value，确认全文、preview、日志均不含原值。
+- [x] 保留 malformed JSON、外置正文缺失返回 500，以及 unsupported 类型仅在严格 history 可读取的既有边界。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api/test_analysis_history.py backend/tests/application/test_transcript_registry.py -q`。
-- [ ] 在真实 PostgreSQL 的 inline/外置两种正文位置执行同样用例。
+- [x] `python -m pytest backend/tests/api/test_analysis_history.py backend/tests/application/test_transcript_registry.py -q`。
+- [x] 在真实 PostgreSQL 的 inline/外置两种正文位置执行同样用例。
 
 阶段出口：corrupt 描述业务解析失败，500 只描述正文缺失或无法安全读取；安全可得的原 JSON 始终可通过全文接口审计。
+
+### Milestone 15 完成记录（2026-09-15）
+
+- 实现：registry 的读取安全出口现在只负责 JSON decode、递归凭据脱敏与紧凑规范序列化，不再调用已知 content adapter；typed schema 校验仍独立决定 `ok/unsupported/corrupt`。
+- 读取：reader 对存在且可解析的原正文始终构造安全文本。原 schema 非法或存储字节数不匹配时，详情继续返回 `corrupt/unparsed` 与 issue，全文则返回 200；响应 `content_bytes` 按实际安全 UTF-8 文本重算。只有 malformed JSON 或缺失外置正文返回 `500/transcript_content_unreadable`。
+- 安全：内存/API 与真实 PostgreSQL inline/external 用例均注入嵌套 `api_key`、Authorization Basic 和 private key，确认详情、全文及日志不含原值；external 用例另直接制造 byte mismatch，并保留 malformed/missing 失败边界。
+- 验证：Milestone 15 指定 focused tests 为 27 passed；真实 PostgreSQL 17.10 inline/external 用例为 2 passed，完整 persistence 文件为 16 passed；连接同一临时测试库的完整后端回归为 810 passed。
+- 限制：Milestone 16、Ubuntu/macOS/Windows 实际 CI 与同库跨系统迁移证据仍未完成；契约矩阵和中心最终承接继续保持 `partial / request changes`，等待最终复审统一更新。
 
 ## Milestone 16：权威文档同步与最终复审
 

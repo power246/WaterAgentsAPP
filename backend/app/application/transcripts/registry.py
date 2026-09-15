@@ -176,25 +176,11 @@ class TranscriptRegistry:
 
     def safe_read_body(
         self,
-        content_type: str,
-        content_schema_version: int,
+        _content_type: str,
+        _content_schema_version: int,
         body: str,
     ) -> str:
-        registration = self._registrations.get(
-            (content_type, content_schema_version)
-        )
-        decoded = json.loads(body)
-        if registration is not None:
-            validated = registration.adapter.validate_python(decoded)
-            decoded = registration.adapter.dump_python(
-                validated,
-                mode="json",
-                exclude_unset=registration.preserve_unset,
-            )
-        safe_body = _serialize_safe_json(decoded)
-        if registration is not None:
-            registration.adapter.validate_json(safe_body)
-        return safe_body
+        return _serialize_safe_json(json.loads(body))
 
     def parse(
         self,

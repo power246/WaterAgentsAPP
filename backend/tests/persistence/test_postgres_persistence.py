@@ -8,7 +8,7 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from pydantic import ValidationError
-from sqlalchemy import inspect, select, text
+from sqlalchemy import delete, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -35,6 +35,11 @@ from app.application.analysis_runs.persistence import (
 )
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.registry import create_production_registry
+from app.application.transcripts.read_models import ReadView
+from app.application.transcripts.reader import (
+    TranscriptContentUnreadableError,
+    TranscriptReader,
+)
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -109,6 +114,12 @@ class RollbackOncePostgresStore(PostgresTranscriptStore):
                 raise
         await super().write_batch(batch)
         self.committed_batches.append(batch)
+
+
+class NoLiveTranscript:
+    async def get_live_read(self, run_id: UUID | str):
+        del run_id
+        return None
 
 
 def _item(
@@ -1103,6 +1114,160 @@ def test_external_content_is_committed_atomically(postgres_settings: AppSettings
                     {"item_id": item_id},
                 )
             assert stored == body
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["inline", "external"])
+def test_real_postgres_corrupt_json_has_safe_fulltext_when_readable(
+    postgres_settings: AppSettings,
+    external: bool,
+) -> None:
+    async def exercise() -> None:
+        run_id, creation = _run_batch()
+        unsafe_values = (
+            "postgres-api-secret",
+            "dXNlcjpwYXNz",
+            "postgres-private-secret",
+        )
+        unsafe_body = json.dumps(
+            {
+                "query": 7,
+                "nested": {
+                    "api_key": unsafe_values[0],
+                    "note": f"Authorization: Basic {unsafe_values[1]}",
+                },
+                "private_key": unsafe_values[2],
+            },
+            indent=2,
+        )
+        request_item = creation.items[0].model_copy(update={
+            "inline_body": None if external else unsafe_body,
+            "preview_head": "unsafe preview" if external else None,
+            "preview_tail": "unsafe preview" if external else None,
+            "content_bytes": len(unsafe_body.encode("utf-8")),
+        })
+        contents = (
+            (PersistedTranscriptContentRecord(
+                item_id=request_item.item_id,
+                body=unsafe_body,
+                created_at=request_item.created_at,
+            ),)
+            if external
+            else ()
+        )
+        await _commit(
+            postgres_settings,
+            PersistenceBatch(
+                runs=creation.runs,
+                items=(request_item, creation.items[1]),
+                contents=contents,
+            ),
+        )
+
+        engine = create_database_engine(postgres_settings)
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        reader = TranscriptReader(
+            NoLiveTranscript(),
+            store,
+            create_production_registry(),
+            error_id_factory=lambda: UUID(int=1),
+            inline_content_bytes=1 if external else 10_000,
+            preview_bytes=16,
+        )
+        try:
+            detail = await reader.get_run(run_id, ReadView.HISTORY)
+            target = next(
+                item for item in detail.items if item.item_id == request_item.item_id
+            )
+            assert target.parse_status.value == "corrupt"
+            assert target.content.kind == "unparsed"
+            assert all(
+                secret not in detail.model_dump_json()
+                for secret in unsafe_values
+            )
+
+            content = await reader.get_content(
+                run_id,
+                request_item.item_id,
+                ReadView.HISTORY,
+            )
+            assert json.loads(content.text) == {
+                "query": 7,
+                "nested": {
+                    "api_key": "[REDACTED]",
+                    "note": "Authorization: [REDACTED]",
+                },
+                "private_key": "[REDACTED]",
+            }
+            assert content.content_bytes == len(content.text.encode("utf-8"))
+            assert content.issues[0].error.code == "transcript_content_corrupt"
+            assert all(secret not in content.text for secret in unsafe_values)
+
+            if external:
+                valid_body = '{"query":"byte mismatch"}'
+                async with engine.begin() as connection:
+                    await connection.execute(
+                        update(transcript_contents)
+                        .where(transcript_contents.c.item_id == request_item.item_id)
+                        .values(body=valid_body)
+                    )
+                    await connection.execute(
+                        update(transcript_items)
+                        .where(transcript_items.c.item_id == request_item.item_id)
+                        .values(content_bytes=1)
+                    )
+                mismatched = await reader.get_content(
+                    run_id,
+                    request_item.item_id,
+                    ReadView.HISTORY,
+                )
+                assert json.loads(mismatched.text) == {"query": "byte mismatch"}
+                assert mismatched.content_bytes == len(
+                    mismatched.text.encode("utf-8")
+                )
+                assert mismatched.issues[0].error.code == (
+                    "transcript_content_corrupt"
+                )
+
+            async with engine.begin() as connection:
+                if external:
+                    await connection.execute(
+                        update(transcript_contents)
+                        .where(transcript_contents.c.item_id == request_item.item_id)
+                        .values(body="{")
+                    )
+                else:
+                    await connection.execute(
+                        update(transcript_items)
+                        .where(transcript_items.c.item_id == request_item.item_id)
+                        .values(inline_body="{", content_bytes=1)
+                    )
+            with pytest.raises(TranscriptContentUnreadableError):
+                await reader.get_content(
+                    run_id,
+                    request_item.item_id,
+                    ReadView.HISTORY,
+                )
+
+            if external:
+                async with engine.begin() as connection:
+                    await connection.execute(
+                        delete(transcript_contents).where(
+                            transcript_contents.c.item_id == request_item.item_id
+                        )
+                    )
+                with pytest.raises(TranscriptContentUnreadableError):
+                    await reader.get_content(
+                        run_id,
+                        request_item.item_id,
+                        ReadView.HISTORY,
+                    )
         finally:
             await engine.dispose()
 

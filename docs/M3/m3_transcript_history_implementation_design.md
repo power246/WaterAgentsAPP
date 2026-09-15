@@ -2,7 +2,7 @@
 
 更新日期：2026-09-15
 
-状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–14 已完成本机实现与适用验证，Milestone 15–16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
+状态：D01–D86 的主体设计与 Milestone 0–10 历史实现已经保留；针对提交 `452749b` 的审查发现 4 个 P1、5 个 P2，修复方案已按功能追加为 Milestone 11–16。Milestone 11–15 已完成本机实现与适用验证，Milestone 16 尚未完成，当前保持 `partial / request changes`。本文描述修复后的目标工程方案；逐阶段实际状态与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/跨系统迁移证据也仍为 partial，中心最终承接暂不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
 
@@ -248,7 +248,7 @@ API 的 confidence/provenance 由注册器按对应业务层级提取；不适�
 
 ### 5.4 未知版本与损坏
 
-reader 返回 item 的 `parse_status=ok/unsupported/corrupt`。unsupported 保留身份/类型/时间、raw 全文引用，不把它当业务结果；corrupt 附安全 PublicError 和 item_id，正常邻近记录继续返回。两者不修改数据库或静默跳过。全文装载能取得原文本时仍经过安全出口返回，无法取得外置正文则返回明确 500 `transcript_content_unreadable`，不返回空文本。整个数据库查询失败返回 503。
+reader 返回 item 的 `parse_status=ok/unsupported/corrupt`。unsupported 保留身份/类型/时间、raw 全文引用，不把它当业务结果；corrupt 附安全 PublicError 和 item_id，正常邻近记录继续返回。两者不修改数据库或静默跳过。读取安全出口先独立完成 JSON decode、递归脱敏和规范序列化，再由 content adapter 决定 typed parse 状态；因此 schema 非法或存储 `content_bytes` 不匹配仍是 `corrupt/unparsed`，但只要原正文是合法 JSON，全文接口就返回安全文本并按实际返回值重算 UTF-8 字节数。只有外置正文缺失或正文不是可安全解析的 JSON 才返回明确 500 `transcript_content_unreadable`，不返回空文本。整个数据库查询失败返回 503。
 
 已知类型损坏可能使引用/摘要/配置不可解析：将问题记录放进返回记录列表与 `issues`，对应派生值为 null，不用当前配置或猜测值补齐。未知类型默认只允许严格历史原文查看；auto 无法证明其取消可见性时不公开正文，防止未知晚到审计绕过边界。
 
@@ -313,7 +313,7 @@ run 终态、所有工作执行方 quiesced、所有必需事实及状态实际�
 
 ### 7.1 一次选择来源
 
-reader 先固定 `view` 与来源：auto 有 live 使用该 run 内存快照（即使 PG 故障），否则使用 PostgreSQL；history 直接用 PostgreSQL。一次响应中的记录、session 归属、配置和引用来自同一来源，不能逐字段混合。live 提取在短临界区复制不可变引用，编码在锁外完成；PG 多语句装载使用短只读 REPEATABLE READ 事务，保证同一响应的目录/原记录一致。
+reader 先固定 `view` 与来源：auto 有 live 使用该 run 内存快照（即使 PG 故障），否则使用 PostgreSQL；history 直接用 PostgreSQL。一次响应中的记录、session 归属、配置和引用来自同一来源，不能逐字段混合。live 提取在短临界区复制不可变引用，编码在锁外完成；PG 多语句装载使用短只读 REPEATABLE READ 事务，保证同一响应的目录/原记录一致。取得正文后，安全 JSON 读取与 typed schema 解析分别执行；typed 解析失败不改变本次已经固定的来源，也不阻断仍可安全返回的全文。
 
 响应 `source=live/postgresql`。live 返回 PersistenceInfo，数据库返回 persistence=null；null 仅表示没有 live 保存进度，不证明没有历史丢失。HTTP 引用继续带同一个 view；若两次 HTTP 之间 live 已释放，auto 的新响应可合法转 PostgreSQL，并明确报告来源。history URL 显式带 view=history。
 

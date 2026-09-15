@@ -449,7 +449,9 @@ def test_history_never_mixes_unpersisted_live_items_into_postgres_view() -> None
     run(exercise)
 
 
-def test_corrupt_items_remain_visible_and_missing_fulltext_is_not_empty() -> None:
+def test_corrupt_items_keep_safe_fulltext_unless_body_is_unreadable(
+    application_logs: list[str],
+) -> None:
     async def exercise() -> None:
         store = InMemoryTranscriptStore()
         settings = AppSettings(
@@ -462,11 +464,32 @@ def test_corrupt_items_remain_visible_and_missing_fulltext_is_not_empty() -> Non
             run_id = UUID(created.json()["run_id"])
             candidate = store._runs[run_id]
             item = store._items[candidate.created_item_id]
+            unsafe_values = (
+                "nested-secret",
+                "dXNlcjpwYXNz",
+                "private-secret",
+            )
+            unsafe_body = json.dumps(
+                {
+                    "type": "run_created",
+                    "payload": {
+                        "configuration": 7,
+                        "nested": {
+                            "api_key": unsafe_values[0],
+                            "note": f"Authorization: Basic {unsafe_values[1]}",
+                        },
+                        "private_key": unsafe_values[2],
+                    },
+                },
+                indent=2,
+            )
             store._items[item.item_id] = item.model_copy(update={
-                "content_bytes": 1,
+                "content_bytes": len(unsafe_body.encode("utf-8")),
             })
-            content = store._contents[item.item_id]
-            store._contents[item.item_id] = content.model_copy(update={"body": "{"})
+            stored_content = store._contents[item.item_id]
+            store._contents[item.item_id] = stored_content.model_copy(
+                update={"body": unsafe_body}
+            )
 
             listing = await client.get(BASE)
             listed = next(
@@ -483,11 +506,58 @@ def test_corrupt_items_remain_visible_and_missing_fulltext_is_not_empty() -> Non
             )
             assert corrupt["parse_status"] == "corrupt"
             assert corrupt["content"] == {"kind": "unparsed"}
-            content = await client.get(
+            assert all(secret not in detail.text for secret in unsafe_values)
+            content_response = await client.get(
                 f"{BASE}/{run_id}/transcript/{candidate.created_item_id}/content?view=history"
             )
-            assert content.status_code == 500
-            assert content.json()["error"]["code"] == "transcript_content_unreadable"
+            assert content_response.status_code == 200
+            safe_text = content_response.json()["text"]
+            assert json.loads(safe_text) == {
+                "type": "run_created",
+                "payload": {
+                    "configuration": 7,
+                    "nested": {
+                        "api_key": "[REDACTED]",
+                        "note": "Authorization: [REDACTED]",
+                    },
+                    "private_key": "[REDACTED]",
+                },
+            }
+            assert content_response.json()["issues"][0]["error"]["code"] == (
+                "transcript_content_corrupt"
+            )
+            assert content_response.json()["content_bytes"] == len(
+                safe_text.encode("utf-8")
+            )
+            assert all(secret not in content_response.text for secret in unsafe_values)
+            assert all(secret not in "".join(application_logs) for secret in unsafe_values)
+
+            store._items[item.item_id] = item.model_copy(
+                update={"content_bytes": 1}
+            )
+            store._contents[item.item_id] = stored_content
+            mismatched = await client.get(
+                f"{BASE}/{run_id}/transcript/{item.item_id}/content?view=history"
+            )
+            assert mismatched.status_code == 200
+            assert json.loads(mismatched.json()["text"])["type"] == "run_created"
+            assert mismatched.json()["issues"][0]["error"]["code"] == (
+                "transcript_content_corrupt"
+            )
+            assert mismatched.json()["content_bytes"] == len(
+                mismatched.json()["text"].encode("utf-8")
+            )
+
+            store._contents[item.item_id] = stored_content.model_copy(
+                update={"body": "{"}
+            )
+            malformed = await client.get(
+                f"{BASE}/{run_id}/transcript/{item.item_id}/content?view=history"
+            )
+            assert malformed.status_code == 500
+            assert malformed.json()["error"]["code"] == (
+                "transcript_content_unreadable"
+            )
 
             store._contents.pop(item.item_id)
             unreadable = await client.get(
@@ -495,6 +565,48 @@ def test_corrupt_items_remain_visible_and_missing_fulltext_is_not_empty() -> Non
             )
             assert unreadable.status_code == 500
             assert unreadable.json()["error"]["code"] == "transcript_content_unreadable"
+
+    run(exercise)
+
+
+def test_unsupported_fulltext_requires_strict_history_view() -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = GatedWorkflow()
+        async with app_client(store=store, workflow=workflow) as (application, client):
+            created = await client.post(BASE, json={"query": "future content"})
+            run_id = UUID(created.json()["run_id"])
+            _, release = await workflow.started.get()
+            await wait_saved(application, run_id)
+            candidate = store._runs[run_id]
+            item = store._items[candidate.request_item_id]
+            store._items[item.item_id] = item.model_copy(update={
+                "content_type": "future_content",
+            })
+
+            coordinator = application.state.run_coordinator
+            runtime = coordinator._runs.pop(run_id)
+            try:
+                auto = await client.get(
+                    f"{BASE}/{run_id}/transcript/{item.item_id}/content"
+                )
+                assert auto.status_code == 404
+                assert auto.json()["error"]["code"] == "transcript_item_not_found"
+
+                history = await client.get(
+                    f"{BASE}/{run_id}/transcript/{item.item_id}/content?view=history"
+                )
+                assert history.status_code == 200
+                assert history.json()["content_type"] == "future_content"
+                assert json.loads(history.json()["text"]) == {
+                    "query": "future content"
+                }
+                assert history.json()["issues"][0]["error"]["code"] == (
+                    "transcript_content_unsupported"
+                )
+            finally:
+                coordinator._runs[run_id] = runtime
+                release.set()
 
     run(exercise)
 
