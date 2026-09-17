@@ -185,6 +185,83 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
     run(exercise)
 
 
+def test_cancelled_short_marker_prefix_masks_the_late_credential() -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        store = InMemoryTranscriptStore()
+        registry = create_production_registry().copy_with(
+            fixture_message_registration()
+        )
+        application = create_app(
+            AppSettings(_env_file=None),
+            clock=TickingClock(),
+            workflow=workflow,
+            transcript_store=store,
+            transcript_registry=registry,
+            shutdown_grace_period=0,
+        )
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            created = await coordinator.create_run("short cancel boundary", CONFIGURATION)
+            await workflow.started.wait()
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+            )
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                "safe api",
+            )
+            await coordinator.cancel_run(created.run_id)
+            await coordinator.append_transcript_message_delta(
+                created.run_id,
+                message.item_id,
+                "_key=alphabetic tail",
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text="safe api_key=alphabetic tail",
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            workflow.release.set()
+            await coordinator._runs[created.run_id].workflow_quiesced.wait()
+            await wait_saved(application, created.run_id)
+
+            stored = await store.read_run(created.run_id)
+            bodies = {
+                item.item_id: item.inline_body
+                for item in stored.items
+                if item.inline_body is not None
+            }
+            original = json.loads(bodies[message.item_id])
+            assert original["text"] == "safe [REDACTED]"
+            late = next(
+                registry.parse(item, bodies[item.item_id]).body
+                for item in stored.items
+                if item.content_type == "runtime_fact"
+                and item.item_id in bodies
+                and "late_message_output" in bodies[item.item_id]
+            )
+            assert late.text == "_key=[REDACTED] tail"
+            assert "alphabetic" not in "".join(bodies.values())
+
+    run(exercise)
+
+
 @pytest.mark.parametrize("workflow_error", [False, True])
 def test_workflow_failure_closes_sessions_messages_and_pending_results(
     workflow_error,

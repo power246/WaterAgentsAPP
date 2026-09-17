@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -130,6 +133,31 @@ def test_cancelled_credentials_are_hidden_at_every_chunk_split(
 
 
 @pytest.mark.parametrize(
+    ("text", "secret"),
+    (
+        ("api_key=alphabetic trailing", "alphabetic"),
+        ("password=alphabetic trailing", "alphabetic"),
+        ("Bearer alphabetic trailing", "alphabetic"),
+        ("https://user:alphabetic@example.test/path", "alphabetic"),
+    ),
+)
+def test_every_syntax_cancel_position_keeps_original_and_late_text_safe(
+    text: str,
+    secret: str,
+) -> None:
+    for cancel_at in range(len(text) + 1):
+        filter_ = StreamingCredentialFilter()
+        original = filter_.feed(text[:cancel_at]) + filter_.cancel()
+        late = filter_.feed(text[cancel_at:]) + filter_.finish()
+
+        assert secret not in original
+        assert secret not in late
+        assert secret not in original + late
+        assert filter_.cancel() == ""
+        assert filter_.finish() == ""
+
+
+@pytest.mark.parametrize(
     "text",
     (
         "https://user:alphabetic@example.test:8443/path?count=3",
@@ -187,6 +215,174 @@ def test_normal_query_streams_incrementally_and_round_trips_unchanged() -> None:
 def test_finish_masks_an_unresolved_sensitive_candidate() -> None:
     filter_ = StreamingCredentialFilter()
 
-    assert filter_.feed("safe api_ke") == ""
-    rendered = filter_.finish()
+    rendered = filter_.feed("safe api_ke") + filter_.finish()
     assert rendered == "safe [REDACTED]"
+
+
+@pytest.mark.parametrize(
+    ("prefix", "suffix", "private_values", "secrets"),
+    (
+        ("api", "_key=alphabetic ", (), ("alphabetic",)),
+        ("Bea", "rer alphabetic ", (), ("alphabetic",)),
+        ("pas", "sword=alphabetic ", (), ("alphabetic",)),
+        ("s", "ynthetic-private ", ("synthetic-private",), ("synthetic-private",)),
+        ("sy", "nthetic-private ", ("synthetic-private",), ("synthetic-private",)),
+        ("syn", "thetic-private ", ("synthetic-private",), ("synthetic-private",)),
+    ),
+)
+def test_cancel_masks_one_to_three_character_sensitive_prefixes(
+    prefix: str,
+    suffix: str,
+    private_values: tuple[str, ...],
+    secrets: tuple[str, ...],
+) -> None:
+    filter_ = StreamingCredentialFilter(private_values)
+
+    original = filter_.feed(prefix) + filter_.cancel()
+    late = filter_.feed(suffix) + filter_.finish()
+
+    assert original == "[REDACTED]"
+    assert all(secret not in original for secret in secrets)
+    assert all(secret not in late for secret in secrets)
+    assert all(secret not in original + late for secret in secrets)
+    assert filter_.cancel() == ""
+    assert filter_.finish() == ""
+
+
+@pytest.mark.parametrize(
+    "private_url",
+    (
+        "https://private.example/path",
+        "https://private.example/path?query=value#fragment",
+        "https://user:password@private.example/path",
+        "https://private.example/水位?note=quoted%20value#片段",
+    ),
+)
+def test_complete_private_url_is_hidden_at_every_chunk_split(private_url: str) -> None:
+    text = f"before {private_url} after"
+
+    for rendered in _render_at_every_split(text, (private_url,)):
+        assert rendered == "before [REDACTED] after"
+        assert private_url not in rendered
+
+
+def test_overlapping_private_values_are_hidden_at_every_chunk_split() -> None:
+    text = "before synthetic-private after private"
+    for rendered in _render_at_every_split(
+        text,
+        ("synthetic-private", "private"),
+    ):
+        assert rendered == "before [REDACTED] after [REDACTED]"
+
+
+@pytest.mark.parametrize("prefix", ("s", "sy", "syn"))
+def test_finish_preserves_short_known_secret_prefix(prefix: str) -> None:
+    filter_ = StreamingCredentialFilter(("synthetic-private",))
+    assert filter_.feed(prefix) + filter_.finish() == prefix
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    (
+        ("api_key=alphabetic trailing safe", "api_key=[REDACTED] trailing safe"),
+        ('api_key="alphabetic value" trailing safe', 'api_key="[REDACTED]" trailing safe'),
+        ("api_key=[REDACTED]", "api_key=[REDACTED]"),
+        ("query=Lake Erie water level", "query=Lake Erie water level"),
+    ),
+)
+def test_assignment_boundaries_match_static_at_every_chunk_split(
+    text: str,
+    expected: str,
+) -> None:
+    assert redact_text(text) == expected
+    assert all(rendered == expected for rendered in _render_at_every_split(text))
+
+
+@pytest.mark.parametrize(
+    ("private_prefix", "suffix"),
+    (
+        ("api_key=", "alphabetic trailing"),
+        ('client_secret="', 'alphabetic" trailing'),
+        ("Authorization: ", "alphabetic\ntrailing"),
+        ("Bearer ", "alphabetic trailing"),
+    ),
+)
+def test_private_value_replacement_cannot_expose_following_credential(
+    private_prefix: str,
+    suffix: str,
+) -> None:
+    text = private_prefix + suffix
+    for rendered in _render_at_every_split(text, (private_prefix,)):
+        assert private_prefix not in rendered
+        assert "alphabetic" not in rendered
+        assert "trailing" in rendered
+
+
+@pytest.mark.parametrize(
+    "text",
+    (
+        "https://example.com?contact=alice@example.net",
+        "https://example.com/path#contact=alice@example.net",
+        "https://example.com:8443/path?contact=alice@example.net",
+        "https://[2001:db8::1]:8443/path#contact=alice@example.net",
+    ),
+)
+def test_query_and_fragment_at_signs_are_not_url_credentials(text: str) -> None:
+    assert redact_text(text) == text
+    assert all(rendered == text for rendered in _render_at_every_split(text))
+
+
+def test_large_single_delta_scales_in_an_isolated_process() -> None:
+    script = textwrap.dedent(
+        """
+        import json
+        import time
+
+        from app.application.transcripts.streaming import StreamingCredentialFilter
+
+        measurements = []
+        for size in (4, 8, 16, 128, 512):
+            repeated = "token." * (size * 1024 // 6)
+            assignments = "token=a " * (size * 1024 // 8)
+            payloads = {
+                "path": ("https://example.com/" + "a" * (size * 1024), None),
+                "api_path": ("https://example.com/api/" + "a" * (size * 1024), None),
+                "field": ("ordinary_field=" + "a" * (size * 1024), None),
+                "repeated": (repeated, None),
+                "assignments": (
+                    assignments,
+                    "token=[REDACTED] " * (size * 1024 // 8),
+                ),
+                "authority": ("https://" + "a" * (size * 1024), "https://[REDACTED]"),
+                "malformed": ("api_key" + "a" * (size * 1024), "[REDACTED]"),
+            }
+            for name, (text, expected) in payloads.items():
+                filter_ = StreamingCredentialFilter()
+                started = time.perf_counter()
+                streamed = filter_.feed(text)
+                buffered = filter_.buffered_characters
+                rendered = streamed + filter_.finish()
+                elapsed = time.perf_counter() - started
+                assert rendered == (text if expected is None else expected)
+                measurements.append((name, size, elapsed, buffered))
+        print(json.dumps(measurements))
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=8,
+    )
+    measurements = json.loads(completed.stdout)
+    elapsed = {
+        (name, size): duration
+        for name, size, duration, _ in measurements
+    }
+
+    for name in {name for name, _, _, _ in measurements}:
+        assert elapsed[name, 128] < 2.0
+        assert elapsed[name, 512] < elapsed[name, 128] * 6 + 0.1
+    assert all(buffered <= 2048 for _, _, _, buffered in measurements)

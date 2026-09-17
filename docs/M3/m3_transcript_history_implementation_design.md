@@ -2,7 +2,7 @@
 
 更新日期：2026-09-17
 
-状态：D01–D86 主体设计已对齐，Milestone 0–16 保留历史实现和验证证据；[Milestone 17](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 已完成 Windows Uvicorn factory 的本机实现、真实 Runner 回归及 macOS PostgreSQL smoke。HEAD `def435a` 追加审查还剩 Milestone 18 的 3 个 P1、1 个 P2，Milestone 19 最终复审未开始，当前仍为 `request changes`。本文规定工程目标与既有实现边界，追加修复设计见 §12.1；三平台实际 CI/同库跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
+状态：D01–D86 主体设计已对齐，Milestone 0–16 保留历史实现和验证证据；[Milestone 17](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 与 [Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 已完成本机实现和适用验证。HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已有本机修复与回归，Milestone 19 最终复审未开始，当前仍为 `request changes`。本文规定工程目标与既有实现边界，追加修复设计见 §12.1；三平台实际 CI/同库跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。当前功能完成状态只以实施清单中的实际测试和环境证据为准。
 
@@ -381,7 +381,7 @@ run cancel 在统一状态边界关闭调度入口，固定全部生成中原消
 
 ### 9.2 凭据边界
 
-本节规定目标安全保证。当前短敏感前缀取消、完整 private URL 的跨段匹配、大 chunk 扫描与静态 URL authority 识别尚未满足这些保证，由 [Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 统一修复，不能以最终正文脱敏替代已公开 delta 的安全性。
+本节规定当前安全保证。[Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 已用静态/流式共用的增量有界扫描修复短敏感前缀取消、完整 private URL 跨段匹配、大 chunk 扫描与静态 URL authority 识别；最终正文脱敏仍不能替代已公开 delta 的安全性。
 
 复用并扩展现有 redaction：结构化敏感键、Authorization/Cookie、URL userinfo、已知实际凭据，以及常见凭据标记后的值。`Bearer <token>` 与 `Basic <token>` 采用安全优先语义，token 即使只含字母也遮蔽；无法与认证 scheme 区分的短语不以业务文本为由放行，只有不构成 scheme 的普通 query 原样保留。HTTP、workflow、异常 repr/JSON 转义、driver 错误、日志及 safe preview 都走相同规则。原 Agent 实际输入不因日志脱敏而被改写。
 
@@ -468,7 +468,7 @@ M3 完成需同时满足：四表与环境可搭建；已保存事实可重启�
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
 
-Milestone 16 的 GLOBAL/M3/MR 审计与文档 golden 保留为历史证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭；其余 3 个 P1、1 个 P2 由 Milestone 18–19 承接，相关当前成功标准和矩阵继续标为待修复。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；完成本轮修复与复审后，M3 仍须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。
+Milestone 16 的 GLOBAL/M3/MR 审计与文档 golden 保留为历史证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭，其余 3 个 P1、1 个 P2 已由 Milestone 18 完成本机修复与适用验证；相关矩阵等待 Milestone 19 最终复审。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；完成本轮复审后，M3 仍须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。
 
 ### 12.1 追加修复设计：Milestone 17–19
 

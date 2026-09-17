@@ -2,7 +2,7 @@
 
 更新日期：2026-09-17
 
-**状态：Milestone 17 已完成 Windows 正式入口 factory 的本机实现、真实 Runner 回归与 macOS PostgreSQL smoke；Milestone 0–16 保留历史证据。** HEAD `def435a` 追加审查还剩 Milestone 18 的短前缀取消、完整 private URL、单大 delta 性能和普通 URL 误脱敏，Milestone 19 最终复审未开始，当前仍为 `request changes`。公共 HTTP/SSE 契约不变；实际 Windows/三平台 CI 与跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
+**状态：Milestone 17–18 已完成本机实现与适用验证；Milestone 0–16 保留历史证据。** HEAD `def435a` 追加审查的 Windows 正式入口、短前缀取消、完整 private URL、单大 delta 性能和普通 URL 误脱敏均已有本机修复与回归，Milestone 19 最终复审未开始，当前仍为 `request changes`。公共 HTTP/SSE 契约不变；实际 Windows/三平台 CI 与跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。普通 HTTP 以当前 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 

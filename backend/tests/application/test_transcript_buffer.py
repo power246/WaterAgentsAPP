@@ -119,19 +119,7 @@ def test_redaction_happens_before_live_and_is_rechecked_for_storage() -> None:
         buffer.to_storage_batch(private_values=("inspect",))
 
 
-def test_large_non_sensitive_text_skips_complex_redaction_patterns(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class UnexpectedPattern:
-        def sub(self, *args: object, **kwargs: object) -> str:
-            del args, kwargs
-            raise AssertionError("complex redaction pattern should not run")
-
-    pattern = UnexpectedPattern()
-    monkeypatch.setattr(redaction, "HEADER_VALUE", pattern)
-    monkeypatch.setattr(redaction, "ASSIGNMENT", pattern)
-    monkeypatch.setattr(redaction, "AUTH_CREDENTIAL", pattern)
-    monkeypatch.setattr(redaction, "URL_CREDENTIAL", pattern)
+def test_large_non_sensitive_text_round_trips_unchanged() -> None:
     value = "水" * 30000
 
     assert redaction.redact_text(value) == value

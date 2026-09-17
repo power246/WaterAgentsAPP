@@ -670,7 +670,28 @@ def test_streamed_message_metadata_matches_started_finalized_get_and_storage() -
     run(exercise)
 
 
-def test_streamed_host_port_url_stays_completed_and_matches_final_body() -> None:
+@pytest.mark.parametrize(
+    ("expected", "chunks"),
+    (
+        ("https://example.com:8443/path", ("https://example.com:", "8443/", "path")),
+        (
+            "https://example.com?contact=alice@example.net",
+            ("https://example.com?contact=", "alice@", "example.net"),
+        ),
+        (
+            "https://example.com/path#contact=alice@example.net",
+            ("https://example.com/path#contact=", "alice@", "example.net"),
+        ),
+        (
+            "https://[2001:db8::1]:8443/path",
+            ("https://[2001:db8::1]", ":8443/", "path"),
+        ),
+    ),
+)
+def test_streamed_normal_url_stays_completed_and_matches_final_body(
+    expected: str,
+    chunks: tuple[str, ...],
+) -> None:
     async def exercise() -> None:
         async with run_runtime(message_registry=True) as (
             app, coordinator, created, _, _, store,
@@ -689,8 +710,7 @@ def test_streamed_host_port_url_stays_completed_and_matches_final_body() -> None
                 "fixture_message",
                 1,
             )
-            expected = "https://example.com:8443/path"
-            for chunk in ("https://example.com:", "8443/", "path"):
+            for chunk in chunks:
                 await coordinator.append_transcript_message_delta(
                     created.run_id,
                     message.item_id,
@@ -743,6 +763,90 @@ def test_streamed_host_port_url_stays_completed_and_matches_final_body() -> None
                 item for item in stored.items if item.item_id == message.item_id
             )
             assert json.loads(stored_message.inline_body)["text"] == expected
+
+    run(exercise)
+
+
+def test_complete_private_url_is_hidden_in_deltas_replay_and_storage(
+    application_logs,
+) -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (
+            app, coordinator, created, _, _, store,
+        ):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            private_url = "https://private.example/path?query=value#fragment"
+            message = await coordinator.start_transcript_message(
+                created.run_id,
+                session.session_id,
+                "fixture_message",
+                1,
+                private_values=(private_url,),
+            )
+            for chunk in ("https://pri", "vate.example/path?", "query=value#fragment"):
+                await coordinator.append_transcript_message_delta(
+                    created.run_id,
+                    message.item_id,
+                    chunk,
+                )
+            await coordinator.finalize_transcript_message(
+                created.run_id,
+                message.item_id,
+                FixtureMessageV1(
+                    text=private_url,
+                    generation_status=GenerationStatus.COMPLETED,
+                ),
+            )
+            await coordinator.complete_agent_session(
+                created.run_id,
+                session.session_id,
+            )
+            runtime = coordinator._runs[created.run_id]
+            await coordinator._wait_for_writer_drain(runtime)
+
+            response = await create_session_event_response(
+                coordinator,
+                app.state.transcript_reader,
+                created.run_id,
+                session.session_id,
+            )
+            events = decoded_frames(await collect_response(response))
+            serialized = json.dumps(events)
+            streamed = "".join(
+                data["payload"]["text"]
+                for name, _, data in events
+                if name == "message_delta"
+                and data["payload"]["item_id"] == str(message.item_id)
+            )
+            assert streamed == "[REDACTED]"
+            assert private_url not in serialized
+
+            stored = await store.read_run(created.run_id)
+            stored_message = next(
+                item for item in stored.items if item.item_id == message.item_id
+            )
+            assert json.loads(stored_message.inline_body)["text"] == "[REDACTED]"
+            assert private_url not in "\n".join(application_logs)
+
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                for suffix in ("", "?view=history"):
+                    transcript = await client.get(
+                        f"/api/analysis/runs/{created.run_id}/sessions/"
+                        f"{session.session_id}/transcript{suffix}"
+                    )
+                    assert transcript.status_code == 200
+                    assert private_url not in transcript.text
+                    assert "[REDACTED]" in transcript.text
 
     run(exercise)
 

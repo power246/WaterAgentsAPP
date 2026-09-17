@@ -289,6 +289,27 @@ def test_authorization_text_round_trips_through_history_and_full_content() -> No
     run(exercise)
 
 
+def test_query_at_sign_url_round_trips_without_userinfo_redaction() -> None:
+    async def exercise() -> None:
+        query = "https://example.com/path?contact=alice@example.net"
+        async with app_client() as (application, client):
+            created = await client.post(BASE, json={"query": query})
+            assert created.status_code == 201
+            run_id = UUID(created.json()["run_id"])
+            await wait_saved(application, run_id)
+
+            detail = await client.get(f"{BASE}/{run_id}?view=history")
+            assert detail.status_code == 200
+            request_item = next(
+                item for item in detail.json()["items"]
+                if item["content_type"] == "analysis_request"
+            )
+            assert request_item["content"]["body"] == {"query": query}
+            assert "message_content_mismatch" not in detail.text
+
+    run(exercise)
+
+
 def test_history_cursor_is_stable_strict_and_uses_uuid_tie_breaks() -> None:
     async def exercise() -> None:
         store = InMemoryTranscriptStore()

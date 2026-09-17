@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 
 import httpx
@@ -13,7 +14,12 @@ from app.application.transcripts.registry import (
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
-from scripts.run_sse_smoke import BASE, GatedWorkflow, read_event, running_server
+from scripts.run_sse_smoke import (
+    BASE,
+    GatedWorkflow,
+    read_frame,
+    running_server,
+)
 
 
 @pytest.mark.parametrize("exit_mode", ["normal", "failure", "cancelled"])
@@ -111,6 +117,7 @@ def test_long_transcript_stream_allows_another_run_and_reaches_stream_end(
             transcript_store=InMemoryTranscriptStore(),
             transcript_registry=registry,
             shutdown_grace_period=0,
+            keepalive_interval=0.01,
         )
         try:
             async with running_server(app) as client:
@@ -132,14 +139,15 @@ def test_long_transcript_stream_allows_another_run_and_reaches_stream_end(
                 )
                 expected = "https://example.com/" + "a" * (128 * 1024)
                 path = f"{BASE}/{run_id}/sessions/{session.session_id}/events"
+                allow_finalize = asyncio.Event()
 
                 async def produce_transcript():
-                    for offset in range(0, len(expected), 256):
-                        await coordinator.append_transcript_message_delta(
-                            run_id,
-                            message.item_id,
-                            expected[offset:offset + 256],
-                        )
+                    await coordinator.append_transcript_message_delta(
+                        run_id,
+                        message.item_id,
+                        expected,
+                    )
+                    await allow_finalize.wait()
                     await coordinator.finalize_transcript_message(
                         run_id,
                         message.item_id,
@@ -150,24 +158,48 @@ def test_long_transcript_stream_allows_another_run_and_reaches_stream_end(
                     )
                     await coordinator.complete_agent_session(run_id, session.session_id)
 
+                async def create_and_cancel_other_run():
+                    created = await client.post(
+                        BASE,
+                        json={"query": "concurrent run smoke"},
+                    )
+                    assert created.status_code == 201
+                    cancelled = await client.post(
+                        f"{BASE}/{created.json()['run_id']}/cancel"
+                    )
+                    assert cancelled.status_code == 200
+                    return created
+
                 async with client.stream("GET", path) as response:
                     assert response.status_code == 200
                     lines = response.aiter_lines()
+                    started = asyncio.get_running_loop().time()
                     producer = asyncio.create_task(produce_transcript())
-                    other_run = asyncio.create_task(
-                        client.post(BASE, json={"query": "concurrent run smoke"})
-                    )
+                    other_run = asyncio.create_task(create_and_cancel_other_run())
+                    created_while_streaming = await other_run
+                    concurrent_elapsed = asyncio.get_running_loop().time() - started
+                    assert concurrent_elapsed < 1.0
+
                     streamed = []
+                    keepalive_received = False
                     while True:
-                        name, data, _ = await read_event(lines)
+                        frame = await read_frame(lines)
+                        if frame == [": keepalive"]:
+                            keepalive_received = True
+                            allow_finalize.set()
+                            continue
+                        event_line = next(line for line in frame if line.startswith("event: "))
+                        data_line = next(line for line in frame if line.startswith("data: "))
+                        name = event_line[7:]
+                        data = json.loads(data_line[6:])
                         if name == "message_delta":
                             streamed.append(data["payload"]["text"])
                         if name == "stream_end":
                             assert data["stream"] == "session"
                             break
                     await producer
-                    created_while_streaming = await other_run
                     assert created_while_streaming.status_code == 201
+                    assert keepalive_received
                     assert "".join(streamed) == expected
         finally:
             workflow.release.set()

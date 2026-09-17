@@ -175,7 +175,7 @@ M9  Settings/keys/admin + demo closure
 
 跨平台交付必须满足 GLOBAL-C11：三系统共用代码、配置、依赖锁和 schema；[跨系统迁移](M3/m3_transcript_history_api.md#85-更换操作系统或机器的最短流程) 只调整环境并重建依赖。Milestone 2/9 验证目标平台安装与同库历史切换，不能只证明各自能启动；不增加数据库内容搬迁或在途 Agent 接管范围。
 
-关键用户行为与持久化边界已完成对齐，工程方案参照 M1/M2 展开为 [M3 实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、原子提交、类型/读取模型、history、十路由与两层 SSE；Milestone 0–16 保留历史完成记录。Milestone 17 已完成 Windows 正式入口 factory 的本机实现、真实 Runner 回归与 macOS PostgreSQL smoke；统一脱敏/性能修复和最终复审由待完成的 Milestone 18–19 承接，当前仍为 `request changes`。实际 Windows/三平台 CI 与同一 PostgreSQL 跨系统迁移另无完整结果，GLOBAL-C11、Milestone 2/9 和中心最终承接继续保持 `partial`；已修复代码缺陷与外部验收缺口分别记录。
+关键用户行为与持久化边界已完成对齐，工程方案参照 M1/M2 展开为 [M3 实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、原子提交、类型/读取模型、history、十路由与两层 SSE；Milestone 0–16 保留历史完成记录。Milestone 17–18 已完成 Windows 正式入口和统一脱敏/性能功能包的本机实现与适用验证；Milestone 19 最终复审尚未完成，当前仍为 `request changes`。实际 Windows/三平台 CI 与同一 PostgreSQL 跨系统迁移另无完整结果，GLOBAL-C11、Milestone 2/9 和中心最终承接继续保持 `partial`；已修复代码缺陷与外部验收缺口分别记录。
 
 当前公开路由以实际 OpenAPI 为准：
 
