@@ -4,14 +4,14 @@
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
-M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 17–18 已完成 Windows 正式入口和统一脱敏/性能功能包的本机修复，Milestone 0–16 保留历史证据；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已有本机回归，[Milestone 19](M3/m3_implementation_todo.md#milestone-19追加修复集成验收与契约复审) 最终复审尚未完成，当前仍为 `request changes`。公共 OpenAPI/SSE 契约不变；正式前端消费仍由产品阶段 M9 实现。实际 Windows/三平台 CI 与同库跨系统迁移另保持 `partial`，契约可用于接入设计但不代表本分支已通过合并或发布验收。
+M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 17–18 已完成 Windows 正式入口和统一脱敏/性能功能包，[Milestone 19](M3/m3_implementation_todo.md#milestone-19追加修复集成验收与契约复审) 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；Milestone 0–16 保留历史证据，HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已本机复审通过，`request changes` 已清除。公共 OpenAPI/SSE 契约不变；正式前端消费仍由产品阶段 M9 实现。实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移另保持 `partial`，契约可用于接入设计但不代表中心最终承接已登记 `implemented`。
 
 **领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
-| M3 transcript/history/idempotency/SSE | Milestone 17–18 本机已完成，Milestone 0–16 保留历史证据；Milestone 19 待最终复审，当前 `request changes`；三平台实跑与同库迁移仍为 `partial` | 以当前 OpenAPI、API 指南和 SSE frame 设计接入；Windows 入口、短前缀取消、private URL、性能与正文一致性已完成本机修复，公共契约不变。正式消费由产品阶段 M9 接入。 |
+| M3 transcript/history/idempotency/SSE | Milestone 0–19 本机实现与复审完成，追加 findings 已关闭；实际 Windows/Linux runner、三平台完整 CI 与同库迁移仍为 `partial` | 以当前 OpenAPI、API 指南和 SSE frame 设计接入；Windows 入口、短前缀取消、private URL、性能与正文一致性已完成本机实现和复审，公共契约不变。正式消费由产品阶段 M9 接入。 |
 | M4–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -168,7 +168,7 @@ M2 不公开 `session_started`。前端不得依赖该事件，也不需要区�
 
 ## 4. M3 接入约定与分阶段状态
 
-本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、启动修复、live 清理与两层 SSE 的既有证据保留；Milestone 17–18 已本机修复 Windows 正式入口与统一脱敏/性能缺陷，Milestone 19 继续承接最终复审，当前不宣称全部验收通过。本节保留已确认的产品行为和公共契约，不因实现缺陷而弱化安全或取消保证。后续产品能力仍按各自 Milestone 状态接入；已确认行为的变更须同步运行时 schema、对应设计与契约。
+本节来自 [M3 设计决策](M3/m3_transcript_history_design.md) 和 `M3-C01`–`M3-C20`。创建、统一 HTTP 读取、历史分页、取消/晚到审计、手动补写、启动修复、live 清理与两层 SSE 的既有证据保留；Milestone 17–18 已本机修复 Windows 正式入口与统一脱敏/性能缺陷，Milestone 19 已完成最终集成复审。本节保留已确认的产品行为和公共契约，不因外部三平台证据仍为 `partial` 而弱化安全或取消保证。后续产品能力仍按各自 Milestone 状态接入；已确认行为的变更须同步运行时 schema、对应设计与契约。
 
 ### 4.1 创建分析：Idempotency-Key
 

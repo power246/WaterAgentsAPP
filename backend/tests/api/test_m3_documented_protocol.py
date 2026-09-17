@@ -186,6 +186,10 @@ def test_m3_contract_audit_covers_every_id_without_claiming_platform_evidence() 
     checklist = IMPLEMENTATION_CHECKLIST.read_text(encoding="utf-8")
     central = CENTRAL_CONTRACTS.read_text(encoding="utf-8")
     matrix = section(checklist, "### 契约覆盖矩阵", "### GLOBAL / MR 门禁审计")
+    milestone_19 = checklist.split(
+        "## Milestone 19：追加修复集成验收与契约复审",
+        1,
+    )[1]
     central_m3 = section(central, "## 5. M3", "## 6. M4")
     expected_contracts = {
         *(f"M3-C{index:02d}" for index in range(1, 21)),
@@ -210,6 +214,10 @@ def test_m3_contract_audit_covers_every_id_without_claiming_platform_evidence() 
     ):
         assert label in checklist
     assert "GLOBAL-C11 | partial" in checklist
+    assert "- [ ]" not in milestone_19
+    assert "### Milestone 19 完成记录（2026-09-17）" in milestone_19
+    assert "851 passed" in milestone_19
+    assert "47 passed" in milestone_19
     assert "三平台实际结果" in central
     assert "保持未最终承接" in central
 
@@ -252,5 +260,7 @@ def test_parent_docs_describe_the_implemented_m3_public_protocol() -> None:
         for event_name in ("message_started", "message_delta", "message_finalized"):
             assert event_name in document
         assert "M3 已在 `backend/` 实现" in document
+        assert "Milestone 19 已完成" in document
+        assert "`request changes` 已清除" in document
         assert "GLOBAL-C11" in document
         assert "partial" in document

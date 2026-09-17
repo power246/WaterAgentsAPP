@@ -4,7 +4,7 @@
 
 本清单执行 [M3 实施详细设计](m3_transcript_history_implementation_design.md)，同时维护 [API 与搭建排障指南](m3_transcript_history_api.md)、父目录 [前端接入约定](../frontend_integration_contracts.md) 和 [中心验收契约](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis)。[D01–D86 决策记录](m3_transcript_history_design.md) 保留已确认依据。
 
-**当前状态：Milestone 17–18 已完成本机实现与适用验证，分别关闭 Windows 正式入口和统一脱敏/性能功能缺陷；Milestone 0–16 的完成记录继续保留为历史证据。** HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已有本机修复与失败到通过回归，Milestone 19 最终复审尚未开始，因此整体仍为 `request changes`。实际 Windows/三平台 CI、同一数据库跨系统迁移继续保持 `partial`；中心最终承接不登记 `implemented`。
+**当前状态：Milestone 0–19 的本机实现、适用验证与最终集成复审已完成。** HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 已由 Milestone 17–18 修复，并由 Milestone 19 在隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约检查中复审通过；本轮 `request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同一数据库跨系统迁移仍未取得，继续保持 `partial`；中心最终承接不登记 `implemented`。
 
 ## 阶段与设计导航
 
@@ -64,7 +64,7 @@
 - [x] 取消即固定原生成中正文，晚到审计仅历史可见；凭据跨片段、短前缀取消边界、URL 分段和日志均不泄漏，通用在途结果也不能绕过取消边界。（追加验收：[Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)）
 - [x] 静态与流式脱敏对单个大 delta、长 URL 和长字段候选均无二次方扫描；内部待判定缓冲有明确上限，其他 run、cancel 和 keepalive 保持可调度。（追加验收：[Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)）
 - [x] 只有终态、执行收敛、全部实际保存和完整 grace 后清理；workflow 失败和 session 取消同样收束活动消息，重启不自动恢复 Agent 或补造未保存内容。（追加验收：[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)）
-- [ ] 中心全部适用契约有实现位置和重新验证证据，API、OpenAPI、前端约定、fixture 与运行时一致，未完成的跨平台验证或业务后续项准确登记。（追加验收：[Milestone 19](#milestone-19追加修复集成验收与契约复审)）
+- [x] 中心全部适用契约有实现位置和重新验证证据，API、OpenAPI、前端约定、fixture 与运行时一致，未完成的跨平台验证或业务后续项准确登记。（追加验收：[Milestone 19](#milestone-19追加修复集成验收与契约复审)）
 
 ## Milestone 0：基线、适用契约与工作区
 
@@ -606,7 +606,7 @@ git diff --check
 
 ### 契约覆盖矩阵
 
-下表逐项覆盖全部 M3 contract ID；同一行只合并共享实现边界与验收用例的条目。Milestone 11–18 的证据保留；HEAD `def435a` 追加审查中与 Milestone 18 相关的行已有本机修复和 focused 证据，仍等待 Milestone 19 统一复审。其余行保留既有本机证据，不代表本轮重新执行了测试。任何本机状态均不等于中心最终 `implemented`，所有行仍共同等待 GLOBAL-C11 的三平台实际结果。
+下表逐项覆盖全部 M3 contract ID；同一行只合并共享实现边界与验收用例的条目。Milestone 11–18 的历史证据保留；HEAD `def435a` 追加审查的 5 个 finding 已由 Milestone 17–18 修复，并由 Milestone 19 通过 851 项完整后端测试、47 项真实 PostgreSQL 专项、focused/socket/smoke 与协议检查统一复审。任何本机状态均不等于中心最终 `implemented`，所有行仍共同等待 GLOBAL-C11 的实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移结果。
 
 | 契约 | 状态 | 实现位置 | 重点测试位置 | 文档与剩余风险 |
 |---|---|---|---|---|
@@ -615,38 +615,38 @@ git diff --check
 | M3-C02 / M3-A02 | 本机已验证 | `application/transcripts/models.py`、`registry.py`、`reader.py` | `test_transcript_registry.py`、`test_run_models.py`、`test_analysis_history.py`、`test_m3_documented_protocol.py` | [Milestone 15](#milestone-15corrupt-item-的安全全文读取)；corrupt 解析状态与安全全文可读性已分离验证。 |
 | M3-C03 / M3-C07 | 本机已验证 | `application/analysis_runs/models.py`、`coordinator.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_agent_session_models.py`、`test_agent_session_runtime.py`、`test_analysis_history.py`、`test_milestone8_runtime.py` | [设计 §3.2](m3_transcript_history_implementation_design.md#32-当前状态)；run 六态、session 五态及 workflow 父子终态收束已重验。 |
 | M3-C04 | 本机已验证 | `api/http/analysis_runs.py`、`api/schemas/analysis_runs.py`、`application/transcripts/reader.py` | `test_analysis_history.py`、`test_analysis_runs.py`、`test_analysis_events.py`、`test_m3_documented_protocol.py` | [Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)、[Milestone 15](#milestone-15corrupt-item-的安全全文读取)；retry 错误分类和全文响应已重验。 |
-| M3-C05 / M3-C06 / M3-A03 | Milestone 18 本机已修复，待复审 | `application/transcripts/buffer.py`、`streaming.py`、`redaction.py`、`reader.py` | `test_transcript_buffer.py`、`test_streaming_redaction.py`、`test_analysis_history.py`、`test_json_logging.py` | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)；短前缀、完整 private URL 与普通 query URL 已有失败到通过回归，Milestone 19 再做全量契约复审。 |
+| M3-C05 / M3-C06 / M3-A03 | 本机已验证 | `application/transcripts/buffer.py`、`streaming.py`、`redaction.py`、`reader.py` | `test_transcript_buffer.py`、`test_streaming_redaction.py`、`test_analysis_history.py`、`test_json_logging.py` | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)、[Milestone 19](#milestone-19追加修复集成验收与契约复审)；短前缀、完整 private URL 与普通 query URL 已完成失败到通过回归和全量复审。 |
 | M3-C08 | 本机已验证 | `application/analysis_runs/models.py`、`coordinator.py`、`creation.py`、`startup_repair.py` | `test_run_state_machine.py`、`test_run_creation.py`、`test_milestone8_runtime.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；取消/失败终态及其 transcript 已共同持久化收敛。 |
 | M3-C09 / M3-A04 | 本机已验证 | `application/analysis_runs/creation.py`、`coordinator.py`、`infrastructure/persistence/store.py`、创建路由 | `test_run_creation.py`、`test_analysis_runs.py`、`test_postgres_persistence.py`、run/history smoke | [API §2](m3_transcript_history_api.md#2-创建与幂等)；非超时提交未知、并发接管、原回执及外置正文顺序已重验。 |
-| M3-C10 / M3-A05 | Milestone 18 本机已修复，待复审 | `application/analysis_runs/coordinator.py`、`application/transcripts/streaming.py`、`registry.py` | `test_milestone8_runtime.py`、`test_streaming_redaction.py`、`test_analysis_history.py` | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)；短敏感前缀跨取消继续遮蔽，原消息与 late audit 均有端到端回归；Milestone 13 的引用依赖修复保持不变。 |
+| M3-C10 / M3-A05 | 本机已验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/streaming.py`、`registry.py` | `test_milestone8_runtime.py`、`test_streaming_redaction.py`、`test_analysis_history.py` | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)、[Milestone 19](#milestone-19追加修复集成验收与契约复审)；短敏感前缀跨取消继续遮蔽，原消息与 late audit 均有端到端和完整回归；Milestone 13 的引用依赖修复保持不变。 |
 | M3-C11 / M3-A07 | 本机已验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、`application/transcripts/reader.py` | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_events.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；合法依赖不再杀死 writer 或永久耗尽补写。 |
 | M3-C12 / M3-C13 / M3-A06 | 本机已验证 | `application/analysis_runs/coordinator.py`、`runtime.py`、`main.py` | `test_milestone8_runtime.py`、`test_run_workflow.py`、`test_run_writer.py`、两条 smoke | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)、[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)；持久化 pending 和 cleanup/retry 线性化已重验。 |
 | M3-C14 | 本机已验证 | `__main__.py`、`runtime/event_loop.py`、`main.py`、`application/analysis_runs/startup_repair.py`、`infrastructure/persistence/database.py`、`store.py` | `test_server_entrypoint.py`、`test_database_config.py`、`test_milestone8_runtime.py`、`test_postgres_persistence.py`、run/history smoke | [Milestone 17](#milestone-17windows-正式入口与事件循环-factory)；正式入口与 history 子进程显式选择兼容 factory，真实 Runner 创建 Selector loop；本机 PostgreSQL health/history/restart smoke 通过。 |
-| M3-C15 / M3-A08 | Milestone 18 本机已修复，待复审 | `application/analysis_runs/coordinator.py`、`api/sse/encoder.py`、`response.py`、两层 SSE 路由 | `test_analysis_events.py`、`test_analysis_runs.py`、`test_run_sse_smoke.py`、`test_m3_documented_protocol.py`、run/history smoke | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)；完整 private URL 的 delta/replay 与单大 delta socket 并发回归通过，普通 URL 不再触发正文 mismatch。 |
+| M3-C15 / M3-A08 | 本机已验证 | `application/analysis_runs/coordinator.py`、`api/sse/encoder.py`、`response.py`、两层 SSE 路由 | `test_analysis_events.py`、`test_analysis_runs.py`、`test_run_sse_smoke.py`、`test_m3_documented_protocol.py`、run/history smoke | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)、[Milestone 19](#milestone-19追加修复集成验收与契约复审)；完整 private URL 的 delta/replay、单大 delta socket 并发和正式服务 smoke 均通过，普通 URL 不再触发正文 mismatch。 |
 | M3-C16 / M3-A09 | 本机已验证 | `application/analysis_runs/coordinator.py`、`application/transcripts/registry.py`、`reader.py` | `test_agent_session_runtime.py`、`test_transcript_registry.py`、`test_analysis_history.py` | [Milestone 11](#milestone-11认证凭据与公开-metadata-脱敏)、[Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；metadata 单源和被取消引用目标已重验。 |
 | M3-C17 | 本机已验证 | `application/transcripts/reader.py`、统一详情/过程/全文路由 | `test_analysis_history.py`、`test_analysis_events.py` | [Milestone 15](#milestone-15corrupt-item-的安全全文读取)；安全可读的 corrupt JSON 已验证返回全文而非固定 500。 |
 | M3-C18 / M3-A10 | 本机已验证 | `application/analysis_runs/persistence.py`、`coordinator.py`、`infrastructure/persistence/store.py`、`records.py` | `test_run_writer.py`、`test_postgres_persistence.py`、`test_records.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)；取消终态与依赖 target/source 的原子持久化已重验。 |
-| M3-C19 / M3-A11 | Milestone 18 本机已修复，待复审 | `infrastructure/observability/redaction.py`、`json_logging.py`、`application/transcripts/redaction.py`、`streaming.py` | `test_json_logging.py`、`test_log_correlation.py`、`test_streaming_redaction.py` | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)；静态与流式共用扫描核心，普通 query/fragment `@`、assignment 边界及大 chunk 性能已有回归。 |
+| M3-C19 / M3-A11 | 本机已验证 | `infrastructure/observability/redaction.py`、`json_logging.py`、`application/transcripts/redaction.py`、`streaming.py` | `test_json_logging.py`、`test_log_correlation.py`、`test_streaming_redaction.py` | [Milestone 18](#milestone-18统一脱敏扫描取消边界与大-delta-性能)、[Milestone 19](#milestone-19追加修复集成验收与契约复审)；静态与流式共用扫描核心，普通 query/fragment `@`、assignment 边界及大 chunk 性能已完成 focused 与全量回归。 |
 | M3-C20 / M3-A12 | 本机已验证 | `application/analysis_runs/coordinator.py`、`persistence.py`、补写路由 | `test_run_writer.py`、`test_analysis_history.py`、`test_analysis_runs.py` | [Milestone 13](#milestone-13取消时的引用依赖与持久化收敛)、[Milestone 14](#milestone-14手动补写与-live-cleanup-原子性)；引用依赖与 cleanup 竞态均已修复并重验。 |
 
 ### GLOBAL / MR 门禁审计
 
 Milestone 16 在 Milestone 11–15 完成后重新复核 `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` 以及当前适用的 `MR-G01`–`MR-G14`。提交 `452749b` 后确认的 4 个 P1、5 个 P2 均已关闭；没有新增、拆分、替换或取消 contract，也没有把本机证据冒充远端 MR/CI 结果。
 
-上述是 Milestone 16 的历史审计范围。HEAD `def435a` 的追加审查重新打开 Secret、正式入口和 SSE/正文一致性门禁，当前结论以下表为准；Milestone 19 在修复后重审，不以此前 811 项测试通过替代新增失败路径的验证。
+上述是 Milestone 16 的历史审计范围。HEAD `def435a` 的追加审查曾重新打开 Secret、正式入口和 SSE/正文一致性门禁；Milestone 17–18 已完成修复，Milestone 19 已用新增失败路径、真实 PostgreSQL、socket、smoke 与协议检查重审。当前结论以下表为准，不以此前 811 项测试通过替代本轮证据。
 
 | 门禁范围 | 结论 | 证据或限制 |
 |---|---|---|
 | GLOBAL-C01–C03 | 满足本阶段适用范围 | 新后端、run/session/COMID 身份与当前 DTO 均由 production 路径、OpenAPI 和契约测试约束；未读取或兼容归档实现，也未引入通用 Waterbody。 |
 | GLOBAL-C04、C09 | 本机已验证 | UTC/IANA 时间事实、typed DTO 与同源边界模型由 domain/application 原事实装配，不维护语义不同的重复状态。 |
 | GLOBAL-C05–C06 | 保留并已登记接力 | M3 保存 UTC 时间、typed facts 与原引用；真实日期窗口和水质 evidence 闭包由 M4/M6 按下方入口验收，不用 fixture 冒充。 |
-| GLOBAL-C07 | Milestone 18 本机已修复，待复审 | 纯字母认证凭据和 tags 保留既有修复证据；短前缀取消、跨 URL 分段 private value 及全出口 focused 回归通过，等待 Milestone 19 全量复审。 |
+| GLOBAL-C07 | 本机已验证 | 纯字母认证凭据、tags、短前缀取消、跨 URL 分段 private value 及全出口安全已通过 focused、完整后端、真实 PostgreSQL 与 smoke 复审。 |
 | GLOBAL-C08 | 保留并已登记接力 | 当前后端契约已冻结；最终前端仍由产品 M9 按届时设计、OpenAPI 和 SSE 契约独立实现，不复用归档前端。 |
 | GLOBAL-C10 | 已登记接力 | 下方 M4/M6/M7/M8/产品 M9 表给出入口、保留约束和可观察验收。 |
 | GLOBAL-C11 | partial | Windows Uvicorn factory 启动缺陷已由 Milestone 17 本机修复并通过真实 Runner 与 macOS PostgreSQL smoke；实际 Windows/三平台远端实跑及同库依次切换证据另行待补。 |
-| MR-G01–G02 | Milestone 17–18 已登记，待最终复审 | 本清单已登记两个功能包的实现、测试、性能与本机 socket 结果；Milestone 19 尚未验收。 |
-| MR-G03–G10 | Milestone 18 本机已修复，待复审 | 短前缀取消、完整 private URL、单大 chunk 性能和静态/流式一致性已有失败到通过回归；原引用、retry/cleanup 与 corrupt 全文修复保留。 |
-| MR-G11–G12 | partial / 待复审 | 本机 focused、非 PostgreSQL 全量回归和 socket smoke 已通过；真实 PostgreSQL 本轮未配置，三平台实际 CI 仍未取得，中心最终表不写 `implemented`。 |
+| MR-G01–G02 | 本机已复核 | Milestone 17–19 已登记两个功能包及最终复审的实现、测试、性能、数据库、socket 和文档证据。 |
+| MR-G03–G10 | 本机已验证 | 短前缀取消、完整 private URL、单大 chunk 性能、静态/流式一致性、原引用、retry/cleanup 与 corrupt 全文均通过本轮完整回归。 |
+| MR-G11–G12 | 本机已验证 / 外部 partial | 本机 851 项完整测试、47 项 PostgreSQL 专项、两组 focused、socket 与正式服务 smoke 均通过；实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移仍未取得，中心最终表不写 `implemented`。 |
 | MR-G13–G14 | 本机已复核 | 最终 diff 未引入兼容层、第二套状态/正文或无关抽象；M4–M9 未来能力仍保持原接力边界。 |
 
 ### 后续阶段交接
@@ -889,10 +889,10 @@ Milestone 16 在 Milestone 11–15 完成后重新复核 `GLOBAL-C01`–`GLOBAL-
 | 本轮 finding | 触发与影响 | 承接阶段 |
 |---|---|---|
 | P1-1：Windows 正式入口 | 锁定 Uvicorn 0.52.4 在 Windows 单 worker 下选择 Proactor factory，绕过 Selector policy，psycopg async 拒绝连接；history smoke 子进程同样受影响。 | Milestone 17，本机已完成；实际 Windows runner 仍为 GLOBAL-C11 外部缺口。 |
-| P1-2：短前缀取消泄漏 | `feed("api") → cancel() → feed("_key=abcdef") → finish()` 可在原消息与 late audit 中重建凭据；Bearer/password 与 known secret 同样受影响。 | Milestone 18，本机已完成；Milestone 19 最终复审。 |
-| P1-3：URL 绕过 private values | private value 为完整 `https://private.example/path`，分块 `https://pri` / `vate.example/path` 时 scheme/authority/path 分段使原值进入 delta/replay。 | Milestone 18，本机已完成；Milestone 19 最终复审。 |
-| P1-4：单大 delta 超线性扫描 | URL 状态机之前的全块贪婪 assignment search 仍为二次方；同步 `feed()` 阻塞单 worker 的其他 run、HTTP、cancel 和 keepalive。 | Milestone 18，本机已完成；Milestone 19 最终复审。 |
-| P2-5：query/fragment 中 `@` 误脱敏 | 静态规则未以 `?`/`#` 结束 authority，普通 URL 被当作 userinfo，损坏 POST query 并导致 streamed/final mismatch。 | Milestone 18，本机已完成；Milestone 19 最终复审。 |
+| P1-2：短前缀取消泄漏 | `feed("api") → cancel() → feed("_key=abcdef") → finish()` 可在原消息与 late audit 中重建凭据；Bearer/password 与 known secret 同样受影响。 | Milestone 18 修复，Milestone 19 本机复审通过。 |
+| P1-3：URL 绕过 private values | private value 为完整 `https://private.example/path`，分块 `https://pri` / `vate.example/path` 时 scheme/authority/path 分段使原值进入 delta/replay。 | Milestone 18 修复，Milestone 19 本机复审通过。 |
+| P1-4：单大 delta 超线性扫描 | URL 状态机之前的全块贪婪 assignment search 仍为二次方；同步 `feed()` 阻塞单 worker 的其他 run、HTTP、cancel 和 keepalive。 | Milestone 18 修复，Milestone 19 本机复审通过。 |
+| P2-5：query/fragment 中 `@` 误脱敏 | 静态规则未以 `?`/`#` 结束 authority，普通 URL 被当作 userinfo，损坏 POST query 并导致 streamed/final mismatch。 | Milestone 18 修复，Milestone 19 本机复审通过。 |
 
 审查提供的既有证据：隔离 PostgreSQL 17 上 811 passed、无 skip，health/history/独立进程重启 smoke、compileall 与 diff check 通过。Windows 问题由当前依赖源码和模拟正式入口复现确认，不是仅缺平台证据；模拟结果不等于实际 Windows runner 验证。以上不作为 Milestone 17–19 的修复后通过值，也不代表本次文档追加重新运行了这些命令。
 
@@ -977,17 +977,33 @@ Milestone 16 在 Milestone 11–15 完成后重新复核 `GLOBAL-C01`–`GLOBAL-
 
 ### 工作
 
-- [ ] 将本轮 5 个 finding 与 Milestone 17–18 的实现位置、测试名称/命令、结果逐项对应，修复后重新审查短前缀、URL 模式边界、实际事件循环和单大 chunk；不以旧 811 passed 直接判定闭环。（[追加审查修复](#追加审查修复2026-09-15)）
-- [ ] 回归此前持久化引用、retry/cleanup 原子分类、corrupt 安全文、tags/纯字母认证、父文档状态修复，以及创建幂等、原子提交、保存确认、晚到审计、重启与关闭。（[契约覆盖矩阵](#契约覆盖矩阵)）
-- [ ] 同步 M3 清单/设计/API、README、两份权威父文档、前端约定和中心待验收索引；不改变 HTTP/SSE schema，不将待实现功能写成当前事实，不追溯抹去 Milestone 0–16 历史证据。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)）
-- [ ] 逐项更新当前成功标准和 GLOBAL/M3/MR 矩阵，仅凭新实现及实际回归证据清除本轮 `request changes`；Windows factory 缺陷是否修复与三平台实跑/同库迁移是否完成分别登记，中心最终承接继续遵守真实证据门槛。（[契约 §13](../deferred_milestone_contracts.md#13-承接记录)）
+- [x] 将本轮 5 个 finding 与 Milestone 17–18 的实现位置、测试名称/命令、结果逐项对应，修复后重新审查短前缀、URL 模式边界、实际事件循环和单大 chunk；不以旧 811 passed 直接判定闭环。（[追加审查修复](#追加审查修复2026-09-15)）
+- [x] 回归此前持久化引用、retry/cleanup 原子分类、corrupt 安全文、tags/纯字母认证、父文档状态修复，以及创建幂等、原子提交、保存确认、晚到审计、重启与关闭。（[契约覆盖矩阵](#契约覆盖矩阵)）
+- [x] 同步 M3 清单/设计/API、README、两份权威父文档、前端约定和中心待验收索引；不改变 HTTP/SSE schema，不将待实现功能写成当前事实，不追溯抹去 Milestone 0–16 历史证据。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)）
+- [x] 逐项更新当前成功标准和 GLOBAL/M3/MR 矩阵，仅凭新实现及实际回归证据清除本轮 `request changes`；Windows factory 缺陷是否修复与三平台实跑/同库迁移是否完成分别登记，中心最终承接继续遵守真实证据门槛。（[契约 §13](../deferred_milestone_contracts.md#13-承接记录)）
 
 ### Verify
 
-- [ ] 运行 Milestone 17–18 全部 focused、性能和 socket 回归，再在隔离真实 PostgreSQL 上运行完整 `python -m pytest backend/tests -q` 与 persistence tests，记录实际 pass/fail/skip 数量及所有环境限制。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
-- [ ] 运行 health/history/独立进程重启 smoke，核对历史身份、原回执、游标、正文与全文引用；验证子进程和测试数据库资源按实际结果收尾，清理范围明确且无残留。（[API §9](m3_transcript_history_api.md#9-排障与验证)）
-- [ ] 运行文档协议 golden、OpenAPI、M3 32 个 contract ID 精确集合、GLOBAL/MR 分组、相对文件链接/锚点检查、compileall 与 `git diff --check`。（[实际证据记录格式](#实际证据记录格式)）
-- [ ] 搜索非历史状态描述，确认权威入口不再沿用 `def435a` 的“本机全部完成/清除 finding”结论；M4–M9 后续接力和当前公共 API 保持不变。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)）
-- [ ] 分别登记实际 Windows/macOS/Linux runner 与同一 PostgreSQL 跨系统迁移证据；未取得的部分仍留在 Milestone 2/9 与 GLOBAL-C11 的 `partial` 中，模拟 Windows 和本机 smoke 不替代真实平台结果。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)）
+- [x] 运行 Milestone 17–18 全部 focused、性能和 socket 回归，再在隔离真实 PostgreSQL 上运行完整 `python -m pytest backend/tests -q` 与 persistence tests，记录实际 pass/fail/skip 数量及所有环境限制。（[设计 §11](m3_transcript_history_implementation_design.md#11-测试与验收设计)）
+- [x] 运行 health/history/独立进程重启 smoke，核对历史身份、原回执、游标、正文与全文引用；验证子进程和测试数据库资源按实际结果收尾，清理范围明确且无残留。（[API §9](m3_transcript_history_api.md#9-排障与验证)）
+- [x] 运行文档协议 golden、OpenAPI、M3 32 个 contract ID 精确集合、GLOBAL/MR 分组、相对文件链接/锚点检查、compileall 与 `git diff --check`。（[实际证据记录格式](#实际证据记录格式)）
+- [x] 搜索非历史状态描述，确认权威入口不再沿用 `def435a` 的“本机全部完成/清除 finding”结论；M4–M9 后续接力和当前公共 API 保持不变。（[设计 §12](m3_transcript_history_implementation_design.md#12-完成标准与接力)）
+- [x] 分别登记实际 Windows/macOS/Linux runner 与同一 PostgreSQL 跨系统迁移证据；未取得的部分仍留在 Milestone 2/9 与 GLOBAL-C11 的 `partial` 中，模拟 Windows 和本机 smoke 不替代真实平台结果。（[设计 §10.4](m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性)）
 
 阶段出口：本轮 5 个 finding 有新实现、失败到通过的回归和复审证据，相关当前状态才恢复为本机已验证；三平台与同库迁移最终验收是否完成继续独立报告，不提前登记 `implemented`。
+
+### Milestone 19 完成记录（2026-09-17）
+
+| Finding | 实现与行为复审 | 新证据 |
+|---|---|---|
+| P1-1 Windows 正式入口 | `runtime/event_loop.py` 的 Selector factory 由正式 `python -m app` 与 history 子进程显式选择；非 Windows 保持 `auto`，单 worker、policy hook 与数据库门禁不变。 | Milestone 17 focused 36 passed；真实 health/history/restart smoke 通过；实际 Windows runner 仍归 GLOBAL-C11。 |
+| P1-2 短前缀取消 | `redaction.py` 在 cancel 边界保留语法/known-secret 未决状态，1–3 字符前缀分别安全结算到原消息与 late audit，重复 cancel/finish 不重复输出。 | Milestone 18 focused 259 passed；遍历语法取消位置、短前缀和 coordinator 端到端用例通过。 |
+| P1-3 完整 private URL | 静态与流式共用连续原始输入的前后 known-secret 过滤与 URL authority 状态，scheme/path/query/fragment 切分不重置匹配。 | every-split、delta/replay/live/history/storage/log 用例及完整后端回归通过。 |
+| P1-4 单大 delta 性能 | 单个外部 delta 按固定 4 KiB 块进入有界扫描；URL authority、语法候选和普通 look-behind 均有上限。 | 独立子进程 4/8/16/128/512 KiB 趋势守卫及 128 KiB 真实 socket 并发 run/cancel/keepalive 通过。 |
+| P2-5 URL 中普通 `@` | `/`、`?`、`#`、空白结束 authority，只有 authority 内 `@` 视为 userinfo；host:port、IPv4/IPv6 和 query/fragment 原样保留。 | 静态/流式 every-split、生产 POST/history 与正常 completed 无 mismatch 用例通过。 |
+
+- 本机环境：macOS 26.6.2 arm64、Python 3.12.14、PostgreSQL 17.10、Alembic 1.20.0、SQLAlchemy 2.0.52、psycopg 3.3.5、Uvicorn 0.52.4；隔离实例监听 `127.0.0.1:55419`，专用测试库为 `wateragents_m19_test`，业务库保护值为 `wateragents_m19_guard`。
+- 测试：完整 `backend/tests` 为 851 passed、无 skip；真实 PostgreSQL persistence 为 47 passed；Milestone 17/18 focused 分别为 36/259 passed，真实 SSE socket 为 11 passed。此前引用依赖、retry/cleanup、corrupt 安全文、tags/纯字母认证、幂等、原子提交、晚到审计、重启与关闭均由这些套件重新覆盖。
+- smoke：health 输出 `{"status":"healthy"}`；run/SSE 输出 `{"completed":"passed","cancelled":"passed"}`；history 输出 `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"wateragents_m19_test"}`。测试与 smoke 后 `wateragents_m3_%` 临时 schema 计数为 0。
+- 契约与文档：公共 HTTP/SSE schema、M4–M9 接力和单份正文/原引用边界未改变；README 当前命令与配置经复核无需改动。协议 golden 为 5 passed，32 个 M3 contract ID 精确集合与 GLOBAL/MR 分组通过；15 份适用 Markdown 的 833 个相对文件链接和 761 个相对锚点均可解析，compileall 与 `git diff --check` 通过。
+- 结论与限制：追加审查的 5 个 finding 及此前 9 个 finding 均在本机复审通过，本轮 `request changes` 清除。实际 macOS 证据已取得；实际 Windows/Linux runner、三平台完整 CI 和同一已保存 PostgreSQL 依次接入三个系统仍未取得，因此 GLOBAL-C11、Milestone 2/9 对应外部项及中心最终承接继续保持 `partial`，不登记 `implemented`。

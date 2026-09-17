@@ -2,7 +2,7 @@
 
 更新日期：2026-09-17
 
-状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](m3_implementation_todo.md)。Milestone 17–18 已完成本机实现与适用验证，Milestone 0–16 保留历史证据；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已有本机修复与回归，Milestone 19 最终复审仍待完成，当前保持 `request changes`。实际 Windows/三平台 CI 与同库跨系统迁移仍为 `partial`，实际状态以清单为准。
+状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](m3_implementation_todo.md)。Milestone 0–19 的本机实现、适用验证与最终集成复审已完成；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已修复并在隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约检查中复审通过，本轮 `request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移仍为 `partial`，实际状态以清单为准。
 
 本文保留确认过程与原 D 编号，供追溯设计依据。当前工程字段、约束、DTO、事件和配置以实施详细设计及 API 指南为入口；下面决策原文中的“继续定型”表示当时的工程待办，现已在新文档收敛，不要求重新逐项询问用户，也不另形成一套实现规范。
 
@@ -1574,4 +1574,4 @@ message_finalized 从原消息定稿事实生成，不额外追加一条同义 t
 
 ## 5. 当前交付状态
 
-本决策记录保留 M3 形成过程；主体实现的配置、schema、路由和测试保持既有证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭，其余 3 个 P1、1 个 P2 已由 Milestone 18 完成本机修复与适用验证，等待 Milestone 19 最终复审，当前仍为 `request changes`。GLOBAL-C11 的实际 Windows/三平台证据仍缺，中心 contract 不登记为最终 `implemented`。
+本决策记录保留 M3 形成过程；主体实现的配置、schema、路由和测试保持既有证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭，其余 3 个 P1、1 个 P2 已由 Milestone 18 完成本机修复，并由 Milestone 19 完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；本轮 `request changes` 已清除。GLOBAL-C11 的实际 Windows/Linux runner、三平台完整 CI 与同库迁移证据仍缺，中心 contract 不登记为最终 `implemented`。

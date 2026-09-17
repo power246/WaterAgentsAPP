@@ -12,7 +12,7 @@ M3 及之后必须承接的已确认功能，统一登记在 [deferred_milestone
 
 跨操作系统可迁移性与简单迁移是全局约束（GLOBAL-C11）：macOS、Windows、Linux 共用业务代码、依赖锁、配置格式和 schema，换系统通过目标环境配置与重新安装依赖完成；平台差异只在基础设施入口处理。M3 提供统一检查/启动命令及跨系统迁移验收，历史身份与全文引用不依赖宿主机路径。具体步骤见 [迁移指南](M3/m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)。
 
-M3 工程文档入口：[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md)、[Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、run/session 状态、history、十个 run 根路由与两层 SSE；Milestone 0–16 保留历史验证证据，原 D01–D86 保留为决策依据。Milestone 17–18 已完成 Windows 正式入口及统一脱敏/性能功能包的本机实现与适用验证；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已有本机修复与回归，Milestone 19 最终复审仍待完成，当前保持 `request changes`。实际 Windows/三平台 CI 与同一 PostgreSQL 跨系统迁移另缺完整证据，因此 GLOBAL-C11 和中心最终承接仍保持 `partial`。
+M3 工程文档入口：[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md)、[Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、run/session 状态、history、十个 run 根路由与两层 SSE；Milestone 0–16 保留历史验证证据，原 D01–D86 保留为决策依据。Milestone 17–18 已完成 Windows 正式入口及统一脱敏/性能功能包，Milestone 19 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已本机复审通过，`request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同一 PostgreSQL 跨系统迁移另缺完整证据，因此 GLOBAL-C11 和中心最终承接仍保持 `partial`。
 
 实时交互按 [M3 D69](M3/m3_transcript_history_design.md#d69run-通知与-session-过程使用两层-sse) 使用两层 SSE：当前 run 页面连接轻量 run 通知流，用户打开水体实时过程时再按 D68 连接对应 session 流。run 通知整体状态、新 session、各 Agent 状态和保存情况，session 上报具体过程；GET 用于首次加载、断线核对和历史。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。D65 路由表已同步两条流，关闭时机按 D70，恢复语义按 D73；具体事件、消费身份及握手规则见 M3 API 指南。
 
