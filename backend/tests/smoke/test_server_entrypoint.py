@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import selectors
 import socket
 from contextlib import asynccontextmanager
 
@@ -12,8 +13,39 @@ import app.__main__ as entrypoint
 import app.main as application_module
 from app.application.analysis_runs.models import RunStatus
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.runtime import event_loop
 from app.main import create_app
 from scripts.run_sse_smoke import BASE, GatedWorkflow, SmokeServer, read_event
+
+
+def test_windows_entrypoint_uses_selector_loop_factory(monkeypatch) -> None:
+    monkeypatch.setenv("WATERAGENTS_DB_PASSWORD", "entrypoint-test-only")
+    monkeypatch.setattr(event_loop.sys, "platform", "win32")
+    monkeypatch.setattr(entrypoint, "configure_asyncio_event_loop", lambda: None)
+    configurations = []
+
+    def capture_run(target, **options):
+        configurations.append(uvicorn.Config(target, log_config=None, **options))
+
+    monkeypatch.setattr(entrypoint.uvicorn, "run", capture_run)
+    entrypoint.main()
+
+    config, = configurations
+    assert config.loop == event_loop.WINDOWS_SELECTOR_LOOP_FACTORY
+    observed = []
+
+    class LoopProbeServer(uvicorn.Server):
+        async def serve(self, sockets=None) -> None:
+            loop = asyncio.get_running_loop()
+            observed.append(
+                (
+                    isinstance(loop, asyncio.SelectorEventLoop),
+                    isinstance(loop._selector, selectors.SelectSelector),
+                )
+            )
+
+    LoopProbeServer(config).run()
+    assert observed == [(True, True)]
 
 
 @pytest.fixture

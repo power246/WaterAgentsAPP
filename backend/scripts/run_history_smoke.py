@@ -19,7 +19,10 @@ from app.application.transcripts.registry import (
     fixture_message_registration,
 )
 from app.infrastructure.config import AppSettings
-from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
+from app.infrastructure.runtime.event_loop import (
+    configure_asyncio_event_loop,
+    uvicorn_loop,
+)
 from app.main import create_app
 from health_smoke import available_loopback_port, stop_process
 from run_sse_smoke import read_event, stream_headers
@@ -125,6 +128,8 @@ def start_application(settings: AppSettings) -> tuple[subprocess.Popen[str], int
             "uvicorn",
             "run_history_smoke:create_smoke_app",
             "--factory",
+            "--loop",
+            uvicorn_loop(),
             "--host",
             "127.0.0.1",
             "--port",

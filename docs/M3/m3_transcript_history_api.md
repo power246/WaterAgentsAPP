@@ -1,8 +1,8 @@
 # M3 Transcript、History 与两层 SSE API / 搭建排障指南
 
-更新日期：2026-09-15
+更新日期：2026-09-17
 
-**状态：Milestone 0–16 已完成本机实现、适用验证和最终复审；针对提交 `452749b` 发现的 4 个 P1、5 个 P2 均已关闭，本机 `request changes` 已清除。** 纯字母 Bearer/Basic、显式 private value tags、流式 URL、取消边界的敏感状态、取消引用依赖、手动补写/cleanup 竞态及 corrupt 安全文读取已经收敛。三平台实际 CI 与跨系统迁移证据仍为 `partial`，中心最终承接暂不登记 `implemented`。
+**状态：Milestone 17 已完成 Windows 正式入口 factory 的本机实现、真实 Runner 回归与 macOS PostgreSQL smoke；Milestone 0–16 保留历史证据。** HEAD `def435a` 追加审查还剩 Milestone 18 的短前缀取消、完整 private URL、单大 delta 性能和普通 URL 误脱敏，Milestone 19 最终复审未开始，当前仍为 `request changes`。公共 HTTP/SSE 契约不变；实际 Windows/三平台 CI 与跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
 工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。普通 HTTP 以当前 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
@@ -428,7 +428,7 @@ wateragents-db check
 wateragents
 ```
 
-每台机器新建 venv，不复制虚拟环境。Windows 正式入口必须在 loop 创建前配置 Selector loop；直接调用自定义 Uvicorn 启动方式必须复用同样初始化，不能把默认 Proactor 配置列为已支持的启动命令。
+每台机器新建 venv，不复制虚拟环境。正式 `python -m app` 入口在 Windows 显式向 Uvicorn 传入 Selector loop factory，macOS/Linux 保持 `auto`，不要求用户修改源码或启动参数；history smoke 的独立 Uvicorn 子进程复用同一选择。直接执行 `python -m uvicorn` 进行 Windows 诊断时须加 `--loop app.infrastructure.runtime.event_loop:windows_selector_loop_factory`，不能把默认 Proactor 配置列为已支持的部署入口。直接 `asyncio.run()` 的 CLI/smoke 仍在创建 loop 前配置 Selector policy。
 
 ### 8.3 已有数据库与升级
 

@@ -126,6 +126,7 @@ def test_main_entrypoint_enforces_one_worker_despite_environment(monkeypatch, wo
     entrypoint.main()
     assert len(configurations) == 1
     assert configurations[0].app == "app.main:app"
+    assert configurations[0].loop == "auto"
     assert configurations[0].workers == 1
 
 

@@ -4,7 +4,10 @@ import uvicorn
 
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.database import require_database_password
-from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
+from app.infrastructure.runtime.event_loop import (
+    configure_asyncio_event_loop,
+    uvicorn_loop,
+)
 
 
 def main() -> None:
@@ -16,6 +19,7 @@ def main() -> None:
         host=settings.host,
         port=settings.port,
         log_level="debug" if settings.log_level == "trace" else settings.log_level,
+        loop=uvicorn_loop(),
         workers=1,
         access_log=False,
         timeout_graceful_shutdown=2,

@@ -1,8 +1,8 @@
 # M3 Transcript Store + History APIs 实施详细设计
 
-更新日期：2026-09-15
+更新日期：2026-09-17
 
-状态：D01–D86 的主体设计与 Milestone 0–16 本机实现、适用验证和最终复审均已完成；针对提交 `452749b` 发现的 4 个 P1、5 个 P2 已按功能修复并取得回归证据，本机 `request changes` 已清除。本文描述当前实现方案；逐阶段证据见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。三平台实际 CI/同库跨系统迁移仍为 `partial`，中心最终承接暂不登记 `implemented`。
+状态：D01–D86 主体设计已对齐，Milestone 0–16 保留历史实现和验证证据；[Milestone 17](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 已完成 Windows Uvicorn factory 的本机实现、真实 Runner 回归及 macOS PostgreSQL smoke。HEAD `def435a` 追加审查还剩 Milestone 18 的 3 个 P1、1 个 P2，Milestone 19 最终复审未开始，当前仍为 `request changes`。本文规定工程目标与既有实现边界，追加修复设计见 §12.1；三平台实际 CI/同库跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。当前功能完成状态只以实施清单中的实际测试和环境证据为准。
 
@@ -381,13 +381,15 @@ run cancel 在统一状态边界关闭调度入口，固定全部生成中原消
 
 ### 9.2 凭据边界
 
+本节规定目标安全保证。当前短敏感前缀取消、完整 private URL 的跨段匹配、大 chunk 扫描与静态 URL authority 识别尚未满足这些保证，由 [Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 统一修复，不能以最终正文脱敏替代已公开 delta 的安全性。
+
 复用并扩展现有 redaction：结构化敏感键、Authorization/Cookie、URL userinfo、已知实际凭据，以及常见凭据标记后的值。`Bearer <token>` 与 `Basic <token>` 采用安全优先语义，token 即使只含字母也遮蔽；无法与认证 scheme 区分的短语不以业务文本为由放行，只有不构成 scheme 的普通 query 原样保留。HTTP、workflow、异常 repr/JSON 转义、driver 错误、日志及 safe preview 都走相同规则。原 Agent 实际输入不因日志脱敏而被改写。
 
 公开 tags 与正文使用同一 `private_values` 和静态凭据规则，在 `message_started` 可见前完成安全化；脱敏后重复的 tag 按原顺序稳定去重。finalized item、live/history DTO 和数据库记录复用这一份安全 metadata，持久化边界再次复核，不能把未安全化 tags 写入存储。
 
 流式过滤器在不可读的私有缓冲中维护已知 secret 前缀和敏感字段识别状态：仅释放已经排除匹配可能的安全前缀；凭据值进入遮蔽状态后不缓存或发送原值，直到确定分隔边界。known secret 的后缀前缀保留到后片段确定；敏感标记可能跨片段时同样保留。结束/取消时未能判定的敏感候选按安全替换收尾，不能原样放行。取消之后保留遮蔽状态，避免跨边界剩余凭据出现在历史尾部；不保留一份未脱敏全文。
 
-URL scheme 可确认后立即释放，过滤器只在 authority 判定期保留最多 2,048 个字符；`/`、`?`、`#` 或空白结束 authority，后续 path/query/fragment 回到通用有界 look-behind。authority 中出现 `@` 才表示 userinfo，此前内容统一遮蔽，安全 host/port 继续输出；没有 `@` 的域名端口、IPv4 与方括号 IPv6 原样保留。authority 超限时立即输出一次安全占位并进入 masked 状态直至分隔符，因此空间有固定上限，扫描成本不随无空白长 URL 超线性增长。取消时未决 authority 先以安全占位计入原消息，再保留 masked 状态消费取消后的剩余 authority，不能把前缀或后缀移动成 late audit 明文。
+URL scheme 只有在语法与 known-secret 识别均排除敏感匹配后才能公开，authority 判定保留最多 2,048 个字符；`/`、`?`、`#` 或空白结束 authority，后续 path/query/fragment 仍使用同一连续原始输入的 known-secret 匹配状态。只有 authority 内的 `@` 表示 userinfo，此前内容统一遮蔽，安全 host/port 继续输出；没有 `@` 的域名端口、IPv4 与方括号 IPv6 原样保留，query/fragment 的 `@` 不属于凭据。authority 超限时输出安全占位并继续有界消费，不反复扫描完整 chunk 或不断增长的 URL。取消时未决 authority 安全结算到原消息，相关识别/遮蔽状态继续消费取消后的剩余内容，不能把前缀或后缀移动成 late audit 明文。该目标规则及静态/流式一致性由 Milestone 18 验证。
 
 这是限定凭据规则的跨片段处理，不宣称识别所有敏感信息。使用合成凭据逐切分点验证（包括 Unicode、引号、转义、分隔符、取消处与日志），并验证正常文本有持续增量输出；不能通过整段等到结束才输出规避流式验收。持久化出口再次校验与脱敏，不能用最终安全覆盖弥补已泄露 SSE。
 
@@ -466,4 +468,14 @@ M3 完成需同时满足：四表与环境可搭建；已保存事实可重启�
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
 
-Milestone 16 已在 Milestone 11–15 修复完成后逐项重审 GLOBAL、M3-C01–C20、M3-A01–A12 与适用 MR 门禁，并通过可执行文档 golden 对齐实际 OpenAPI、production registry 和 SSE encoder。提交 `452749b` 后发现的 4 个 P1、5 个 P2 均已有实现、回归和文档证据，本机完成标准重新满足。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；M3 还须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。
+Milestone 16 的 GLOBAL/M3/MR 审计与文档 golden 保留为历史证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭；其余 3 个 P1、1 个 P2 由 Milestone 18–19 承接，相关当前成功标准和矩阵继续标为待修复。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；完成本轮修复与复审后，M3 仍须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。
+
+### 12.1 追加修复设计：Milestone 17–19
+
+Milestone 17 已将 Windows 差异集中在现有 runtime 模块：可导入的零参数 Selector factory 由正式入口和 history smoke 的 Uvicorn 子进程显式选择，非 Windows 保留 `auto`；现有 policy hook 继续服务于直接 `asyncio.run()` 的调用方。行为回归经过真实 `Server.run()`/Runner 创建 Selector loop，本机 health/history PostgreSQL smoke 通过。实际 Windows runner 尚未取得，继续作为 GLOBAL-C11 外部证据，而不回退到 Uvicorn 的内置 Proactor factory 或增加 worker。
+
+脱敏在现有 transcripts 边界统一原始输入扫描、语法识别与 known-secret 匹配，安全输出须得到共同确认；URL 状态切换不提前公开 scheme 或丢弃已知凭据前缀。使用增量、有界候选状态代替全 incoming chunk 的贪婪搜索，静态入口复用识别规则，避免将二次方耗时留在 POST、定稿或日志。缓冲上限只依赖 authority 上限与最长候选/known-secret 变体，不随输入长度增长；超长可疑候选保守遮蔽。
+
+取消不是 EOF：所有仍可能匹配的未决前缀，包括 1–3 字符，安全归入原消息并保留后续识别/遮蔽状态；晚到审计只保存新增安全内容，不重复原前缀。正常结束与取消分别验收。静态/流式共用 authority 与 assignment 值边界，正常完整输入结果一致，取消/超限的保守遮蔽例外明确记录；保留真实内容不一致时的诊断，不能放宽正常完成态断言。
+
+Milestone 19 在两个功能包完成后验证真实 PostgreSQL、正式服务 smoke、单大 chunk 性能及并发响应，并重审全部适用契约。这里不新增 migration、HTTP/SSE schema 或业务状态，不改变原引用、单份正文和 M4–M9 接力。任务与通过证据以 [Milestone 17–19 清单](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 为准，未实现任务保持未勾选。

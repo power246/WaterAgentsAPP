@@ -1,8 +1,8 @@
 # M3 Transcript Store + History APIs 设计决策记录
 
-更新日期：2026-09-15
+更新日期：2026-09-17
 
-状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–16 实施清单](m3_implementation_todo.md)。Milestone 0–16 已完成本机实现、适用验证和最终复审；三平台实际 CI 与同库跨系统迁移仍为 `partial`，实际状态以清单为准。
+状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](m3_implementation_todo.md)。Milestone 17 已完成 Windows Uvicorn factory 的本机实现与适用验证，Milestone 0–16 保留历史证据；HEAD `def435a` 追加审查还剩 Milestone 18 的 3 个 P1、1 个 P2 及 Milestone 19 最终复审，当前仍为 `request changes`。实际 Windows/三平台 CI 与同库跨系统迁移仍为 `partial`，实际状态以清单为准。
 
 本文保留确认过程与原 D 编号，供追溯设计依据。当前工程字段、约束、DTO、事件和配置以实施详细设计及 API 指南为入口；下面决策原文中的“继续定型”表示当时的工程待办，现已在新文档收敛，不要求重新逐项询问用户，也不另形成一套实现规范。
 
@@ -1574,4 +1574,4 @@ message_finalized 从原消息定稿事实生成，不额外追加一条同义 t
 
 ## 5. 当前交付状态
 
-本决策记录保留 M3 形成过程；当前交付已实现实施详细设计、API/搭建指南、分阶段清单、配置、schema、路由和测试，并同步上层契约入口。Milestone 16 已清除本机 review finding；由于 GLOBAL-C11 的外部证据仍缺，中心 contract 仍未登记为最终 `implemented`。
+本决策记录保留 M3 形成过程；主体实现的配置、schema、路由和测试保持既有证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭，其余 3 个 P1、1 个 P2 由 Milestone 18–19 修复及复审，当前仍为 `request changes`。GLOBAL-C11 的实际 Windows/三平台证据仍缺，中心 contract 不登记为最终 `implemented`。

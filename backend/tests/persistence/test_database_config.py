@@ -283,3 +283,24 @@ def test_selector_policy_is_not_changed_inside_a_running_loop(
             event_loop.configure_asyncio_event_loop()
 
     asyncio.run(exercise())
+
+
+def test_windows_selector_policy_is_configured_before_direct_asyncio_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.infrastructure.runtime import event_loop
+
+    policy = object()
+    selected = []
+    monkeypatch.setattr(event_loop.sys, "platform", "win32")
+    monkeypatch.setattr(
+        event_loop.asyncio,
+        "WindowsSelectorEventLoopPolicy",
+        lambda: policy,
+        raising=False,
+    )
+    monkeypatch.setattr(event_loop.asyncio, "set_event_loop_policy", selected.append)
+
+    event_loop.configure_asyncio_event_loop()
+
+    assert selected == [policy]

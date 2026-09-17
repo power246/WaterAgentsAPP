@@ -58,6 +58,24 @@ def test_tests_and_direct_async_smoke_share_windows_loop_initialization() -> Non
         assert "configure_asyncio_event_loop" in source
 
 
+def test_history_smoke_passes_the_shared_loop_factory_to_uvicorn() -> None:
+    source = HISTORY_SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=HISTORY_SMOKE_SCRIPT_PATH)
+    popen_call = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "subprocess"
+        and node.func.attr == "Popen"
+    )
+    command = ast.unparse(popen_call.args[0])
+
+    assert "'--loop'" in command
+    assert "uvicorn_loop()" in command
+
+
 def test_health_smoke_uses_cross_platform_process_and_path_apis() -> None:
     source = SMOKE_SCRIPT_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=SMOKE_SCRIPT_PATH)
