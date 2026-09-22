@@ -50,6 +50,9 @@ def test_windows_entrypoint_uses_selector_loop_factory(monkeypatch) -> None:
 
 @pytest.fixture
 def running_entrypoint(monkeypatch, request):
+    original_policy = asyncio.get_event_loop_policy()
+    entrypoint.configure_asyncio_event_loop()
+    monkeypatch.setattr(entrypoint, "configure_asyncio_event_loop", lambda: None)
     loggers = [logging.getLogger(name) for name in (
         "wateragents", "uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi"
     )]
@@ -94,6 +97,7 @@ def running_entrypoint(monkeypatch, request):
     try:
         yield run
     finally:
+        asyncio.set_event_loop_policy(original_policy)
         for logger, handlers, level, propagate, disabled in original_logging:
             logger.handlers = handlers
             logger.setLevel(level)

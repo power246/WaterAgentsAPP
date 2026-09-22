@@ -1,6 +1,7 @@
 import asyncio
 import importlib
 import socket
+import sys
 import threading
 from zoneinfo import TZPATH, ZoneInfo, reset_tzpath
 
@@ -126,7 +127,11 @@ def test_main_entrypoint_enforces_one_worker_despite_environment(monkeypatch, wo
     entrypoint.main()
     assert len(configurations) == 1
     assert configurations[0].app == "app.main:app"
-    assert configurations[0].loop == "auto"
+    assert configurations[0].loop == (
+        "app.infrastructure.runtime.event_loop:windows_selector_loop_factory"
+        if sys.platform == "win32"
+        else "auto"
+    )
     assert configurations[0].workers == 1
 
 
