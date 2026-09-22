@@ -741,6 +741,10 @@ class RunCoordinator:
             raise RuntimeError("creation owner task was not started")
         remaining = deadline - asyncio.get_running_loop().time()
         if remaining <= 0:
+            if initial:
+                raise CreationCommitUnconfirmedError(
+                    owner.prepared.candidate.snapshot.run_id
+                )
             raise IdempotencyWaitTimeoutError()
         if not initial:
             try:

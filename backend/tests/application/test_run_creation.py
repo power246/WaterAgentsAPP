@@ -404,6 +404,40 @@ def test_owner_and_waiter_timeouts_are_distinct_and_do_not_cancel_owner() -> Non
     run(exercise)
 
 
+def test_expired_deadline_after_owner_creation_is_unconfirmed(monkeypatch) -> None:
+    async def exercise() -> None:
+        store = GatedStore()
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow, idempotency_wait_timeout=1)
+        wait_for_owner = coordinator._wait_for_owner
+        key = uuid4()
+
+        async def expire_before_wait(owner, deadline, *, initial):
+            assert initial
+            return await wait_for_owner(
+                owner, asyncio.get_running_loop().time() - 1, initial=initial
+            )
+
+        monkeypatch.setattr(coordinator, "_wait_for_owner", expire_before_wait)
+        try:
+            with pytest.raises(CreationCommitUnconfirmedError) as failure:
+                await coordinator.create_run(b'{"query":"lake"}', idempotency_key=key)
+            await store.started.wait()
+            assert (
+                failure.value.run_id
+                == coordinator._creation_owners[key].prepared.candidate.snapshot.run_id
+            )
+            store.release.set()
+            await workflow.calls.get()
+            assert failure.value.run_id == store.candidates[0].snapshot.run_id
+        finally:
+            store.release.set()
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
 def test_lookup_waits_through_the_post_commit_registration_window() -> None:
     class RegistrationGatedCoordinator(RunCoordinator):
         def __init__(self, *args, **kwargs) -> None:

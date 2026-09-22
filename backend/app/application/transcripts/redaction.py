@@ -333,7 +333,7 @@ class _SyntaxFilter:
 
     def _mask_partial_at_finish(self) -> bool:
         visible = self._pending[self._suppressed:]
-        if len(visible) < 3:
+        if len(visible) < 3 or not self._boundary_before(self._suppressed):
             return False
         lowered = _ascii_lower(visible)
         return any(

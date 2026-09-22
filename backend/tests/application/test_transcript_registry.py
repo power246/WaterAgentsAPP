@@ -149,6 +149,19 @@ def test_lifecycle_v2_keeps_run_and_session_names_and_single_configuration() -> 
     assert "agent_role" not in session_body["payload"]
 
 
+def test_lifecycle_v2_accepts_uuid_ending_in_sensitive_key_prefix() -> None:
+    run_id = UUID("4914ec8b-6d77-4bd2-bf65-e8aa93289acc")
+    run = RunCreatedEvent(
+        run_id=run_id,
+        occurred_at=NOW,
+        payload={"created_at": NOW, "configuration": CONFIGURATION},
+    )
+
+    encoded = create_production_registry().encode("lifecycle_event", 2, run)
+
+    assert json.loads(encoded.safe_body)["run_id"] == str(run_id)
+
+
 def test_legacy_lifecycle_v1_is_readable_but_never_rewritten() -> None:
     registry = create_production_registry()
     legacy = {

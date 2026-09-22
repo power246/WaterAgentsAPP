@@ -220,6 +220,20 @@ def test_finish_masks_an_unresolved_sensitive_candidate() -> None:
 
 
 @pytest.mark.parametrize(
+    "identifier",
+    (
+        "4914ec8b-6d77-4bd2-bf65-e8aa93289acc",
+        "4914ec8b-6d77-4bd2-bf65-e8aa9328acce",
+    ),
+)
+def test_uuid_hex_suffix_is_not_a_sensitive_key_prefix(identifier: str) -> None:
+    assert redact_text(identifier) == identifier
+    assert all(
+        rendered == identifier for rendered in _render_at_every_split(identifier)
+    )
+
+
+@pytest.mark.parametrize(
     ("prefix", "suffix", "private_values", "secrets"),
     (
         ("api", "_key=alphabetic ", (), ("alphabetic",)),
