@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import selectors
 import socket
 from contextlib import asynccontextmanager
 
@@ -10,13 +11,48 @@ import uvicorn
 
 import app.__main__ as entrypoint
 import app.main as application_module
-from app.application.analysis_sessions.models import SessionStatus
+from app.application.analysis_runs.models import RunStatus
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.runtime import event_loop
 from app.main import create_app
-from scripts.session_sse_smoke import BASE, GatedWorkflow, SmokeServer, read_event
+from scripts.run_sse_smoke import BASE, GatedWorkflow, SmokeServer, read_event
+
+
+def test_windows_entrypoint_uses_selector_loop_factory(monkeypatch) -> None:
+    monkeypatch.setenv("WATERAGENTS_DB_PASSWORD", "entrypoint-test-only")
+    monkeypatch.setattr(event_loop.sys, "platform", "win32")
+    monkeypatch.setattr(entrypoint, "configure_asyncio_event_loop", lambda: None)
+    configurations = []
+
+    def capture_run(target, **options):
+        configurations.append(uvicorn.Config(target, log_config=None, **options))
+
+    monkeypatch.setattr(entrypoint.uvicorn, "run", capture_run)
+    entrypoint.main()
+
+    config, = configurations
+    assert config.loop == event_loop.WINDOWS_SELECTOR_LOOP_FACTORY
+    observed = []
+
+    class LoopProbeServer(uvicorn.Server):
+        async def serve(self, sockets=None) -> None:
+            loop = asyncio.get_running_loop()
+            observed.append(
+                (
+                    isinstance(loop, asyncio.SelectorEventLoop),
+                    isinstance(loop._selector, selectors.SelectSelector),
+                )
+            )
+
+    LoopProbeServer(config).run()
+    assert observed == [(True, True)]
 
 
 @pytest.fixture
 def running_entrypoint(monkeypatch, request):
+    original_policy = asyncio.get_event_loop_policy()
+    entrypoint.configure_asyncio_event_loop()
+    monkeypatch.setattr(entrypoint, "configure_asyncio_event_loop", lambda: None)
     loggers = [logging.getLogger(name) for name in (
         "wateragents", "uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.asgi"
     )]
@@ -26,6 +62,7 @@ def running_entrypoint(monkeypatch, request):
     ]
     monkeypatch.setenv("WATERAGENTS_LOG_LEVEL", getattr(request, "param", "info"))
     monkeypatch.setenv("WATERAGENTS_HOST", "127.0.0.1")
+    monkeypatch.setenv("WATERAGENTS_DB_PASSWORD", "entrypoint-test-only")
 
     @asynccontextmanager
     async def run(application):
@@ -60,6 +97,7 @@ def running_entrypoint(monkeypatch, request):
     try:
         yield run
     finally:
+        asyncio.set_event_loop_policy(original_policy)
         for logger, handlers, level, propagate, disabled in original_logging:
             logger.handlers = handlers
             logger.setLevel(level)
@@ -84,20 +122,25 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(
     async def exercise():
         before = asyncio.all_tasks()
         workflow = CooperativeWorkflow()
-        application = create_app(workflow=workflow)
+        application = create_app(
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+        )
         async with running_entrypoint(application) as (server, task, client):
             created = await client.post(BASE, json={"query": "shutdown regression"})
             assert created.status_code == 201
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             await workflow.started.wait()
-            async with client.stream("GET", f"{BASE}/{session_id}/events") as response:
+            async with client.stream("GET", f"{BASE}/{run_id}/events") as response:
                 assert response.status_code == 200
                 lines = response.aiter_lines()
-                assert (await read_event(lines)).type.value == "session_created"
+                name, data, event_id = await read_event(lines)
+                assert name == "run_snapshot" and data["status"] == "running"
+                assert event_id is None
                 server.should_exit = True
                 await asyncio.wait_for(asyncio.shield(task), timeout=5)
                 assert workflow.stopped.is_set()
-                assert (await application.state.session_coordinator.get_snapshot(session_id)).status is SessionStatus.RUNNING
+                assert (await application.state.run_coordinator.get_snapshot(run_id)).status is RunStatus.RUNNING
                 try:
                     async for line in lines:
                         assert not line.startswith("event:")
@@ -110,7 +153,7 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(
     rows = [json.loads(line) for line in output.err.splitlines() if line.startswith("{")]
     assert any(row["event_name"] == "workflow_quiesced" for row in rows)
     assert any(row["event_name"] == "service_shutdown" for row in rows)
-    assert not any(row.get("lifecycle_event", {}).get("type") == "session_cancelled" for row in rows)
+    assert not any(row.get("lifecycle_event", {}).get("type") == "run_cancelled" for row in rows)
 
 
 @pytest.mark.parametrize("running_entrypoint", ["info", "trace"], indirect=True)
@@ -119,7 +162,7 @@ def test_entrypoint_logs_exclude_url_credentials_and_private_query(running_entry
     private_query = "REVIEW_PRIVATE_QUERY"
     authorization = "REVIEW_AUTHORIZATION"
     cookie = "REVIEW_COOKIE"
-    application = create_app()
+    application = create_app(transcript_store=InMemoryTranscriptStore())
 
     async def exercise():
         async with running_entrypoint(application) as (_, _, client):
@@ -157,25 +200,32 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
     original_encode = response_module.encode_event
     failed = False
 
-    def fail_once(event):
+    def fail_once(event_name, event, *, event_id=None):
         nonlocal failed
-        if event.sequence == 2 and not failed:
+        if (
+            event_name == "run_snapshot"
+            and getattr(event, "status", None) is RunStatus.COMPLETED
+            and not failed
+        ):
             failed = True
             try:
                 raise ValueError(f"upstream failure; access_token={cause_secret}")
             except ValueError as cause:
                 raise RuntimeError(f"encoder failure; api_key={secret}") from cause
-        return original_encode(event)
+        return original_encode(event_name, event, event_id=event_id)
 
     monkeypatch.setattr(response_module, "encode_event", fail_once)
 
     async def exercise():
         before = asyncio.all_tasks()
         workflow = GatedWorkflow()
-        application = create_app(workflow=workflow)
+        application = create_app(
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+        )
         async with running_entrypoint(application) as (_, _, client):
-            coordinator = application.state.session_coordinator
-            original_subscribe = coordinator.subscribe
+            coordinator = application.state.run_coordinator
+            original_subscribe = coordinator.subscribe_run
             subscriptions = []
 
             async def observe_subscription(*args, **options):
@@ -184,47 +234,52 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
                     subscriptions.append(events)
                 return events
 
-            monkeypatch.setattr(coordinator, "subscribe", observe_subscription)
+            monkeypatch.setattr(coordinator, "subscribe_run", observe_subscription)
             created = await client.post(BASE, json={"query": "stream failure regression"})
             assert created.status_code == 201
-            session_id = created.json()["session_id"]
+            run_id = created.json()["run_id"]
             await workflow.started.wait()
-            path = f"{BASE}/{session_id}/events"
+            path = f"{BASE}/{run_id}/events"
             try:
                 async with client.stream("GET", path) as stream:
                     assert stream.status_code == 200
                     request_id = stream.headers["x-request-id"]
                     lines = stream.aiter_lines()
-                    assert (await read_event(lines)).type.value == "session_created"
+                    name, data, event_id = await read_event(lines)
+                    assert name == "run_snapshot" and data["status"] == "running"
+                    assert event_id is None
                     workflow.release.set()
                     with pytest.raises((httpx.RemoteProtocolError, httpx.ReadError)):
                         async for line in lines:
                             pytest.fail(f"Unexpected data after stream failure: {line!r}")
                 assert subscriptions[0].ag_frame is None
-                assert (await coordinator.get_snapshot(session_id)).status is SessionStatus.COMPLETED
+                assert (await coordinator.get_snapshot(run_id)).status is RunStatus.COMPLETED
                 assert workflow.exited.is_set()
                 assert not workflow.context.cancellation.is_requested()
                 async with client.stream("GET", path, headers={"Last-Event-ID": "1"}) as replay:
                     assert replay.status_code == 200
                     lines = replay.aiter_lines()
-                    terminal = await read_event(lines)
-                    assert terminal.type.value == "session_completed" and terminal.sequence == 2
-                    assert str(terminal.session_id) == session_id
+                    name, terminal, event_id = await read_event(lines)
+                    assert name == "run_snapshot" and terminal["status"] == "completed"
+                    assert terminal["run_id"] == run_id and event_id is None
+                    name, end, event_id = await read_event(lines)
+                    assert name == "stream_end" and end["stream"] == "run"
+                    assert event_id is None
                     assert await anext(lines, None) is None
-                assert (await client.get(path, headers={"Last-Event-ID": "2"})).status_code == 204
+                assert (await client.get(path, headers={"Last-Event-ID": "2"})).status_code == 200
             finally:
                 workflow.release.set()
         assert all(events.ag_frame is None for events in subscriptions)
         assert not asyncio.all_tasks() - before
-        return session_id, request_id
+        return run_id, request_id
 
-    session_id, request_id = asyncio.run(asyncio.wait_for(exercise(), timeout=15))
+    run_id, request_id = asyncio.run(asyncio.wait_for(exercise(), timeout=15))
     output = capsys.readouterr()
     assert secret not in output.out + output.err
     assert cause_secret not in output.out + output.err
     rows = [json.loads(line) for line in output.err.splitlines() if line.startswith("{")]
     failure, = [row for row in rows if row["event_name"] == "http_stream_failed"]
-    assert failure["session_id"] == session_id and failure["request_id"] == request_id
+    assert failure["run_id"] == run_id and failure["request_id"] == request_id
     assert failure["exception_type"] == "RuntimeError"
     assert failure["exception_message"] == "encoder failure; api_key=[REDACTED]"
     assert "ValueError" in failure["stack_trace"] and "direct cause" in failure["stack_trace"]

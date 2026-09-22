@@ -18,7 +18,7 @@ from app.ports.hydrology_data import (
 from app.ports.key_store import KeyStorePort
 from app.ports.llm import LLMPort
 from app.ports.rag_index import RAGIndexPort
-from app.ports.transcript_store import TranscriptStorePort
+from app.ports.transcript_store import TranscriptReadStorePort, TranscriptStorePort
 from app.ports.weather_data import WeatherForecastPort, WeatherObservationPort
 
 __all__ = [
@@ -38,6 +38,7 @@ __all__ = [
     "RAGIndexPort",
     "TopologyDataPort",
     "TranscriptStorePort",
+    "TranscriptReadStorePort",
     "WaterObservationPort",
     "WeatherForecastPort",
     "WeatherObservationPort",

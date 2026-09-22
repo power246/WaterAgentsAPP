@@ -6,21 +6,21 @@ from uuid import UUID
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from app.application.analysis_sessions.models import (
+from app.application.analysis_runs.models import (
     AnalysisConfigurationSnapshot,
-    AnalysisSessionSnapshot,
+    AnalysisRunSnapshot,
     CorrelationContext,
-    LifecycleEvent,
     LifecycleEventType,
     PublicError,
-    SessionCancelledEvent,
-    SessionCompletedEvent,
-    SessionCreatedEvent,
-    SessionFailedEvent,
-    SessionStatus,
+    RunCancelledEvent,
+    RunCompletedEvent,
+    RunCreatedEvent,
+    RunFailedEvent,
+    RunLifecycleEvent,
+    RunStatus,
 )
 
-SESSION_ID = "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"
+RUN_ID = "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"
 ERROR_ID = "0463cd90-6d0f-47e9-9656-b4aa86352c61"
 LOCAL_TIME = "2026-09-08T08:20:00-05:00"
 UTC_TIME = "2026-09-08T13:20:00Z"
@@ -37,7 +37,7 @@ ERROR = {
     "retryable": False,
 }
 SNAPSHOT = {
-    "session_id": SESSION_ID,
+    "run_id": RUN_ID,
     "status": "pending",
     "created_at": LOCAL_TIME,
     "updated_at": LOCAL_TIME,
@@ -45,8 +45,8 @@ SNAPSHOT = {
 }
 EVENT_CASES = (
     (
-        SessionCreatedEvent,
-        "session_created",
+        RunCreatedEvent,
+        "run_created",
         {
             "status": "pending",
             "created_at": LOCAL_TIME,
@@ -54,37 +54,38 @@ EVENT_CASES = (
         },
     ),
     (
-        SessionCompletedEvent,
-        "session_completed",
-        {"status": "completed", "completed_at": LOCAL_TIME},
+        RunCompletedEvent,
+        "run_completed",
+        {"status": "completed", "completed_at": LOCAL_TIME, "warning": None},
     ),
     (
-        SessionFailedEvent,
-        "session_failed",
+        RunFailedEvent,
+        "run_failed",
         {"status": "failed", "failed_at": LOCAL_TIME, "error": ERROR},
     ),
     (
-        SessionCancelledEvent,
-        "session_cancelled",
+        RunCancelledEvent,
+        "run_cancelled",
         {"status": "cancelled", "cancelled_at": LOCAL_TIME},
     ),
 )
-EVENT_ADAPTER = TypeAdapter(LifecycleEvent)
+EVENT_ADAPTER = TypeAdapter(RunLifecycleEvent)
 
 
 def event_data(event_type: str, payload: dict) -> dict:
     return {
-        "schema_version": 1,
-        "session_id": SESSION_ID,
-        "sequence": 1 if event_type == "session_created" else 2,
+        "schema_version": 2,
+        "run_id": RUN_ID,
+        "session_id": None,
+        "sequence": 1 if event_type == "run_created" else 2,
         "type": event_type,
         "occurred_at": LOCAL_TIME,
         "payload": payload,
     }
 
 
-def test_session_and_event_names_are_stable() -> None:
-    assert [status.value for status in SessionStatus] == [
+def test_run_and_event_names_are_stable() -> None:
+    assert [status.value for status in RunStatus] == [
         "pending",
         "running",
         "completed",
@@ -93,6 +94,10 @@ def test_session_and_event_names_are_stable() -> None:
         "completed_with_persistence_error",
     ]
     assert [event.value for event in LifecycleEventType] == [
+        "run_created",
+        "run_completed",
+        "run_failed",
+        "run_cancelled",
         "session_created",
         "session_completed",
         "session_failed",
@@ -101,11 +106,11 @@ def test_session_and_event_names_are_stable() -> None:
 
 
 def test_snapshot_normalizes_uuid_and_utc_and_round_trips() -> None:
-    snapshot = AnalysisSessionSnapshot.model_validate(
-        {**SNAPSHOT, "session_id": SESSION_ID.upper()}
+    snapshot = AnalysisRunSnapshot.model_validate(
+        {**SNAPSHOT, "run_id": RUN_ID.upper()}
     )
 
-    assert snapshot.session_id == UUID(SESSION_ID)
+    assert snapshot.run_id == UUID(RUN_ID)
     assert snapshot.created_at.tzinfo is timezone.utc
     assert snapshot.updated_at.tzinfo is timezone.utc
     assert snapshot.model_dump(mode="json") == {
@@ -113,17 +118,17 @@ def test_snapshot_normalizes_uuid_and_utc_and_round_trips() -> None:
         "created_at": UTC_TIME,
         "updated_at": UTC_TIME,
     }
-    assert AnalysisSessionSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+    assert AnalysisRunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
 
 
 def test_snapshot_and_nested_configuration_are_immutable() -> None:
     data = {**SNAPSHOT, "configuration": dict(CONFIGURATION)}
-    snapshot = AnalysisSessionSnapshot.model_validate(data)
+    snapshot = AnalysisRunSnapshot.model_validate(data)
     data["configuration"]["analysis_timezone"] = "Asia/Shanghai"
 
     assert snapshot.configuration.analysis_timezone == "America/Chicago"
     with pytest.raises(ValidationError, match="frozen"):
-        snapshot.status = SessionStatus.COMPLETED
+        snapshot.status = RunStatus.COMPLETED
     with pytest.raises(ValidationError, match="frozen"):
         snapshot.configuration.analysis_timezone = "Asia/Shanghai"
 
@@ -186,7 +191,7 @@ def test_event_type_rejects_other_payloads_in_models_python_and_json(expected, o
 
 @pytest.mark.parametrize("event_type", [None, "session_started", "unknown"])
 def test_event_discriminator_is_required_and_rejects_unknown_types(event_type) -> None:
-    data = event_data("session_completed", EVENT_CASES[1][2])
+    data = event_data("run_completed", EVENT_CASES[1][2])
     if event_type is None:
         del data["type"]
     else:
@@ -206,14 +211,18 @@ def test_event_json_schema_preserves_type_payload_relationship() -> None:
         assert event_schema["properties"]["type"]["const"] == event_type
         payload_name = event_schema["properties"]["payload"]["$ref"].rsplit("/", 1)[-1]
         payload_schema = schema["$defs"][payload_name]
-        assert payload_schema["properties"]["status"]["const"] == payload["status"]
+        status_schema = payload_schema["properties"]["status"]
+        if "const" in status_schema:
+            assert status_schema["const"] == payload["status"]
+        else:
+            assert payload["status"] in status_schema["enum"]
         assert event_schema["additionalProperties"] is False
         assert payload_schema["additionalProperties"] is False
 
 
 @pytest.mark.parametrize("sequence", [0, -1, True, False, 1.0, 1.5, "2", None])
 def test_sequence_is_a_strict_positive_integer(sequence) -> None:
-    data = {**event_data("session_completed", EVENT_CASES[1][2]), "sequence": sequence}
+    data = {**event_data("run_completed", EVENT_CASES[1][2]), "sequence": sequence}
 
     with pytest.raises(ValidationError):
         EVENT_ADAPTER.validate_python(data)
@@ -226,15 +235,15 @@ def test_sequence_is_a_strict_positive_integer(sequence) -> None:
 
 def test_created_sequence_is_one() -> None:
     with pytest.raises(ValidationError):
-        SessionCreatedEvent.model_validate(
-            {**event_data("session_created", EVENT_CASES[0][2]), "sequence": 2}
+        RunCreatedEvent.model_validate(
+            {**event_data("run_created", EVENT_CASES[0][2]), "sequence": 2}
         )
 
 
-@pytest.mark.parametrize("version", [0, 2, True, 1.0, "1", None])
-def test_event_schema_version_is_integer_one(version) -> None:
+@pytest.mark.parametrize("version", [0, 1, True, 1.0, "1", None])
+def test_event_schema_version_is_integer_two(version) -> None:
     data = {
-        **event_data("session_completed", EVENT_CASES[1][2]),
+        **event_data("run_completed", EVENT_CASES[1][2]),
         "schema_version": version,
     }
     with pytest.raises(ValidationError):
@@ -245,7 +254,7 @@ def test_event_schema_version_is_integer_one(version) -> None:
 def test_all_snapshot_and_event_timestamps_reject_naive_time(naive) -> None:
     for field in ("created_at", "updated_at"):
         with pytest.raises(ValidationError, match="timezone"):
-            AnalysisSessionSnapshot.model_validate({**SNAPSHOT, field: naive})
+            AnalysisRunSnapshot.model_validate({**SNAPSHOT, field: naive})
     for event_class, event_type, payload in EVENT_CASES:
         data = event_data(event_type, payload)
         with pytest.raises(ValidationError, match="timezone"):
@@ -258,14 +267,14 @@ def test_all_snapshot_and_event_timestamps_reject_naive_time(naive) -> None:
 @pytest.mark.parametrize("invalid", ["not-a-uuid", "", 1])
 def test_uuid_fields_reject_invalid_ids(invalid) -> None:
     with pytest.raises(ValidationError):
-        AnalysisSessionSnapshot.model_validate({**SNAPSHOT, "session_id": invalid})
+        AnalysisRunSnapshot.model_validate({**SNAPSHOT, "run_id": invalid})
     with pytest.raises(ValidationError):
         PublicError.model_validate({**ERROR, "error_id": invalid})
     with pytest.raises(ValidationError):
         EVENT_ADAPTER.validate_python(
-            {**event_data("session_completed", EVENT_CASES[1][2]), "session_id": invalid}
+            {**event_data("run_completed", EVENT_CASES[1][2]), "run_id": invalid}
         )
-    for field in ("request_id", "session_id", "error_id"):
+    for field in ("request_id", "run_id", "error_id"):
         with pytest.raises(ValidationError):
             CorrelationContext.model_validate({field: invalid})
 
@@ -287,7 +296,7 @@ def test_public_error_and_correlation_round_trip() -> None:
     error = PublicError.model_validate(ERROR)
     context = CorrelationContext(
         request_id=UUID(ERROR_ID),
-        session_id=UUID(SESSION_ID),
+        run_id=UUID(RUN_ID),
         error_id=error.error_id,
         event_sequence=2,
     )
@@ -303,7 +312,7 @@ def test_public_error_and_correlation_round_trip() -> None:
 def test_models_reject_extra_fields_at_each_public_boundary() -> None:
     model_inputs = [
         (AnalysisConfigurationSnapshot, CONFIGURATION),
-        (AnalysisSessionSnapshot, SNAPSHOT),
+        (AnalysisRunSnapshot, SNAPSHOT),
         (PublicError, ERROR),
         (CorrelationContext, {}),
     ]

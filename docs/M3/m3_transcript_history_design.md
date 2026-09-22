@@ -1,18 +1,18 @@
 # M3 Transcript Store + History APIs 设计决策记录
 
-更新日期：2026-09-13
+更新日期：2026-09-17
 
-状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–10 实施清单](m3_implementation_todo.md)。后端尚未实现，任何验收契约均未因文档交付而视为完成。
+状态：D01–D86 已完成对齐，工程方案已整理为 [M3 实施详细设计](m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](m3_implementation_todo.md)。Milestone 0–19 的本机实现、适用验证与最终集成复审已完成；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已修复并在隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约检查中复审通过，本轮 `request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移仍为 `partial`，实际状态以清单为准。
 
 本文保留确认过程与原 D 编号，供追溯设计依据。当前工程字段、约束、DTO、事件和配置以实施详细设计及 API 指南为入口；下面决策原文中的“继续定型”表示当时的工程待办，现已在新文档收敛，不要求重新逐项询问用户，也不另形成一套实现规范。
 
-D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run SSE，通知 run 状态、新 session、各 Agent 状态和保存情况；打开水体实时过程时按需连接对应 session SSE。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。GET 用于首次加载、断线后核对和历史读取，前面提出的轮询方案不采用。D65 路由表已按 D69 补入 session SSE；关闭时机按 D70、续传按 D73/D78、握手按 D77、消息流按 D85/D86 确认。剩余字段和命名映射由实现者统一定型，保留既定行为，不将未实现协议当作现有接口。
+D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run SSE，通知 run 状态、新 session、各 Agent 状态和保存情况；打开水体实时过程时按需连接对应 session SSE。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。GET 用于首次加载、断线后核对和历史读取，前面提出的轮询方案不采用。D65 路由表已按 D69 补入 session SSE；关闭时机按 D70、续传按 D73/D78、握手按 D77、消息流按 D85/D86 确认。当前字段和命名映射以实施详细设计、API 指南、OpenAPI 与运行时 serializer 为准。
 
 当前领域边界以 D50/D51 为准：run 是一次用户提交的完整分析，session 是单个 Agent 的独立上下文和完整执行 loop，包括问题解析 session 和各水体 session。D01–D49 中把整次分析称为 session 的部分属于旧术语；其中创建幂等、整体状态、SSE、取消、保存重试、清理和历史分页职责应映射到 run。总体流程见 [总体设计第 1.2 节](../backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。
 
 执行身份按 D52：session_id 统一标识独立 Agent 上下文及本次执行，取消原 D32 中同义的执行 agent_id；agent_role 表达职责，target_comid 表达适用水体，operation_id 继续标识一次调用。
 
-表职责以 D53 为准：analysis_runs、analysis_sessions、transcript_items、transcript_contents 四张核心表，分别维护 run 当前信息、独立 Agent session 当前信息、原记录和独立大正文。D33 的去重、单一事实及原子性原则保留；通用时间列按 D55、session 五态按 D60 确定，路径按 D65 确认，具体身份约束与完整 DTO 继续定型。当前 M2 代码与已实现接口仍使用旧名称，本轮尚未修改实现。
+表职责以 D53 为准：analysis_runs、analysis_sessions、transcript_items、transcript_contents 四张核心表，分别维护 run 当前信息、独立 Agent session 当前信息、原记录和独立大正文。D33 的去重、单一事实及原子性原则保留；通用时间列按 D55、session 五态按 D60 确定，路径按 D65 确认。Milestone 0–16 已落实这些身份、存储、HTTP 读取 DTO、两层 SSE 与审查修复。
 
 ## 1. 依据与当前基线
 
@@ -21,10 +21,10 @@ D66–D69 确认两层实时交互：打开当前 run 页面时连接轻量 run 
 - [跨 Milestone 延后契约](../deferred_milestone_contracts.md)，重点为 `M3-C01`–`M3-C20`、`M3-A01`–`M3-A12`
 - [M2 详细设计](../M2/m2_analysis_session_sse_design.md)
 - [M2 接力记录](../M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)
-- [前端接入约定](../frontend_integration_contracts.md)，供前端查看已确认但尚未实现的 M3 接口设计
+- [前端接入约定](../frontend_integration_contracts.md)，供前端查看已实现 HTTP 契约及后续 SSE 接入边界
 - [M3 实施清单](m3_implementation_todo.md)，汇总工程定型、交付顺序和验收。
 
-当前新后端已经包含 M1 领域模型与 M2 内存态 session、状态机、SSE、取消和日志。TranscriptStorePort 仍为 generic Protocol，尚未实现数据库或 history API。当前 M2 API 文档记录 macOS 本机 602 项回归通过，修复后的三平台完整 tests 与 smoke 仍待远端通过；本次设计未重新运行这些测试。
+当前后端已经包含 run/Agent session 模型、状态机、typed transcript、PostgreSQL 存储、历史 API、取消、补写和日志。写入与一致性读取各自通过端口约束，由 PostgreSQL 实现和内存测试替身共同承接；实际验证结果记录在实施清单。M2 API 文档保留旧阶段证据，不再作为当前 HTTP 路径来源。
 
 本阶段继续遵守单进程、单 worker、多 session 隔离、唯一终态事件、显式取消、时间 snapshot、单一事实模型和 secret 边界。业务结果的生产与最终 payload 由 M6/M7 定型，M3 不制造 fake 水质结果或历史摘要。
 
@@ -1574,4 +1574,4 @@ message_finalized 从原消息定稿事实生成，不额外追加一条同义 t
 
 ## 5. 当前交付状态
 
-本次交付决策记录、实施详细设计、API/搭建指南与分阶段实施清单，并同步上层契约入口。未修改后端行为、安装数据库、启动容器或创建数据库对象。配置文件、schema 命令、路由和测试均是 M3 必需实施项，尚未实现；任何 contract 均未因文档完成而标为已承接。
+本决策记录保留 M3 形成过程；主体实现的配置、schema、路由和测试保持既有证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭，其余 3 个 P1、1 个 P2 已由 Milestone 18 完成本机修复，并由 Milestone 19 完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；本轮 `request changes` 已清除。GLOBAL-C11 的实际 Windows/Linux runner、三平台完整 CI 与同库迁移证据仍缺，中心 contract 不登记为最终 `implemented`。

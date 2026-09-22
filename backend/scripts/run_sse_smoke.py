@@ -8,16 +8,15 @@ from uuid import UUID
 import httpx
 import uvicorn
 from fastapi import FastAPI
-from pydantic import TypeAdapter
 
-from app.api.schemas.analysis_sessions import AnalysisSessionResponse
-from app.application.analysis_sessions.models import LifecycleEvent, SessionStatus
-from app.application.analysis_sessions.workflow import WorkflowContext
+from app.api.schemas.analysis_runs import AnalysisRunResponse, RunStatusResponse
+from app.application.analysis_runs.models import RunStatus
+from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config import AppSettings
+from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 from app.main import create_app
 
-BASE = "/api/analysis/sessions"
-EVENT = TypeAdapter(LifecycleEvent)
+BASE = "/api/analysis/runs"
 
 
 class SmokeServer(uvicorn.Server):
@@ -50,7 +49,7 @@ async def running_server(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
             app, host="127.0.0.1", port=0, loop="asyncio", lifespan="on",
             log_config=None, access_log=False, workers=1, timeout_graceful_shutdown=2,
         ))
-        task = asyncio.create_task(server.serve(sockets=[listener]), name="m2-smoke-server")
+        task = asyncio.create_task(server.serve(sockets=[listener]), name="run-smoke-server")
         try:
             await asyncio.wait_for(server.ready.wait(), timeout=10)
             if task.done():
@@ -99,6 +98,7 @@ def stream_headers(response: httpx.Response) -> None:
     assert response.status_code == 200, response.status_code
     assert response.headers["content-type"] == "text/event-stream; charset=utf-8"
     assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
     request_id(response)
 
 
@@ -111,104 +111,122 @@ async def read_frame(lines: AsyncIterator[str]) -> list[str]:
     raise AssertionError("SSE closed before a complete frame was received.")
 
 
-async def read_event(lines: AsyncIterator[str]) -> LifecycleEvent:
+async def read_event(lines: AsyncIterator[str]) -> tuple[str, dict[str, object], int | None]:
     frame = await read_frame(lines)
     while frame == [": keepalive"]:
         frame = await read_frame(lines)
-    assert len(frame) == 3 and frame[2].startswith("data: "), frame
-    event = EVENT.validate_json(frame[2][6:])
-    assert frame[:2] == [f"id: {event.sequence}", f"event: {event.type.value}"], frame
-    return event
+    event_id = None
+    if frame[0].startswith("id: "):
+        event_id = int(frame.pop(0)[4:])
+    assert len(frame) == 2 and frame[0].startswith("event: ") and frame[1].startswith("data: ")
+    return frame[0][7:], json.loads(frame[1][6:]), event_id
 
 
-async def verify_replay(client: httpx.AsyncClient, path: str, terminal: LifecycleEvent) -> None:
-    async with client.stream("GET", path, headers={"Last-Event-ID": "1"}) as response:
+async def verify_terminal_reconnect(client: httpx.AsyncClient, path: str, run_id: UUID) -> None:
+    async with client.stream("GET", path, headers={"Last-Event-ID": "999"}) as response:
         stream_headers(response)
         lines = response.aiter_lines()
-        assert await read_event(lines) == terminal
-        assert await anext(lines, None) is None, "Terminal stream did not close"
-    consumed = await client.get(path, headers={"Last-Event-ID": str(terminal.sequence)})
-    assert consumed.status_code == 204 and consumed.content == b""
-    request_id(consumed)
+        name, snapshot, event_id = await read_event(lines)
+        assert name == "run_snapshot" and snapshot["run_id"] == str(run_id)
+        assert event_id is None
+        name, end, event_id = await read_event(lines)
+        assert name == "stream_end" and end["stream"] == "run"
+        assert event_id is None
+        assert await anext(lines, None) is None
 
 
 async def completed_smoke() -> None:
     app = create_app(AppSettings(analysis_timezone="America/Chicago", log_level="warning"))
     async with running_server(app) as client:
-        created = await client.post(BASE, json={"query": "M2 smoke completed", "time_resolution": "6h"})
+        created = await client.post(
+            BASE,
+            json={"query": "M3 run smoke completed", "time_resolution": "6h"},
+        )
         assert created.status_code == 201, created.text
-        snapshot = AnalysisSessionResponse.model_validate(created.json())
-        assert snapshot.status is SessionStatus.PENDING
-        assert snapshot.created_at == snapshot.updated_at
-        assert snapshot.configuration.model_dump(mode="json") == {
-            "analysis_timezone": "America/Chicago", "time_resolution": "6h",
-            "time_resolution_source": "frontend",
-        }
-        path = f"{BASE}/{snapshot.session_id}/events"
+        snapshot = AnalysisRunResponse.model_validate(created.json())
+        assert snapshot.status is RunStatus.PENDING
+        path = f"{BASE}/{snapshot.run_id}/events"
         async with client.stream("GET", path) as response:
             stream_headers(response)
             assert request_id(response) != request_id(created)
             lines = response.aiter_lines()
-            first = await read_event(lines)
-            terminal = await read_event(lines)
-            assert (first.type.value, terminal.type.value) == ("session_created", "session_completed")
-            assert first.sequence == 1 and terminal.sequence == 2
-            assert first.session_id == terminal.session_id == snapshot.session_id
-            assert first.payload.configuration == snapshot.configuration
-            assert first.occurred_at == snapshot.created_at
-            assert await anext(lines, None) is None, "Terminal stream did not close"
-        await verify_replay(client, path, terminal)
+            statuses = []
+            final_snapshot = None
+            while True:
+                name, data, event_id = await read_event(lines)
+                if name == "stream_end":
+                    end = data
+                    break
+                assert name == "run_snapshot" and data["run_id"] == str(snapshot.run_id)
+                assert data["status"] in {"pending", "running", "completed"}
+                assert data["sessions"] == [] and data["waterbodies"] == []
+                assert "configuration" not in data and event_id is None
+                statuses.append(data["status"])
+                final_snapshot = data
+            assert final_snapshot is not None
+            assert final_snapshot["status"] == "completed"
+            assert final_snapshot["persistence"]["state"] == "up_to_date"
+            assert name == "stream_end" and end["stream"] == "run" and event_id is None
+            assert await anext(lines, None) is None
+        await verify_terminal_reconnect(client, path, snapshot.run_id)
 
 
 async def cancelled_smoke() -> None:
     workflow = GatedWorkflow()
     app = create_app(
         AppSettings(analysis_timezone="America/Chicago", log_level="warning"),
-        workflow=workflow, keepalive_interval=0.01,
+        workflow=workflow,
+        keepalive_interval=0.01,
     )
     async with running_server(app) as client:
         try:
-            created = await client.post(BASE, json={"query": "M2 smoke cancelled"})
-            assert created.status_code == 201, created.text
-            snapshot = AnalysisSessionResponse.model_validate(created.json())
-            assert snapshot.status is SessionStatus.PENDING
-            assert snapshot.configuration.time_resolution.value == "12h"
-            assert snapshot.configuration.time_resolution_source.value == "default"
+            created = await client.post(BASE, json={"query": "M3 run smoke cancelled"})
+            snapshot = AnalysisRunResponse.model_validate(created.json())
             await workflow.started.wait()
-            path = f"{BASE}/{snapshot.session_id}/events"
+            path = f"{BASE}/{snapshot.run_id}/events"
             async with client.stream("GET", path) as response:
                 stream_headers(response)
                 lines = response.aiter_lines()
-                first = await read_event(lines)
-                assert first.type.value == "session_created" and first.sequence == 1
-                assert first.session_id == snapshot.session_id
-                assert await read_frame(lines) == [": keepalive"]
+                name, data, event_id = await read_event(lines)
+                assert name == "run_snapshot" and data["status"] == "running"
+                assert event_id is None
+                while True:
+                    frame = await read_frame(lines)
+                    if frame == [": keepalive"]:
+                        break
+                    assert frame[0] == "event: run_snapshot"
+                    update = json.loads(frame[1].removeprefix("data: "))
+                    assert update["status"] == "running"
             assert workflow.context is not None
             assert not workflow.context.cancellation.is_requested()
-            async with client.stream("GET", path, headers={"Last-Event-ID": "1"}) as response:
+            async with client.stream("GET", path) as response:
                 stream_headers(response)
                 lines = response.aiter_lines()
-                assert await read_frame(lines) == [": keepalive"]
-                cancelled = await client.post(f"{BASE}/{snapshot.session_id}/cancel")
-                assert cancelled.status_code == 200, cancelled.text
-                cancellation = AnalysisSessionResponse.model_validate(cancelled.json())
-                assert cancellation.status is SessionStatus.CANCELLED
-                assert cancellation.session_id == snapshot.session_id
-                assert cancellation.configuration == snapshot.configuration
-                assert len({request_id(created), request_id(response), request_id(cancelled)}) == 3
-                assert not workflow.exited.is_set(), "Cancel waited for the workflow gate"
+                name, data, _ = await read_event(lines)
+                assert name == "run_snapshot" and data["status"] == "running"
+                cancelled = await client.post(f"{BASE}/{snapshot.run_id}/cancel")
+                cancellation = RunStatusResponse.model_validate(cancelled.json())
+                assert cancellation.status is RunStatus.CANCELLED
                 assert workflow.context.cancellation.is_requested()
-                terminal = await read_event(lines)
-                assert terminal.type.value == "session_cancelled" and terminal.sequence == 2
-                assert terminal.session_id == snapshot.session_id
-                assert terminal.payload.cancelled_at == cancellation.updated_at
-                assert await anext(lines, None) is None, "Terminal stream did not close"
-            repeated = await client.post(f"{BASE}/{snapshot.session_id}/cancel")
-            assert repeated.status_code == 200 and repeated.json() == cancelled.json()
-            assert request_id(repeated) != request_id(cancelled)
-            workflow.release.set()
+                workflow.release.set()
+                final_snapshot = None
+                while True:
+                    name, data, event_id = await read_event(lines)
+                    if name == "stream_end":
+                        end = data
+                        break
+                    assert name == "run_snapshot" and event_id is None
+                    final_snapshot = data
+                assert final_snapshot is not None
+                assert final_snapshot["status"] == "cancelled"
+                assert final_snapshot["persistence"]["state"] == "up_to_date"
+                assert name == "stream_end" and end["stream"] == "run"
+                assert event_id is None and await anext(lines, None) is None
+            repeated = await client.post(f"{BASE}/{snapshot.run_id}/cancel")
+            assert repeated.status_code == 200
+            assert RunStatusResponse.model_validate(repeated.json()).status is RunStatus.CANCELLED
             await workflow.exited.wait()
-            await verify_replay(client, path, terminal)
+            await verify_terminal_reconnect(client, path, snapshot.run_id)
         finally:
             workflow.release.set()
 
@@ -221,4 +239,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    configure_asyncio_event_loop()
     asyncio.run(main())

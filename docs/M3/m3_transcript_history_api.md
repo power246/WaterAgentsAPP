@@ -1,10 +1,10 @@
 # M3 Transcript、History 与两层 SSE API / 搭建排障指南
 
-更新日期：2026-09-13
+更新日期：2026-09-17
 
-**状态：目标协议与运行手册，尚未实现。** 本文中的新路由、数据库配置、命令和 smoke 需要按 [实施清单](m3_implementation_todo.md) 交付后才能执行。当前已实现接口仍以 [M2 API](../M2/m2_analysis_session_sse_api.md) 为准；M3 实施时直接替换旧整体 session 路径，不维护兼容别名。
+**状态：Milestone 0–19 的本机实现、适用验证与最终集成复审已完成。** HEAD `def435a` 追加审查的 Windows 正式入口、短前缀取消、完整 private URL、单大 delta 性能和普通 URL 误脱敏均已修复，并在隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约检查中复审通过；本轮 `request changes` 已清除。公共 HTTP/SSE 契约不变；实际 Windows/Linux runner、三平台完整 CI 与跨系统同库迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
-工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。实现后，普通 HTTP 以同步后的 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
+工程原理见 [M3 实施详细设计](m3_transcript_history_implementation_design.md)。跨阶段前端行为集中在父目录 [前端接入约定](../frontend_integration_contracts.md)，本文负责具体 HTTP/SSE 表示和搭建步骤。普通 HTTP 以当前 OpenAPI 为可执行来源，SSE 时序与重连遵守本文。
 
 ## 1. 基础约定与路由
 
@@ -150,7 +150,7 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
   "item_id": "c5677c98-27ac-4881-b7ba-b06cc2e85482",
   "run_id": "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c",
   "transcript_sequence": 2,
-  "occurred_at": "2026-09-13T03:20:00.000000Z",
+  "occurred_at": "2026-09-13T03:20:00Z",
   "content_type": "lifecycle_event",
   "content_schema_version": 2,
   "scope": {
@@ -167,7 +167,7 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
   "rag_eligible": false,
   "confidence": null,
   "provenance": null,
-  "content_bytes": 354,
+  "content_bytes": 340,
   "content_ref": {
     "run_id": "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c",
     "item_id": "c5677c98-27ac-4881-b7ba-b06cc2e85482"
@@ -180,10 +180,10 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
       "run_id": "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c",
       "session_id": null,
       "sequence": 1,
-      "occurred_at": "2026-09-13T03:20:00.000000Z",
+      "occurred_at": "2026-09-13T03:20:00Z",
       "payload": {
         "status": "pending",
-        "created_at": "2026-09-13T03:20:00.000000Z",
+        "created_at": "2026-09-13T03:20:00Z",
         "configuration": {
           "analysis_timezone": "America/Chicago",
           "time_resolution": "12h",
@@ -240,9 +240,9 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
 
 `GET /api/analysis/runs/{run_id}/transcript/{item_id}/content[?view=history]` 返回 `{run_id,item_id,content_type,content_schema_version,content_bytes,text,source,persistence,issues}`。text 是完整安全 UTF-8 JSON 原文本，经过 JSON HTTP 字符串转义后传输；客户端应根据类型/版本解析它，不把 HTTP wire bytes 当 content_bytes。
 
-内联与外置使用同一入口。当前 live 数据库故障时仍可读内存全文并保留 warning；live 释放后相同身份自动读 PG。history 模式只返回已保存文本。引用与全文请求必须继续传原 view。
+内联与外置使用同一入口。当前 live 数据库故障时仍可读内存全文并保留 warning；live 释放后相同身份自动读 PG。history 模式只返回已保存文本。引用与全文请求必须继续传原 view。`parse_status=corrupt` 表示 typed schema 或存储字节完整性校验失败，不等于正文不可读：原正文只要是合法 JSON，接口仍返回递归脱敏、规范序列化后的 200 文本，issues 保留原 corrupt 问题，`content_bytes` 按该安全文本的实际 UTF-8 长度返回。
 
-auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 late_message_output。隐藏或不属于 run 的 item 返回 404；外置正文缺失返回明确 500/transcript_content_unreadable，不返回空字符串。
+auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 `late_message_output` 和 `suppressed_transcript_item`。隐藏或不属于 run 的 item 返回 404；外置正文缺失或正文不是可安全解析的 JSON 返回明确 500/transcript_content_unreadable，不返回空字符串。未知类型仍只有严格 history 可以读取原安全 JSON，不能借全文入口绕过 auto 可见性。
 
 ## 5. 两层 SSE
 
@@ -278,6 +278,8 @@ run_snapshot 没有 SSE id；客户端不为 run 保存 Last-Event-ID，服务�
 | message_started | `{item: TranscriptItemHeader}`，原消息一次性元信息。 |
 | message_delta | `{item_id,text}`，只含新增安全文本。 |
 | message_finalized | `{item: TranscriptItemView,generation_status:"completed"或"incomplete"}`，状态从原正文派生。 |
+
+流式安全过滤只在 URL authority 判定期使用最多 2,048 字符的内部缓冲；`/`、`?`、`#` 或空白后立即恢复普通增量输出。userinfo 由 authority 中的 `@` 判定并遮蔽，普通 `host:port`、IPv4 和方括号 IPv6 不因冒号被误判。取消会安全结算原消息的未决凭据并延续遮蔽状态，因此其余敏感值不会以孤立文本进入 history-only late audit。
 
 message_started 的类型表示哪种注册消息正在生成；具体消息正文由生产阶段注册。M3 用严格测试类型验证事件能力，不制造生产 LLM 消息结构。以下只展示与具体业务类型无关的 delta frame：
 
@@ -322,6 +324,8 @@ M9 使用基于 fetch 的统一 SSE 客户端，才能读取握手错误状态�
 
 用户只能停止整次 run，不能给 Agent 追加消息；没有单 session cancel HTTP。取消受理不等在途请求完成、数据库写完或 SSE 关闭。受理时原生成中消息固定为 incomplete，晚到新片段只形成 history-only 审计。auto/SSE 不继续显示晚到内容，history 可读已保存审计。
 
+取消或失败时，无人引用的 reserved item 不生成历史占位。如果尚未定稿的 reserved item 已被 finalized、尚未保存的内容引用，后端会用原 item_id 写入 history-only `runtime_fact`：`{"fact":"suppressed_transcript_item","reason":"cancelled"}`（失败时 reason 为 `error`），并先确认该 target 再保存 dependent source。该事实不出现在 auto/SSE；history 可用于解释引用为何没有业务正文。取消后的 late finalize 不覆盖它，正常收敛不要求调用 persistence/retry。
+
 ### 6.2 persistence/retry
 
 `POST /api/analysis/runs/{run_id}/persistence/retry`，无 body，不使用创建 key。响应 `{run_id,persistence}`：
@@ -334,6 +338,8 @@ M9 使用基于 fetch 的统一 SSE 客户端，才能读取握手错误状态�
 | live 已丢失、历史仍在 | 409 / persistence_retry_unavailable / retryable=false。 |
 | 完全不存在 | 404。 |
 
+live 判定与必要的 writer 唤醒在 coordinator 内是一个原子操作，与 cleanup 使用同一 `_runs_lock → runtime condition` 锁顺序。retry 先完成时返回当时的 200/202，即使 cleanup 随后释放；cleanup 先完成时路由根据历史返回 409，不会在两次 live lookup 之间误报 404。历史查询本身失败仍返回 503；重复请求不创建第二个 writer或另一轮预算。
+
 202 仅表示仍由原保存过程处理，不能显示“保存成功”。自动重试最多 5 次，间隔 1/2/4/8/16 秒；耗尽后 DB 恢复、刷新和新消息不自动重开。手动 POST 超时先 GET 或观察 run SSE 核对现况，不自动再次发送；用户再次明确点击才能重新操作。网络断开不撤销已受理补写，不重新分析。
 
 ## 7. 错误与排查字段
@@ -342,8 +348,9 @@ M9 使用基于 fetch 的统一 SSE 客户端，才能读取握手错误状态�
 
 | HTTP | code | 含义 / 客户端动作 |
 |---|---|---|
-| 400 | invalid_event_cursor | 修正 session SSE 游标格式，不静默吞错。 |
+| 400 | invalid_request / invalid_event_cursor | 请求编码或 session SSE 游标格式非法，不静默吞错。 |
 | 404 | run_not_found / session_not_found / transcript_item_not_found | 不存在、归属不匹配或 auto 不可见。 |
+| 405 | method_not_allowed | 路径存在但 HTTP 方法不受支持；按 OpenAPI 使用准确方法。 |
 | 409 | idempotency_key_conflict | 同 key 不同 body；回到原提交核对，不能自动新 key 重跑。 |
 | 409 | event_cursor_ahead | 游标不属于当前已有过程范围，核对 run/session。 |
 | 409 | run_already_terminal | 其他终态先于取消胜出，使用 body.run 核对当前状态。 |
@@ -351,14 +358,14 @@ M9 使用基于 fetch 的统一 SSE 客户端，才能读取握手错误状态�
 | 410 | live_state_gone | 停止 SSE 重连，读取 history_url。 |
 | 422 | validation_error / invalid_history_cursor | 请求字段、UUID、view、limit 或历史 cursor 非法。 |
 | 500 | transcript_content_unreadable / internal_error | 已知损坏或未预期错误，保留 error_id。 |
-| 503 | database_unavailable / persistence_write_timeout | 必要数据库操作未成功；不返回假空历史。 |
-| 503 | idempotency_wait_timeout / creation_commit_unconfirmed | 创建结果未收敛，保留原 key/body。 |
+| 503 | database_unavailable / service_unavailable | 必要数据库操作失败或服务正在关闭；不返回假空历史。 |
+| 503 | idempotency_wait_timeout / creation_commit_unconfirmed | 创建结果尚未收敛，保留原 key/body。 |
 
-unsupported_content / transcript_content_corrupt 是成功读取中的逐 item parse_error；不把局部问题冒充整个数据库宕机。persistence_identity_conflict 是保存警告/诊断，不覆盖原事实。公开摘要固定安全，不暴露 SQL、连接串、凭据或原始 validation input。
+上表只列目标路由的 HTTP error envelope code，覆盖实际 OpenAPI 声明的全部 400/404/405/409/410/422/500/503 错误状态。成功读取中的逐 item `parse_error.code` 为 `transcript_content_unsupported` 或 `transcript_content_corrupt`，不把局部问题冒充整个数据库宕机。run 级 `persistence.warning.code` 为可重试的 `persistence_write_failed` 或不可重试的 `persistence_write_conflict`；它们不是 HTTP 503 code，也不覆盖原事实。run/session lifecycle 中的 workflow/重启错误继续使用原事件内的 `workflow_start_failed`、`workflow_failed`、`service_interrupted`；启动修复自身失败在服务接收 HTTP 前以 `startup_repair_failed` 诊断并退出。公开摘要固定安全，不暴露 SQL、连接串、凭据或原始 validation input。
 
 ## 8. 跨平台搭建与配置
 
-以下文件与命令是 **M3 实现交付要求，当前尚不可执行的新入口**。实现后需同步 `backend/README.md` 和锁文件；所有命令从仓库根运行。已有 PostgreSQL 跳过 Compose，设置同一组连接变量即可。
+以下文件与命令是当前已交付的 **M3 运行入口**；所有命令从仓库根运行。已有 PostgreSQL 可跳过 Compose，设置同一组连接变量即可。
 
 ### 8.1 环境变量
 
@@ -421,7 +428,7 @@ wateragents-db check
 wateragents
 ```
 
-每台机器新建 venv，不复制虚拟环境。Windows 正式入口必须在 loop 创建前配置 Selector loop；直接调用自定义 Uvicorn 启动方式必须复用同样初始化，不能把默认 Proactor 配置列为已支持的启动命令。
+每台机器新建 venv，不复制虚拟环境。正式 `python -m app` 入口在 Windows 显式向 Uvicorn 传入 Selector loop factory，macOS/Linux 保持 `auto`，不要求用户修改源码或启动参数；history smoke 的独立 Uvicorn 子进程复用同一选择。直接执行 `python -m uvicorn` 进行 Windows 诊断时须加 `--loop app.infrastructure.runtime.event_loop:windows_selector_loop_factory`，不能把默认 Proactor 配置列为已支持的部署入口。直接 `asyncio.run()` 的 CLI/smoke 仍在创建 loop 前配置 Selector policy。
 
 ### 8.3 已有数据库与升级
 
@@ -449,7 +456,7 @@ health 保持现有进程健康语义；启动阶段已通过数据库检查，�
 
 ### 8.5 更换操作系统或机器的最短流程
 
-目标是 macOS、Windows、Linux 共用同一份代码、配置模板、依赖锁和 schema；迁移只调整目标环境配置并重新安装依赖。下列步骤同样属于待实现的 M3 运行手册，不表示现在已完成跨系统验证。
+目标是 macOS、Windows、Linux 共用同一份代码、配置模板、依赖锁和 schema；迁移只调整目标环境配置并重新安装依赖。下列运行手册与三平台 CI 入口已实现，但没有三个远端目标系统依次接回同一数据库的本次实跑证据，因此跨系统验收仍为 partial。
 
 迁移前停止旧实例接收新分析。需要完整保留当次分析时，先确认 run 已结束、执行已收敛且必需写入全部保存（正常 run SSE 的 stream_end 可作为对应信号），再关闭旧后端；新后端启动前旧实例必须退出。尚未保存的内存不会随源码迁走，已保存非终态沿原 service_interrupted 规则处理。
 
@@ -492,11 +499,12 @@ uv run --project backend --locked wateragents-db upgrade
 | SSE 返回 410 | 停止重连，读取明确 history URL，不能创建新分析“恢复”。 |
 | query 日志消失或凭据出现 | 检查实际日志入口与安全过滤；普通 query 保留，凭据始终过滤。 |
 
-M3 实现后，基于独立测试数据库执行：
+验证当前 M3 实现时，基于独立测试数据库执行：
 
 ```text
 uv run --project backend --extra dev python -m pytest backend/tests -q
 uv run --project backend --extra dev python -m pytest backend/tests/persistence -q
+uv run --project backend --extra dev python -m pytest backend/tests/api/test_m3_documented_protocol.py -q
 uv run --project backend --extra dev python backend/scripts/health_smoke.py
 uv run --project backend --extra dev python backend/scripts/run_history_smoke.py
 ```
@@ -505,4 +513,4 @@ uv run --project backend --extra dev python backend/scripts/run_history_smoke.py
 
 测试环境提前创建独立数据库（例如 wateragents_test），通过 `WATERAGENTS_TEST_DB_NAME` 显式指定；host/port/user/password/SSL 复用测试环境提供的 WATERAGENTS_DB_* 连接参数。fixture 和 smoke 构造测试 AppSettings 时将 db_name 替换成该值，要求它与配置中的业务 DB_NAME 不同；缺少测试库名或连接失败就拒绝执行数据库集成。每组测试使用独立临时 schema，并使表查询、Alembic version 表和子进程使用同一 schema；清理只删除本组创建的 schema，不删除数据库或生产表。该变量不是正式服务的隐式数据库覆盖开关。
 
-OpenAPI 必须覆盖十路由、view/分页参数、create/cancel/retry 成功与错误；SSE 文档及可执行 fixture 覆盖 run_snapshot、transcript_item、三个消息事件、stream_end、400/409/410。每个 Milestone 的实际命令、平台、结果和未完成项记录在 [实施清单](m3_implementation_todo.md)，本文不预填测试通过数量。
+OpenAPI 必须覆盖十路由、view/分页参数、create/cancel/retry 成功与错误；SSE 文档及可执行 fixture 覆盖 run_snapshot、transcript_item、三个消息事件、stream_end、400/409/410。`test_m3_documented_protocol.py` 直接读取实际 OpenAPI，并用 production registry 与 SSE encoder 核对本文的错误状态、状态枚举、完整 item 字节数、UTC 时间和 raw frame。每个 Milestone 的实际命令、平台、结果和未完成项记录在 [实施清单](m3_implementation_todo.md)，本文不预填测试通过数量。

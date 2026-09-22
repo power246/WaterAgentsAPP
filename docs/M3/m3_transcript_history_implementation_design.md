@@ -1,10 +1,10 @@
 # M3 Transcript Store + History APIs 实施详细设计
 
-更新日期：2026-09-13
+更新日期：2026-09-17
 
-状态：设计交付，后端尚未实现。本文把已经确认的 D01–D86 收敛为可执行的工程方案；具体任务与验收见 [Implementation TODO](m3_implementation_todo.md)，对外字段、请求示例和环境命令见 [API 与搭建排障指南](m3_transcript_history_api.md)。
+状态：D01–D86 主体设计已对齐，Milestone 0–16 保留历史实现和验证证据；[Milestone 17](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 与 [Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 已完成本机实现，[Milestone 19](m3_implementation_todo.md#milestone-19追加修复集成验收与契约复审) 已完成最终集成复审。HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已在隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约检查中复审通过，本轮 `request changes` 已清除。本文规定工程目标与既有实现边界，追加修复设计见 §12.1；实际 Windows/Linux runner、三平台完整 CI/同库跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
-本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。常规工程细节由实现者直接落实；本次不把设计完成标记为功能完成。
+本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。当前功能完成状态只以实施清单中的实际测试和环境证据为准。
 
 ## 1. 核心结论与交付边界
 
@@ -32,7 +32,7 @@ M4 产生真实结构化问题与 BFS；M6 产生真实模型/工具/技能/钩�
 
 ## 2. 当前代码与目标模块
 
-当前代码只有 M1 领域与 M2 内存态整体分析：`application/analysis_sessions/` 中的协调器、快照和 workflow 都指整次分析；HTTP 只有创建、SSE、取消，`TranscriptStorePort` 只有 generic append/list，尚无数据库依赖。M2 文档中的本机测试数量属于原实现证据，M3 开发开始时重新记录基线。
+当前代码已迁移到 `application/analysis_runs/`，具备 run/Agent session 身份、typed transcript、PostgreSQL 四表存储、幂等创建、串行补写、统一 history 读取及两层 SSE。HTTP 已提供创建、历史列表、run/session/transcript/全文读取、取消、手动补写、完整轻量 run 快照流和可续传 session 过程流；取消定稿/晚到审计、严格启动遗留修复、资源关闭与 live grace 清理已经实现。真实 PostgreSQL/Uvicorn smoke 和三平台 CI 入口也已交付，三平台实际运行与跨系统迁移证据仍按清单保持 partial。M2 文档及其测试数量只作为旧阶段证据。
 
 建议目录如下；每个模块包含相关小类型，不为每个 DTO 单独建文件。
 
@@ -197,8 +197,9 @@ session 完成不代表 run 完成；run 取消保留已经完成/失败的 sess
 - 历史列表索引 `(created_at DESC, run_id DESC)`。
 - session 目录索引 `(run_id, created_at, session_id)`；完整过程索引 `(run_id, session_id, transcript_sequence)`；run 全部原记录利用序号唯一索引。
 - 初版不为 confidence、provenance、tags、工具名等预建筛选索引；不存 scope/correlation JSON、额外公开 content_ref 或关联表。
-- 所有业务内容只追加，冲突时不能 `DO UPDATE` 覆盖正文。相同身份且各不可变字段/正文相同才视为同一事实；同 ID 不同内容报 `persistence_identity_conflict` 并保留待写与诊断，不能吞冲突。
+- 所有业务内容只追加，冲突时不能 `DO UPDATE` 覆盖正文。相同身份且各不可变字段/正文相同才视为同一事实；同 ID 不同内容形成 run 级 `persistence_write_conflict` warning 并保留待写与诊断，不能吞冲突。
 - 记录和所需同批引用、状态、全文形成原子组，先验证再提交；事务中的引用目标必须已存在于同 run 或在本批。引用生成不能指向仍在生成且不在本批的草稿；这种有依赖的组等待目标定稿，无关可写组照常保存。
+- terminal 收束前从所有尚未确认持久化的 finalized typed content 汇总引用；被引用的 reserved target 使用原 item_id 定稿为 history-only suppression fact，无人引用的 reserved item 不造记录。suppression target 与 dependent source 仍按引用顺序验证和提交，不增加关联表或特殊外键旁路。
 - 明确引用在原 typed content、AnalysisDetail、AnalysisStep 中保留；注册器唯一实现提取/验证。首版不做反向索引，M6/M7 按真实查询需求评估。
 
 ## 5. Typed content 与读取表示
@@ -224,6 +225,7 @@ M2 版本 1 的事件保留 reader 支持，原字段不改写，不把旧整体
 |---|---|
 | workflow_quiesced | 无额外正文；所有执行方收敛时追加一次，归属由 item 决定。 |
 | persistence_recovered | `error_id`：关联该轮实际保存故障，恢复后追加一次，不在保存恢复记录自身成功时递归新增。 |
+| suppressed_transcript_item | `reason`（cancelled/error）；只为 terminal 时已被 finalized 内容引用、但尚未定稿的草稿生成，沿用原 item_id，是历史审计。 |
 | late_message_output | `original_item_id`、`text`、`end_reason`（completed/cancelled/error/truncated）；只含取消后的新增文本，是历史审计。 |
 
 进程遗留修复使用 failed 生命周期及 `PublicError(code=service_interrupted)`，不复制 runtime interruption 记录。BFS、业务输入、LLM、tool、skill、hook、结果由实际生产阶段注册类型。M3 的消息能力通过测试专用严格 `fixture_message`（text、generation_status、可选 end_reason）验证，它不注册进生产，也不作为公开业务 payload 承诺。
@@ -246,7 +248,7 @@ API 的 confidence/provenance 由注册器按对应业务层级提取；不适�
 
 ### 5.4 未知版本与损坏
 
-reader 返回 item 的 `parse_status=ok/unsupported/corrupt`。unsupported 保留身份/类型/时间、raw 全文引用，不把它当业务结果；corrupt 附安全 PublicError 和 item_id，正常邻近记录继续返回。两者不修改数据库或静默跳过。全文装载能取得原文本时仍经过安全出口返回，无法取得外置正文则返回明确 500 `transcript_content_unreadable`，不返回空文本。整个数据库查询失败返回 503。
+reader 返回 item 的 `parse_status=ok/unsupported/corrupt`。unsupported 保留身份/类型/时间、raw 全文引用，不把它当业务结果；corrupt 附安全 PublicError 和 item_id，正常邻近记录继续返回。两者不修改数据库或静默跳过。读取安全出口先独立完成 JSON decode、递归脱敏和规范序列化，再由 content adapter 决定 typed parse 状态；因此 schema 非法或存储 `content_bytes` 不匹配仍是 `corrupt/unparsed`，但只要原正文是合法 JSON，全文接口就返回安全文本并按实际返回值重算 UTF-8 字节数。只有外置正文缺失或正文不是可安全解析的 JSON 才返回明确 500 `transcript_content_unreadable`，不返回空文本。整个数据库查询失败返回 503。
 
 已知类型损坏可能使引用/摘要/配置不可解析：将问题记录放进返回记录列表与 `issues`，对应派生值为 null，不用当前配置或猜测值补齐。未知类型默认只允许严格历史原文查看；auto 无法证明其取消可见性时不公开正文，防止未知晚到审计绕过边界。
 
@@ -269,6 +271,8 @@ reader 返回 item 的 `parse_status=ok/unsupported/corrupt`。unsupported 保�
 live buffer 保存原事实；writer 待写集合只持有原对象身份和必要状态更新，不另复制正文队列。每 run 一个 task、一个活动事务，多个 run 可并发。状态锁内选取原子组和冻结批次，在锁外等待数据库。
 
 空闲收到可写组或独立状态更新立即开始；默认目标 100 items，不等凑满，不做空事务。不能拆散同一变化的状态/事件/全文/引用目标；大于目标的原子组独立提交。生成中草稿不是可写组，但已产生的必需正文计入 pending。失败后冻结原批次，新事实排在后续；无依赖的新组可越过未定稿草稿，不能越过已失败的活动批次。
+
+run/session 取消或失败抑制草稿前，coordinator 先遍历所有 finalized 且尚未确认持久化的 typed content；其显式引用所命中的 reserved target 构成待收束引用闭包。每个 target 以原身份形成独立 suppression 组并继续留在依赖解析视图，writer 因而先提交 target，再解除 dependent source 的等待。无人引用草稿不进入待写集合；late finalize 命中 suppression identity 时只幂等返回，不产生第二份正文。该过程复用既有批次合并、事务回滚和有限重试，不要求人工补写。
 
 状态变更的内存确认使用具体 mutation 身份与目标快照；它不对外暴露，也不增加 DB state_revision。适用状态与事件同事务提交；一个批次包含同一行多次变化时按原顺序验证/应用，数据库最终保存最后状态，全部原事件仍保留。独立 running 更新也需确认，不能因没有公开事件而漏存。
 
@@ -301,7 +305,7 @@ psycopg 文档说明异步任务取消时数据库操作可能已经完成，因
 
 `PersistenceInfo` 是 run 的 live 派生结果：`state=up_to_date/pending/retry_exhausted` 与 `warning:PublicError|null`。先判断耗尽；否则生成中必需正文、待写组或未确认状态均为 pending；仅所有当前必需事实确认时为 up_to_date。正常等待生成时 warning=null，实际失败才有警告；保存恢复后当前 warning 清除，原终态 warning 不改。
 
-手动 POST 重试复用原 writer：耗尽时开始新一轮，pending 时返回现况、不重置，up_to_date 时不做空事务。等待生成也不能被手动请求强制定稿。没有 live 无法恢复未保存内容，响应见 API 指南。
+手动 POST 重试复用原 writer：耗尽时开始新一轮，pending 时返回现况、不重置，up_to_date 时不做空事务。等待生成也不能被手动请求强制定稿。coordinator 在一次操作内按 `_runs_lock → runtime.condition` 顺序判定 live owner 并完成必要的预算重置/唤醒，与 cleanup 共用唯一线性化点；live 已释放返回明确 absent，不抛普通 run lookup 的 not found。HTTP 不预读 live：只调用该原子操作，absent 后查 history，存在返回 409、完全不存在返回 404、数据库失败返回 503。retry 先取得锁时可返回原 200/202，即使 cleanup 随后释放；cleanup 先取得锁时稳定走历史 409，不启动第二个 writer或增加 recovery fact。
 
 run 终态、所有工作执行方 quiesced、所有必需事实及状态实际确认后，开始默认 60 秒可配置 grace；包括终态、晚到审计与恢复事实。失败不计时，后续新待写使资格失效，恢复后重新获得完整 grace。到期在原状态锁中复查再移除 live runtime/事件/正文；cleanup 幂等、失败可重试，不影响业务终态。SSE 的正常结束不等待 grace，也不增加极慢连接排空/浏览器 ACK 协议。
 
@@ -309,7 +313,7 @@ run 终态、所有工作执行方 quiesced、所有必需事实及状态实际�
 
 ### 7.1 一次选择来源
 
-reader 先固定 `view` 与来源：auto 有 live 使用该 run 内存快照（即使 PG 故障），否则使用 PostgreSQL；history 直接用 PostgreSQL。一次响应中的记录、session 归属、配置和引用来自同一来源，不能逐字段混合。live 提取在短临界区复制不可变引用，编码在锁外完成；PG 多语句装载使用短只读 REPEATABLE READ 事务，保证同一响应的目录/原记录一致。
+reader 先固定 `view` 与来源：auto 有 live 使用该 run 内存快照（即使 PG 故障），否则使用 PostgreSQL；history 直接用 PostgreSQL。一次响应中的记录、session 归属、配置和引用来自同一来源，不能逐字段混合。live 提取在短临界区复制不可变引用，编码在锁外完成；PG 多语句装载使用短只读 REPEATABLE READ 事务，保证同一响应的目录/原记录一致。取得正文后，安全 JSON 读取与 typed schema 解析分别执行；typed 解析失败不改变本次已经固定的来源，也不阻断仍可安全返回的全文。
 
 响应 `source=live/postgresql`。live 返回 PersistenceInfo，数据库返回 persistence=null；null 仅表示没有 live 保存进度，不证明没有历史丢失。HTTP 引用继续带同一个 view；若两次 HTTP 之间 live 已释放，auto 的新响应可合法转 PostgreSQL，并明确报告来源。history URL 显式带 view=history。
 
@@ -323,7 +327,7 @@ session transcript 先读取本 session 的全部可见原记录，按 run trans
 
 ### 7.3 可见性
 
-取消后的 `late_message_output` 以及后续注册的仅审计类型，从类型规则决定 history-only，不增加 after-cancel 字段。auto 的列表、详情、全文、引用和 SSE 都执行同一过滤，包括 auto 回退 PostgreSQL。直接请求被隐藏 item 返回 404 `transcript_item_not_found`；history 可读取已提交审计及原前缀，但不把它拼回当前消息。
+取消后的 `late_message_output`、`suppressed_transcript_item` 以及后续注册的仅审计类型，从类型规则决定 history-only，不增加 after-cancel 字段。auto 的列表、详情、全文、引用和 SSE 都执行同一过滤，包括 auto 回退 PostgreSQL。直接请求被隐藏 item 返回 404 `transcript_item_not_found`；history 可读取已提交审计、suppression 原因及原前缀，但不把它们拼回当前消息。
 
 ### 7.4 run 历史分页
 
@@ -373,11 +377,19 @@ run cancel 在统一状态边界关闭调度入口，固定全部生成中原消
 
 取消边界前已接收的文本属于原 item，保留身份/序号/时间；尚在脱敏私有缓冲中的不确定敏感区安全替换后纳入原文，不能直接 flush 原始字节。其后接收的新片段按原消息聚合一个 late_message_output 审计，独立分配身份/序号/时间，只存新尾部并引用原消息；空尾部不创建假审计。待执行方收敛后定稿入库，引用原文必须已保存或同批保存。原前缀不再改写，也不因历史查看拼接成实时消息。
 
+普通 reserved item 在取消/失败时仍被抑制且不落库；如果它已经成为尚未持久化 finalized 内容的合法引用目标，则以原 item_id 固定为 `suppressed_transcript_item`。该 history-only fact 只说明目标因 cancelled/error 未产生业务正文，先于依赖它的 source 持久化；后续提供方再尝试定稿只幂等返回原 identity，不能覆盖 suppression 正文。run/session 终态 mutation、原 terminal transcript 与依赖组继续使用既有原子提交和重试边界。
+
 ### 9.2 凭据边界
 
-复用并扩展现有 redaction：结构化敏感键、Authorization/Cookie、URL userinfo、已知实际凭据，以及常见凭据标记后的值。普通业务 query 不整段隐藏；HTTP、workflow、异常 repr/JSON 转义、driver 错误、日志及 safe preview 都走相同规则。原 Agent 实际输入不因日志脱敏而被改写。
+本节规定当前安全保证。[Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 已用静态/流式共用的增量有界扫描修复短敏感前缀取消、完整 private URL 跨段匹配、大 chunk 扫描与静态 URL authority 识别；最终正文脱敏仍不能替代已公开 delta 的安全性。
+
+复用并扩展现有 redaction：结构化敏感键、Authorization/Cookie、URL userinfo、已知实际凭据，以及常见凭据标记后的值。`Bearer <token>` 与 `Basic <token>` 采用安全优先语义，token 即使只含字母也遮蔽；无法与认证 scheme 区分的短语不以业务文本为由放行，只有不构成 scheme 的普通 query 原样保留。HTTP、workflow、异常 repr/JSON 转义、driver 错误、日志及 safe preview 都走相同规则。原 Agent 实际输入不因日志脱敏而被改写。
+
+公开 tags 与正文使用同一 `private_values` 和静态凭据规则，在 `message_started` 可见前完成安全化；脱敏后重复的 tag 按原顺序稳定去重。finalized item、live/history DTO 和数据库记录复用这一份安全 metadata，持久化边界再次复核，不能把未安全化 tags 写入存储。
 
 流式过滤器在不可读的私有缓冲中维护已知 secret 前缀和敏感字段识别状态：仅释放已经排除匹配可能的安全前缀；凭据值进入遮蔽状态后不缓存或发送原值，直到确定分隔边界。known secret 的后缀前缀保留到后片段确定；敏感标记可能跨片段时同样保留。结束/取消时未能判定的敏感候选按安全替换收尾，不能原样放行。取消之后保留遮蔽状态，避免跨边界剩余凭据出现在历史尾部；不保留一份未脱敏全文。
+
+URL scheme 只有在语法与 known-secret 识别均排除敏感匹配后才能公开，authority 判定保留最多 2,048 个字符；`/`、`?`、`#` 或空白结束 authority，后续 path/query/fragment 仍使用同一连续原始输入的 known-secret 匹配状态。只有 authority 内的 `@` 表示 userinfo，此前内容统一遮蔽，安全 host/port 继续输出；没有 `@` 的域名端口、IPv4 与方括号 IPv6 原样保留，query/fragment 的 `@` 不属于凭据。authority 超限时输出安全占位并继续有界消费，不反复扫描完整 chunk 或不断增长的 URL。取消时未决 authority 安全结算到原消息，相关识别/遮蔽状态继续消费取消后的剩余内容，不能把前缀或后缀移动成 late audit 明文。该目标规则及静态/流式一致性由 Milestone 18 验证。
 
 这是限定凭据规则的跨片段处理，不宣称识别所有敏感信息。使用合成凭据逐切分点验证（包括 Unicode、引号、转义、分隔符、取消处与日志），并验证正常文本有持续增量输出；不能通过整段等到结束才输出规避流式验收。持久化出口再次校验与脱敏，不能用最终安全覆盖弥补已泄露 SSE。
 
@@ -435,10 +447,11 @@ uv.lock 能描述操作系统、架构和 Python 条件下的依赖选择；本�
 
 | 层 | 必须证明的行为 |
 |---|---|
-| 模型与纯函数 | run/session 五态与六态、UTC、UUID、严格注册、JSON round-trip、字节边界、引用提取、游标编解码。 |
+| 模型与纯函数 | run 六态/session 五态、UTC、UUID、严格注册、JSON round-trip、字节边界、引用提取、游标编解码。 |
 | Application + 可控故障 store | 单 writer、草稿缺口、状态独立确认、原子组、1/2/4/8/16、第三次失败后两秒、取消胜出、耗尽/手动恢复/清理。 |
 | 真 PostgreSQL | 唯一 key 竞争、回执复用、FK/序号/事务回滚、全文单份、引用批次、未知 commit 后核实、启动遗留与严格 schema。 |
 | HTTP / SSE | 十路由及错误、auto/history、完整过程、两层流、首次与新增无缺口、三阶段消息及晚到审计、200/410/stream_end。 |
+| 文档协议 golden | 从实际 OpenAPI 核对公开错误状态和 run/session 枚举；用 production registry 与 SSE encoder 生成完整 item 字节数、UTC 时间和 raw frame，避免示例手工漂移。 |
 | 脱敏与日志 | 全切分点合成凭据、取消跨边界、普通 query、异常与 driver 输出、全文/预览和无订阅生成。 |
 | 正式服务 smoke | 实际 PG + Uvicorn，创建→两层观察→历史→重启读取；取消与连接关闭；Windows selector/资源收尾。 |
 | 跨系统迁移 | 三个系统分别作为目标环境，以同一代码/锁完成安装和启动；顺序接入同一测试 PG，核对原历史、回执、游标与全文引用，期间不修改业务代码。 |
@@ -454,3 +467,15 @@ uv.lock 能描述操作系统、架构和 Python 条件下的依赖选择；本�
 M3 完成需同时满足：四表与环境可搭建；已保存事实可重启读取；创建/取消/补写/唯一终态保证成立；用户能完整读取任一实际 session 和原公共引用；实时两层流与三阶段消息不重复写正文；凭据不进入可见流；中心 M3-C01–C20 和 M3-A01–A12 有实际实现与验证证据。
 
 M4/M6/M7 通过同一记录入口、session 生命周期与类型注册接入，不能另建自己的 transcript/SSE/补写系统。未来增加真实 content_type、跨 run 证据或查询索引时，需同步原类型与对应阶段契约；不能以未来扩展为由削弱 M3 的当前完整读取。配置与 API 指南必须可供新环境独立使用，未完成内容在 TODO 与中心登记中保持未完成。
+
+Milestone 16 的 GLOBAL/M3/MR 审计与文档 golden 保留为历史证据。HEAD `def435a` 追加审查的 Windows 启动 P1 已由 Milestone 17 本机关闭，其余 3 个 P1、1 个 P2 已由 Milestone 18 完成本机修复，并由 Milestone 19 完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审。M4/M6/M7/M8/产品 M9 的接入边界和可观察验收仍登记在 [实施清单](m3_implementation_todo.md#后续阶段交接)；本轮 `request changes` 已清除，但 M3 仍须补齐 GLOBAL-C11 的 Ubuntu/macOS/Windows 实际 CI 与同一已保存 PostgreSQL 的依次切换证据，才能登记 `implemented`。
+
+### 12.1 追加修复设计：Milestone 17–19
+
+Milestone 17 已将 Windows 差异集中在现有 runtime 模块：可导入的零参数 Selector factory 由正式入口和 history smoke 的 Uvicorn 子进程显式选择，非 Windows 保留 `auto`；现有 policy hook 继续服务于直接 `asyncio.run()` 的调用方。行为回归经过真实 `Server.run()`/Runner 创建 Selector loop，本机 health/history PostgreSQL smoke 通过。实际 Windows runner 尚未取得，继续作为 GLOBAL-C11 外部证据，而不回退到 Uvicorn 的内置 Proactor factory 或增加 worker。
+
+脱敏在现有 transcripts 边界统一原始输入扫描、语法识别与 known-secret 匹配，安全输出须得到共同确认；URL 状态切换不提前公开 scheme 或丢弃已知凭据前缀。使用增量、有界候选状态代替全 incoming chunk 的贪婪搜索，静态入口复用识别规则，避免将二次方耗时留在 POST、定稿或日志。缓冲上限只依赖 authority 上限与最长候选/known-secret 变体，不随输入长度增长；超长可疑候选保守遮蔽。
+
+取消不是 EOF：所有仍可能匹配的未决前缀，包括 1–3 字符，安全归入原消息并保留后续识别/遮蔽状态；晚到审计只保存新增安全内容，不重复原前缀。正常结束与取消分别验收。静态/流式共用 authority 与 assignment 值边界，正常完整输入结果一致，取消/超限的保守遮蔽例外明确记录；保留真实内容不一致时的诊断，不能放宽正常完成态断言。
+
+Milestone 19 已在两个功能包完成后验证真实 PostgreSQL、正式服务 smoke、单大 chunk 性能及并发响应，并重审全部适用契约。该阶段未新增 migration、HTTP/SSE schema 或业务状态，未改变原引用、单份正文和 M4–M9 接力。任务、通过证据与外部 `partial` 项以 [Milestone 17–19 清单](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 为准。

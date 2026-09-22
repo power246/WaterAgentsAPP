@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-13
+更新日期：2026-09-17
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -12,7 +12,7 @@
 
 领域边界按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)：run 是一次用户提交的完整分析和历史分页对象；session 是单个 Agent 的独立上下文与完整 loop，包括问题解析 session 和各水体 session。解析 session 不绑定 COMID，水体 session 绑定对应 COMID 并等待所有上游结束后只触发一次。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。旧设计中整次分析的创建幂等、整体状态、SSE、取消、保存重试和清理职责归到 run；M3 按 D53 四表职责集中修订模型、存储、接口及引用校验，D33 去重原则与既有持久化保证保留；所有表的时间要求按 D54/D55 落实。
 
-当前 M2 以旧 session 命名实现整次分析及 SSE；下文尚未修订的整体 session 名称和旧路径不能直接作为新模型的最终结构，M2 已实现接口的证据保持原义，本次没有修改代码。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
+M2 的旧整体 session 模型只保留为历史实现证据；M3 已在 `backend/` 实现 run 根协议，Agent session 是 run 下的独立上下文，旧 `/api/analysis/sessions` 不提供兼容别名。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
 
 ## 0. 仓库目录约定
 
@@ -175,7 +175,22 @@ M9  Settings/keys/admin + demo closure
 
 跨平台交付必须满足 GLOBAL-C11：三系统共用代码、配置、依赖锁和 schema；[跨系统迁移](M3/m3_transcript_history_api.md#85-更换操作系统或机器的最短流程) 只调整环境并重建依赖。Milestone 2/9 验证目标平台安装与同库历史切换，不能只证明各自能启动；不增加数据库内容搬迁或在途 Agent 接管范围。
 
-关键用户行为与持久化边界已完成对齐，工程方案参照 M1/M2 展开为 [M3 实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md) 和 [Milestone 0–10 实施清单](M3/m3_implementation_todo.md)。四表字段、原子提交、类型/读取模型、十路由、两层 SSE 与跨平台配置已在文档收敛；常规实现细节由实现者直接落实。本阶段尚未实现，文档完成不表示契约验收完成。
+关键用户行为与持久化边界已完成对齐，工程方案参照 M1/M2 展开为 [M3 实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md) 和 [Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、原子提交、类型/读取模型、history、十路由与两层 SSE；Milestone 0–16 保留历史完成记录。Milestone 17–18 已完成 Windows 正式入口和统一脱敏/性能功能包，Milestone 19 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；本轮 `request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同一 PostgreSQL 跨系统迁移另无完整结果，GLOBAL-C11、Milestone 2/9 和中心最终承接继续保持 `partial`；已修复代码缺陷与外部验收缺口分别记录。
+
+当前公开路由以实际 OpenAPI 为准：
+
+```text
+POST /api/analysis/runs
+GET  /api/analysis/runs
+GET  /api/analysis/runs/{run_id}
+GET  /api/analysis/runs/{run_id}/sessions/{session_id}
+GET  /api/analysis/runs/{run_id}/sessions/{session_id}/transcript
+GET  /api/analysis/runs/{run_id}/transcript/{item_id}/content
+GET  /api/analysis/runs/{run_id}/events
+GET  /api/analysis/runs/{run_id}/sessions/{session_id}/events
+POST /api/analysis/runs/{run_id}/cancel
+POST /api/analysis/runs/{run_id}/persistence/retry
+```
 
 消息流按 [D86](M3/m3_transcript_history_design.md#d86消息流划分为开始增量和定稿事件) 使用 message_started / message_delta / message_finalized，分别提供原消息元信息、本次新增文本及定稿表示。三者沿原 session SSE 编号续传，数据库不逐帧保存，其他过程事实仍完整记录；字段、组装和解析由实现者直接落实。
 
@@ -224,7 +239,7 @@ M9  Settings/keys/admin + demo closure
 - session、request、LifecycleEvent、error 和 final result 的持久化
 - 持久化 `Idempotency-Key`
 - persistence-confirmed/workflow-quiesced/grace-period 驱动的 live-state cleanup
-- 路径基线按 [D65](M3/m3_transcript_history_design.md#d65接口以-runs-为根嵌套读取独立-session)：创建、历史列表、run/Agent 详情、完整过程、原全文、SSE、取消和补写统一以 /api/analysis/runs 为根。M3 直接替换 M2 旧整体 session 路径，并同步实现、OpenAPI、文档、测试与 smoke；当前 M2 实现证据保留，不维护旧路径兼容别名。
+- 路径基线按 [D65](M3/m3_transcript_history_design.md#d65接口以-runs-为根嵌套读取独立-session)：创建、历史列表、run/Agent 详情、完整过程、原全文、SSE、取消和补写统一以 /api/analysis/runs 为根。M3 已替换 M2 旧整体 session 路径，并同步实现、OpenAPI、文档、测试与 smoke；M2 实现证据只作历史保留，不维护旧路径兼容别名。
 - D69 的两流分别为 GET /api/analysis/runs/{run_id}/events 与 GET /api/analysis/runs/{run_id}/sessions/{session_id}/events。run 通知从既有状态装配，不重复保存完整 Agent 消息或为通知生成同义必需写入；保存变化与 GET 的 D40 语义一致，原唯一业务终态不变。
 - `GET /api/analysis/runs`
 - query 历史列表分页按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历史列表按创建顺序游标分页)：limit 默认 50、允许整数 1–200，非法值 422；按 created_at DESC、run_id DESC，以 cursor 翻页，返回 items/next_cursor，不返回总条数。状态/updated_at 更新不改变列表位置，分页只读 PostgreSQL，Agent 过程沿用 D45 完整列表读取。
@@ -240,7 +255,7 @@ M9  Settings/keys/admin + demo closure
   - `occurred_at`
   - `content_type`
   - `content_schema_version`
-  - `scope`：适用时的 `target_comid`、`operation_id`；按 D52，Agent 执行统一关联独立 `session_id`，不再包含同义 `agent_id`，run/session 在完整 DTO 中的层级继续定型。
+  - `scope`：适用时的 `target_comid`、`operation_id`；按 D52，Agent 执行统一关联独立 `session_id`，不再包含同义 `agent_id`；M3 的 run/session DTO 层级以当前 OpenAPI 和 API 指南为准。
   - `correlation`：适用时的 `request_id`、`error_id`
   - 内联 `content` 或 `content_ref`，大内容附 preview 和完整字节数
   - `tags`：默认空列表，仅辅助筛选
@@ -260,28 +275,28 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 阶段自测验收：
 
-- fake session 的请求、事件、结果能写入 transcript。
+- fake run 及其 Agent session 的请求、事件、结果能写入 transcript。
 - 历史列表能返回：
-  - `session_id`
+  - `run_id`
   - `status`
   - `created_at`
   - `updated_at`
   - `query`
   - `configuration` snapshot：从已保存的原创建事件装配，analysis_sessions 不再存完整配置副本
 - `target_comid/location/time_range/mode/parameters` 由 M4 基于持久化 AnalysisContext 扩展；`final_confidence` 由 M6 基于持久化 result 扩展。M3 不为尚未产生的字段伪造 placeholder。
-- 历史详情返回 session、可展开的 transcript timeline，以及存在时的已持久化 final-result projection；M6 定型 final-result schema 前不生成 fake 业务摘要。
+- 历史详情返回 run、所属 Agent session、可展开的 transcript timeline，以及存在时的已持久化 final-result projection；M6 定型 final-result schema 前不生成 fake 业务摘要。
 - transcript 写入保持 append-only，不修改旧 item。
-- 创建 key/指纹/回执随 session 同事务保存并受数据库唯一约束保护；同一 item 的全文按阈值只保存于内联或独立内容表之一。
+- 创建 key/指纹/回执随 run 同事务保存并受数据库唯一约束保护；同一 item 的全文按阈值只保存于内联或独立内容表之一。
 - session 状态由已有状态机决定，存在对应事件/记录时同事务保存；running 没有公开事件也须保存状态并参与持久化确认，不实现通用事件回放重建。
 - 在没有关联索引表时，D45 按 scope 一次返回完整有序记录列表与原显式引用，仍能读取水体全部过程、共享全文和大正文中的引用；不依赖 Agent 记录分页或固定条数截断，写入失败不留下半批事实。当前与历史共用读取实现仍保留来源差异、持久化警告和取消后的可见性。
 - API keys 不进入 transcript 内容。
 - transcript content 使用 `content_type + content_schema_version` 版本化 envelope。
-- session 历史固化分析时区，后续全局设置变化不改变历史窗口语义。
+- run 创建记录固化分析时区，后续全局设置变化不改变历史窗口语义。
 - transcript 写入前强制移除 API key、Authorization、Cookie 等 secret。
 - analysis detail 可以引用完整 tool/prompt/raw output timeline；大 payload 采用预览加引用，按需加载。
-- 相同幂等 key 和完全相同的原始请求体在服务重启后仍返回原 session；相同 key 搭配不同请求体返回 409。前端每次主动分析生成新 key，即使 query/请求体相同；只有同一次提交的重试才原样复用 key 和请求体，不额外做字段规范化。幂等记录不自动过期，随 session 历史保留；详见 [前端接入约定](frontend_integration_contracts.md)。
+- 相同幂等 key 和完全相同的原始请求体在服务重启后仍返回原 run；相同 key 搭配不同请求体返回 409。前端每次主动分析生成新 key，即使 query/请求体相同；只有同一次提交的重试才原样复用 key 和请求体，不额外做字段规范化。幂等记录不自动过期，随 run 历史保留；详见 [前端接入约定](frontend_integration_contracts.md)。
 - cancelled session 的晚到内容可以写 transcript，但不再进入 SSE 或下游，也不增加 after-cancel 冗余字段。
-- 按 M3 D38，成功分析结束时固定此前已产生的必需写入范围，交付窗口到期仍未保存完整则进入 `completed_with_persistence_error`，发布带安全 warning/error_id 的唯一 `session_completed`。选定终态后的完成事件/收尾写入失败通过当前读取返回警告，不改写业务终态；全部必需写入确认前不清理 live state。
+- 按 M3 D38，成功分析结束时固定此前已产生的必需写入范围，交付窗口到期仍未保存完整则进入 `completed_with_persistence_error`，发布带安全 warning/error_id 的唯一 `run_completed`。选定终态后的完成事件/收尾写入失败通过当前读取返回警告，不改写业务终态；全部必需写入确认前不清理 live state。
 - 按 M3 D39–D41/M3-C20，自动补写耗尽后提供 POST /api/analysis/runs/{run_id}/persistence/retry，无需请求体；由原串行写入器受理新一轮或复用已有补写，202 只表示受理，200 表示当前无需补写。无 live 但历史仍在时返回 409 / persistence_retry_unavailable；重复触发不增加并发或重置运行中的预算，不重新分析，HTTP 断开不取消已受理补写。M9-C11 承接按钮与响应丢失后先查询、不自动重发 POST 的规则。
 - live state 只有在持久化确认、workflow quiesced 和 grace period 全部满足后才清理；grace 默认 60 秒、可配置，从终态、quiesced 和全部必需数据落库确认后起算，不延迟结果交付。cleanup 幂等且失败不修改业务终态。
 - 启动遗留处理按 [D61](M3/m3_transcript_history_design.md#d61重启时分别处理-run-与-session-的遗留状态)：分别将 PostgreSQL 中 pending/running 的 run 与 Agent session 标记为 failed/service_interrupted，已终态 run 下的遗留 session 也检查。各层原终态保持不变，状态修正与适用中断记录同事务保存；保留原身份、时间事实和已保存过程，不补造未保存会话、不自动恢复执行，重复启动不重复修正已处理记录。

@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from app.application.analysis_sessions.models import CorrelationContext
+from app.application.analysis_runs.models import CorrelationContext
 from app.infrastructure.observability import json_logging
 from app.infrastructure.observability.json_logging import JsonFormatter, JsonLogHandler, configure_logging
 from app.infrastructure.observability.redaction import REDACTED, redact, redact_text
@@ -18,7 +18,7 @@ from app.infrastructure.observability.redaction import REDACTED, redact, redact_
     "api_key", "apiKey", "API KEY", "OPENAI_API_KEY", "clientSecret", "client_secret",
     "PASSWORD", "passwd", "access_token", "refreshToken", "AWS_ACCESS_KEY_ID",
     "aws_secret_access_key", "private_key", "Credential", "credentials",
-    "query", "request_body", "headers",
+    "request_body", "headers",
 ])
 def test_nested_redaction_is_case_insensitive_and_does_not_mutate(name):
     source = {"items": [{name: {"nested": ["hidden-credential"]}, "count": 2}], "ok": True}
@@ -38,11 +38,16 @@ def test_nested_redaction_is_case_insensitive_and_does_not_mutate(name):
     'https://user:hidden-credential@provider.test/run',
     'upstream rejected bEaReR hidden-credential',
     'proxy rejected BASIC hidden-credential',
+    'upstream rejected Bearer abcdefgh',
+    'proxy rejected Basic dXNlcjpwYXNz',
     'password=hidden-credential\nnext safe line',
 ])
 def test_credentials_in_diagnostic_text_are_redacted(text):
     result = redact_text(text)
-    assert "hidden-credential" not in result
+    assert not any(
+        credential in result
+        for credential in ("hidden-credential", "abcdefgh", "dXNlcjpwYXNz")
+    )
     assert REDACTED in result
 
 
@@ -52,6 +57,13 @@ def test_private_query_redacts_raw_repr_and_json_escapes():
         result = redact_text("failure: " + rendered, (query,))
         assert "secret" not in result
         assert REDACTED in result
+
+
+def test_ordinary_query_is_not_treated_as_a_credential_container():
+    source = {"query": "Lake Erie water level", "safe": True}
+
+    assert redact(source) == source
+    assert redact_text("query=Lake Erie water level") == "query=Lake Erie water level"
 
 
 def test_formatter_has_stable_fields_and_ignores_unapproved_extras():

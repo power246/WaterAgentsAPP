@@ -3,6 +3,9 @@ import logging
 import pytest
 
 from app.infrastructure.observability.json_logging import JsonFormatter
+from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
+
+configure_asyncio_event_loop()
 
 
 @pytest.fixture

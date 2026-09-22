@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from app.application.analysis_sessions.models import AnalysisSessionSnapshot
+from app.application.analysis_runs.models import AnalysisRunSnapshot
 
 
 class WorkflowStopped(Exception):
@@ -30,7 +30,7 @@ class CancellationToken:
 
 @dataclass(frozen=True)
 class WorkflowContext:
-    session: AnalysisSessionSnapshot
+    run: AnalysisRunSnapshot
     query: str = field(repr=False)
     cancellation: CancellationToken
 

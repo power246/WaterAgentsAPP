@@ -13,7 +13,7 @@ from app.infrastructure.observability.redaction import redact, redact_text
 _FIELDS = (
     "operation", "from_status", "to_status", "method", "route", "status_code",
     "duration_ms", "exception_type", "public_error", "lifecycle_event",
-    "original_status", "outcome",
+    "original_status", "outcome", "attempt",
 )
 _FORMAT_FAILURE = (
     '{"timestamp":null,"level":"ERROR","event_name":"log_format_failed",'

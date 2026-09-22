@@ -1,12 +1,12 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-09-13
+更新日期：2026-09-17
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
 各 Milestone 的详细设计可以补充实现类型、API schema 和验收用例，但不得静默弱化本文档的硬约束。约定变更时，必须在同一个 MR 中同步更新本文档、所属 Milestone 设计/TODO、相关 API 文档和测试。
 
-**2026-09-10 领域基线修订**：按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)，run 覆盖整次用户分析，session 是单个 Agent 的独立上下文与完整 loop，包括不绑定水体的解析 session 和绑定 COMID 的水体 sessions，历史分页对象为 run。完整主流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M3–M9 条目中此前用于整次分析的 session/旧路径按 run 层职责理解；创建幂等、整体状态、SSE、取消、保存重试及清理的已确认行为保留。四表职责与两层记录归属按 D53 确认，D54 要求所有业务表保留时间；路径按 D65、引用边界按 D58，具体列和校验实现继续定型。M2 已实现代码和接口仍是旧命名，本次不改变其实现证据或宣称迁移已完成。
+**2026-09-10 领域基线修订，2026-09-17 实现状态同步**：按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)，run 覆盖整次用户分析，session 是单个 Agent 的独立上下文与完整 loop，包括不绑定水体的解析 session 和绑定 COMID 的水体 sessions，历史分页对象为 run。完整主流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M3–M9 条目中此前用于整次分析的 session/旧路径按 run 层职责理解；创建幂等、整体状态、SSE、取消、保存重试及清理的已确认行为保留。四表职责、两层记录归属、路径和引用校验已由 M3 当前 schema/OpenAPI 实现；M2 旧代码与接口只保留历史证据，不再表示当前 `backend/` 状态。
 
 相关入口：
 
@@ -92,7 +92,7 @@ Contract changes:
 
 ## 5. M3：Transcript Store + History APIs
 
-当前工程规范见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)，对外表示与搭建命令见 [API 指南](M3/m3_transcript_history_api.md)，实施与证据分解见 [Milestone 0–10 清单](M3/m3_implementation_todo.md)。D01–D86 保留确认依据；其早期整体 session 术语映射为 run，真实 Agent session 保留独立语义。以下契约编号与保证不变，本次只完成文档，尚无 M3 实现验收证据。
+当前工程规范见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)，对外表示与搭建命令见 [API 指南](M3/m3_transcript_history_api.md)，实施与证据分解见 [Milestone 0–19 清单](M3/m3_implementation_todo.md)。D01–D86 保留确认依据；其早期整体 session 术语映射为 run，真实 Agent session 保留独立语义。Milestone 17–18 已完成 Windows Uvicorn factory 和统一脱敏/性能功能包，Milestone 19 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审，Milestone 0–16 保留历史记录；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已本机复审通过，`request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移证据另缺，因此 M3 保持 `partial`，不进入最终 `implemented` 表；既有 contract ID 和硬约束不变。
 
 工程定型补充：四表采用原身份/联合归属约束、单份正文及 Alembic 单 head；当前状态不通过事件回放重建。新生命周期正文版本 2 区分 run_* 与 session_*，历史版本 1 保留解析；run_snapshot 与 stream_end 是控制通知，session 的 transcript_item/message_started/message_delta/message_finalized 使用独立过程整数序号，不逐帧落库。run 详情提供全部 run-owned 原记录，所选 session 的完整过程另读；未知/损坏内容显式表示。配置、严格来源、取消可见性、创建未知提交核实和逐项保存确认按实施详细设计执行，不能用最大已保存序号推断草稿已保存。
 
@@ -101,7 +101,7 @@ Contract changes:
 ### 必须实现
 
 - **M3-C01 — Transcript 事实源**：提供 `LiveTranscriptBuffer`、持久化 `TranscriptStore` 和 append-only item 写入；数据库中的 transcript 是历史权威来源。
-  - 按 [M3 D53](M3/m3_transcript_history_design.md#d53四张核心表会话状态与两层记录归属) 采用四张核心表：analysis_runs 保存 run 当前信息、列表字段、创建 key/指纹/单份原回执及引用；analysis_sessions 保存身份、所属 run、角色、水体与自身必要状态和时间；transcript_items 保存 run 或 session 的原 typed 记录；transcript_contents 保存独立大正文。不得复制同义完整请求/配置/结果/transcript，少量查询投影从同一事实生成，四表均按 D54 保留时间。独立创建 key 表取消，关联索引表延后至 M6-C10/M7-C08 按真实需求评估；引用校验、公共全文复用与完整读取仍须交付。具体列与约束按实施详细设计执行，尚未实现。
+  - 按 [M3 D53](M3/m3_transcript_history_design.md#d53四张核心表会话状态与两层记录归属) 采用四张核心表：analysis_runs 保存 run 当前信息、列表字段、创建 key/指纹/单份原回执及引用；analysis_sessions 保存身份、所属 run、角色、水体与自身必要状态和时间；transcript_items 保存 run 或 session 的原 typed 记录；transcript_contents 保存独立大正文。不得复制同义完整请求/配置/结果/transcript，少量查询投影从同一事实生成，四表均按 D54 保留时间。独立创建 key 表取消，关联索引表延后至 M6-C10/M7-C08 按真实需求评估；引用校验、公共全文复用与完整读取仍须交付。具体列与约束已按实施详细设计实现，证据见 [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)。
   - 按 M3 D31/D57，item 首次创建时由后端生成全局唯一 UUID，补写/读取保留身份；content_ref 统一由原 run_id + item_id 组装，读取时校验该 item 属于指定 run，不另设公开 content_id。session_id 继续表达适用 Agent 归属。按 D56，run 自身与各 Agent session 的记录共用 run 内 transcript_sequence，首次追加分配，session 筛选保留原序号；相同内容的独立发生记录不按文本去重，公共上下文通过原 item 引用复用。
   - 按 [D81](M3/m3_transcript_history_design.md#d81流式片段与最终消息复用-item_id)，流式消息开始生成时分配一次 item_id，所有片段与最终正文复用；提前分配身份不写数据库占位或部分正文，结束或中断后仍按 D79/D80 整理保存。读取、补写及全文引用保留原身份，不增加同义 message_id 或身份映射表。按 [D82](M3/m3_transcript_history_design.md#d82消息开始时固定过程序号和创建时间)，消息开始生成时同时固定 run 内 transcript_sequence 和 created_at，occurred_at 同源，先保留在内存；定稿、保存和补写不重新编号或刷新时间。其他可写记录照常保存，不能按最大已保存序号确认此前所有内容。
 - **M3-C02 — Content 版本**：transcript content 使用 `content_type + content_schema_version` 版本化 envelope。按 M3 D28，首批生产注册 analysis_request、lifecycle_event、error、runtime_fact 四类并严格校验；runtime_fact 内部也须有明确 fact 类型和字段。创建配置及生命周期错误通过原事件保留，不额外复制同义 item；LLM/tool/skill/hook、真实 context/result 类型由后续生产它们的 milestone 扩展注册，M3 不预造业务 payload。
@@ -459,7 +459,7 @@ Contract changes:
 
 | Contract ID | Milestone | Status | Implementation/MR | Test evidence | Notes |
 |---|---|---|---|---|---|
-| — | — | — | — | — | 暂无满足全部验收条件的记录；M2 本地实现证据见下方，三平台 CI 待通过。 |
+| — | — | — | — | — | 暂无满足全部验收条件的记录；M2/M3 本机实现证据见下方，三平台 CI 与同库跨系统迁移待通过。 |
 
 允许的 Status：
 
@@ -478,9 +478,17 @@ cancelled
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
 | `GLOBAL-C01`、`GLOBAL-C02`、`GLOBAL-C04`、`GLOBAL-C07`、`GLOBAL-C09`、`GLOBAL-C10`；`M2-C01`–`M2-C13` | [M2 最终本地 contract evidence](M2/m2_analysis_session_sse_implementation_todo.md#m2-contract-evidence)、[正式启动审查修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-审查修复记录2026-09-08)、[日志边界修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-日志边界修复记录2026-09-09)、[跨平台 smoke 修复](M2/m2_analysis_session_sse_implementation_todo.md#milestone-8-跨平台-smoke-修复记录2026-09-09)、[详细设计](M2/m2_analysis_session_sse_design.md)、[API/runbook](M2/m2_analysis_session_sse_api.md)。602 项回归、health 和 completed/cancel 真实 Uvicorn smoke 在 macOS 本机通过；包含真实资源关闭检查、连接超时/重置注入、架构门禁、单 worker、活动 SSE 关闭、info/trace 下完整服务输出脱敏及流中断后 replay 回归。 | 修复后三平台完整 tests 和两项 smoke 的实际 CI 结果；通过后在最终承接表追加实现位置、测试结果和提交/MR 引用。 |
-| M3–M9 / Future 接力 | [后续接力入口与验收](M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)给出当前代码入口、保留约束与可观察验收。 | 各所属 Milestone 按原 ID 实现；本次只登记接力，不将未来能力计为已实现。 |
+| M3–M9 / Future 接力 | [后续接力入口与验收](M2/m2_analysis_session_sse_implementation_todo.md#后续接力入口与验收)给出当前代码入口、保留约束与可观察验收。 | M3 的后续状态见下方独立索引；M4–M9/Future 仍按原 ID 实现，本行不将未来能力计为已实现。 |
 
-未新增、拆分、替换或取消 contract。CI 待验收仍属于 M2 的 Milestone 7/8，不转移为新的 deferred contract。
+### M3 待验收索引
+
+本节只索引本机实现与契约审计证据，不属于上表的最终承接记录。当前分支为 `codex/m3-milestone`；Milestone 2–9 审查回补对应本地提交 `6c3a515`–`01e8f07`，Milestone 10 历史证据收敛于 `452749b`，Milestone 11–16 保留随后本机修复与契约审计记录。Milestone 17–18 已完成 Windows 正式入口和统一脱敏/性能功能包，Milestone 19 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审，追加 finding 的 `request changes` 已清除。GLOBAL-C11 的三平台实际结果（包括实际 Windows runner）另缺，M3 保持未最终承接；模拟 Windows 验证和本机性能/socket 结果不替代实际平台证据。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。[Milestone 11–16](M3/m3_implementation_todo.md#milestone-11认证凭据与公开-metadata-脱敏) 保留既有证据；[Milestone 17–19](M3/m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 已完成本机实现与最终复审。 | 补齐 Ubuntu/macOS/Windows 完整测试、两项 smoke 及同一已保存 PostgreSQL 的跨系统核对后，才可在最终承接表登记 `implemented`。 |
+
+未新增、拆分、替换或取消 contract；Milestone 11–16 是既有 M3/Global/MR 约束的审查修复分解。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
 ## 14. 维护规则
 

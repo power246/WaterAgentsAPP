@@ -8,6 +8,9 @@ from pathlib import Path
 
 import httpx
 
+from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
+from test_database import temporary_migrated_schema
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -28,13 +31,14 @@ def stop_process(process: subprocess.Popen[str]) -> None:
         process.wait(timeout=5)
 
 
-def main() -> None:
+def run_health_smoke(settings) -> None:
     port = available_loopback_port()
     process_environment = os.environ.copy()
     process_environment["PYTHONIOENCODING"] = "utf-8"
     process_environment["WATERAGENTS_HOST"] = "127.0.0.1"
     process_environment["WATERAGENTS_PORT"] = str(port)
     process_environment["WATERAGENTS_LOG_LEVEL"] = "INFO"
+    process_environment["WATERAGENTS_DB_NAME"] = settings.db_name
     process = subprocess.Popen(
         [
             sys.executable,
@@ -72,5 +76,11 @@ def main() -> None:
         stop_process(process)
 
 
+def main() -> None:
+    with temporary_migrated_schema() as settings:
+        run_health_smoke(settings)
+
+
 if __name__ == "__main__":
+    configure_asyncio_event_loop()
     main()
