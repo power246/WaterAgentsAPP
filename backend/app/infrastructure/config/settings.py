@@ -2,11 +2,21 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ENV_FILE = BACKEND_ROOT / ".env"
+
+
+class SettingsConfigurationError(RuntimeError):
+    pass
 
 
 class AppSettings(BaseSettings):
@@ -14,6 +24,7 @@ class AppSettings(BaseSettings):
         env_prefix="WATERAGENTS_",
         env_file=BACKEND_ENV_FILE,
         env_file_encoding="utf-8",
+        extra="forbid",
         str_strip_whitespace=True,
     )
 
@@ -117,3 +128,19 @@ class AppSettings(BaseSettings):
                 "transcript_preview_bytes must be smaller than transcript_inline_max_bytes"
             )
         return self
+
+
+def load_app_settings() -> AppSettings:
+    try:
+        return AppSettings()
+    except ValidationError as error:
+        fields = sorted(
+            {
+                ".".join(str(part) for part in issue["loc"])
+                for issue in error.errors(include_url=False, include_input=False)
+            }
+        )
+        detail = ", ".join(fields) if fields else "unknown field"
+        raise SettingsConfigurationError(
+            f"invalid application configuration ({detail})"
+        ) from None

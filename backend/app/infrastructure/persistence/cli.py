@@ -2,7 +2,10 @@ import argparse
 import asyncio
 from collections.abc import Sequence
 
-from app.infrastructure.config.settings import AppSettings
+from app.infrastructure.config.settings import (
+    SettingsConfigurationError,
+    load_app_settings,
+)
 from app.infrastructure.persistence.database import (
     DatabaseConfigurationError,
     DatabaseConnectionError,
@@ -23,14 +26,19 @@ def run(argv: Sequence[str] | None = None) -> int:
     arguments = _parser().parse_args(argv)
     configure_asyncio_event_loop()
     try:
-        settings = AppSettings()
+        settings = load_app_settings()
         if arguments.command == "upgrade":
             revision = upgrade_database(settings)
             print(f"database schema upgraded to {revision}")
         else:
             revision = asyncio.run(check_database_schema(settings))
             print(f"database schema is current at {revision}")
-    except (DatabaseConfigurationError, DatabaseConnectionError, SchemaVersionError) as error:
+    except (
+        SettingsConfigurationError,
+        DatabaseConfigurationError,
+        DatabaseConnectionError,
+        SchemaVersionError,
+    ) as error:
         print(f"wateragents-db: {error}")
         return 1
     except Exception:

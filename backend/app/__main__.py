@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uvicorn
 
-from app.infrastructure.config import AppSettings
+from app.infrastructure.config import load_app_settings
 from app.infrastructure.persistence.database import require_database_password
 from app.infrastructure.runtime.event_loop import (
     configure_asyncio_event_loop,
@@ -12,7 +12,7 @@ from app.infrastructure.runtime.event_loop import (
 
 def main() -> None:
     configure_asyncio_event_loop()
-    settings = AppSettings()
+    settings = load_app_settings()
     require_database_password(settings)
     uvicorn.run(
         "app.main:app",

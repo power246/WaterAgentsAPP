@@ -4,7 +4,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.infrastructure.config.settings import AppSettings, BACKEND_ENV_FILE
+from app.infrastructure.config.settings import (
+    AppSettings,
+    BACKEND_ENV_FILE,
+    SettingsConfigurationError,
+    load_app_settings,
+)
 from app.infrastructure.persistence import cli
 from app.infrastructure.persistence.database import (
     DatabaseConfigurationError,
@@ -76,6 +81,71 @@ def test_env_file_supports_unicode_space_paths_and_line_endings(
     assert settings.db_sslmode == "require"
 
 
+def test_test_database_process_variable_is_not_runtime_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "WATERAGENTS_DB_NAME=business_from_file\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("WATERAGENTS_DB_NAME", raising=False)
+    monkeypatch.setenv("WATERAGENTS_TEST_DB_NAME", "wateragents_test")
+
+    settings = AppSettings(_env_file=env_file)
+
+    assert settings.db_name == "business_from_file"
+    assert "test_db_name" not in AppSettings.model_fields
+
+
+@pytest.mark.parametrize(
+    "invalid_line",
+    (
+        "WATERAGENTS_TEST_DB_NAME=test_only_value",
+        "WATERAGENTS_DB_NMAE=misspelled_value",
+    ),
+)
+def test_runtime_env_file_rejects_test_and_misspelled_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    invalid_line: str,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"{invalid_line}\n", encoding="utf-8")
+    monkeypatch.delenv("WATERAGENTS_TEST_DB_NAME", raising=False)
+
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AppSettings(_env_file=env_file)
+
+
+def test_settings_loader_reports_fields_without_raw_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw_value = "do-not-echo-this-port-value"
+    monkeypatch.setenv("WATERAGENTS_DB_PORT", raw_value)
+
+    with pytest.raises(SettingsConfigurationError) as captured:
+        load_app_settings()
+
+    assert "db_port" in str(captured.value)
+    assert raw_value not in str(captured.value)
+
+
+def test_database_cli_reports_config_field_without_raw_value(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    raw_value = "do-not-echo-this-port-value"
+    monkeypatch.setenv("WATERAGENTS_DB_PORT", raw_value)
+
+    assert cli.run(["check"]) == 1
+
+    output = capsys.readouterr().out
+    assert "db_port" in output
+    assert raw_value not in output
+
+
 def test_database_smoke_rejects_business_database_loaded_from_env_file(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -141,6 +211,24 @@ def test_database_smoke_preserves_business_connection_for_distinct_test_database
     assert settings.db_user == "smoke_user"
     assert settings.db_password is not None
     assert settings.db_password.get_secret_value() == "smoke_password"
+
+
+@pytest.mark.parametrize("test_name", (None, "", "   "))
+def test_database_smoke_rejects_missing_or_empty_test_database_name(
+    monkeypatch: pytest.MonkeyPatch,
+    test_name: str | None,
+) -> None:
+    monkeypatch.delenv("WATERAGENTS_TEST_DB_NAME", raising=False)
+    if test_name is not None:
+        monkeypatch.setenv("WATERAGENTS_TEST_DB_NAME", test_name)
+    monkeypatch.setattr(
+        test_database,
+        "AppSettings",
+        lambda: AppSettings(_env_file=None),
+    )
+
+    with pytest.raises(RuntimeError, match="WATERAGENTS_TEST_DB_NAME is required"):
+        test_database.require_test_database_settings()
 
 
 def test_database_url_preserves_and_encodes_special_password() -> None:
@@ -244,7 +332,11 @@ def test_cli_missing_password_fails_without_echoing_secrets(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delenv("WATERAGENTS_DB_PASSWORD", raising=False)
-    monkeypatch.setattr(cli, "AppSettings", lambda: AppSettings(_env_file=None))
+    monkeypatch.setattr(
+        cli,
+        "load_app_settings",
+        lambda: AppSettings(_env_file=None),
+    )
     assert cli.run(["check"]) == 1
     output = capsys.readouterr().out
     assert "DB_PASSWORD is required" in output
@@ -259,7 +351,7 @@ def test_formal_entrypoint_requires_database_password(
     monkeypatch.delenv("WATERAGENTS_DB_PASSWORD", raising=False)
     monkeypatch.setattr(
         entrypoint,
-        "AppSettings",
+        "load_app_settings",
         lambda: AppSettings(_env_file=None),
     )
     monkeypatch.setattr(
@@ -269,6 +361,26 @@ def test_formal_entrypoint_requires_database_password(
     )
     with pytest.raises(DatabaseConfigurationError, match="DB_PASSWORD is required"):
         entrypoint.main()
+
+
+def test_formal_entrypoint_reports_config_field_without_raw_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.__main__ as entrypoint
+
+    raw_value = "do-not-echo-this-port-value"
+    monkeypatch.setenv("WATERAGENTS_DB_PORT", raw_value)
+    monkeypatch.setattr(
+        entrypoint.uvicorn,
+        "run",
+        lambda *args, **kwargs: pytest.fail("uvicorn must not start"),
+    )
+
+    with pytest.raises(SettingsConfigurationError) as captured:
+        entrypoint.main()
+
+    assert "db_port" in str(captured.value)
+    assert raw_value not in str(captured.value)
 
 
 def test_selector_policy_is_not_changed_inside_a_running_loop(
