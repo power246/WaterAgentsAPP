@@ -76,7 +76,7 @@ The lower-level server command below still runs lifespan database checks, but by
 python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log --timeout-graceful-shutdown 2 --log-level info
 ```
 
-Create a dedicated empty test database, set `WATERAGENTS_TEST_DB_NAME` to its name, and keep it different from `WATERAGENTS_DB_NAME`. Both smoke scripts create and migrate a random temporary schema inside that test database, then delete only that schema. The health smoke starts the formal `python -m app` entry point on an available loopback port, verifies the exact response, and stops the child process:
+Create a dedicated empty test database, set `WATERAGENTS_TEST_DB_NAME` in the test process environment, and keep it different from `WATERAGENTS_DB_NAME`. Do not put this test-only variable in `backend/.env`; that file accepts formal runtime settings only. Both smoke scripts create and migrate a random temporary schema inside that test database, then delete only that schema. The health smoke starts the formal `python -m app` entry point on an available loopback port, verifies the exact response, and stops the child process:
 
 ```text
 python scripts/health_smoke.py
@@ -96,15 +96,31 @@ The `Backend M1-M9` GitHub Actions workflow installs the same `backend/uv.lock`,
 
 ## Test
 
-PostgreSQL integration tests are mandatory. Set the normal `WATERAGENTS_DB_*` host, port, user, password, and SSL variables for a dedicated test server, set `WATERAGENTS_DB_NAME` to a different business guard name, and set `WATERAGENTS_TEST_DB_NAME` to the pre-created test database. Tests use temporary schemas and refuse a missing or identical test database name.
+PostgreSQL integration tests are mandatory. Put only the normal `WATERAGENTS_DB_*` host, port, business database name, user, password, and SSL settings in `backend/.env`. Then set `WATERAGENTS_TEST_DB_NAME` to the pre-created test database in the shell that launches tests and smoke checks. Tests use temporary schemas and refuse a missing, empty, or business-identical test database name.
 
-```text
+PowerShell:
+
+```powershell
+$env:WATERAGENTS_TEST_DB_NAME = 'wateragents_test'
 python -m pytest -q
+python scripts/health_smoke.py
+python scripts/run_history_smoke.py
+Remove-Item Env:WATERAGENTS_TEST_DB_NAME
+```
+
+bash:
+
+```bash
+export WATERAGENTS_TEST_DB_NAME='wateragents_test'
+python -m pytest -q
+python scripts/health_smoke.py
+python scripts/run_history_smoke.py
+unset WATERAGENTS_TEST_DB_NAME
 ```
 
 ## Configuration
 
-Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructor values have highest priority, followed by process environment, the fixed UTF-8 `backend/.env`, and defaults. Loading does not depend on the current working directory. Database passwords use `SecretStr`, are not trimmed or printed, and are passed as a separate URL field so characters such as `@:/#%$` are encoded correctly.
+Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructor values have highest priority, followed by process environment, the fixed UTF-8 `backend/.env`, and defaults. Loading does not depend on the current working directory. `backend/.env` is production-runtime configuration: unknown or misspelled fields fail validation instead of being ignored. Database passwords use `SecretStr`, are not trimmed or printed, and are passed as a separate URL field so characters such as `@:/#%$` are encoded correctly.
 
 | Variable | Default |
 | --- | --- |
@@ -130,7 +146,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_LIVE_STATE_GRACE_SECONDS` | `60` |
 | `WATERAGENTS_SHUTDOWN_SAVE_GRACE_SECONDS` | `5` |
 
-`WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only by tests/smoke; it never overrides the production service database implicitly.
+`WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
 ### Local PostgreSQL with Compose
 

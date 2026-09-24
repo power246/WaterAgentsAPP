@@ -103,7 +103,8 @@ def _repair_batch(
     active_sessions = tuple(
         session for session in stored.sessions if session.status in _ACTIVE_SESSIONS
     )
-    if stored.run.status not in _ACTIVE_RUNS and not active_sessions:
+    run_is_active = stored.run.status in _ACTIVE_RUNS
+    if not run_is_active and not active_sessions:
         return None
     repaired_at = max(
         repaired_at,
@@ -111,18 +112,12 @@ def _repair_batch(
         *(session.updated_at for session in active_sessions),
     )
 
-    bodies = _read_lifecycle_bodies(stored, registry)
-    created = next(
-        (
-            body
-            for item, body in bodies
-            if item.item_id == stored.run.created_item_id
-            and isinstance(body, RunCreatedEvent)
-        ),
-        None,
+    bodies = _read_lifecycle_bodies(
+        stored,
+        registry,
+        include_run=run_is_active,
+        session_ids=frozenset(session.session_id for session in active_sessions),
     )
-    if created is None:
-        raise ValueError("the stored run creation lifecycle item is unreadable")
 
     transcript = TranscriptBuffer(registry)
     next_transcript_sequence = max(
@@ -147,7 +142,18 @@ def _repair_batch(
         item_ids.append(result.item_id)
         return result
 
-    if stored.run.status in _ACTIVE_RUNS:
+    if run_is_active:
+        created = next(
+            (
+                body
+                for item, body in bodies
+                if item.item_id == stored.run.created_item_id
+                and isinstance(body, RunCreatedEvent)
+            ),
+            None,
+        )
+        if created is None:
+            raise ValueError("the stored run creation lifecycle item is unreadable")
         error = _interruption_error(id_factory)
         terminal_item = identity(None)
         run_sequence = 1 + max(
@@ -237,11 +243,18 @@ def _repair_batch(
 def _read_lifecycle_bodies(
     stored: StoredRunRead,
     registry: TranscriptRegistry,
+    *,
+    include_run: bool,
+    session_ids: frozenset[UUID],
 ) -> tuple[tuple[StoredTranscriptItem, object], ...]:
     external = {content.item_id: content.body for content in stored.contents}
     parsed_items: list[tuple[StoredTranscriptItem, object]] = []
     for item in stored.items:
         if item.content_type != "lifecycle_event":
+            continue
+        if item.session_id is None and not include_run:
+            continue
+        if item.session_id is not None and item.session_id not in session_ids:
             continue
         safe_body = item.inline_body
         if safe_body is None:

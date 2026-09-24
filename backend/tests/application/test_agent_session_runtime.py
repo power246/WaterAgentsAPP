@@ -457,3 +457,42 @@ def test_no_new_session_can_be_prepared_after_run_terminal() -> None:
         assert await coordinator.list_sessions(run_id) == ()
 
     run_test(exercise)
+
+
+def test_cancel_request_blocks_session_preparation_before_terminal_transition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def exercise(coordinator, clock, run_id) -> None:
+        runtime = coordinator._runs[run_id]
+        original_acquire = runtime.condition.acquire
+        cancel_waiting = asyncio.Event()
+        allow_cancel = asyncio.Event()
+
+        async def gated_acquire() -> bool:
+            if asyncio.current_task().get_name() == "gated-cancel":
+                cancel_waiting.set()
+                await allow_cancel.wait()
+            return await original_acquire()
+
+        monkeypatch.setattr(runtime.condition, "acquire", gated_acquire)
+        cancel_task = asyncio.create_task(
+            coordinator.cancel_run(run_id),
+            name="gated-cancel",
+        )
+        await cancel_waiting.wait()
+
+        assert runtime.cancel_requested.is_set()
+        assert runtime.stop_requested.is_set()
+        with pytest.raises(InvalidRunTransitionError):
+            await coordinator.prepare_agent_session(
+                run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+        assert await coordinator.list_sessions(run_id) == ()
+
+        allow_cancel.set()
+        cancelled = await cancel_task
+        assert cancelled.status is RunStatus.CANCELLED
+        assert await coordinator.list_sessions(run_id) == ()
+
+    run_test(exercise)

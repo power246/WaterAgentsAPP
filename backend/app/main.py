@@ -24,7 +24,7 @@ from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
-from app.infrastructure.config import AppSettings
+from app.infrastructure.config import AppSettings, load_app_settings
 from app.infrastructure.observability.json_logging import configure_logging
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -57,7 +57,7 @@ def create_app(
         asyncio.Task[None],
     ] | None = None,
 ) -> FastAPI:
-    resolved_settings = settings or AppSettings()
+    resolved_settings = settings or load_app_settings()
     resolved_clock = clock if clock is not None else SystemClock()
 
     @asynccontextmanager

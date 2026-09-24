@@ -1569,7 +1569,11 @@ class RunCoordinator:
         async with runtime.condition:
             if self._closing:
                 raise ServiceShuttingDownError()
-            if runtime.snapshot.status not in _RUN_TRANSITIONS:
+            if (
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status not in _RUN_TRANSITIONS
+            ):
                 raise InvalidRunTransitionError(runtime.snapshot, RunStatus.RUNNING)
             existing_id = (
                 runtime.query_parser_session_id

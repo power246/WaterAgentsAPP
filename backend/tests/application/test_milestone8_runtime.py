@@ -597,6 +597,70 @@ def test_next_lifespan_repairs_interrupted_run_and_session_once() -> None:
     run(exercise)
 
 
+@pytest.mark.parametrize("failure", ("unsupported", "corrupt"))
+def test_terminal_run_session_repair_ignores_unreadable_run_creation(
+    failure: str,
+) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = GatedWorkflow()
+        settings = AppSettings(_env_file=None)
+        first = create_app(
+            settings,
+            clock=TickingClock(),
+            workflow=workflow,
+            transcript_store=store,
+            shutdown_grace_period=0,
+        )
+        async with first.router.lifespan_context(first):
+            coordinator = first.state.run_coordinator
+            created = await coordinator.create_run("terminal parent", CONFIGURATION)
+            await workflow.started.wait()
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            await coordinator.complete_run(created.run_id)
+            await wait_saved(first, created.run_id)
+
+        stored = await store.read_run(created.run_id)
+        assert stored is not None
+        assert stored.run.status is RunStatus.COMPLETED
+        assert stored.sessions[0].status is AgentSessionStatus.RUNNING
+        creation = store._items[stored.run.created_item_id]
+        update = (
+            {"content_schema_version": 999}
+            if failure == "unsupported"
+            else {"inline_body": "x" * creation.content_bytes}
+        )
+        store._items[stored.run.created_item_id] = creation.model_copy(
+            update=update
+        )
+        batches_before = len(store.write_batches)
+
+        second = create_app(settings, transcript_store=store, clock=TickingClock())
+        async with second.router.lifespan_context(second):
+            repaired = await store.read_run(created.run_id)
+            assert repaired is not None
+            assert repaired.run.status is RunStatus.COMPLETED
+            assert repaired.sessions[0].status is AgentSessionStatus.FAILED
+            failure_bodies = [
+                item.inline_body
+                for item in repaired.items
+                if item.session_id == session.session_id
+                and item.inline_body is not None
+                and "service_interrupted" in item.inline_body
+            ]
+            assert len(failure_bodies) == 1
+        assert len(store.write_batches) == batches_before + 1
+
+    run(exercise)
+
+
 def test_startup_repair_keeps_prior_commits_and_retries_remaining_run() -> None:
     class QueuedWorkflow:
         def __init__(self) -> None:
