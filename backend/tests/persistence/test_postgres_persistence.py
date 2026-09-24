@@ -202,10 +202,10 @@ async def _wait_persistence(
     async with asyncio.timeout(10):
         async with runtime.condition:
             await runtime.condition.wait_for(
-                lambda: coordinator._persistence_info_locked(runtime).state
+                lambda: coordinator._transcript_writer.info_locked(runtime).state
                 is not PersistenceState.PENDING
             )
-            info = coordinator._persistence_info_locked(runtime)
+            info = coordinator._transcript_writer.info_locked(runtime)
     if info.state is not PersistenceState.UP_TO_DATE:
         raise AssertionError(info)
 

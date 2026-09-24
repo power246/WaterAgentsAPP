@@ -124,8 +124,7 @@ def test_lifecycle_commits_one_timestamp_and_event_per_public_transition(operati
         coordinator = coordinator_factory(clock)
         created = await coordinator.create_run("  private query  ", CONFIGURATION)
         runtime = coordinator._runs[created.run_id]
-        stream = await coordinator.subscribe(str(created.run_id).upper())
-        created_event = await anext(stream)
+        created_event = runtime.events[0]
 
         assert created.status is RunStatus.PENDING
         assert created.created_at == created.updated_at == created_event.occurred_at
@@ -147,9 +146,7 @@ def test_lifecycle_commits_one_timestamp_and_event_per_public_transition(operati
         assert clock.calls == 2
 
         terminal = await invoke(coordinator, operation, created.run_id)
-        terminal_event = await anext(stream)
-        with pytest.raises(StopAsyncIteration):
-            await anext(stream)
+        terminal_event = runtime.events[-1]
 
         assert created.status is RunStatus.PENDING
         assert terminal.created_at == created.created_at
@@ -183,7 +180,7 @@ def test_pending_cancel_is_atomic_and_idempotent() -> None:
 
         assert await coordinator.cancel_run(created.run_id) is cancelled
         assert clock.calls == 2
-        events = [event async for event in await coordinator.subscribe(created.run_id)]
+        events = coordinator._runs[created.run_id].events
         assert [event.type.value for event in events] == ["run_created", "run_cancelled"]
         assert events[-1].occurred_at == cancelled.updated_at
         assert coordinator._runs[created.run_id].cancel_requested.is_set()
@@ -213,7 +210,7 @@ def test_pending_can_fail_during_preparation() -> None:
         failed = await coordinator.fail_run(created.run_id, ERROR)
 
         assert failed.status is RunStatus.FAILED
-        events = [event async for event in await coordinator.subscribe(created.run_id)]
+        events = coordinator._runs[created.run_id].events
         assert [event.type.value for event in events] == ["run_created", "run_failed"]
         assert events[-1].payload.error is ERROR
 
@@ -297,7 +294,7 @@ def test_terminal_race_has_one_winner_and_one_terminal_event(operation, cancel_f
             assert results[1] is winner
         assert winner.status is RunStatus.CANCELLED
         assert await coordinator.get_snapshot(created.run_id) is winner
-        events = [event async for event in await coordinator.subscribe(created.run_id)]
+        events = runtime.events
         assert len(events) == 2
         assert [event.sequence for event in events] == [1, 2]
         assert events[-1].payload.status == winner.status
@@ -336,63 +333,10 @@ def test_runs_have_independent_locks_events_and_cancellation() -> None:
         assert cancelled.status is RunStatus.CANCELLED
         assert await coordinator.get_snapshot(second.run_id) is completed
         for snapshot in (cancelled, completed):
-            events = [event async for event in await coordinator.subscribe(snapshot.run_id)]
+            events = coordinator._runs[snapshot.run_id].events
             assert [event.sequence for event in events] == [1, 2]
             assert all(event.run_id == snapshot.run_id for event in events)
         assert set(coordinator._runs) == {first.run_id, second.run_id}
-
-    run(exercise)
-
-
-def test_commit_notifies_all_waiting_subscribers_without_exposing_runtime(monkeypatch) -> None:
-    async def exercise(coordinator_factory) -> None:
-        coordinator = coordinator_factory(StepClock())
-        created = await coordinator.create_run("query", CONFIGURATION)
-        runtime = coordinator._runs[created.run_id]
-        first = await coordinator.subscribe(created.run_id)
-        second = await coordinator.subscribe(created.run_id)
-        assert await anext(first) is await anext(second)
-        original_wait = runtime.condition.wait
-        waiting = asyncio.Event()
-        wait_count = 0
-
-        async def observe_wait():
-            nonlocal wait_count
-            wait_count += 1
-            if wait_count == 2:
-                waiting.set()
-            return await original_wait()
-
-        monkeypatch.setattr(runtime.condition, "wait", observe_wait)
-        tasks = [asyncio.create_task(anext(stream)) for stream in (first, second)]
-        await waiting.wait()
-        cancelled = await coordinator.cancel_run(created.run_id)
-        events = await asyncio.gather(*tasks)
-
-        assert events[0] is events[1] is runtime.events[-1]
-        assert events[0].occurred_at == cancelled.updated_at
-        assert events[0].payload.status is RunStatus.CANCELLED
-        for stream in (first, second):
-            with pytest.raises(StopAsyncIteration):
-                await anext(stream)
-
-    run(exercise)
-
-
-def test_closed_subscriber_does_not_cancel_run_or_affect_other_subscribers() -> None:
-    async def exercise(coordinator_factory) -> None:
-        coordinator = coordinator_factory(StepClock())
-        created = await coordinator.create_run("query", CONFIGURATION)
-        first = await coordinator.subscribe(created.run_id)
-        second = await coordinator.subscribe(created.run_id)
-        await anext(first)
-        await first.aclose()
-
-        await wait_running(coordinator, created.run_id)
-        completed = await coordinator.complete_run(created.run_id)
-        assert [event.sequence async for event in second] == [1, 2]
-        assert completed.status is RunStatus.COMPLETED
-        assert not coordinator._runs[created.run_id].cancel_requested.is_set()
 
     run(exercise)
 
@@ -407,7 +351,7 @@ def test_logging_runs_after_unlock_and_cannot_undo_committed_state(fail_logger: 
         created = await coordinator.create_run("private query", CONFIGURATION)
         await wait_running(coordinator, created.run_id)
         failed = await coordinator.fail_run(created.run_id, ERROR)
-        events = [event async for event in await coordinator.subscribe(created.run_id)]
+        events = coordinator._runs[created.run_id].events
 
         assert len(events) == 2
         assert events[-1].payload.error is ERROR
@@ -432,7 +376,7 @@ def test_logging_runs_after_unlock_and_cannot_undo_committed_state(fail_logger: 
 
 @pytest.mark.parametrize(
     "operation",
-    ["get_snapshot", "mark_running", "complete_run", "fail_run", "cancel_run", "subscribe"],
+    ["get_snapshot", "mark_running", "complete_run", "fail_run", "cancel_run", "subscribe_run"],
 )
 def test_lookup_distinguishes_invalid_uuid_and_unknown_run(operation: str) -> None:
     async def exercise(coordinator_factory) -> None:

@@ -179,12 +179,6 @@ class GenerationStatus(str, Enum):
     INCOMPLETE = "incomplete"
 
 
-class FixtureMessageV1(DomainModel):
-    text: str
-    generation_status: GenerationStatus
-    end_reason: MessageEndReason | None = None
-
-
 class ContentVisibility(str, Enum):
     AUTO = "auto"
     HISTORY_ONLY = "history_only"
@@ -380,5 +374,4 @@ TypedTranscriptBody: TypeAlias = (
     | LegacyLifecycleEventV1
     | PublicError
     | RuntimeFact
-    | FixtureMessageV1
 )

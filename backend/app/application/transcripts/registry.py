@@ -15,7 +15,6 @@ from app.application.analysis_runs.models import (
 from app.application.transcripts.models import (
     AnalysisRequestV1,
     ContentVisibility,
-    FixtureMessageV1,
     GenerationStatus,
     LateMessageOutputFact,
     LegacyLifecycleEventV1,
@@ -425,38 +424,6 @@ def _standalone_error(body: object) -> tuple[UUID, ...]:
     if not isinstance(body, PublicError):
         raise TypeError("error registration received another content type")
     return (body.error_id,)
-
-
-def _fixture_message_adapter(body: object) -> MessageProjection:
-    if not isinstance(body, FixtureMessageV1):
-        raise TypeError("fixture message adapter received another content type")
-    return MessageProjection(
-        text=body.text,
-        generation_status=body.generation_status,
-        end_reason=body.end_reason,
-    )
-
-
-def _fixture_message_finalizer(
-    text: str,
-    generation_status: GenerationStatus,
-    end_reason: MessageEndReason | None,
-) -> FixtureMessageV1:
-    return FixtureMessageV1(
-        text=text,
-        generation_status=generation_status,
-        end_reason=end_reason,
-    )
-
-
-def fixture_message_registration() -> ContentRegistration:
-    return ContentRegistration(
-        content_type="fixture_message",
-        content_schema_version=1,
-        adapter=TypeAdapter(FixtureMessageV1),
-        message_adapter=_fixture_message_adapter,
-        message_finalizer=_fixture_message_finalizer,
-    )
 
 
 def create_production_registry() -> TranscriptRegistry:

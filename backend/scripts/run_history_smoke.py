@@ -13,11 +13,8 @@ from fastapi import FastAPI
 
 from app.application.analysis_runs.models import AgentRole
 from app.application.analysis_runs.workflow import WorkflowContext
-from app.application.transcripts.models import FixtureMessageV1, GenerationStatus
-from app.application.transcripts.registry import (
-    create_production_registry,
-    fixture_message_registration,
-)
+from app.application.transcripts.models import GenerationStatus
+from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.config import AppSettings
 from app.infrastructure.runtime.event_loop import (
     configure_asyncio_event_loop,
@@ -27,6 +24,7 @@ from app.main import create_app
 from health_smoke import available_loopback_port, stop_process
 from run_sse_smoke import read_event, stream_headers
 from test_database import temporary_migrated_schema
+from transcript_fixtures import FixtureMessageV1, fixture_message_registration
 
 BASE = "/api/analysis/runs"
 SCRIPT_ROOT = Path(__file__).resolve().parent

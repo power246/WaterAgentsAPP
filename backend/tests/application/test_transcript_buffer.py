@@ -12,10 +12,8 @@ from app.application.transcripts.buffer import (
     locate_content,
 )
 from app.application.transcripts.models import TranscriptContentRef, TranscriptMetadata
-from app.application.transcripts.registry import (
-    create_production_registry,
-    fixture_message_registration,
-)
+from app.application.transcripts.registry import create_production_registry
+from scripts.transcript_fixtures import fixture_message_registration
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
 ITEM_ID = UUID("30000000-0000-0000-0000-000000000001")

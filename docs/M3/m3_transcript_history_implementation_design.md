@@ -1,8 +1,8 @@
 # M3 Transcript Store + History APIs 实施详细设计
 
-更新日期：2026-09-17
+更新日期：2026-09-24
 
-状态：D01–D86 主体设计已对齐，Milestone 0–16 保留历史实现和验证证据；[Milestone 17](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 与 [Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 已完成本机实现，[Milestone 19](m3_implementation_todo.md#milestone-19追加修复集成验收与契约复审) 已完成最终集成复审。HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已在隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约检查中复审通过，本轮 `request changes` 已清除。本文规定工程目标与既有实现边界，追加修复设计见 §12.1；实际 Windows/Linux runner、三平台完整 CI/同库跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
+状态：D01–D86 主体设计已对齐，Milestone 0–16 保留历史实现和验证证据；[Milestone 17](m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 与 [Milestone 18](m3_implementation_todo.md#milestone-18统一脱敏扫描取消边界与大-delta-性能) 已完成本机实现，[Milestone 19](m3_implementation_todo.md#milestone-19追加修复集成验收与契约复审) 已完成最终集成复审。截至 2026-09-24，追加审查提出的取消准入、启动修复及测试数据库配置边界均已完成本机回归，写入、核实与重试职责也已收敛到独立 `TranscriptWriter`。本文规定工程目标与既有实现边界，追加修复设计见 §12.1；实际 Windows/Linux runner、三平台完整 CI/同库跨系统迁移仍为 `partial`，中心最终承接不登记 `implemented`。
 
 本文是 M3 当前工程设计入口。[设计决策记录](m3_transcript_history_design.md) 保留原编号、取舍和确认依据；其中旧整体 session 术语及“继续定型”应按本文解释，不另形成一套实现方案。用户行为和持久化保证仍受 [中心契约 M3-C01–C20 / M3-A01–A12](../deferred_milestone_contracts.md#5-m3transcript-store--history-apis) 约束。当前功能完成状态只以实施清单中的实际测试和环境证据为准。
 
@@ -34,7 +34,7 @@ M4 产生真实结构化问题与 BFS；M6 产生真实模型/工具/技能/钩�
 
 当前代码已迁移到 `application/analysis_runs/`，具备 run/Agent session 身份、typed transcript、PostgreSQL 四表存储、幂等创建、串行补写、统一 history 读取及两层 SSE。HTTP 已提供创建、历史列表、run/session/transcript/全文读取、取消、手动补写、完整轻量 run 快照流和可续传 session 过程流；取消定稿/晚到审计、严格启动遗留修复、资源关闭与 live grace 清理已经实现。真实 PostgreSQL/Uvicorn smoke 和三平台 CI 入口也已交付，三平台实际运行与跨系统迁移证据仍按清单保持 partial。M2 文档及其测试数量只作为旧阶段证据。
 
-建议目录如下；每个模块包含相关小类型，不为每个 DTO 单独建文件。
+当前关键目录如下；每个模块包含相关小类型，不为每个 DTO 单独建文件。
 
 ```text
 backend/
@@ -51,19 +51,21 @@ backend/
     application/analysis_runs/
       models.py
       coordinator.py
+      persistence.py
       runtime.py
+      startup_repair.py
+      writer.py
       workflow.py
     application/transcripts/
       models.py
       registry.py
       buffer.py
-      writer.py
       reader.py
       streaming.py
     ports/transcript_store.py
     infrastructure/persistence/
       schema.py
-      postgres_store.py
+      store.py
       database.py
       cli.py
     infrastructure/config/settings.py
@@ -79,11 +81,11 @@ backend/
 | TranscriptBuffer / streaming | 原事实唯一入口、身份/顺序/时间、脱敏、生成中正文、定稿和晚到审计。 |
 | TranscriptWriter | 每个 run 串行组批、确认集合、有限重试及补写，管理待写引用依赖。 |
 | TranscriptReader / registry | 来源选择、统一模型、完整过程、正文解析、引用与可见性；不在 HTTP 层复制。 |
-| TranscriptStorePort / PostgreSQL adapter | 原子 create/append、提交核实、持久化只读查询、启动修复；不决定业务终态。 |
+| TranscriptStorePort / PostgreSQL adapter | 原子 create/write_batch、提交核实、持久化只读查询、启动修复；不决定业务终态。 |
 | HTTP / SSE adapter | 参数、状态码、错误封装、DTO 与 frame 编码；不写 SQL 或直接取消 task。 |
 | composition / lifespan / CLI | 注入 store、clock、workflow；创建和关闭连接池；独立迁移与启动检查。 |
 
-Port 的 generic 参数使用有界、已校验的记录/批次模型；不能继续用逐条 append 模拟原子组，也不能让 port 导入 application 或 SQLAlchemy。中立的存储命令/查询 DTO 与 Protocol 一起放在 ports 边界，application 装配它们，adapter 实现它们。必要操作为 `create_run`、`commit_batch`、`verify_batch`、`list_runs`、`read_run`、`read_session`、`list_items`、`load_contents`、`repair_interrupted`；读取返回持久化原记录，公共 DTO 由同一个 reader 生成。引用抽取通过同一注册器注入，不让 adapter 维护第二份字段清单。
+Port 只定义不依赖 application 或 SQLAlchemy 的 generic Protocol；有界且已校验的创建、批次与读取模型由 application 定义，并在组合根中绑定到这些类型参数，adapter 以结构化类型实现协议。`TranscriptStorePort` 提供 `get_creation`、`create_run`、`verify_creation`、`write_batch`、`verify_batch`；`TranscriptReadStorePort` 提供 `list_runs`、`read_run`；`StartupRepairStorePort` 提供 `list_interrupted_run_ids`、`read_run`、`write_batch`。session、item 与全文都从一致的 `read_run` 快照装配，不另设 `read_session`、`list_items` 或 `load_contents` port；启动修复流程由 application 驱动，不在 port 上暴露 `repair_interrupted`。引用抽取通过同一注册器注入，不让 adapter 维护第二份字段清单，也不使用逐条 append 模拟原子批次。
 
 保持 `create_app(...)` 的测试注入能力；生产默认使用 PostgreSQL，测试可注入可控 store/workflow。直接替换旧 `/api/analysis/sessions` 路由及整体模型名，不保留兼容路由。同步导入、fakes、架构测试、OpenAPI、CLI、smoke 和 README；不重写 M1 领域模型或 M2 历史验收记录。
 

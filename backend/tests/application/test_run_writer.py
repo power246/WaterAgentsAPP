@@ -238,7 +238,7 @@ async def wait_for_state(
     state: PersistenceState,
 ) -> None:
     await wait_until(
-        lambda: coordinator._persistence_info_locked(
+        lambda: coordinator._transcript_writer.info_locked(
             coordinator._runs[run_id]
         ).state
         is state
@@ -701,7 +701,8 @@ def test_unexpected_writer_failure_is_nonretryable_and_writer_can_recover(
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             runtime = coordinator._runs[created.run_id]
-            original = coordinator._freeze_persistence_batch_locked
+            writer = coordinator._transcript_writer
+            original = writer._freeze_batch_locked
             failed = False
 
             def fail_once(candidate):
@@ -712,8 +713,8 @@ def test_unexpected_writer_failure_is_nonretryable_and_writer_can_recover(
                 return original(candidate)
 
             monkeypatch.setattr(
-                coordinator,
-                "_freeze_persistence_batch_locked",
+                writer,
+                "_freeze_batch_locked",
                 fail_once,
             )
             item = await coordinator.reserve_transcript_item(created.run_id)
