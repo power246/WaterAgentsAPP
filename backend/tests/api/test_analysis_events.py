@@ -22,11 +22,8 @@ from app.application.analysis_runs.coordinator import (
 )
 from app.application.analysis_runs.models import AgentRole, RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext
-from app.application.transcripts.models import FixtureMessageV1, GenerationStatus
-from app.application.transcripts.registry import (
-    create_production_registry,
-    fixture_message_registration,
-)
+from app.application.transcripts.models import GenerationStatus
+from app.application.transcripts.registry import create_production_registry
 from app.application.transcripts.stream_models import (
     MessageDeltaProcessRecord,
     MessageFinalizedProcessRecord,
@@ -37,6 +34,10 @@ from app.application.transcripts.stream_models import (
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.config import AppSettings
 from app.main import create_app
+from scripts.transcript_fixtures import (
+    FixtureMessageV1,
+    fixture_message_registration,
+)
 
 CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
     "America/Chicago"
@@ -248,7 +249,9 @@ def test_session_log_exists_without_subscribers_and_preserves_phase_order() -> N
             assert records[1].header.transcript_sequence == message.transcript_sequence
             assert records[1].header.occurred_at == message.created_at
             assert records[2].text + records[3].text == "first answer"
-            await coordinator._wait_for_writer_drain(coordinator._runs[created.run_id])
+            await coordinator._transcript_writer.drain(
+                coordinator._runs[created.run_id]
+            )
             stored = await store.read_run(created.run_id)
             assert sum(item.item_id == message.item_id for item in stored.items) == 1
             assert all(
@@ -555,7 +558,7 @@ def test_streamed_and_final_text_mismatch_records_visible_diagnostic() -> None:
                 item.item_id == message.item_id
                 for item in runtime.transcript_buffer.items
             ) == 1
-            await coordinator._wait_for_writer_drain(runtime)
+            await coordinator._transcript_writer.drain(runtime)
             stored = await store.read_run(created.run_id)
             stored_message = next(
                 item for item in stored.items if item.item_id == message.item_id
@@ -617,7 +620,7 @@ def test_streamed_message_metadata_matches_started_finalized_get_and_storage() -
                 session.session_id,
             )
             runtime = coordinator._runs[created.run_id]
-            await coordinator._wait_for_writer_drain(runtime)
+            await coordinator._transcript_writer.drain(runtime)
 
             response = await create_session_event_response(
                 coordinator,
@@ -729,7 +732,7 @@ def test_streamed_normal_url_stays_completed_and_matches_final_body(
                 session.session_id,
             )
             runtime = coordinator._runs[created.run_id]
-            await coordinator._wait_for_writer_drain(runtime)
+            await coordinator._transcript_writer.drain(runtime)
 
             response = await create_session_event_response(
                 coordinator,
@@ -809,7 +812,7 @@ def test_complete_private_url_is_hidden_in_deltas_replay_and_storage(
                 session.session_id,
             )
             runtime = coordinator._runs[created.run_id]
-            await coordinator._wait_for_writer_drain(runtime)
+            await coordinator._transcript_writer.drain(runtime)
 
             response = await create_session_event_response(
                 coordinator,
@@ -989,7 +992,7 @@ def test_released_live_stream_returns_history_location_but_missing_is_404() -> N
             release.set()
             runtime = coordinator._runs[created.run_id]
             await runtime.workflow_quiesced.wait()
-            await coordinator._wait_for_writer_drain(runtime)
+            await coordinator._transcript_writer.drain(runtime)
             coordinator._runs.pop(created.run_id)
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),

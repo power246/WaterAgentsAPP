@@ -8,6 +8,7 @@ from uuid import UUID
 from app.api.http.errors import handle_error
 from app.api.sse.encoder import encode_event
 from app.application.analysis_runs.coordinator import RunCoordinator
+from app.application.analysis_runs.writer import TranscriptWriter
 from app.application.analysis_runs.models import (
     AnalysisConfigurationSnapshot,
     RunCreatedEvent,
@@ -96,7 +97,7 @@ def test_documented_error_codes_match_runtime_names_and_openapi_statuses() -> No
     }.intersection(error_section)
 
     registry_source = inspect.getsource(TranscriptRegistry.parse)
-    warning_source = inspect.getsource(RunCoordinator._persistence_error)
+    warning_source = inspect.getsource(TranscriptWriter.error_for)
     for code in ("transcript_content_unsupported", "transcript_content_corrupt"):
         assert code in registry_source
         assert code in error_section

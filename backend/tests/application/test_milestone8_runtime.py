@@ -15,15 +15,11 @@ from app.application.analysis_runs.coordinator import (
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.models import (
-    FixtureMessageV1,
     GenerationStatus,
     LateMessageOutputFact,
     MessageEndReason,
 )
-from app.application.transcripts.registry import (
-    create_production_registry,
-    fixture_message_registration,
-)
+from app.application.transcripts.registry import create_production_registry
 from app.application.transcripts.stream_models import (
     MessageFinalizedProcessRecord,
     TranscriptItemProcessRecord,
@@ -31,6 +27,10 @@ from app.application.transcripts.stream_models import (
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
+from scripts.transcript_fixtures import (
+    FixtureMessageV1,
+    fixture_message_registration,
+)
 
 
 CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(

@@ -6,11 +6,8 @@ import httpx
 import pytest
 
 from app.application.analysis_runs.models import AgentRole
-from app.application.transcripts.models import FixtureMessageV1, GenerationStatus
-from app.application.transcripts.registry import (
-    create_production_registry,
-    fixture_message_registration,
-)
+from app.application.transcripts.models import GenerationStatus
+from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.main import create_app
@@ -19,6 +16,10 @@ from scripts.run_sse_smoke import (
     GatedWorkflow,
     read_frame,
     running_server,
+)
+from scripts.transcript_fixtures import (
+    FixtureMessageV1,
+    fixture_message_registration,
 )
 
 

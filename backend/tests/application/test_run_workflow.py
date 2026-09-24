@@ -105,7 +105,7 @@ async def wait_quiesced(coordinator, run_id):
 
 
 async def events_for(coordinator, run_id):
-    return [event async for event in await coordinator.subscribe(run_id)]
+    return tuple(coordinator._runs[run_id].events)
 
 
 def records_for(caplog, event_name):

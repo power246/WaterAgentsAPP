@@ -19,10 +19,10 @@ from app.application.transcripts.registry import (
     UnsupportedTranscriptContentError,
     create_production_registry,
     extract_analysis_detail_references,
-    fixture_message_registration,
     validate_references,
 )
 from app.domain.attribution import AnalysisDetail, AnalysisStep
+from scripts.transcript_fixtures import fixture_message_registration
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
 OTHER_RUN_ID = UUID("10000000-0000-0000-0000-000000000002")
