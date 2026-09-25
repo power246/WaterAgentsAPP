@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -19,6 +20,11 @@ from app.application.analysis_runs.creation import (
 from app.application.analysis_runs.models import RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from tests.m4_support import (
+    MODEL_CAPABILITIES,
+    MODEL_CATALOG,
+    create_request_bytes,
+)
 
 
 class FixedClock:
@@ -112,9 +118,12 @@ class TakeoverStore(RecordingStore):
 
 
 def coordinator_for(store, workflow=None, **options) -> RunCoordinator:
+    clock = options.pop("clock", FixedClock())
+    model_catalog = options.pop("model_catalog", MODEL_CATALOG)
     return RunCoordinator(
-        FixedClock(),
+        clock,
         transcript_store=store,
+        model_catalog=model_catalog,
         workflow=workflow,
         shutdown_grace_period=0,
         **options,
@@ -125,12 +134,34 @@ def run(exercise) -> None:
     asyncio.run(asyncio.wait_for(exercise(), timeout=5))
 
 
+class MutableClock:
+    def __init__(self, instant: datetime) -> None:
+        self.instant = instant
+        self.calls = 0
+
+    def now(self) -> datetime:
+        self.calls += 1
+        return self.instant
+
+
+class MutableCatalog:
+    def __init__(self) -> None:
+        self.capabilities = MODEL_CAPABILITIES
+        self.calls = 0
+
+    def snapshot(self):
+        from app.domain.model_catalog import ModelCatalogSnapshot
+
+        self.calls += 1
+        return ModelCatalogSnapshot(capabilities=self.capabilities)
+
+
 def test_creation_candidate_has_exact_atomic_facts_and_immutable_receipt() -> None:
     async def exercise() -> None:
         store = RecordingStore()
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
-        raw_body = b'{ "query" : "  lake  ", "time_resolution" : "6h" }'
+        raw_body = create_request_bytes("  lake  ", time_resolution="6h")
         key = uuid4()
         try:
             receipt = await coordinator.create_run(raw_body, idempotency_key=key)
@@ -146,7 +177,9 @@ def test_creation_candidate_has_exact_atomic_facts_and_immutable_receipt() -> No
                 "analysis_request", "lifecycle_event"
             ]
             request_body = candidate.transcript.items[0].inline_body
-            assert request_body == '{"query":"lake","time_resolution":"6h"}'
+            assert json.loads(request_body) == json.loads(
+                create_request_bytes("lake", time_resolution="6h")
+            )
             context = await workflow.calls.get()
             assert context.run.run_id == receipt.run_id
             assert context.query == "lake"
@@ -163,7 +196,7 @@ def test_creation_rejects_nul_query_before_persistence() -> None:
         coordinator = coordinator_for(store)
         try:
             with pytest.raises(ValidationError):
-                await coordinator.create_run(b'{"query":"lake\\u0000level"}')
+                await coordinator.create_run(create_request_bytes("lake\x00level"))
             assert store.candidates == []
             assert coordinator._runs == {}
         finally:
@@ -178,7 +211,7 @@ def test_same_key_concurrent_waiters_share_one_owner_and_one_execution() -> None
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         key = uuid4()
-        body = b'{"query":"lake"}'
+        body = create_request_bytes()
         try:
             first = asyncio.create_task(coordinator.create_run(body, idempotency_key=key))
             await store.started.wait()
@@ -200,6 +233,53 @@ def test_same_key_concurrent_waiters_share_one_owner_and_one_execution() -> None
     run(exercise)
 
 
+def test_idempotent_replay_skips_changed_clock_and_catalog_but_new_key_uses_them() -> None:
+    async def exercise() -> None:
+        store = RecordingStore()
+        workflow = HoldingWorkflow()
+        clock = MutableClock(datetime(2026, 9, 13, 12, tzinfo=UTC))
+        catalog = MutableCatalog()
+        coordinator = coordinator_for(
+            store,
+            workflow,
+            clock=clock,
+            model_catalog=catalog,
+        )
+        key = uuid4()
+        body = create_request_bytes(
+            date_range={"start_date": "2026-09-12", "end_date": "2026-09-13"}
+        )
+        try:
+            original = await coordinator.create_run(body, idempotency_key=key)
+            await workflow.calls.get()
+            clock_calls = clock.calls
+            catalog_calls = catalog.calls
+
+            clock.instant = datetime(2026, 10, 13, 12, tzinfo=UTC)
+            catalog.capabilities = ()
+            replay = await coordinator.create_run(body, idempotency_key=key)
+
+            assert replay == original
+            assert clock.calls == clock_calls
+            assert catalog.calls == catalog_calls
+            assert len(store.candidates) == 1
+
+            with pytest.raises(ValidationError) as rejected:
+                await coordinator.create_run(body, idempotency_key=uuid4())
+            assert {
+                issue["ctx"]["error"].error_type
+                for issue in rejected.value.errors()
+            } == {"date_range_out_of_bounds", "model_selection_unsupported"}
+            assert clock.calls == clock_calls + 1
+            assert catalog.calls == catalog_calls + 1
+            assert len(store.candidates) == 1
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
 def test_in_process_owner_rejects_different_bytes_before_a_second_write() -> None:
     async def exercise() -> None:
         store = GatedStore()
@@ -207,12 +287,12 @@ def test_in_process_owner_rejects_different_bytes_before_a_second_write() -> Non
         coordinator = coordinator_for(store, workflow)
         key = uuid4()
         first = asyncio.create_task(
-            coordinator.create_run(b'{"query":"lake"}', idempotency_key=key)
+            coordinator.create_run(create_request_bytes(), idempotency_key=key)
         )
         try:
             await store.started.wait()
             with pytest.raises(IdempotencyKeyConflictError):
-                await coordinator.create_run(b'{ "query":"lake"}', idempotency_key=key)
+                await coordinator.create_run(b" " + create_request_bytes(), idempotency_key=key)
             store.release.set()
             await first
             await workflow.calls.get()
@@ -246,7 +326,7 @@ def test_uncertain_commit_errors_are_verified_without_rewrite(
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         key = uuid4()
-        body = b'{"query":"lake"}'
+        body = create_request_bytes()
         try:
             receipt = await coordinator.create_run(body, idempotency_key=key)
             context = await workflow.calls.get()
@@ -279,7 +359,7 @@ def test_unconfirmed_owner_survives_first_response_and_later_converges() -> None
             verification_retry_interval=0.001,
         )
         key = uuid4()
-        body = b'{"query":"lake"}'
+        body = create_request_bytes()
         try:
             with pytest.raises(CreationCommitUnconfirmedError) as failure:
                 await coordinator.create_run(body, idempotency_key=key)
@@ -310,7 +390,7 @@ def test_confirmed_rollback_never_registers_or_executes() -> None:
         try:
             with pytest.raises(CreationRolledBackError):
                 await coordinator.create_run(
-                    b'{"query":"lake"}', idempotency_key=uuid4()
+                    create_request_bytes(), idempotency_key=uuid4()
                 )
             assert coordinator._runs == {}
             assert workflow.calls.empty()
@@ -327,7 +407,7 @@ def test_waiter_takes_over_only_after_the_first_rollback_is_confirmed() -> None:
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow, idempotency_wait_timeout=0.5)
         key = uuid4()
-        body = b'{"query":"lake"}'
+        body = create_request_bytes()
         try:
             first = asyncio.create_task(
                 coordinator.create_run(body, idempotency_key=key)
@@ -360,7 +440,7 @@ def test_client_cancellation_does_not_cancel_creation_owner() -> None:
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         request = asyncio.create_task(
-            coordinator.create_run(b'{"query":"lake"}', idempotency_key=uuid4())
+            coordinator.create_run(create_request_bytes(), idempotency_key=uuid4())
         )
         try:
             await store.started.wait()
@@ -385,7 +465,7 @@ def test_owner_and_waiter_timeouts_are_distinct_and_do_not_cancel_owner() -> Non
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow, idempotency_wait_timeout=0.01)
         key = uuid4()
-        body = b'{"query":"lake"}'
+        body = create_request_bytes()
         first = asyncio.create_task(coordinator.create_run(body, idempotency_key=key))
         try:
             await store.started.wait()
@@ -421,7 +501,7 @@ def test_expired_deadline_after_owner_creation_is_unconfirmed(monkeypatch) -> No
         monkeypatch.setattr(coordinator, "_wait_for_owner", expire_before_wait)
         try:
             with pytest.raises(CreationCommitUnconfirmedError) as failure:
-                await coordinator.create_run(b'{"query":"lake"}', idempotency_key=key)
+                await coordinator.create_run(create_request_bytes(), idempotency_key=key)
             await store.started.wait()
             assert (
                 failure.value.run_id
@@ -454,10 +534,11 @@ def test_lookup_waits_through_the_post_commit_registration_window() -> None:
         store = RecordingStore()
         workflow = HoldingWorkflow()
         coordinator = RegistrationGatedCoordinator(
-            FixedClock(), transcript_store=store, workflow=workflow,
+            FixedClock(), transcript_store=store, model_catalog=MODEL_CATALOG,
+            workflow=workflow,
             shutdown_grace_period=0,
         )
-        creation = asyncio.create_task(coordinator.create_run(b'{"query":"lake"}'))
+        creation = asyncio.create_task(coordinator.create_run(create_request_bytes()))
         try:
             await coordinator.registration_started.wait()
             run_id = store.candidates[0].snapshot.run_id
@@ -491,7 +572,7 @@ def test_workflow_task_start_failure_keeps_receipt_and_adds_one_failure() -> Non
             workflow_task_factory=fail_start,
         )
         key = uuid4()
-        body = b'{"query":"lake"}'
+        body = create_request_bytes()
         try:
             receipt = await coordinator.create_run(body, idempotency_key=key)
             runtime = coordinator._runs[receipt.run_id]
@@ -528,7 +609,7 @@ def test_cancel_wins_if_requested_before_workflow_start_failure_is_recorded() ->
             workflow_task_factory=cancel_then_fail,
         )
         try:
-            receipt = await coordinator.create_run(b'{"query":"lake"}')
+            receipt = await coordinator.create_run(create_request_bytes())
             runtime = coordinator._runs[receipt.run_id]
             assert receipt.status is RunStatus.PENDING
             assert runtime.snapshot.status is RunStatus.CANCELLED

@@ -4,12 +4,12 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import isfinite
 from typing import Coroutine, TypeVar
 from uuid import UUID, uuid4
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from app.application.analysis_runs.creation import (
     CreationCommitUnconfirmedError,
@@ -110,9 +110,14 @@ from app.application.transcripts.stream_models import (
 )
 from app.application.transcripts.streaming import StreamingCredentialFilter
 from app.domain.common import NonEmptyString, normalize_utc_datetime
-from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION
-from app.domain.time.time_resolution_source import TimeResolutionSource
+from app.domain.model_catalog import ModelRole
+from app.domain.stable_validation_error import stable_validation_error
+from app.domain.time.time_resolution_preference_source import (
+    TimeResolutionPreferenceSource,
+)
+from app.domain.time.timezone import get_iana_timezone
 from app.ports.clock import ClockPort
+from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
@@ -237,6 +242,7 @@ class RunCoordinator:
             PersistenceWriteBatch,
             BatchVerification,
         ],
+        model_catalog: ModelCatalogPort,
         analysis_timezone: str = "America/Chicago",
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
@@ -281,6 +287,7 @@ class RunCoordinator:
             raise ValueError("live_state_grace_period must be finite and non-negative")
         self._clock = clock
         self._transcript_store = transcript_store
+        self._model_catalog = model_catalog
         self._analysis_timezone = analysis_timezone
         self._id_factory = id_factory
         self._record_id_factory = record_id_factory
@@ -416,9 +423,17 @@ class RunCoordinator:
             return body, None
         query = _QUERY.validate_python(body)
         checked = AnalysisConfigurationSnapshot.model_validate(configuration)
-        payload: dict[str, str] = {"query": query}
-        if checked.time_resolution_source is TimeResolutionSource.FRONTEND:
-            payload["time_resolution"] = checked.time_resolution.value
+        payload: dict[str, object] = {
+            "query": query,
+            "parser_model": checked.parser_model.model_dump(mode="json"),
+            "waterbody_model": checked.waterbody_model.model_dump(mode="json"),
+            "memory_mode": checked.memory_mode.value,
+        }
+        if (
+            checked.time_resolution_preference_source
+            is TimeResolutionPreferenceSource.FRONTEND
+        ):
+            payload["time_resolution"] = checked.time_resolution_preference.value
         return (
             json.dumps(
                 payload,
@@ -476,19 +491,66 @@ class RunCoordinator:
         except UnicodeDecodeError as error:
             raise InvalidSubmissionEncodingError() from error
         request = AnalysisRequestV1.model_validate_json(raw_body)
-        configuration = configuration_override or AnalysisConfigurationSnapshot(
-            analysis_timezone=self._analysis_timezone,
-            time_resolution=request.time_resolution or DEFAULT_TIME_RESOLUTION,
-            time_resolution_source=(
-                TimeResolutionSource.FRONTEND
-                if "time_resolution" in request.model_fields_set
-                else TimeResolutionSource.DEFAULT
-            ),
+        timestamp = self._clock.now()
+        catalog = self._model_catalog.snapshot()
+        validation_errors: list[dict[str, object]] = []
+        if request.date_range is not None:
+            local_today = timestamp.astimezone(
+                get_iana_timezone(self._analysis_timezone)
+            ).date()
+            earliest = local_today - timedelta(days=7)
+            latest = local_today + timedelta(days=7)
+            if (
+                request.date_range.start_date < earliest
+                or request.date_range.end_date > latest
+            ):
+                validation_errors.append(
+                    {
+                        "type": "value_error",
+                        "ctx": {
+                            "error": stable_validation_error(
+                                "date_range_out_of_bounds",
+                                "date_range must be within {earliest} and {latest}",
+                                {
+                                    "earliest": earliest.isoformat(),
+                                    "latest": latest.isoformat(),
+                                },
+                            )
+                        },
+                        "loc": ("date_range",),
+                        "input": request.date_range.model_dump(mode="json"),
+                    }
+                )
+        for field_name, role in (
+            ("parser_model", ModelRole.QUERY_PARSER),
+            ("waterbody_model", ModelRole.WATERBODY),
+        ):
+            selection = getattr(request, field_name)
+            if not catalog.supports(selection, role):
+                validation_errors.append(
+                    {
+                        "type": "value_error",
+                        "ctx": {
+                            "error": stable_validation_error(
+                                "model_selection_unsupported",
+                                "model is not selectable for role {role}",
+                                {"role": role.value},
+                            )
+                        },
+                        "loc": (field_name,),
+                        "input": selection.model_dump(mode="json"),
+                    }
+                )
+        if validation_errors:
+            raise ValidationError.from_exception_data(
+                "AnalysisRequestV1", validation_errors
+            )
+        configuration = configuration_override or request.to_configuration_snapshot(
+            self._analysis_timezone
         )
         run_id = self._new_id()
         if run_id in self._runs:
             raise ValueError("The generated run ID already exists.")
-        timestamp = self._clock.now()
         snapshot = AnalysisRunSnapshot(
             run_id=run_id,
             status=RunStatus.PENDING,

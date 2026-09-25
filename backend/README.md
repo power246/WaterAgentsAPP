@@ -130,6 +130,15 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_HOST` | `127.0.0.1` |
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
+| `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with only `provider`, `model`, and `roles` (`query_parser` / `waterbody`) |
+| `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `100` |
+| `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `12` |
+| `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
+| `WATERAGENTS_TOPOLOGY_MAX_CONCURRENCY` | `8` |
+| `WATERAGENTS_PREDICTION_BASELINE_HOURS` | `48` |
+| `WATERAGENTS_MAX_TARGET_PARAMETERS` | `6` |
+| `WATERAGENTS_QUERY_PARSER_TIMEOUT_SECONDS` | `45` |
+| `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `120` |
 | `WATERAGENTS_DB_HOST` | `127.0.0.1` |
 | `WATERAGENTS_DB_PORT` | `5432` |
 | `WATERAGENTS_DB_NAME` | `wateragents` |
@@ -147,6 +156,8 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_SHUTDOWN_SAVE_GRACE_SECONDS` | `5` |
 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
+
+Run creation requires one catalog selection for each model role. The catalog stores only public model identities and role metadata; endpoints, credentials, API keys, and authorization values are not valid catalog fields. An empty default keeps health/startup available for configuration checks, but create requests are rejected until both roles are configured.
 
 ### Local PostgreSQL with Compose
 

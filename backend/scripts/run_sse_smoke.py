@@ -15,6 +15,10 @@ from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config import AppSettings
 from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 from app.main import create_app
+try:
+    from scripts.m4_request import smoke_request
+except ModuleNotFoundError:  # Direct `python scripts/run_sse_smoke.py` execution.
+    from m4_request import smoke_request
 
 BASE = "/api/analysis/runs"
 
@@ -140,7 +144,9 @@ async def completed_smoke() -> None:
     async with running_server(app) as client:
         created = await client.post(
             BASE,
-            json={"query": "M3 run smoke completed", "time_resolution": "6h"},
+            json=smoke_request(
+                "M3 run smoke completed", time_resolution="6h"
+            ),
         )
         assert created.status_code == 201, created.text
         snapshot = AnalysisRunResponse.model_validate(created.json())
@@ -180,7 +186,9 @@ async def cancelled_smoke() -> None:
     )
     async with running_server(app) as client:
         try:
-            created = await client.post(BASE, json={"query": "M3 run smoke cancelled"})
+            created = await client.post(
+                BASE, json=smoke_request("M3 run smoke cancelled")
+            )
             snapshot = AnalysisRunResponse.model_validate(created.json())
             await workflow.started.wait()
             path = f"{BASE}/{snapshot.run_id}/events"

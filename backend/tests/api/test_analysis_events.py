@@ -33,15 +33,19 @@ from app.application.transcripts.stream_models import (
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.config import AppSettings
-from app.main import create_app
+from tests.m4_support import (
+    MODEL_CATALOG,
+    create_request,
+    create_test_app as create_app,
+)
 from scripts.transcript_fixtures import (
     FixtureMessageV1,
     fixture_message_registration,
 )
 
-CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
-    "America/Chicago"
-)
+CONFIGURATION = CreateAnalysisRunRequest.model_validate(
+    create_request("query")
+).to_configuration_snapshot("America/Chicago")
 
 
 class TickingClock:
@@ -1040,6 +1044,7 @@ def test_keepalive_interval_must_be_finite_and_positive(interval) -> None:
     with pytest.raises(ValueError, match="finite and positive"):
         RunCoordinator(
             TickingClock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=InMemoryTranscriptStore(),
             keepalive_interval=interval,
         )

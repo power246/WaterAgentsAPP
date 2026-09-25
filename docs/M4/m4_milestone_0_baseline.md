@@ -12,7 +12,7 @@ M4 继续复用 M3 的一个 `RunCoordinator`、run/session runtime、`Transcrip
 
 | 项目 | 基线 |
 |---|---|
-| 实现分支 | `codex/m4-milestone-0` |
+| 实现分支 | `codex/m4-query-topology` |
 | 起始 HEAD | `a75d604c6397ab0e8c8d7b11d2c7fa9d501002cc` |
 | 刷新后的 `origin/main` | `a75d604c6397ab0e8c8d7b11d2c7fa9d501002cc` |
 | 起始 merge-base | `a75d604c6397ab0e8c8d7b11d2c7fa9d501002cc` |

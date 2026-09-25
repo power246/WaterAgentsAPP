@@ -12,7 +12,7 @@ from app.application.correlation import request_id_context
 from app.infrastructure.observability import json_logging
 from app.infrastructure.observability.json_logging import JsonFormatter
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.main import create_app
+from tests.m4_support import create_request, create_test_app as create_app
 
 BASE = "/api/analysis/runs"
 QUERY = 'private-location\n"机密"'
@@ -68,7 +68,11 @@ def parsed(lines, event_name=None):
 def test_completed_lifecycle_json_matches_sse_and_original_objects(application_logs, caplog, capsys):
     async def exercise():
         async with application() as (app, client):
-            created = await client.post(BASE, json={"query": QUERY}, headers={"Authorization": SECRET, "Cookie": SECRET})
+            created = await client.post(
+                BASE,
+                json=create_request(QUERY),
+                headers={"Authorization": SECRET, "Cookie": SECRET},
+            )
             run_id = created.json()["run_id"]
             stream = await client.get(f"{BASE}/{run_id}/events")
             sse_events = [json.loads(line[6:]) for line in stream.text.splitlines() if line.startswith("data: ")]
@@ -117,7 +121,8 @@ def test_failure_error_id_diagnostics_and_request_context_survive_concurrent_req
         workflow = Workflow()
         async with application(workflow=workflow) as (app, client):
             created = await asyncio.gather(*[
-                client.post(BASE, json={"query": f"{QUERY} {index}"}) for index in range(2)
+                client.post(BASE, json=create_request(f"{QUERY} {index}"))
+                for index in range(2)
             ])
             calls = [await workflow.calls.get() for _ in created]
             for _, release in calls:
@@ -154,7 +159,7 @@ def test_http_duration_uses_clock_and_server_errors_keep_safe_diagnostics(monkey
                 raise RuntimeError(f"service failure {QUERY}; API_KEY={SECRET}")
 
             monkeypatch.setattr(app.state.run_coordinator, "create_run", fail)
-            response = await client.post(BASE, json={"query": QUERY})
+            response = await client.post(BASE, json=create_request(QUERY))
             assert response.status_code == 500
             public = response.json()["error"]
             error = parsed(application_logs, "http_request_failed")[-1]
@@ -192,7 +197,7 @@ def test_cancelled_late_exception_keeps_diagnostics_without_a_failed_event(appli
     async def exercise():
         workflow = Workflow()
         async with application(workflow=workflow) as (app, client):
-            created = await client.post(BASE, json={"query": QUERY})
+            created = await client.post(BASE, json=create_request(QUERY))
             run_id = created.json()["run_id"]
             _, release = await workflow.calls.get()
             cancelled = await client.post(f"{BASE}/{run_id}/cancel")
@@ -233,7 +238,7 @@ def test_observability_failure_does_not_change_http_or_run_outcomes(monkeypatch,
                     write = broken
                     flush = broken
                 monkeypatch.setattr(json_logging.sys, "stderr", BrokenWriter())
-            created = await client.post(BASE, json={"query": QUERY})
+            created = await client.post(BASE, json=create_request(QUERY))
             assert created.status_code == 201
             assert UUID(created.headers["x-request-id"])
             run_id = created.json()["run_id"]
@@ -250,7 +255,11 @@ def test_observability_failure_does_not_change_http_or_run_outcomes(monkeypatch,
             await runtime.workflow_quiesced.wait()
             assert runtime.snapshot.status is RunStatus(outcome)
             assert len(runtime.events) == 2
-            assert (await client.post(BASE, json={"query": None})).status_code == 422
+            assert (
+                await client.post(
+                    BASE, json={**create_request(), "query": None}
+                )
+            ).status_code == 422
             if failure == "redactor":
                 assert all(row["event_name"] == "log_format_failed" for row in parsed(application_logs))
             assert "private-observability-failure" not in created.text + stream.text

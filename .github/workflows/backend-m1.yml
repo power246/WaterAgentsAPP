@@ -28,6 +28,7 @@ jobs:
       WATERAGENTS_DB_PASSWORD: wateragents-ci-password
       WATERAGENTS_DB_SSLMODE: disable
       WATERAGENTS_TEST_DB_NAME: wateragents_m9
+      WATERAGENTS_MODEL_CATALOG: '[{"provider":"ci","model":"parser","roles":["query_parser"]},{"provider":"ci","model":"waterbody","roles":["waterbody"]}]'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

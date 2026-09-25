@@ -23,6 +23,14 @@ from app.domain.hydrology import (
     RiverSegment,
     WaterQualityParameter,
 )
+from app.domain.memory import MemoryMode
+from app.domain.model_catalog import (
+    ModelCapability,
+    ModelCatalogSnapshot,
+    ModelRole,
+    ModelSelection,
+)
+from app.domain.stable_validation_error import StableValidationValueError
 from app.domain.inference import (
     AggregationMethod,
     IndeterminateReason,
@@ -48,8 +56,11 @@ from app.domain.evidence import (
 )
 from app.domain.time import (
     DEFAULT_TIME_RESOLUTION,
+    DEFAULT_TIME_RESOLUTION_PREFERENCE,
     TimeRange,
     TimeResolution,
+    TimeResolutionPreference,
+    TimeResolutionPreferenceSource,
     TimeResolutionSource,
     TimeSegment,
     build_time_windows,
@@ -66,6 +77,7 @@ __all__ = [
     "AttributionSummary",
     "CollectionStatus",
     "DEFAULT_TIME_RESOLUTION",
+    "DEFAULT_TIME_RESOLUTION_PREFERENCE",
     "DataQualityFlag",
     "DomainEnum",
     "DomainFloat",
@@ -80,6 +92,11 @@ __all__ = [
     "InferenceResult",
     "IndeterminateReason",
     "JsonValue",
+    "MemoryMode",
+    "ModelCapability",
+    "ModelCatalogSnapshot",
+    "ModelRole",
+    "ModelSelection",
     "MonitoringStation",
     "NonEmptyString",
     "ParameterKey",
@@ -90,7 +107,10 @@ __all__ = [
     "RiskLevel",
     "RiskOrTrendAssessment",
     "TimeRange",
+    "StableValidationValueError",
     "TimeResolution",
+    "TimeResolutionPreference",
+    "TimeResolutionPreferenceSource",
     "TimeResolutionSource",
     "TimeSegment",
     "TimeWindowResult",

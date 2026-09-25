@@ -11,6 +11,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.domain.model_catalog import ModelCapability
+
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ENV_FILE = BACKEND_ROOT / ".env"
 
@@ -41,6 +43,30 @@ class AppSettings(BaseSettings):
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=8000, ge=1, le=65535)
     analysis_timezone: str = "America/Chicago"
+    model_catalog: tuple[ModelCapability, ...] = ()
+    topology_max_distance_km: float = Field(
+        default=100,
+        gt=0,
+        le=1000,
+        allow_inf_nan=False,
+    )
+    topology_max_hops: int = Field(default=12, ge=1, le=100)
+    topology_max_nodes: int = Field(default=128, ge=1, le=10000)
+    topology_max_concurrency: int = Field(default=8, ge=1, le=64)
+    prediction_baseline_hours: int = Field(default=48, ge=1, le=168)
+    max_target_parameters: int = Field(default=6, ge=1, le=6)
+    query_parser_timeout_seconds: float = Field(
+        default=45,
+        gt=0,
+        le=300,
+        allow_inf_nan=False,
+    )
+    topology_stage_timeout_seconds: float = Field(
+        default=120,
+        gt=0,
+        le=900,
+        allow_inf_nan=False,
+    )
     db_host: str = Field(default="127.0.0.1", min_length=1)
     db_port: int = Field(default=5432, ge=1, le=65535)
     db_name: str = Field(default="wateragents", min_length=1)
@@ -86,6 +112,32 @@ class AppSettings(BaseSettings):
     def preserve_database_password(cls, value: object) -> object:
         if isinstance(value, str):
             return SecretStr(value)
+        return value
+
+    @field_validator(
+        "topology_max_hops",
+        "topology_max_nodes",
+        "topology_max_concurrency",
+        "prediction_baseline_hours",
+        "max_target_parameters",
+        mode="before",
+    )
+    @classmethod
+    def reject_non_integer_m4_limits(cls, value: object) -> object:
+        if isinstance(value, (bool, float)):
+            raise ValueError("M4 integer limits require an integer value")
+        return value
+
+    @field_validator(
+        "topology_max_distance_km",
+        "query_parser_timeout_seconds",
+        "topology_stage_timeout_seconds",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_m4_numbers(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("M4 numeric settings must not be boolean")
         return value
 
     @field_validator("db_sslmode", mode="before")

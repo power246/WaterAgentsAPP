@@ -18,7 +18,7 @@ from app.application.transcripts.models import (
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.ports.errors import PortUnavailableError
-from app.main import create_app
+from tests.m4_support import create_request, create_test_app as create_app
 
 BASE = "/api/analysis/runs"
 
@@ -115,7 +115,7 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
             workflow=workflow,
             settings=settings,
         ) as (application, client):
-            created = await client.post(BASE, json={"query": "  inspect river  "})
+            created = await client.post(BASE, json=create_request("  inspect river  "))
             run_id = UUID(created.json()["run_id"])
             _, release = await workflow.started.get()
             coordinator = application.state.run_coordinator
@@ -156,7 +156,9 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
             assert detail.status_code == 200
             assert detail.json()["source"] == "live"
             assert detail.json()["run"]["query"] == "inspect river"
-            assert detail.json()["run"]["configuration"]["time_resolution"] == "12h"
+            assert detail.json()["run"]["configuration"][
+                "time_resolution_preference"
+            ] == "12h"
             assert detail.json()["sessions"] == [
                 {
                     "session_id": str(session.session_id),
@@ -220,7 +222,7 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
             assert json.loads(content.json()["text"])["text"] == "水" * 400
             assert len(content.json()["text"].encode()) == content.json()["content_bytes"]
 
-            other = await client.post(BASE, json={"query": "other run"})
+            other = await client.post(BASE, json=create_request("other run"))
             cross_run = await client.get(
                 f"{BASE}/{other.json()['run_id']}/transcript/{audit.item_id}/content"
             )
@@ -250,7 +252,7 @@ def test_authorization_text_round_trips_through_history_and_full_content() -> No
         store = InMemoryTranscriptStore()
         query = "Authorization: [REDACTED]"
         async with app_client(store=store) as (application, client):
-            created = await client.post(BASE, json={"query": query})
+            created = await client.post(BASE, json=create_request(query))
             assert created.status_code == 201
             run_id = UUID(created.json()["run_id"])
             await wait_saved(application, run_id)
@@ -271,7 +273,7 @@ def test_authorization_text_round_trips_through_history_and_full_content() -> No
             assert request_item["parse_status"] == "ok"
             assert request_item["content"] == {
                 "kind": "inline",
-                "body": {"query": query},
+                "body": create_request(query),
             }
             assert detail.json()["issues"] == []
 
@@ -280,7 +282,7 @@ def test_authorization_text_round_trips_through_history_and_full_content() -> No
                 "?view=history"
             )
             assert content.status_code == 200
-            assert json.loads(content.json()["text"]) == {"query": query}
+            assert json.loads(content.json()["text"]) == create_request(query)
             assert request_item["content_bytes"] == content.json()["content_bytes"]
             assert len(content.json()["text"].encode("utf-8")) == content.json()[
                 "content_bytes"
@@ -293,7 +295,7 @@ def test_query_at_sign_url_round_trips_without_userinfo_redaction() -> None:
     async def exercise() -> None:
         query = "https://example.com/path?contact=alice@example.net"
         async with app_client() as (application, client):
-            created = await client.post(BASE, json={"query": query})
+            created = await client.post(BASE, json=create_request(query))
             assert created.status_code == 201
             run_id = UUID(created.json()["run_id"])
             await wait_saved(application, run_id)
@@ -304,7 +306,7 @@ def test_query_at_sign_url_round_trips_without_userinfo_redaction() -> None:
                 item for item in detail.json()["items"]
                 if item["content_type"] == "analysis_request"
             )
-            assert request_item["content"]["body"] == {"query": query}
+            assert request_item["content"]["body"] == create_request(query)
             assert "message_content_mismatch" not in detail.text
 
     run(exercise)
@@ -318,7 +320,13 @@ def test_history_cursor_is_stable_strict_and_uses_uuid_tie_breaks() -> None:
         expected = []
         async with app_client(store=store, clock=clock) as (_, client):
             run_ids = [
-                UUID((await client.post(BASE, json={"query": f"query {index}"})).json()["run_id"])
+                UUID(
+                    (
+                        await client.post(
+                            BASE, json=create_request(f"query {index}")
+                        )
+                    ).json()["run_id"]
+                )
                 for index in range(5)
             ]
             expected = sorted(run_ids, reverse=True)
@@ -334,7 +342,11 @@ def test_history_cursor_is_stable_strict_and_uses_uuid_tie_breaks() -> None:
                 "updated_at": changed.updated_at + timedelta(seconds=30),
             })
             clock.value += timedelta(seconds=1)
-            newest = UUID((await client.post(BASE, json={"query": "new page"})).json()["run_id"])
+            newest = UUID(
+                (await client.post(BASE, json=create_request("new page"))).json()[
+                    "run_id"
+                ]
+            )
             second = await client.get(
                 BASE,
                 params={"limit": 2, "cursor": first_cursor},
@@ -371,7 +383,7 @@ def test_invalid_read_parameters_and_database_failures_are_explicit() -> None:
         store = ReadFailureStore()
         workflow = GatedWorkflow()
         async with app_client(store=store, workflow=workflow) as (application, client):
-            created = await client.post(BASE, json={"query": "live query"})
+            created = await client.post(BASE, json=create_request("live query"))
             run_id = created.json()["run_id"]
             _, release = await workflow.started.get()
             assert (await client.get(f"{BASE}/{run_id}")).json()["source"] == "live"
@@ -433,7 +445,7 @@ def test_history_never_mixes_unpersisted_live_items_into_postgres_view() -> None
         store = BlockingWriteStore()
         workflow = GatedWorkflow()
         async with app_client(store=store, workflow=workflow) as (application, client):
-            created = await client.post(BASE, json={"query": "partial history"})
+            created = await client.post(BASE, json=create_request("partial history"))
             run_id = UUID(created.json()["run_id"])
             _, release = await workflow.started.get()
             await store.write_started.wait()
@@ -481,7 +493,7 @@ def test_corrupt_items_keep_safe_fulltext_unless_body_is_unreadable(
             transcript_preview_bytes=20,
         )
         async with app_client(store=store, settings=settings) as (_, client):
-            created = await client.post(BASE, json={"query": "corrupt config"})
+            created = await client.post(BASE, json=create_request("corrupt config"))
             run_id = UUID(created.json()["run_id"])
             candidate = store._runs[run_id]
             item = store._items[candidate.created_item_id]
@@ -595,7 +607,7 @@ def test_unsupported_fulltext_requires_strict_history_view() -> None:
         store = InMemoryTranscriptStore()
         workflow = GatedWorkflow()
         async with app_client(store=store, workflow=workflow) as (application, client):
-            created = await client.post(BASE, json={"query": "future content"})
+            created = await client.post(BASE, json=create_request("future content"))
             run_id = UUID(created.json()["run_id"])
             _, release = await workflow.started.get()
             await wait_saved(application, run_id)
@@ -619,9 +631,9 @@ def test_unsupported_fulltext_requires_strict_history_view() -> None:
                 )
                 assert history.status_code == 200
                 assert history.json()["content_type"] == "future_content"
-                assert json.loads(history.json()["text"]) == {
-                    "query": "future content"
-                }
+                assert json.loads(history.json()["text"]) == create_request(
+                    "future content"
+                )
                 assert history.json()["issues"][0]["error"]["code"] == (
                     "transcript_content_unsupported"
                 )
@@ -646,7 +658,7 @@ def test_cancel_and_manual_persistence_controls_cover_live_and_history(
                 live_state_grace_seconds=3600,
             ),
         ) as (application, client):
-            created = await client.post(BASE, json={"query": "control run"})
+            created = await client.post(BASE, json=create_request("control run"))
             run_id = UUID(created.json()["run_id"])
             _, release = await workflow.started.get()
             await wait_saved(application, run_id)
@@ -726,7 +738,7 @@ def test_cancel_and_manual_persistence_controls_cover_live_and_history(
             store=cancelled_store,
             workflow=cancelled_workflow,
         ) as (application, client):
-            created = await client.post(BASE, json={"query": "cancelled history"})
+            created = await client.post(BASE, json=create_request("cancelled history"))
             run_id = UUID(created.json()["run_id"])
             _, release = await cancelled_workflow.started.get()
             cancelled = await client.post(f"{BASE}/{run_id}/cancel")

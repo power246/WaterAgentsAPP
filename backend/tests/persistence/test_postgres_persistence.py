@@ -61,7 +61,12 @@ from app.infrastructure.persistence.schema import (
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
-from app.main import create_app
+from tests.m4_support import (
+    MODEL_CATALOG,
+    create_request,
+    create_request_bytes,
+    create_test_app as create_app,
+)
 from scripts.test_database import temporary_migrated_schema
 
 
@@ -429,6 +434,7 @@ def test_concurrent_coordinators_use_database_key_authority_and_execute_once(
         coordinators = [
             RunCoordinator(
                 Clock(),
+                model_catalog=MODEL_CATALOG,
                 transcript_store=store,
                 workflow=workflow,
                 shutdown_grace_period=0,
@@ -436,7 +442,7 @@ def test_concurrent_coordinators_use_database_key_authority_and_execute_once(
             for _ in range(2)
         ]
         key = uuid4()
-        body = b'{"query":"database race"}'
+        body = create_request_bytes("database race")
         try:
             receipts = await asyncio.gather(
                 *(
@@ -453,7 +459,7 @@ def test_concurrent_coordinators_use_database_key_authority_and_execute_once(
             assert stored.creation.receipt_snapshot() == receipts[0]
             with pytest.raises(IdempotencyKeyConflictError):
                 await coordinators[0].create_run(
-                    b'{ "query":"database race"}',
+                    b" " + body,
                     idempotency_key=key,
                 )
         finally:
@@ -498,6 +504,7 @@ def test_creation_verification_maps_external_content_by_expected_item_id(
         record_ids = iter(UUID(int=value) for value in (2, 1, 3, 4, 5, 6, 7, 8))
         coordinator = RunCoordinator(
             Clock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=store,
             workflow=workflow,
             record_id_factory=record_ids.__next__,
@@ -506,7 +513,7 @@ def test_creation_verification_maps_external_content_by_expected_item_id(
             shutdown_grace_period=0,
         )
         key = uuid4()
-        body = b'{"query":"external creation content"}'
+        body = create_request_bytes("external creation content")
         try:
             try:
                 receipt = await coordinator.create_run(body, idempotency_key=key)
@@ -557,6 +564,7 @@ def test_run_writer_persists_incremental_state_events_and_large_content(
         workflow = Workflow()
         coordinator = RunCoordinator(
             Clock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=store,
             workflow=workflow,
             persistence_retry_delays=(0, 0, 0, 0, 0),
@@ -564,7 +572,9 @@ def test_run_writer_persists_incremental_state_events_and_large_content(
             shutdown_save_grace_period=1,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"writer integration"}')
+            created = await coordinator.create_run(
+                create_request_bytes("writer integration")
+            )
             await workflow.calls.get()
             await _wait_persistence(coordinator, created.run_id)
             session = await coordinator.prepare_agent_session(
@@ -585,7 +595,7 @@ def test_run_writer_persists_incremental_state_events_and_large_content(
                 large.item_id,
                 "analysis_request",
                 1,
-                {"query": "水" * 30000},
+                create_request("水" * 30000),
             )
             await _wait_persistence(coordinator, created.run_id)
             completed = await coordinator.complete_run(created.run_id)
@@ -696,12 +706,15 @@ def test_pending_session_creation_unknown_commit_matches_memory_contract(
         workflow = Workflow()
         coordinator = RunCoordinator(
             Clock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=store,
             workflow=workflow,
             shutdown_grace_period=0,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"session verify"}')
+            created = await coordinator.create_run(
+                create_request_bytes("session verify")
+            )
             await workflow.calls.get()
             await _wait_persistence(coordinator, created.run_id)
 
@@ -793,6 +806,7 @@ def test_referenced_cancelled_draft_rolls_back_retries_and_survives_restart(
         registry = create_production_registry()
         coordinator = RunCoordinator(
             SystemClock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=store,
             workflow=workflow,
             shutdown_grace_period=0,
@@ -802,7 +816,7 @@ def test_referenced_cancelled_draft_rolls_back_retries_and_survives_restart(
         )
         try:
             created = await coordinator.create_run(
-                b'{"query":"referenced cancellation"}'
+                create_request_bytes("referenced cancellation")
             )
             await workflow.calls.get()
             await _wait_persistence(coordinator, created.run_id)
@@ -844,7 +858,7 @@ def test_referenced_cancelled_draft_rolls_back_retries_and_survives_restart(
                 target.item_id,
                 "analysis_request",
                 1,
-                {"query": "late finalize must stay suppressed"},
+                create_request("late finalize must stay suppressed"),
             ) is target
         finally:
             workflow.release.set()
@@ -1210,7 +1224,7 @@ def test_real_postgres_corrupt_json_has_safe_fulltext_when_readable(
             assert all(secret not in content.text for secret in unsafe_values)
 
             if external:
-                valid_body = '{"query":"byte mismatch"}'
+                valid_body = create_request_bytes("byte mismatch").decode()
                 async with engine.begin() as connection:
                     await connection.execute(
                         update(transcript_contents)
@@ -1227,7 +1241,7 @@ def test_real_postgres_corrupt_json_has_safe_fulltext_when_readable(
                     request_item.item_id,
                     ReadView.HISTORY,
                 )
-                assert json.loads(mismatched.text) == {"query": "byte mismatch"}
+                assert json.loads(mismatched.text) == create_request("byte mismatch")
                 assert mismatched.content_bytes == len(
                     mismatched.text.encode("utf-8")
                 )
@@ -1396,7 +1410,7 @@ def test_lifespan_repairs_real_postgres_without_restarting_workflow() -> None:
         async with first_app.router.lifespan_context(first_app):
             coordinator = first_app.state.run_coordinator
             interrupted = await coordinator.create_run(
-                b'{"query":"real PG interrupted"}'
+                create_request_bytes("real PG interrupted")
             )
             await workflow.calls.get()
             interrupted_session = await coordinator.prepare_agent_session(
@@ -1410,7 +1424,7 @@ def test_lifespan_repairs_real_postgres_without_restarting_workflow() -> None:
             await _wait_persistence(coordinator, interrupted.run_id)
 
             terminal_parent = await coordinator.create_run(
-                b'{"query":"terminal parent"}'
+                create_request_bytes("terminal parent")
             )
             await workflow.calls.get()
             terminal_child = await coordinator.prepare_agent_session(

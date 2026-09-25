@@ -24,7 +24,7 @@ from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
-from app.infrastructure.config import AppSettings, load_app_settings
+from app.infrastructure.config import AppSettings, ModelCatalog, load_app_settings
 from app.infrastructure.observability.json_logging import configure_logging
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -33,6 +33,7 @@ from app.infrastructure.persistence.database import (
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.ports.clock import ClockPort
+from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
 
 
@@ -52,6 +53,7 @@ def create_app(
         BatchVerification,
     ] | None = None,
     transcript_registry: TranscriptRegistry | None = None,
+    model_catalog: ModelCatalogPort | None = None,
     workflow_task_factory: Callable[
         [Coroutine[object, object, None], str],
         asyncio.Task[None],
@@ -59,6 +61,7 @@ def create_app(
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
     resolved_clock = clock if clock is not None else SystemClock()
+    resolved_model_catalog = model_catalog or ModelCatalog(resolved_settings.model_catalog)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -88,6 +91,7 @@ def create_app(
             coordinator = RunCoordinator(
                 resolved_clock,
                 transcript_store=active_store,
+                model_catalog=resolved_model_catalog,
                 analysis_timezone=resolved_settings.analysis_timezone,
                 workflow=workflow,
                 id_factory=id_factory,
@@ -149,7 +153,14 @@ def create_app(
         create_schema = CreateAnalysisRunRequest.model_json_schema(
             ref_template="#/components/schemas/{model}",
         )
-        schemas.update(create_schema.pop("$defs", {}))
+        definitions = create_schema.pop("$defs", {})
+        for optional_object in ("target", "date_range"):
+            create_schema["properties"][optional_object].pop("default", None)
+        for optional_target_member in ("comid", "coordinates"):
+            definitions["AnalysisTargetV1"]["properties"][
+                optional_target_member
+            ].pop("default", None)
+        schemas.update(definitions)
         schemas["CreateAnalysisRunRequest"] = create_schema
         return schema
 

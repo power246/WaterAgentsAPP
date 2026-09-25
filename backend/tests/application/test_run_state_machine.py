@@ -22,6 +22,7 @@ from app.application.analysis_runs.models import (
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
+from tests.m4_support import MODEL_CATALOG, create_request
 
 ERROR = PublicError(
     error_id=UUID("0463cd90-6d0f-47e9-9656-b4aa86352c61"),
@@ -30,8 +31,8 @@ ERROR = PublicError(
     failed_stage="analysis_workflow",
     retryable=False,
 )
-CONFIGURATION = CreateAnalysisRunRequest(
-    query="Analyze water quality", time_resolution="6h"
+CONFIGURATION = CreateAnalysisRunRequest.model_validate(
+    create_request("Analyze water quality", time_resolution="6h")
 ).to_configuration_snapshot("America/Chicago")
 
 
@@ -68,6 +69,7 @@ def run(exercise) -> None:
             coordinator = RunCoordinator(
                 *args,
                 transcript_store=InMemoryTranscriptStore(),
+                model_catalog=MODEL_CATALOG,
                 workflow=WaitingWorkflow(),
                 **kwargs,
             )

@@ -12,8 +12,12 @@ from pydantic import (
 from app.domain.common import NonEmptyString, UtcDatetime
 from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
-from app.domain.time.time_resolution import TimeResolution
-from app.domain.time.time_resolution_source import TimeResolutionSource
+from app.domain.memory import MemoryMode
+from app.domain.model_catalog import ModelSelection
+from app.domain.time.time_resolution_preference import TimeResolutionPreference
+from app.domain.time.time_resolution_preference_source import (
+    TimeResolutionPreferenceSource,
+)
 from app.domain.time.timezone import get_iana_timezone
 
 PositiveSequence: TypeAlias = Annotated[int, Field(strict=True, gt=0)]
@@ -47,8 +51,11 @@ class AgentRole(DomainEnum):
 
 class AnalysisConfigurationSnapshot(DomainModel):
     analysis_timezone: NonEmptyString
-    time_resolution: TimeResolution
-    time_resolution_source: TimeResolutionSource
+    time_resolution_preference: TimeResolutionPreference
+    time_resolution_preference_source: TimeResolutionPreferenceSource
+    parser_model: ModelSelection
+    waterbody_model: ModelSelection
+    memory_mode: MemoryMode
 
     @field_validator("analysis_timezone")
     @classmethod
