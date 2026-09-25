@@ -1,3 +1,5 @@
+from app.domain.hydrology.administrative_location import AdministrativeLocation
+from app.domain.hydrology.geocoding_candidate import GeocodingCandidate
 from app.domain.hydrology.location import GeoPoint
 from app.domain.hydrology.monitoring_station import MonitoringStation
 from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
@@ -25,6 +27,8 @@ from app.domain.hydrology.river_segment import RiverSegment
 from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
 
 __all__ = [
+    "AdministrativeLocation",
+    "GeocodingCandidate",
     "GeoPoint",
     "MonitoringStation",
     "EXPECTED_PARAMETER_CAPABILITY_COUNT",

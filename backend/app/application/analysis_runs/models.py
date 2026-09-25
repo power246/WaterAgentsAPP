@@ -63,6 +63,17 @@ class AnalysisConfigurationSnapshot(DomainModel):
         get_iana_timezone(value)
         return value
 
+    @model_validator(mode="after")
+    def validate_resolution_preference_source(self) -> "AnalysisConfigurationSnapshot":
+        if (
+            self.time_resolution_preference_source
+            is TimeResolutionPreferenceSource.DEFAULT
+            and self.time_resolution_preference
+            is not TimeResolutionPreference.TWELVE_HOURS
+        ):
+            raise ValueError("default time resolution preference must be 12h")
+        return self
+
 
 class AnalysisRunSnapshot(DomainModel):
     run_id: UUID

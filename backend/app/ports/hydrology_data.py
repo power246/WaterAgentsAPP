@@ -14,7 +14,7 @@ RecordT = TypeVar("RecordT", covariant=True)
 class ComidLookupPort(Protocol):
     """None means a successful lookup found no COMID; unavailability is an error."""
 
-    async def lookup_comid(self, point: GeoPoint) -> str | None: ...
+    async def lookup_position(self, point: GeoPoint) -> str | None: ...
 
 
 class TopologyDataPort(Protocol):

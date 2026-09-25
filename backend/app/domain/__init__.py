@@ -17,10 +17,12 @@ from app.domain.attribution import (
     AttributionSummary,
 )
 from app.domain.hydrology import (
+    AdministrativeLocation,
     EXPECTED_PARAMETER_CAPABILITY_COUNT,
     EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256,
     EXPECTED_PARAMETER_GROUP_COUNTS,
     EvidenceRuleId,
+    GeocodingCandidate,
     GeoPoint,
     MonitoringStation,
     ParameterCapability,
@@ -80,6 +82,7 @@ from app.domain.time import (
 
 __all__ = [
     "AggregationMethod",
+    "AdministrativeLocation",
     "AnalysisDetail",
     "AnalysisStep",
     "AttributionBasis",
@@ -104,6 +107,7 @@ __all__ = [
     "EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256",
     "EXPECTED_PARAMETER_GROUP_COUNTS",
     "GeoPoint",
+    "GeocodingCandidate",
     "InferenceMode",
     "InferenceResult",
     "IndeterminateReason",

@@ -9,7 +9,9 @@ from typing import get_origin
 import pytest
 
 from app.domain import (
+    AdministrativeLocation,
     GeoPoint,
+    GeocodingCandidate,
     MonitoringStation,
     ParameterCatalogCandidate,
     ParameterKey,
@@ -69,8 +71,9 @@ def test_all_port_contracts_are_public_protocols() -> None:
 def test_port_method_sync_and_async_semantics() -> None:
     assert not inspect.iscoroutinefunction(ClockPort.now)
     async_methods = (
-        GeocodingPort.resolve,
-        ComidLookupPort.lookup_comid,
+        GeocodingPort.resolve_text,
+        GeocodingPort.reverse,
+        ComidLookupPort.lookup_position,
         TopologyDataPort.get_segment,
         TopologyDataPort.get_direct_upstreams,
         MonitoringStationPort.find_for_segment,
@@ -106,8 +109,9 @@ def test_port_method_sync_and_async_semantics() -> None:
     ("method", "parameters"),
     [
         (ClockPort.now, ("self",)),
-        (GeocodingPort.resolve, ("self", "location_text")),
-        (ComidLookupPort.lookup_comid, ("self", "point")),
+        (GeocodingPort.resolve_text, ("self", "location_text")),
+        (GeocodingPort.reverse, ("self", "point")),
+        (ComidLookupPort.lookup_position, ("self", "point")),
         (TopologyDataPort.get_segment, ("self", "comid")),
         (
             TopologyDataPort.get_direct_upstreams,
@@ -141,15 +145,18 @@ def test_port_method_signatures(method, parameters: tuple[str, ...]) -> None:
 
 
 def test_stable_ports_use_domain_types() -> None:
-    geocoding = inspect.signature(GeocodingPort.resolve)
-    comid_lookup = inspect.signature(ComidLookupPort.lookup_comid)
+    geocoding = inspect.signature(GeocodingPort.resolve_text)
+    reverse_geocoding = inspect.signature(GeocodingPort.reverse)
+    comid_lookup = inspect.signature(ComidLookupPort.lookup_position)
     topology = inspect.signature(TopologyDataPort.get_segment)
     upstreams = inspect.signature(TopologyDataPort.get_direct_upstreams)
     stations = inspect.signature(MonitoringStationPort.find_for_segment)
     parameter_catalog = inspect.signature(ParameterCatalogPort.find_candidates)
 
     assert geocoding.parameters["location_text"].annotation is str
-    assert geocoding.return_annotation == GeoPoint | None
+    assert geocoding.return_annotation == tuple[GeocodingCandidate, ...]
+    assert reverse_geocoding.parameters["point"].annotation is GeoPoint
+    assert reverse_geocoding.return_annotation == AdministrativeLocation | None
     assert comid_lookup.parameters["point"].annotation is GeoPoint
     assert comid_lookup.return_annotation == str | None
     assert topology.return_annotation == RiverSegment | None
@@ -211,7 +218,13 @@ def test_successful_empty_results_are_distinct_from_unavailability() -> None:
 
 def test_not_found_contracts_use_none_or_empty_tuple() -> None:
     class EmptyGeocoder:
-        async def resolve(self, location_text: str) -> GeoPoint | None:
+        async def resolve_text(
+            self,
+            location_text: str,
+        ) -> tuple[GeocodingCandidate, ...]:
+            return ()
+
+        async def reverse(self, point: GeoPoint) -> AdministrativeLocation | None:
             return None
 
     class EmptyTopology:
@@ -229,7 +242,8 @@ def test_not_found_contracts_use_none_or_empty_tuple() -> None:
         geocoder: GeocodingPort = EmptyGeocoder()
         topology: TopologyDataPort = EmptyTopology()
 
-        assert await geocoder.resolve("unknown") is None
+        assert await geocoder.resolve_text("unknown") == ()
+        assert await geocoder.reverse(GeoPoint(latitude=1.0, longitude=1.0)) is None
         assert await topology.get_segment("0001") is None
         assert await topology.get_direct_upstreams("0001", 10) == ()
 

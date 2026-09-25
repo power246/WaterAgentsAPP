@@ -1,9 +1,21 @@
 from typing import Protocol
 
-from app.domain.hydrology import GeoPoint
+from app.domain.hydrology import (
+    AdministrativeLocation,
+    GeocodingCandidate,
+    GeoPoint,
+)
 
 
 class GeocodingPort(Protocol):
-    """None means a successful lookup found no match; unavailability is an error."""
+    """None or an empty tuple means no match; unavailability is an error."""
 
-    async def resolve(self, location_text: str) -> GeoPoint | None: ...
+    async def resolve_text(
+        self,
+        location_text: str,
+    ) -> tuple[GeocodingCandidate, ...]: ...
+
+    async def reverse(
+        self,
+        point: GeoPoint,
+    ) -> AdministrativeLocation | None: ...
