@@ -24,7 +24,13 @@ from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
-from app.infrastructure.config import AppSettings, ModelCatalog, load_app_settings
+from app.domain.hydrology import ParameterCapabilityRegistry
+from app.infrastructure.config import (
+    AppSettings,
+    ModelCatalog,
+    load_app_settings,
+    load_parameter_capability_registry,
+)
 from app.infrastructure.observability.json_logging import configure_logging
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -54,6 +60,7 @@ def create_app(
     ] | None = None,
     transcript_registry: TranscriptRegistry | None = None,
     model_catalog: ModelCatalogPort | None = None,
+    parameter_capability_registry: ParameterCapabilityRegistry | None = None,
     workflow_task_factory: Callable[
         [Coroutine[object, object, None], str],
         asyncio.Task[None],
@@ -62,6 +69,9 @@ def create_app(
     resolved_settings = settings or load_app_settings()
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_model_catalog = model_catalog or ModelCatalog(resolved_settings.model_catalog)
+    resolved_parameter_capabilities = (
+        parameter_capability_registry or load_parameter_capability_registry()
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -138,6 +148,7 @@ def create_app(
     application.state.settings = resolved_settings
     application.state.clock = resolved_clock
     application.state.id_factory = id_factory
+    application.state.parameter_capability_registry = resolved_parameter_capabilities
     application.add_middleware(RequestContextMiddleware, id_factory=id_factory)
     register_error_handlers(application)
     application.include_router(

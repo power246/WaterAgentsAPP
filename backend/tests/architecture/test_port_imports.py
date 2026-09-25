@@ -8,7 +8,13 @@ from typing import get_origin
 
 import pytest
 
-from app.domain import GeoPoint, MonitoringStation, ParameterKey, RiverSegment
+from app.domain import (
+    GeoPoint,
+    MonitoringStation,
+    ParameterCatalogCandidate,
+    ParameterKey,
+    RiverSegment,
+)
 from app.ports import (
     CachePort,
     ClockPort,
@@ -20,6 +26,7 @@ from app.ports import (
     KeyStorePort,
     LLMPort,
     MonitoringStationPort,
+    ParameterCatalogPort,
     PortError,
     PortTimeoutError,
     PortUnavailableError,
@@ -46,6 +53,7 @@ def test_all_port_contracts_are_public_protocols() -> None:
         KeyStorePort,
         LLMPort,
         MonitoringStationPort,
+        ParameterCatalogPort,
         RAGIndexPort,
         TopologyDataPort,
         TranscriptReadStorePort,
@@ -66,6 +74,7 @@ def test_port_method_sync_and_async_semantics() -> None:
         TopologyDataPort.get_segment,
         TopologyDataPort.get_direct_upstreams,
         MonitoringStationPort.find_for_segment,
+        ParameterCatalogPort.find_candidates,
         WaterObservationPort.fetch,
         WeatherObservationPort.fetch,
         WeatherForecastPort.fetch,
@@ -108,6 +117,7 @@ def test_port_method_sync_and_async_semantics() -> None:
             MonitoringStationPort.find_for_segment,
             ("self", "comid", "parameters"),
         ),
+        (ParameterCatalogPort.find_candidates, ("self", "concept")),
         (TranscriptStorePort.get_creation, ("self", "idempotency_key")),
         (TranscriptStorePort.create_run, ("self", "candidate")),
         (TranscriptStorePort.verify_creation, ("self", "candidate")),
@@ -136,6 +146,7 @@ def test_stable_ports_use_domain_types() -> None:
     topology = inspect.signature(TopologyDataPort.get_segment)
     upstreams = inspect.signature(TopologyDataPort.get_direct_upstreams)
     stations = inspect.signature(MonitoringStationPort.find_for_segment)
+    parameter_catalog = inspect.signature(ParameterCatalogPort.find_candidates)
 
     assert geocoding.parameters["location_text"].annotation is str
     assert geocoding.return_annotation == GeoPoint | None
@@ -145,6 +156,8 @@ def test_stable_ports_use_domain_types() -> None:
     assert upstreams.return_annotation == tuple[RiverSegment, ...]
     assert stations.parameters["parameters"].annotation == tuple[ParameterKey, ...]
     assert stations.return_annotation == tuple[MonitoringStation, ...]
+    assert parameter_catalog.parameters["concept"].annotation is str
+    assert parameter_catalog.return_annotation == tuple[ParameterCatalogCandidate, ...]
 
 
 def test_deferred_ports_are_generic_without_guessing_dtos() -> None:
@@ -239,6 +252,7 @@ def test_query_protocols_document_empty_and_unavailable_as_distinct() -> None:
         ComidLookupPort,
         TopologyDataPort,
         MonitoringStationPort,
+        ParameterCatalogPort,
         WaterObservationPort,
         WeatherObservationPort,
         WeatherForecastPort,

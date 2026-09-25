@@ -1,0 +1,2 @@
+class ParameterCapabilityConfigurationError(ValueError):
+    pass
