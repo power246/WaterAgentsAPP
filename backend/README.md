@@ -120,7 +120,7 @@ unset WATERAGENTS_TEST_DB_NAME
 
 ## Configuration
 
-Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructor values have highest priority, followed by process environment, the fixed UTF-8 `backend/.env`, and defaults. Loading does not depend on the current working directory. `backend/.env` is production-runtime configuration: unknown or misspelled fields fail validation instead of being ignored. Database passwords use `SecretStr`, are not trimmed or printed, and are passed as a separate URL field so characters such as `@:/#%$` are encoded correctly.
+Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructor values have highest priority, followed by process environment, the fixed UTF-8 `backend/.env`, and defaults. Loading does not depend on the current working directory. `backend/.env` is production-runtime configuration: unknown or misspelled fields fail validation instead of being ignored. Database passwords and provider API keys use `SecretStr` and are not trimmed or printed. Provider adapters share the production `httpx` runtime, ignore environment proxies, bound response size and pagination, and never include credentials or full provider URLs in application logs.
 
 | Variable | Default |
 | --- | --- |
@@ -138,6 +138,15 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_PREDICTION_BASELINE_HOURS` | `48` |
 | `WATERAGENTS_MAX_TARGET_PARAMETERS` | `6` |
 | `WATERAGENTS_QUERY_PARSER_TIMEOUT_SECONDS` | `45` |
+| `WATERAGENTS_GEOCODING_TIMEOUT_SECONDS` | `10` |
+| `WATERAGENTS_METADATA_TIMEOUT_SECONDS` | `15` |
+| `WATERAGENTS_PROVIDER_HTTP_MAX_RESPONSE_BYTES` | `4194304` |
+| `WATERAGENTS_PROVIDER_HTTP_PAGE_SIZE` | `1000` |
+| `WATERAGENTS_PROVIDER_HTTP_MAX_PAGES` | `10` |
+| `WATERAGENTS_PROVIDER_HTTP_MAX_RECORDS` | `10000` |
+| `WATERAGENTS_PROVIDER_HTTP_RETRY_DELAY_SECONDS` | `0.25` |
+| `WATERAGENTS_GOOGLE_GEOCODING_API_KEY` | unset; backend-only secret |
+| `WATERAGENTS_USGS_API_KEY` | unset; backend-only optional rate-limit secret |
 | `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `120` |
 | `WATERAGENTS_DB_HOST` | `127.0.0.1` |
 | `WATERAGENTS_DB_PORT` | `5432` |

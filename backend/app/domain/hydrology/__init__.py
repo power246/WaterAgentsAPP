@@ -23,7 +23,14 @@ from app.domain.hydrology.parameter_concept_normalization import (
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.hydrology.parameter_provider import ParameterProvider
 from app.domain.hydrology.parameter_role import ParameterRole
+from app.domain.hydrology.monitoring_location_metadata import (
+    MonitoringLocationMetadata,
+)
 from app.domain.hydrology.river_segment import RiverSegment
+from app.domain.hydrology.sample_period_of_record import SamplePeriodOfRecord
+from app.domain.hydrology.time_series_kind import TimeSeriesKind
+from app.domain.hydrology.time_series_metadata import TimeSeriesMetadata
+from app.domain.hydrology.usgs_parameter_metadata import UsgsParameterMetadata
 from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
 
 __all__ = [
@@ -31,6 +38,7 @@ __all__ = [
     "GeocodingCandidate",
     "GeoPoint",
     "MonitoringStation",
+    "MonitoringLocationMetadata",
     "EXPECTED_PARAMETER_CAPABILITY_COUNT",
     "EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256",
     "EXPECTED_PARAMETER_GROUP_COUNTS",
@@ -43,7 +51,11 @@ __all__ = [
     "ParameterKey",
     "ParameterProvider",
     "ParameterRole",
+    "SamplePeriodOfRecord",
     "RiverSegment",
+    "TimeSeriesKind",
+    "TimeSeriesMetadata",
+    "UsgsParameterMetadata",
     "WaterQualityParameter",
     "normalize_parameter_concept",
 ]

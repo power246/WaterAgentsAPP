@@ -1,0 +1,27 @@
+{
+  "status": "OK",
+  "results": [
+    {
+      "place_id": "dc-potomac",
+      "formatted_address": "Potomac River, Washington, DC, USA",
+      "address_components": [
+        {"short_name": "DC", "types": ["administrative_area_level_1", "political"]},
+        {"short_name": "US", "types": ["country", "political"]}
+      ],
+      "geometry": {
+        "location": {"lat": 38.9, "lng": -77.0}
+      }
+    },
+    {
+      "place_id": "va-potomac",
+      "formatted_address": "Potomac River, Virginia, USA",
+      "address_components": [
+        {"short_name": "VA", "types": ["administrative_area_level_1", "political"]},
+        {"short_name": "US", "types": ["country", "political"]}
+      ],
+      "geometry": {
+        "location": {"lat": 38.95, "lng": -77.1}
+      }
+    }
+  ]
+}

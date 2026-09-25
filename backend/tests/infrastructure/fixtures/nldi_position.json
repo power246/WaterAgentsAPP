@@ -1,0 +1,13 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"nhdplus_comid": 12345678},
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [[-77.2, 38.8], [-77.1, 38.9], [-77.0, 39.0]]
+      }
+    }
+  ]
+}

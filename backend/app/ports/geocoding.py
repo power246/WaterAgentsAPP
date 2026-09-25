@@ -13,9 +13,13 @@ class GeocodingPort(Protocol):
     async def resolve_text(
         self,
         location_text: str,
+        *,
+        deadline: float | None = None,
     ) -> tuple[GeocodingCandidate, ...]: ...
 
     async def reverse(
         self,
         point: GeoPoint,
+        *,
+        deadline: float | None = None,
     ) -> AdministrativeLocation | None: ...

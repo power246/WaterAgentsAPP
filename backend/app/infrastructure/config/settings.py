@@ -61,6 +61,34 @@ class AppSettings(BaseSettings):
         le=300,
         allow_inf_nan=False,
     )
+    geocoding_timeout_seconds: float = Field(
+        default=10,
+        gt=0,
+        le=120,
+        allow_inf_nan=False,
+    )
+    metadata_timeout_seconds: float = Field(
+        default=15,
+        gt=0,
+        le=120,
+        allow_inf_nan=False,
+    )
+    provider_http_max_response_bytes: int = Field(
+        default=4_194_304,
+        ge=1024,
+        le=67_108_864,
+    )
+    provider_http_page_size: int = Field(default=1000, ge=1, le=50_000)
+    provider_http_max_pages: int = Field(default=10, ge=1, le=100)
+    provider_http_max_records: int = Field(default=10_000, ge=1, le=50_000)
+    provider_http_retry_delay_seconds: float = Field(
+        default=0.25,
+        ge=0,
+        le=10,
+        allow_inf_nan=False,
+    )
+    google_geocoding_api_key: SecretStr | None = None
+    usgs_api_key: SecretStr | None = None
     topology_stage_timeout_seconds: float = Field(
         default=120,
         gt=0,
@@ -107,9 +135,14 @@ class AppSettings(BaseSettings):
         allow_inf_nan=False,
     )
 
-    @field_validator("db_password", mode="before")
+    @field_validator(
+        "db_password",
+        "google_geocoding_api_key",
+        "usgs_api_key",
+        mode="before",
+    )
     @classmethod
-    def preserve_database_password(cls, value: object) -> object:
+    def preserve_secret(cls, value: object) -> object:
         if isinstance(value, str):
             return SecretStr(value)
         return value
@@ -120,6 +153,10 @@ class AppSettings(BaseSettings):
         "topology_max_concurrency",
         "prediction_baseline_hours",
         "max_target_parameters",
+        "provider_http_max_response_bytes",
+        "provider_http_page_size",
+        "provider_http_max_pages",
+        "provider_http_max_records",
         mode="before",
     )
     @classmethod
@@ -131,6 +168,9 @@ class AppSettings(BaseSettings):
     @field_validator(
         "topology_max_distance_km",
         "query_parser_timeout_seconds",
+        "geocoding_timeout_seconds",
+        "metadata_timeout_seconds",
+        "provider_http_retry_delay_seconds",
         "topology_stage_timeout_seconds",
         mode="before",
     )
@@ -178,6 +218,10 @@ class AppSettings(BaseSettings):
         if self.transcript_preview_bytes >= self.transcript_inline_max_bytes:
             raise ValueError(
                 "transcript_preview_bytes must be smaller than transcript_inline_max_bytes"
+            )
+        if self.provider_http_page_size > self.provider_http_max_records:
+            raise ValueError(
+                "provider_http_page_size must not exceed provider_http_max_records"
             )
         return self
 

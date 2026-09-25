@@ -35,6 +35,15 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "prediction_baseline_hours": 48,
         "max_target_parameters": 6,
         "query_parser_timeout_seconds": 45.0,
+        "geocoding_timeout_seconds": 10.0,
+        "metadata_timeout_seconds": 15.0,
+        "provider_http_max_response_bytes": 4194304,
+        "provider_http_page_size": 1000,
+        "provider_http_max_pages": 10,
+        "provider_http_max_records": 10000,
+        "provider_http_retry_delay_seconds": 0.25,
+        "google_geocoding_api_key": None,
+        "usgs_api_key": None,
         "topology_stage_timeout_seconds": 120.0,
         "db_host": "127.0.0.1",
         "db_port": 5432,
@@ -105,6 +114,13 @@ def test_invalid_analysis_timezone_is_rejected() -> None:
         ("prediction_baseline_hours", 169),
         ("max_target_parameters", 7),
         ("query_parser_timeout_seconds", float("inf")),
+        ("geocoding_timeout_seconds", 0),
+        ("metadata_timeout_seconds", 121),
+        ("provider_http_max_response_bytes", 1023),
+        ("provider_http_page_size", 50001),
+        ("provider_http_max_pages", 101),
+        ("provider_http_max_records", 50001),
+        ("provider_http_retry_delay_seconds", float("nan")),
         ("topology_stage_timeout_seconds", 901),
     ],
 )
@@ -124,6 +140,31 @@ def test_m4_hard_limits_are_strict_but_environment_values_are_parsed(
 
     monkeypatch.setenv("WATERAGENTS_TOPOLOGY_MAX_HOPS", "13")
     assert AppSettings(_env_file=None).topology_max_hops == 13
+
+
+def test_provider_http_page_size_cannot_exceed_record_limit() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="provider_http_page_size must not exceed",
+    ):
+        AppSettings(
+            provider_http_page_size=100,
+            provider_http_max_records=10,
+        )
+
+
+def test_provider_secrets_remain_masked_and_preserve_whitespace() -> None:
+    secret = "  provider-secret  "
+    settings = AppSettings(
+        google_geocoding_api_key=secret,
+        usgs_api_key=secret,
+    )
+
+    assert settings.google_geocoding_api_key is not None
+    assert settings.usgs_api_key is not None
+    assert settings.google_geocoding_api_key.get_secret_value() == secret
+    assert settings.usgs_api_key.get_secret_value() == secret
+    assert secret not in repr(settings)
 
 
 def test_model_catalog_is_parsed_once_as_safe_role_metadata(
