@@ -39,6 +39,20 @@ from app.application.query_understanding.models import (
     SupportingParameterReason,
 )
 from app.application.query_understanding.parameter_resolver import ParameterResolver
+from app.application.query_understanding.parser_models import (
+    ParserFinishReason,
+    ParserMessageRole,
+    ParserPromptMessage,
+    QueryParserInputV1,
+    QueryParserMessageV1,
+    QueryParserResponse,
+)
+from app.application.query_understanding.parser_port import QueryParserPort
+from app.application.query_understanding.parser_prompt import QueryParserPromptBuilder
+from app.application.query_understanding.parser_workflow import (
+    QueryContextResolver,
+    QueryParserWorkflow,
+)
 
 __all__ = [
     "AnalysisContext",
@@ -62,7 +76,17 @@ __all__ = [
     "ParameterResolutionResult",
     "ParameterResolutionStatus",
     "ParameterResolver",
+    "ParserFinishReason",
+    "ParserMessageRole",
+    "ParserPromptMessage",
     "ParsedIntentV1",
+    "QueryParserInputV1",
+    "QueryParserMessageV1",
+    "QueryParserPort",
+    "QueryParserPromptBuilder",
+    "QueryParserResponse",
+    "QueryContextResolver",
+    "QueryParserWorkflow",
     "ResolvedParameterIntent",
     "ResolvedTarget",
     "ResolvedTargetParameter",

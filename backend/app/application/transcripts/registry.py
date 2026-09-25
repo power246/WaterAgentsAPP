@@ -12,6 +12,13 @@ from app.application.analysis_runs.models import (
     RunFailedEvent,
     SessionFailedEvent,
 )
+from app.application.query_understanding.context_models import AnalysisContext
+from app.application.query_understanding.parser_models import (
+    QueryParserInputV1,
+    QueryParserMessageV1,
+    finalize_query_parser_message,
+    query_parser_message_projection,
+)
 from app.application.transcripts.models import (
     AnalysisRequestV1,
     ContentVisibility,
@@ -453,6 +460,23 @@ def create_production_registry() -> TranscriptRegistry:
         references=_runtime_references,
         visibility=_runtime_visibility,
         history_only_possible=True,
+    ))
+    registry.register(ContentRegistration(
+        content_type="query_parser_input",
+        content_schema_version=1,
+        adapter=TypeAdapter(QueryParserInputV1),
+    ))
+    registry.register(ContentRegistration(
+        content_type="query_parser_message",
+        content_schema_version=1,
+        adapter=TypeAdapter(QueryParserMessageV1),
+        message_adapter=query_parser_message_projection,
+        message_finalizer=finalize_query_parser_message,
+    ))
+    registry.register(ContentRegistration(
+        content_type="query_understood",
+        content_schema_version=1,
+        adapter=TypeAdapter(AnalysisContext),
     ))
     registry.register(ContentRegistration(
         content_type="lifecycle_event",

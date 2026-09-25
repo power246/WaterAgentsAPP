@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.application.query_understanding.context_models import (
     AnalysisContext,
     AnalysisContextResolution,
@@ -45,8 +47,11 @@ class AnalysisContextResolver:
         parsed_intent: ParsedIntentV1,
         *,
         analysis_timezone: str,
+        decision_instant: datetime | None = None,
     ) -> AnalysisContextResolution:
-        decision_instant = normalize_utc_datetime(self._clock.now())
+        decision_instant = normalize_utc_datetime(
+            self._clock.now() if decision_instant is None else decision_instant
+        )
         configuration = request.to_configuration_snapshot(analysis_timezone)
         if parsed_intent.ambiguities:
             return self._failure(

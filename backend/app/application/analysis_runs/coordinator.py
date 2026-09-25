@@ -1039,7 +1039,18 @@ class RunCoordinator:
             await runtime.workflow_start.wait()
             token.checkpoint()
             running = await self.mark_running(runtime.snapshot.run_id)
-            await self._workflow.run(WorkflowContext(running, runtime.query, token))
+            safe_request = AnalysisRequestV1.model_validate_json(
+                runtime.transcript_buffer.items[0].content.safe_body
+            )
+            await self._workflow.run(
+                WorkflowContext(
+                    running,
+                    runtime.query,
+                    token,
+                    safe_request,
+                    self,
+                )
+            )
             token.checkpoint()
             async with runtime.condition:
                 if self._workflow_has_unfinished_outputs_locked(runtime):
@@ -1078,12 +1089,21 @@ class RunCoordinator:
                 exception=exception,
             )
             return
+        failure = exception if isinstance(exception, WorkflowFailed) else None
         error = PublicError(
             error_id=self._new_id(),
-            code="workflow_failed",
-            message="The analysis workflow failed.",
-            failed_stage="analysis_workflow",
-            retryable=False,
+            code=failure.code if failure is not None else "workflow_failed",
+            message=(
+                failure.public_message
+                if failure is not None
+                else "The analysis workflow failed."
+            ),
+            failed_stage=(
+                failure.failed_stage
+                if failure is not None
+                else "analysis_workflow"
+            ),
+            retryable=failure.retryable if failure is not None else False,
         )
         try:
             snapshot = await self.fail_run(runtime.snapshot.run_id, error)

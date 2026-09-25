@@ -22,6 +22,12 @@ from app.application.analysis_runs.persistence import (
 )
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
+from app.application.query_understanding import (
+    QueryContextResolver,
+    QueryParserPort,
+    QueryParserPromptBuilder,
+    QueryParserWorkflow,
+)
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
 from app.domain.hydrology import ParameterCapabilityRegistry
@@ -48,6 +54,9 @@ def create_app(
     *,
     clock: ClockPort | None = None,
     workflow: AnalysisWorkflow | None = None,
+    query_parser: QueryParserPort | None = None,
+    query_context_resolver: QueryContextResolver | None = None,
+    query_parser_private_values: tuple[str, ...] = (),
     id_factory: Callable[[], UUID] = uuid4,
     record_id_factory: Callable[[], UUID] = uuid4,
     shutdown_grace_period: float = 1.0,
@@ -72,6 +81,22 @@ def create_app(
     resolved_parameter_capabilities = (
         parameter_capability_registry or load_parameter_capability_registry()
     )
+    if workflow is not None and query_parser is not None:
+        raise ValueError("workflow and query_parser cannot both be configured")
+    if (query_parser is None) != (query_context_resolver is None):
+        raise ValueError(
+            "query_parser and query_context_resolver must be configured together"
+        )
+    resolved_workflow = workflow
+    if query_parser is not None and query_context_resolver is not None:
+        resolved_workflow = QueryParserWorkflow(
+            query_parser,
+            query_context_resolver,
+            QueryParserPromptBuilder(resolved_parameter_capabilities),
+            error_id_factory=id_factory,
+            timeout_seconds=resolved_settings.query_parser_timeout_seconds,
+            private_values=query_parser_private_values,
+        )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
@@ -103,7 +128,7 @@ def create_app(
                 transcript_store=active_store,
                 model_catalog=resolved_model_catalog,
                 analysis_timezone=resolved_settings.analysis_timezone,
-                workflow=workflow,
+                workflow=resolved_workflow,
                 id_factory=id_factory,
                 record_id_factory=record_id_factory,
                 shutdown_grace_period=shutdown_grace_period,
