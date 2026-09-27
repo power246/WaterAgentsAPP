@@ -43,6 +43,7 @@ from app.infrastructure.config import (
     load_parameter_capability_registry,
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.runtime import compose_m4_workflow
 from app.main import create_app
 from app.ports import PortUnavailableError
 
@@ -224,8 +225,6 @@ class FixtureUsgsMetadata:
             return {DO}, {DISCHARGE}
         if self.profile is FixtureProfile.PARTIAL and station_id == "USGS-200":
             return {DO}, set()
-        if self.profile is FixtureProfile.PARTIAL and station_id == "USGS-300":
-            return set(), {DISCHARGE}
         return set(), set()
 
     async def get_parameter_codes(self, parameters, *, deadline=None):
@@ -376,12 +375,21 @@ def build_runtime(profile: FixtureProfile, *, query_fallback: bool):
         stage_timeout_seconds=5,
     )
     store = InMemoryTranscriptStore()
+    settings = AppSettings(
+        analysis_timezone="America/New_York",
+        log_level="warning",
+    )
     application = create_app(
-        AppSettings(analysis_timezone="America/New_York", log_level="warning"),
+        settings,
         clock=FixedClock(),
-        query_parser=parser,
-        query_context_resolver=context_resolver,
-        topology_builder=topology_builder,
+        workflow=compose_m4_workflow(
+            settings,
+            parser=parser,
+            context_resolver=context_resolver,
+            topology_builder=topology_builder,
+            parameter_capabilities=registry,
+            error_id_factory=uuid4,
+        ),
         transcript_store=store,
         model_catalog=MODEL_CATALOG,
         parameter_capability_registry=registry,
@@ -514,7 +522,8 @@ async def run_smoke() -> dict[str, object]:
         assert mixed["status"] == "completed"
         assert mixed["target_source"] == "query"
         assert mixed["mode"] == "mixed"
-        assert mixed["inlets"] == ["200", "300"]
+        assert mixed["coverage"] == TopologyCoverage.PARTIAL.value
+        assert mixed["inlets"] == ["200"]
 
         no_source = await run_case(
             FixtureProfile.NONE,

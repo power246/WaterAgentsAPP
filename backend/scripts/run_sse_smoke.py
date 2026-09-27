@@ -108,6 +108,11 @@ class GatedWorkflow:
             self.exited.set()
 
 
+class CompleteWorkflow:
+    async def run(self, context: WorkflowContext) -> None:
+        context.cancellation.checkpoint()
+
+
 def request_id(response: httpx.Response) -> UUID:
     value = response.headers["x-request-id"]
     identifier = UUID(value)
@@ -159,6 +164,7 @@ async def verify_terminal_reconnect(client: httpx.AsyncClient, path: str, run_id
 async def completed_smoke() -> None:
     app = create_app(
         SMOKE_SETTINGS,
+        workflow=CompleteWorkflow(),
         transcript_store=InMemoryTranscriptStore(),
     )
     async with running_server(app) as client:

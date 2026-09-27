@@ -53,6 +53,8 @@ backend/app/
   application/
     analysis_runs/
       models.py                      # run 配置/快照扩展
+      cancellation.py                # workflow 共用取消/timeout 等待
+      query_topology_workflow.py     # query + topology 单一执行链
     query_understanding/
       context_models.py              # ParsedIntent、AnalysisContext
       parser_workflow.py             # parser session 与一次 schema repair
@@ -77,12 +79,17 @@ backend/app/
     model_catalog.py                 # 可公开选择的 provider/model
     parameter_catalog.py             # 完整目录候选发现
   infrastructure/adapters/
+    openai_responses_parser.py       # Responses API parser adapter
     google_geocoding.py
     nldi.py
     usgs_waterdata.py                # WDFN OGC v1 metadata
+  infrastructure/runtime/
+    m4.py                            # 唯一 production composition factory
 ```
 
 `domain` 只保存可独立验证的值对象和图 invariant；`application` 决定优先级、失败语义和阶段；`ports` 不导入 application/FastAPI/SQLAlchemy；adapter 负责远端协议与错误归类。现有 `MonitoringStationPort.find_for_segment()` 无法表达时间覆盖，实施时由新的 `StationInventoryPort.check_availability()` 替代并删除孤立生产入口，而不是保留两套近义主路径。
+
+正式 `create_app()` 的 lifespan 只通过 `build_m4_runtime(settings)` 装配 OpenAI parser、Google geocoding、NLDI、USGS parameter/metadata、resolver、availability 与 topology builder；组件缺失、parser provider 不支持或凭据缺失时在数据库启动前失败。application factory 的显式 `workflow=` 只作为测试/固定 smoke 注入接缝，生产入口不回退 fake 或空 workflow。parser/geocoding/metadata timeout 与 topology limits 均从同一 `AppSettings` 进入该 factory。
 
 ## 4. 最终请求与不可变配置
 
@@ -374,6 +381,7 @@ BranchOutcome
   stop_comid
   path_to_target[]
   reason
+  blocked_upstream_comid: comid | null
 ```
 
 `nodes`/`edges` 保留本次完整 BFS 范围；`participating=true` 的边和 active nodes 是所有 qualified inlet 到 target 路径的并集，并始终保留 target 本身。节点可以只对部分 coverage units 成为 inlet；未覆盖单元继续向上游。`execution_layers` 只从 active DAG 拓扑排序产生，顺序从最上游到 target，但只是潜在依赖顺序，不代表 session 已创建或一定会调用模型。
@@ -402,7 +410,7 @@ BranchOutcome
 6. 汇流遇到同一 COMID 时合并待覆盖 unit，不重复计数或查询；
 7. 检测到环或不可能的 edge 时以 `topology_invalid` 失败，不删边继续；
 8. 自然到达无上游且仍未覆盖，记录 `no_qualifying_source`；
-9. 任一硬上限阻止继续时，记录 `search_limit_reached`；
+9. 任一硬上限阻止 child 继续时，逐 child 记录 `search_limit_reached` 和 `blocked_upstream_comid`；
 10. 搜索完成后回溯 qualified paths，生成 active union 和稳定 execution layers。
 
 因此 `coverage=none` 不等于最终 `insufficient_evidence`：M5 仍对 target 收集天气、discharge、设施或 capability 允许的其他来源。每个待推理单元既要有目标参数的直接或允许侧面证据，也要有 discharge 的直接或允许侧面证据；任一必需部分完全无证据时，M6 gate 都以 0 次水体模型调用产生该单元的 `indeterminate`。若两者都有合格证据，也只会调度 gate 允许的 target/range。
@@ -424,7 +432,7 @@ production registry 增加：
 
 `analysis_request v1`、`lifecycle_event v2` 和 `run_snapshot v1` 在当前唯一模型中直接增加 M4 所需字段；没有 M3/M4 双注册、旧配置 union 或 milestone compatibility path。实现必须在同一改动中更新 registry、读写模型、持久化、OpenAPI/SSE fixture 和测试。所有新类型都经 registry 在进入 live buffer 前校验/脱敏，并在持久化前 recheck。正文超过 M3 阈值仍只存一份完整内容，读取返回 preview/reference。
 
-parser session 的 input、message、context 与 session completed 使用同一 M3 writer 入口。`query_understood` 成功写入 live 原事实后才允许 BFS 消费；不得在 resolver 内另存一个 dict 缓存作为真实上下文。`topology_ready` 同理是当前/历史装配的唯一图事实。
+parser session 的 input、message、context 与 session completed 使用同一 M3 writer 入口。每次真实 parser 调用各自保存同 operation 的 input/message；repair 不复用首轮 input 充当审计记录。`query_understood` 成功写入 live 原事实后才允许 BFS 消费；不得在 resolver 内另存一个 dict 缓存作为真实上下文。`topology_ready` 同理是当前/历史装配的唯一图事实。
 
 run history 的 `context_summary` 从已解析的 `query_understood` 投影，不从 query 重算。run detail 返回 run-owned `topology_ready` 和引用的 parser context；完整 graph 通过既有全文接口读取。投影失败时沿用 M3 `issues`，不能返回看似完整的空值。
 

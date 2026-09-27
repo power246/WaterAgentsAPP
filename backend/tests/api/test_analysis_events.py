@@ -35,6 +35,7 @@ from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.config import AppSettings
 from tests.m4_support import (
     MODEL_CATALOG,
+    NoOpWorkflow,
     create_request,
     create_test_app as create_app,
 )
@@ -1049,5 +1050,6 @@ def test_keepalive_interval_must_be_finite_and_positive(interval) -> None:
             TickingClock(),
             model_catalog=MODEL_CATALOG,
             transcript_store=InMemoryTranscriptStore(),
+            workflow=NoOpWorkflow(),
             keepalive_interval=interval,
         )

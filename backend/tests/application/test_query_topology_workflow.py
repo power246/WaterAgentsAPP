@@ -43,8 +43,9 @@ from app.domain import (
     StationAvailability,
     TopologyLimits,
 )
-from app.infrastructure.config import AppSettings
+from app.infrastructure.config import AppSettings, load_parameter_capability_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.runtime import compose_m4_workflow
 from app.ports import InvalidPortResponseError, PortUnavailableError
 from tests.m4_support import create_request_bytes, create_test_app
 
@@ -354,16 +355,22 @@ async def workflow_runtime(
     parser = parser or RecordingParser()
     resolver = resolver or RecordingResolver()
     store = store or InMemoryTranscriptStore()
+    settings = AppSettings(
+        analysis_timezone="America/New_York",
+        transcript_inline_max_bytes=inline_bytes,
+        transcript_preview_bytes=min(64, inline_bytes // 2),
+    )
     application = create_test_app(
-        settings=AppSettings(
-            analysis_timezone="America/New_York",
-            transcript_inline_max_bytes=inline_bytes,
-            transcript_preview_bytes=min(64, inline_bytes // 2),
-        ),
+        settings=settings,
         clock=FixedClock(),
-        query_parser=parser,
-        query_context_resolver=resolver,
-        topology_builder=builder,
+        workflow=compose_m4_workflow(
+            settings,
+            parser=parser,
+            context_resolver=resolver,
+            topology_builder=builder,
+            parameter_capabilities=load_parameter_capability_registry(),
+            error_id_factory=uuid4,
+        ),
         transcript_store=store,
     )
     async with application.router.lifespan_context(application):

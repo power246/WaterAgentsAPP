@@ -16,6 +16,7 @@ from app.application.query_understanding.context_models import (
 )
 from app.application.query_understanding.context_resolver import (
     AnalysisContextResolver,
+    ContextDependencyError,
 )
 from app.application.query_understanding.date_resolver import (
     DateResolution,
@@ -59,6 +60,7 @@ __all__ = [
     "AnalysisContextResolution",
     "AnalysisContextResolutionStatus",
     "AnalysisContextResolver",
+    "ContextDependencyError",
     "AnalysisTimeSegment",
     "ClarificationIssue",
     "ClarificationSubject",

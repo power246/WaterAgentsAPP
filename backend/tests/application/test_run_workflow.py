@@ -17,7 +17,12 @@ from app.application.analysis_runs.models import RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from tests.m4_support import MODEL_CATALOG, create_request, create_test_app as create_app
+from tests.m4_support import (
+    MODEL_CATALOG,
+    NoOpWorkflow,
+    create_request,
+    create_test_app as create_app,
+)
 
 CONFIGURATION = CreateAnalysisRunRequest.model_validate(
     create_request("query")
@@ -556,6 +561,7 @@ def test_shutdown_grace_period_rejects_unbounded_or_negative_values(grace) -> No
             FixedClock(),
             transcript_store=InMemoryTranscriptStore(),
             model_catalog=MODEL_CATALOG,
+            workflow=NoOpWorkflow(),
             shutdown_grace_period=grace,
         )
 

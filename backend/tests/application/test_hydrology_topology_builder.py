@@ -416,6 +416,39 @@ def test_each_hard_limit_has_a_distinct_search_limit_outcome(
     assert graph.stats.discovered_nodes <= limits.max_nodes
 
 
+def test_each_blocked_sibling_keeps_its_identity_at_distance_limit() -> None:
+    graph = run(
+        builder(
+            FakeTopology(
+                {
+                    TARGET: (
+                        segment("200", TARGET, distance=1.1),
+                        segment("300", TARGET, distance=1.2),
+                    )
+                }
+            ),
+            FakeInventory({}),
+            limits=TopologyLimits(
+                max_distance_km=1.0,
+                max_hops=12,
+                max_nodes=128,
+            ),
+        ).build(context())
+    )
+
+    limited = tuple(
+        outcome
+        for outcome in graph.branch_outcomes
+        if outcome.reason is BranchOutcomeReason.MAX_DISTANCE_REACHED
+    )
+    assert {outcome.blocked_upstream_comid for outcome in limited} == {
+        "200",
+        "300",
+    }
+    assert {outcome.stop_comid for outcome in limited} == {TARGET}
+    assert {outcome.path_to_target for outcome in limited} == {(TARGET,)}
+
+
 def test_exact_production_boundaries_stop_before_distance_hop_and_node_overflow() -> None:
     distance_graph = run(
         builder(

@@ -33,6 +33,11 @@ MODEL_CATALOG = ModelCatalog(MODEL_CAPABILITIES)
 _OMITTED = object()
 
 
+class NoOpWorkflow:
+    async def run(self, context) -> None:
+        context.cancellation.checkpoint()
+
+
 def create_request(
     query: str = "lake",
     *,
@@ -125,4 +130,6 @@ def create_test_app(*args: object, **kwargs: object):
     from app.main import create_app
 
     kwargs.setdefault("model_catalog", MODEL_CATALOG)
+    if kwargs.get("workflow") is None:
+        kwargs["workflow"] = NoOpWorkflow()
     return create_app(*args, **kwargs)

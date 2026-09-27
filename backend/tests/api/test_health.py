@@ -44,6 +44,8 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "provider_http_retry_delay_seconds": 0.25,
         "google_geocoding_api_key": None,
         "usgs_api_key": None,
+        "openai_api_key": None,
+        "openai_base_url": "https://api.openai.com/v1",
         "topology_stage_timeout_seconds": 120.0,
         "db_host": "127.0.0.1",
         "db_port": 5432,
@@ -158,13 +160,31 @@ def test_provider_secrets_remain_masked_and_preserve_whitespace() -> None:
     settings = AppSettings(
         google_geocoding_api_key=secret,
         usgs_api_key=secret,
+        openai_api_key=secret,
     )
 
     assert settings.google_geocoding_api_key is not None
     assert settings.usgs_api_key is not None
+    assert settings.openai_api_key is not None
     assert settings.google_geocoding_api_key.get_secret_value() == secret
     assert settings.usgs_api_key.get_secret_value() == secret
+    assert settings.openai_api_key.get_secret_value() == secret
     assert secret not in repr(settings)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "api.openai.com/v1",
+        "https://",
+        "https://user:secret@api.openai.com/v1",
+        "https://api.openai.com/v1?key=secret",
+        "https://api.openai.com/v1#fragment",
+    ],
+)
+def test_openai_base_url_rejects_unsafe_or_incomplete_values(value: str) -> None:
+    with pytest.raises(ValidationError, match="openai_base_url"):
+        AppSettings(openai_base_url=value)
 
 
 def test_model_catalog_is_parsed_once_as_safe_role_metadata(

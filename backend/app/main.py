@@ -20,19 +20,9 @@ from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceWriteBatch,
 )
-from app.application.analysis_runs.query_topology_workflow import (
-    QueryTopologyWorkflow,
-    TopologyBuildingStage,
-)
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
-from app.application.query_understanding import (
-    AnalysisContext,
-    QueryContextResolver,
-    QueryParserPort,
-    QueryParserPromptBuilder,
-    QueryParserWorkflow,
-)
+from app.application.query_understanding import AnalysisContext
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
 from app.application.transcripts.stream_models import RunSnapshotEvent
@@ -51,9 +41,17 @@ from app.infrastructure.persistence.database import (
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
+from app.infrastructure.runtime import RuntimeComponents, build_m4_runtime
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
+
+
+@asynccontextmanager
+async def _provided_runtime(
+    workflow: AnalysisWorkflow,
+) -> AsyncIterator[RuntimeComponents]:
+    yield RuntimeComponents(workflow=workflow)
 
 
 def create_app(
@@ -61,10 +59,6 @@ def create_app(
     *,
     clock: ClockPort | None = None,
     workflow: AnalysisWorkflow | None = None,
-    query_parser: QueryParserPort | None = None,
-    query_context_resolver: QueryContextResolver | None = None,
-    topology_builder: TopologyBuildingStage | None = None,
-    query_parser_private_values: tuple[str, ...] = (),
     id_factory: Callable[[], UUID] = uuid4,
     record_id_factory: Callable[[], UUID] = uuid4,
     shutdown_grace_period: float = 1.0,
@@ -89,102 +83,85 @@ def create_app(
     resolved_parameter_capabilities = (
         parameter_capability_registry or load_parameter_capability_registry()
     )
-    m4_components = (query_parser, query_context_resolver, topology_builder)
-    if workflow is not None and any(item is not None for item in m4_components):
-        raise ValueError(
-            "workflow cannot be configured with M4 workflow components"
-        )
-    if any(item is not None for item in m4_components) and not all(
-        item is not None for item in m4_components
-    ):
-        raise ValueError(
-            "query_parser, query_context_resolver, and topology_builder "
-            "must be configured together"
-        )
-    resolved_workflow = workflow
-    if (
-        query_parser is not None
-        and query_context_resolver is not None
-        and topology_builder is not None
-    ):
-        parser_workflow = QueryParserWorkflow(
-            query_parser,
-            query_context_resolver,
-            QueryParserPromptBuilder(resolved_parameter_capabilities),
-            error_id_factory=id_factory,
-            timeout_seconds=resolved_settings.query_parser_timeout_seconds,
-            private_values=query_parser_private_values,
-        )
-        resolved_workflow = QueryTopologyWorkflow(parser_workflow, topology_builder)
-
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         configure_logging(resolved_settings.log_level)
-        engine = None
-        coordinator = None
-        try:
-            active_store = transcript_store
-            if active_store is None:
-                engine = create_database_engine(resolved_settings)
-                await check_database_schema(resolved_settings, engine=engine)
-                active_store = PostgresTranscriptStore(
-                    engine,
-                    operation_timeout_seconds=(
+        runtime_context = (
+            _provided_runtime(workflow)
+            if workflow is not None
+            else build_m4_runtime(
+                resolved_settings,
+                clock=resolved_clock,
+                parameter_capabilities=resolved_parameter_capabilities,
+                error_id_factory=id_factory,
+            )
+        )
+        async with runtime_context as runtime:
+            engine = None
+            coordinator = None
+            try:
+                active_store = transcript_store
+                if active_store is None:
+                    engine = create_database_engine(resolved_settings)
+                    await check_database_schema(resolved_settings, engine=engine)
+                    active_store = PostgresTranscriptStore(
+                        engine,
+                        operation_timeout_seconds=(
+                            resolved_settings.db_operation_timeout_seconds
+                        ),
+                    )
+                active_registry = transcript_registry or create_production_registry()
+                await repair_interrupted_runs(
+                    active_store,
+                    active_registry,
+                    resolved_clock,
+                    id_factory=record_id_factory,
+                    inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
+                    preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+                )
+                coordinator = RunCoordinator(
+                    resolved_clock,
+                    transcript_store=active_store,
+                    model_catalog=resolved_model_catalog,
+                    analysis_timezone=resolved_settings.analysis_timezone,
+                    workflow=runtime.workflow,
+                    id_factory=id_factory,
+                    record_id_factory=record_id_factory,
+                    shutdown_grace_period=shutdown_grace_period,
+                    shutdown_save_grace_period=(
+                        resolved_settings.shutdown_save_grace_seconds
+                    ),
+                    live_state_grace_period=resolved_settings.live_state_grace_seconds,
+                    keepalive_interval=keepalive_interval,
+                    idempotency_wait_timeout=(
+                        resolved_settings.idempotency_wait_timeout_seconds
+                    ),
+                    inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
+                    preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+                    persistence_batch_items=resolved_settings.persistence_batch_items,
+                    persistence_attempt_timeout=(
                         resolved_settings.db_operation_timeout_seconds
                     ),
+                    workflow_task_factory=workflow_task_factory,
+                    transcript_registry=active_registry,
                 )
-            active_registry = transcript_registry or create_production_registry()
-            await repair_interrupted_runs(
-                active_store,
-                active_registry,
-                resolved_clock,
-                id_factory=record_id_factory,
-                inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
-                preview_bytes=resolved_settings.transcript_preview_bytes // 2,
-            )
-            coordinator = RunCoordinator(
-                resolved_clock,
-                transcript_store=active_store,
-                model_catalog=resolved_model_catalog,
-                analysis_timezone=resolved_settings.analysis_timezone,
-                workflow=resolved_workflow,
-                id_factory=id_factory,
-                record_id_factory=record_id_factory,
-                shutdown_grace_period=shutdown_grace_period,
-                shutdown_save_grace_period=(
-                    resolved_settings.shutdown_save_grace_seconds
-                ),
-                live_state_grace_period=resolved_settings.live_state_grace_seconds,
-                keepalive_interval=keepalive_interval,
-                idempotency_wait_timeout=(
-                    resolved_settings.idempotency_wait_timeout_seconds
-                ),
-                inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
-                preview_bytes=resolved_settings.transcript_preview_bytes // 2,
-                persistence_batch_items=resolved_settings.persistence_batch_items,
-                persistence_attempt_timeout=(
-                    resolved_settings.db_operation_timeout_seconds
-                ),
-                workflow_task_factory=workflow_task_factory,
-                transcript_registry=active_registry,
-            )
-            transcript_reader = TranscriptReader(
-                coordinator,
-                active_store,
-                active_registry,
-                error_id_factory=id_factory,
-                inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
-                preview_bytes=resolved_settings.transcript_preview_bytes // 2,
-            )
-            application.state.run_coordinator = coordinator
-            application.state.transcript_reader = transcript_reader
-            application.state.transcript_store = active_store
-            yield
-        finally:
-            if coordinator is not None:
-                await coordinator.shutdown()
-            if engine is not None:
-                await engine.dispose()
+                transcript_reader = TranscriptReader(
+                    coordinator,
+                    active_store,
+                    active_registry,
+                    error_id_factory=id_factory,
+                    inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
+                    preview_bytes=resolved_settings.transcript_preview_bytes // 2,
+                )
+                application.state.run_coordinator = coordinator
+                application.state.transcript_reader = transcript_reader
+                application.state.transcript_store = active_store
+                yield
+            finally:
+                if coordinator is not None:
+                    await coordinator.shutdown()
+                if engine is not None:
+                    await engine.dispose()
 
     application = FastAPI(
         title=resolved_settings.app_name, lifespan=lifespan, redirect_slashes=False
@@ -243,7 +220,9 @@ def create_app(
                 ("parameter_unsupported", "parameter_resolution", False),
                 ("too_many_parameters", "parameter_resolution", False),
                 ("parser_model_unavailable", "query_parsing", True),
-                ("geocoding_unavailable", "location_resolution", True),
+                ("location_resolution_unavailable", "location_resolution", True),
+                ("parameter_catalog_unavailable", "parameter_resolution", True),
+                ("query_resolution_unavailable", "query_resolution", True),
                 ("topology_lookup_failed", "topology_building", True),
                 ("station_availability_failed", "topology_building", True),
                 ("topology_invalid", "topology_building", False),

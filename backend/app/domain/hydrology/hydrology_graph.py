@@ -250,11 +250,17 @@ def _edge_key(edge: HydrologyEdge) -> tuple[int, str, int, str]:
 
 def _outcome_key(
     outcome: BranchOutcome,
-) -> tuple[tuple[int, str, str], int, str, int, tuple[tuple[int, str], ...], str]:
+) -> tuple[object, ...]:
     return (
         coverage_key(outcome.coverage_unit),
         *comid_key(outcome.branch_root_comid),
         len(outcome.path_to_target),
         tuple(comid_key(comid) for comid in outcome.path_to_target),
         outcome.outcome.value,
+        *_optional_comid_key(outcome.blocked_upstream_comid),
+        outcome.reason.value,
     )
+
+
+def _optional_comid_key(comid: str | None) -> tuple[int, str]:
+    return (-1, "") if comid is None else comid_key(comid)

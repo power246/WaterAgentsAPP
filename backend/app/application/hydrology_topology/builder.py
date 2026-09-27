@@ -71,6 +71,12 @@ class _Expansion:
     cumulative_distance_km: float
 
 
+@dataclass(frozen=True)
+class _ExpansionDecision:
+    expansion: _Expansion
+    limit_reason: BranchOutcomeReason | None = None
+
+
 class HydrologyGraphBuilder:
     def __init__(
         self,
@@ -222,43 +228,28 @@ class HydrologyGraphBuilder:
                         coverage_units=remaining,
                     )
                     for segment in upstreams:
-                        self._validate_expansion(remaining_state, segment)
-                        distance = state.cumulative_distance_km + self._edge_distance(
-                            segment
+                        decision = self._decide_expansion(
+                            remaining_state,
+                            segment,
+                            target_comid=target_comid,
+                            sibling_count=len(upstreams),
                         )
-                        if distance > self._limits.max_distance_km:
-                            self._add_terminal_outcomes(
+                        if decision.limit_reason is not None:
+                            self._add_blocked_expansion_outcomes(
                                 outcomes,
-                                remaining_state,
-                                remaining,
-                                BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
-                                BranchOutcomeReason.MAX_DISTANCE_REACHED,
+                                decision.expansion,
+                                decision.limit_reason,
                             )
                             continue
-                        branch_root = (
-                            segment.comid
-                            if state.comid == target_comid or len(upstreams) > 1
-                            else state.branch_root_comid
-                        )
-                        expansions.append(
-                            _Expansion(
-                                parent=remaining_state,
-                                segment=segment,
-                                branch_root_comid=branch_root,
-                                depth=state.depth + 1,
-                                cumulative_distance_km=distance,
-                            )
-                        )
+                        expansions.append(decision.expansion)
 
             next_frontier: set[_PathState] = set()
             for expansion in sorted(expansions, key=_expansion_key):
                 upstream = expansion.segment.comid
                 if upstream not in nodes and len(nodes) >= self._limits.max_nodes:
-                    self._add_terminal_outcomes(
+                    self._add_blocked_expansion_outcomes(
                         outcomes,
-                        expansion.parent,
-                        expansion.parent.coverage_units,
-                        BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+                        expansion,
                         BranchOutcomeReason.MAX_NODES_REACHED,
                     )
                     continue
@@ -403,6 +394,37 @@ class HydrologyGraphBuilder:
             return BranchOutcomeReason.MAX_HOPS_REACHED
         return None
 
+    def _decide_expansion(
+        self,
+        state: _PathState,
+        segment: RiverSegment,
+        *,
+        target_comid: str,
+        sibling_count: int,
+    ) -> _ExpansionDecision:
+        self._validate_expansion(state, segment)
+        distance = state.cumulative_distance_km + self._edge_distance(segment)
+        branch_root = (
+            segment.comid
+            if state.comid == target_comid or sibling_count > 1
+            else state.branch_root_comid
+        )
+        expansion = _Expansion(
+            parent=state,
+            segment=segment,
+            branch_root_comid=branch_root,
+            depth=state.depth + 1,
+            cumulative_distance_km=distance,
+        )
+        return _ExpansionDecision(
+            expansion=expansion,
+            limit_reason=(
+                BranchOutcomeReason.MAX_DISTANCE_REACHED
+                if distance > self._limits.max_distance_km
+                else None
+            ),
+        )
+
     @staticmethod
     def _group_frontier(
         frontier: tuple[_PathState, ...],
@@ -540,6 +562,8 @@ class HydrologyGraphBuilder:
         unit: CoverageUnit,
         status: BranchOutcomeStatus,
         reason: BranchOutcomeReason,
+        *,
+        blocked_upstream_comid: str | None = None,
     ) -> BranchOutcome:
         return BranchOutcome(
             branch_root_comid=state.branch_root_comid,
@@ -548,6 +572,7 @@ class HydrologyGraphBuilder:
             stop_comid=state.comid,
             path_to_target=state.path_to_target,
             reason=reason,
+            blocked_upstream_comid=blocked_upstream_comid,
         )
 
     def _add_terminal_outcomes(
@@ -560,6 +585,23 @@ class HydrologyGraphBuilder:
     ) -> None:
         for unit in units:
             outcomes.add(self._outcome(state, unit, status, reason))
+
+    def _add_blocked_expansion_outcomes(
+        self,
+        outcomes: set[BranchOutcome],
+        expansion: _Expansion,
+        reason: BranchOutcomeReason,
+    ) -> None:
+        for unit in expansion.parent.coverage_units:
+            outcomes.add(
+                self._outcome(
+                    expansion.parent,
+                    unit,
+                    BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+                    reason,
+                    blocked_upstream_comid=expansion.segment.comid,
+                )
+            )
 
     def _assemble_graph(
         self,
@@ -599,6 +641,7 @@ class HydrologyGraphBuilder:
                 branch_root_comid=outcome.branch_root_comid,
                 coverage_unit=outcome.coverage_unit,
                 stop_comid=outcome.stop_comid,
+                blocked_upstream_comid=outcome.blocked_upstream_comid,
             )
             for comid in outcome.path_to_target:
                 if comid not in active_comids:
@@ -816,22 +859,29 @@ def _edge_key(edge: HydrologyEdge) -> tuple[int, str, int, str]:
 
 def _outcome_key(
     outcome: BranchOutcome,
-) -> tuple[tuple[int, str, str], int, str, int, tuple[tuple[int, str], ...], str]:
+) -> tuple[object, ...]:
     return (
         _coverage_key(outcome.coverage_unit),
         *_comid_key(outcome.branch_root_comid),
         len(outcome.path_to_target),
         tuple(_comid_key(comid) for comid in outcome.path_to_target),
         outcome.outcome.value,
+        *_optional_comid_key(outcome.blocked_upstream_comid),
+        outcome.reason.value,
     )
 
 
 def _exclusion_key(
     reason: HydrologyExclusionReason,
-) -> tuple[str, int, str, tuple[int, str, str], int, str]:
+) -> tuple[object, ...]:
     return (
         reason.code.value,
         *_comid_key(reason.branch_root_comid),
         _coverage_key(reason.coverage_unit),
         *_comid_key(reason.stop_comid),
+        *_optional_comid_key(reason.blocked_upstream_comid),
     )
+
+
+def _optional_comid_key(comid: str | None) -> tuple[int, str]:
+    return (-1, "") if comid is None else _comid_key(comid)

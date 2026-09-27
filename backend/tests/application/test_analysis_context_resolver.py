@@ -1,9 +1,12 @@
 import asyncio
 from datetime import date, datetime, timezone
 
+import pytest
+
 from app.application.query_understanding import (
     AnalysisContextResolutionStatus,
     AnalysisContextResolver,
+    ContextDependencyError,
     ClarificationIssue,
     ClarificationSubject,
     DateResolver,
@@ -27,6 +30,7 @@ from app.domain import (
     TimeResolutionPreference,
 )
 from app.infrastructure.config import load_parameter_capability_registry
+from app.ports import PortUnavailableError
 
 
 POINT = GeoPoint(latitude=38.9, longitude=-77.0)
@@ -88,6 +92,29 @@ class FakeParameterCatalog:
         concept: str,
     ) -> tuple[ParameterCatalogCandidate, ...]:
         return ()
+
+
+class FailingGeocoder(FakeGeocoder):
+    async def reverse(self, point: GeoPoint) -> AdministrativeLocation | None:
+        del point
+        raise PortUnavailableError(
+            "geocoding failed",
+            provider="google_geocoding",
+            operation="reverse",
+        )
+
+
+class FailingParameterCatalog:
+    async def find_candidates(
+        self,
+        concept: str,
+    ) -> tuple[ParameterCatalogCandidate, ...]:
+        del concept
+        raise PortUnavailableError(
+            "catalog failed",
+            provider="usgs_waterdata",
+            operation="find_parameter_candidates",
+        )
 
 
 def request(*, explicit_auto: bool = True) -> AnalysisRequestV1:
@@ -253,3 +280,60 @@ def test_parameter_failure_exposes_no_partial_context() -> None:
 
     assert result.status is AnalysisContextResolutionStatus.PARAMETER_UNSUPPORTED
     assert result.context is None
+
+
+def test_location_port_failure_keeps_location_error_semantics() -> None:
+    registry = load_parameter_capability_registry()
+    context_resolver = AnalysisContextResolver(
+        clock=CountingClock(),
+        location_resolver=LocationResolver(
+            FailingGeocoder(),
+            FakeComidLookup(),
+            FakeTopology(),
+        ),
+        date_resolver=DateResolver(),
+        parameter_resolver=ParameterResolver(registry, FakeParameterCatalog()),
+        capability_registry=registry,
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(ContextDependencyError) as captured:
+            await context_resolver.resolve(
+                request(),
+                parsed_intent(),
+                analysis_timezone="America/New_York",
+            )
+        assert captured.value.code == "location_resolution_unavailable"
+        assert captured.value.failed_stage == "location_resolution"
+
+    run(exercise())
+
+
+def test_parameter_catalog_failure_is_not_reported_as_geocoding() -> None:
+    registry = load_parameter_capability_registry()
+    context_resolver = AnalysisContextResolver(
+        clock=CountingClock(),
+        location_resolver=LocationResolver(
+            FakeGeocoder(),
+            FakeComidLookup(),
+            FakeTopology(),
+        ),
+        date_resolver=DateResolver(),
+        parameter_resolver=ParameterResolver(
+            registry,
+            FailingParameterCatalog(),
+        ),
+        capability_registry=registry,
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(ContextDependencyError) as captured:
+            await context_resolver.resolve(
+                request(),
+                parsed_intent(concept="not in local registry"),
+                analysis_timezone="America/New_York",
+            )
+        assert captured.value.code == "parameter_catalog_unavailable"
+        assert captured.value.failed_stage == "parameter_resolution"
+
+    run(exercise())

@@ -13,6 +13,7 @@ from app.application.query_understanding import (
     AnalysisContext,
     AnalysisContextResolution,
     AnalysisContextResolutionStatus,
+    ContextDependencyError,
     DateResolver,
     ParameterIntentSource,
     ParserFinishReason,
@@ -180,10 +181,22 @@ class FakeContextResolver:
 class FailingContextResolver:
     async def resolve(self, *args, **kwargs):
         del args, kwargs
-        raise PortUnavailableError(
-            "Authorization: Bearer geocoder-secret",
-            provider="google_geocoding",
-            operation="reverse",
+        raise ContextDependencyError(
+            code="location_resolution_unavailable",
+            message="Location resolution services are temporarily unavailable.",
+            failed_stage="location_resolution",
+            retryable=True,
+        )
+
+
+class FailingParameterContextResolver:
+    async def resolve(self, *args, **kwargs):
+        del args, kwargs
+        raise ContextDependencyError(
+            code="parameter_catalog_unavailable",
+            message="The parameter catalog is temporarily unavailable.",
+            failed_stage="parameter_resolution",
+            retryable=True,
         )
 
 
@@ -321,9 +334,11 @@ def test_schema_invalid_first_call_repairs_once_without_overwriting_message() ->
             assert session.status is AgentSessionStatus.COMPLETED
             assert len(parser.calls) == 2
             assert len(resolver.calls) == 1
-            assert tuple(item.content.content_type for item in items).count(
-                "query_parser_input"
-            ) == 1
+            inputs = tuple(
+                item for item in items
+                if item.content.content_type == "query_parser_input"
+            )
+            assert len(inputs) == 2
             messages = tuple(
                 item for item in items
                 if item.content.content_type == "query_parser_message"
@@ -334,6 +349,9 @@ def test_schema_invalid_first_call_repairs_once_without_overwriting_message() ->
             assert set(repair_payload) == {"invalid_output", "validation_errors"}
             assert repair_payload["invalid_output"] == invalid
             assert messages[0].operation_id != messages[1].operation_id
+            assert inputs[0].operation_id == messages[0].operation_id
+            assert inputs[1].operation_id == messages[1].operation_id
+            assert inputs[1].content.safe_body == parser.calls[1].model_dump_json()
             context_item = next(
                 item for item in items
                 if item.content.content_type == "query_understood"
@@ -579,13 +597,36 @@ def test_location_dependency_failure_maps_to_safe_retryable_public_error() -> No
 
             assert terminal.status is RunStatus.FAILED
             assert session.status is AgentSessionStatus.FAILED
-            assert error.code == "geocoding_unavailable"
+            assert error.code == "location_resolution_unavailable"
             assert error.failed_stage == "location_resolution"
             assert error.retryable is True
-            assert error.message == "Location services are temporarily unavailable."
+            assert error.message == (
+                "Location resolution services are temporarily unavailable."
+            )
             assert "geocoder-secret" not in error.model_dump_json()
             assert "geocoder-secret" not in "".join(
                 item.content.safe_body for item in items
+            )
+
+    run(exercise())
+
+
+def test_parameter_catalog_failure_keeps_parameter_public_error_semantics() -> None:
+    async def exercise() -> None:
+        parser = FakeParser(successful_response())
+        async with parser_runtime(
+            parser,
+            FailingParameterContextResolver(),
+        ) as coordinator:
+            created, terminal = await create_and_wait(coordinator)
+            error = coordinator._runs[created.run_id].last_error
+
+            assert terminal.status is RunStatus.FAILED
+            assert error.code == "parameter_catalog_unavailable"
+            assert error.failed_stage == "parameter_resolution"
+            assert error.retryable is True
+            assert error.message == (
+                "The parameter catalog is temporarily unavailable."
             )
 
     run(exercise())

@@ -23,6 +23,7 @@ from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from tests.m4_support import (
     MODEL_CAPABILITIES,
     MODEL_CATALOG,
+    NoOpWorkflow,
     create_request_bytes,
 )
 
@@ -124,7 +125,7 @@ def coordinator_for(store, workflow=None, **options) -> RunCoordinator:
         clock,
         transcript_store=store,
         model_catalog=model_catalog,
-        workflow=workflow,
+        workflow=workflow or NoOpWorkflow(),
         shutdown_grace_period=0,
         **options,
     )

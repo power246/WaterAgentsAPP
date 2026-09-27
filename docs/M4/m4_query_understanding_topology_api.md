@@ -196,7 +196,7 @@ parser-session-owned、非流式：
 }
 ```
 
-这是实际送给 provider 的安全输入表示。任何凭据在进入 live buffer 前已脱敏；`tools` 必须为空。
+这是实际送给 provider 的安全输入表示。任何凭据在进入 live buffer 前已脱敏；`tools` 必须为空。若触发一次 schema repair，repair 使用新的 operation，并额外保存一份与第二次真实调用逐字段一致的 `query_parser_input v1`；不能只保存首轮输入。
 
 ### 4.4 `query_parser_message v1`
 
@@ -352,7 +352,8 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
       "outcome": "qualified",
       "stop_comid": "12345678",
       "path_to_target": ["12345678"],
-      "reason": "target_station_qualified"
+      "reason": "target_station_qualified",
+      "blocked_upstream_comid": null
     },
     {
       "branch_root_comid": "12345678",
@@ -366,7 +367,8 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
       "outcome": "qualified",
       "stop_comid": "12345678",
       "path_to_target": ["12345678"],
-      "reason": "target_station_qualified"
+      "reason": "target_station_qualified",
+      "blocked_upstream_comid": null
     }
   ],
   "execution_layers": [
@@ -388,7 +390,7 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
 }
 ```
 
-大图按 M3 64 KiB 规则返回 preview/reference，前端再用全文 endpoint 获取。地图只依据 graph 原事实绘制；不能从 session 数量反推节点或排除原因。
+大图按 M3 64 KiB 规则返回 preview/reference，前端再用全文 endpoint 获取。地图只依据 graph 原事实绘制；不能从 session 数量反推节点或排除原因。距离或全图节点上限在 child 进入图前阻止扩展时，`stop_comid/path_to_target` 仍描述已发现的 parent 路径，`blocked_upstream_comid` 单独记录该 child；因此多个同时受限的支流不会被集合去重合并。
 
 ## 5. History 与 detail 投影
 
@@ -521,7 +523,9 @@ event: stream_end
 | `parameter_unsupported` | `parameter_resolution` | false | 改为能力表支持的目标，或等待后续扩展。 |
 | `too_many_parameters` | `parameter_resolution` | false | 缩小问题至最多 6 个用户目标参数；系统支持参数不占上限。 |
 | `parser_model_unavailable` | `query_parsing` | true | 稍后重试；不会自动切模型。 |
-| `geocoding_unavailable` | `location_resolution` | true | 稍后重试。 |
+| `location_resolution_unavailable` | `location_resolution` | true | 稍后重试。 |
+| `parameter_catalog_unavailable` | `parameter_resolution` | true | 稍后重试。 |
+| `query_resolution_unavailable` | `query_resolution` | true | 稍后重试并联系维护者确认未分类依赖。 |
 | `topology_lookup_failed` | `topology_building` | true | 稍后重试。 |
 | `station_availability_failed` | `topology_building` | true | 稍后重试。 |
 | `topology_invalid` | `topology_building` | false | 联系维护者并提供 `error_id`。 |

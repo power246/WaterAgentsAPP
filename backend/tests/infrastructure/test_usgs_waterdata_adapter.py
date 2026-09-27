@@ -98,6 +98,45 @@ def test_wdfn_parameter_location_and_paginated_series_metadata() -> None:
     assert second_series.url.params["limit"] == "1"
 
 
+@pytest.mark.parametrize(
+    ("concept", "query_name", "query_value"),
+    [
+        ("00060", "id", "00060"),
+        ("Discharge", "parameter_name", "Discharge"),
+    ],
+)
+def test_parameter_catalog_candidates_use_exact_official_queryables(
+    concept: str,
+    query_name: str,
+    query_value: str,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json=json_fixture("wdfn_parameter_codes.json"),
+            request=request,
+        )
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            candidates = await UsgsWaterDataAdapter(
+                http,
+                ogc_base_url=OGC_BASE,
+                samples_base_url=SAMPLES_BASE,
+            ).find_candidates(concept)
+        assert len(candidates) == 1
+        assert candidates[0].key == DISCHARGE
+        assert candidates[0].canonical_name == "Discharge"
+        assert candidates[0].score == 1.0
+
+    run(exercise())
+    assert requests[0].url.path.endswith("/collections/parameter-codes/items")
+    assert requests[0].url.params[query_name] == query_value
+
+
 def test_samples_csv_summary_parses_discrete_periods() -> None:
     content = (FIXTURES / "samples_summary.csv").read_bytes()
     requests: list[httpx.Request] = []

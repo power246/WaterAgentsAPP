@@ -67,7 +67,6 @@ from app.application.analysis_runs.writer import TranscriptWriter
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
     CancellationToken,
-    DefaultFakeWorkflow,
     WorkflowContext,
     WorkflowFailed,
     WorkflowStopped,
@@ -248,7 +247,7 @@ class RunCoordinator:
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
-        workflow: AnalysisWorkflow | None = None,
+        workflow: AnalysisWorkflow,
         shutdown_grace_period: float = 1.0,
         shutdown_save_grace_period: float = 5.0,
         keepalive_interval: float = 15.0,
@@ -302,7 +301,7 @@ class RunCoordinator:
         self._creation_by_run: dict[UUID, _CreationOwner] = {}
         self._creation_tasks: set[asyncio.Task[AnalysisRunSnapshot]] = set()
         self._runs_lock = asyncio.Lock()
-        self._workflow = workflow if workflow is not None else DefaultFakeWorkflow()
+        self._workflow = workflow
         self._shutdown_grace_period = shutdown_grace_period
         self._shutdown_save_grace_period = shutdown_save_grace_period
         self._shutdown_lock = asyncio.Lock()

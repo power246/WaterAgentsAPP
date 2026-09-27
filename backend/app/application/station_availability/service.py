@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import timedelta
 
 from app.domain import (
@@ -33,6 +33,32 @@ from app.ports import (
 PROVIDER = "station_inventory"
 
 
+@dataclass(frozen=True)
+class _AvailabilityPlan:
+    units_by_parameter: dict[ParameterKey, tuple[CoverageUnit, ...]]
+    historical_ranges: dict[int, AvailabilityTimeRange]
+    prediction_baseline_ranges: dict[int, AvailabilityTimeRange]
+
+    @classmethod
+    def compile(cls, request: StationAvailabilityRequest) -> _AvailabilityPlan:
+        units: dict[ParameterKey, list[CoverageUnit]] = {}
+        for unit in request.coverage_units:
+            units.setdefault(unit.parameter, []).append(unit)
+        return cls(
+            units_by_parameter={
+                parameter: tuple(parameter_units)
+                for parameter, parameter_units in units.items()
+            },
+            historical_ranges={
+                item.segment_index: item for item in request.historical_ranges
+            },
+            prediction_baseline_ranges={
+                item.segment_index: item
+                for item in request.prediction_baseline_ranges
+            },
+        )
+
+
 class StationAvailabilityService:
     def __init__(
         self,
@@ -55,6 +81,7 @@ class StationAvailabilityService:
         deadline: float | None = None,
     ) -> tuple[StationAvailability, ...]:
         capabilities = self._capabilities(request)
+        plan = _AvailabilityPlan.compile(request)
         self._ensure_deadline(deadline)
         associated = await self._topology.get_monitoring_sites(
             request.comid,
@@ -76,7 +103,7 @@ class StationAvailabilityService:
             ParameterProvider.USGS_SAMPLES,
         )
         references = await self._provider_references(
-            request,
+            plan,
             stations,
             time_series_parameters,
             sample_parameters,
@@ -131,7 +158,7 @@ class StationAvailabilityService:
 
     async def _provider_references(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         stations: dict[str, MonitoringStation],
         time_series_parameters: tuple[ParameterKey, ...],
         sample_parameters: tuple[ParameterKey, ...],
@@ -144,7 +171,7 @@ class StationAvailabilityService:
             tasks.append(
                 asyncio.create_task(
                     self._time_series_references(
-                        request,
+                        plan,
                         stations,
                         time_series_parameters,
                         capabilities,
@@ -156,7 +183,7 @@ class StationAvailabilityService:
             tasks.append(
                 asyncio.create_task(
                     self._sample_references(
-                        request,
+                        plan,
                         stations,
                         sample_parameters,
                         deadline,
@@ -218,7 +245,7 @@ class StationAvailabilityService:
 
     async def _time_series_references(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         stations: dict[str, MonitoringStation],
         parameters: tuple[ParameterKey, ...],
         capabilities: dict[ParameterKey, ParameterCapability],
@@ -264,7 +291,7 @@ class StationAvailabilityService:
             deadline=deadline,
         )
         return self._qualify_time_series(
-            request,
+            plan,
             series,
             stations=set(routed_stations),
             parameters=set(routed_parameters),
@@ -308,7 +335,7 @@ class StationAvailabilityService:
 
     def _qualify_time_series(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         records: tuple[TimeSeriesMetadata, ...],
         *,
         stations: set[str],
@@ -328,17 +355,17 @@ class StationAvailabilityService:
             ):
                 raise self._invalid_metadata("get_time_series_metadata")
             seen_identities.add(record.series_id)
-            references.extend(self._time_series_refs_for_record(request, record))
+            references.extend(self._time_series_refs_for_record(plan, record))
         return tuple(sorted(references, key=self._series_ref_sort_key))
 
     def _time_series_refs_for_record(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         record: TimeSeriesMetadata,
     ) -> tuple[SeriesRef, ...]:
-        units = self._units_for_parameter(request, record.parameter)
-        historical = self._ranges_by_index(request.historical_ranges)
-        prediction = self._ranges_by_index(request.prediction_baseline_ranges)
+        units = plan.units_by_parameter.get(record.parameter, ())
+        historical = plan.historical_ranges
+        prediction = plan.prediction_baseline_ranges
         by_source: dict[AvailabilityCoverageSource, list[CoverageUnit]] = {}
         for unit in units:
             if unit.segment_index in historical:
@@ -372,7 +399,7 @@ class StationAvailabilityService:
 
     async def _sample_references(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         stations: dict[str, MonitoringStation],
         parameters: tuple[ParameterKey, ...],
         deadline: float | None,
@@ -387,7 +414,7 @@ class StationAvailabilityService:
             )
             references.extend(
                 self._qualify_sample_periods(
-                    request,
+                    plan,
                     station_id,
                     periods,
                     requested=requested,
@@ -397,7 +424,7 @@ class StationAvailabilityService:
 
     def _qualify_sample_periods(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         station_id: str,
         records: tuple[SamplePeriodOfRecord, ...],
         *,
@@ -422,18 +449,18 @@ class StationAvailabilityService:
                 or record.activity_count == 0
             ):
                 continue
-            references.extend(self._sample_refs_for_record(request, record, parameter))
+            references.extend(self._sample_refs_for_record(plan, record, parameter))
         return tuple(sorted(references, key=self._series_ref_sort_key))
 
     def _sample_refs_for_record(
         self,
-        request: StationAvailabilityRequest,
+        plan: _AvailabilityPlan,
         record: SamplePeriodOfRecord,
         parameter: ParameterKey,
     ) -> tuple[SeriesRef, ...]:
-        units = self._units_for_parameter(request, parameter)
-        historical = self._ranges_by_index(request.historical_ranges)
-        prediction = self._ranges_by_index(request.prediction_baseline_ranges)
+        units = plan.units_by_parameter.get(parameter, ())
+        historical = plan.historical_ranges
+        prediction = plan.prediction_baseline_ranges
         by_source: dict[AvailabilityCoverageSource, list[CoverageUnit]] = {}
         for unit in units:
             if unit.segment_index in historical:
@@ -493,21 +520,6 @@ class StationAvailabilityService:
             for label, keys in matches.items()
             if len(keys) == 1
         }
-
-    @staticmethod
-    def _units_for_parameter(
-        request: StationAvailabilityRequest,
-        parameter: ParameterKey,
-    ) -> tuple[CoverageUnit, ...]:
-        return tuple(
-            unit for unit in request.coverage_units if unit.parameter == parameter
-        )
-
-    @staticmethod
-    def _ranges_by_index(
-        ranges: Iterable[AvailabilityTimeRange],
-    ) -> dict[int, AvailabilityTimeRange]:
-        return {item.segment_index: item for item in ranges}
 
     @staticmethod
     def _coverage_sort_key(unit: CoverageUnit) -> tuple[int, str, str]:

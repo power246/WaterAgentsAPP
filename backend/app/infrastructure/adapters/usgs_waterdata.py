@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from app.domain.hydrology import (
     GeoPoint,
     MonitoringLocationMetadata,
+    ParameterCatalogCandidate,
     ParameterKey,
     SamplePeriodOfRecord,
     TimeSeriesKind,
@@ -71,6 +72,38 @@ class UsgsWaterDataAdapter:
         self._page_size = page_size
         self._max_pages = max_pages
         self._max_records = max_records
+
+    async def find_candidates(
+        self,
+        concept: str,
+    ) -> tuple[ParameterCatalogCandidate, ...]:
+        value = concept.strip()
+        if not value:
+            raise ValueError("parameter concept must not be empty")
+        operation = "find_parameter_candidates"
+        query = (
+            {"id": value}
+            if len(value) == 5 and value.isdecimal()
+            else {"parameter_name": value}
+        )
+        features = await self._ogc_features(
+            "parameter-codes",
+            operation=operation,
+            query=query,
+            deadline=None,
+        )
+        records = tuple(
+            self._parameter_metadata(feature, operation)
+            for feature in features
+        )
+        return tuple(
+            ParameterCatalogCandidate(
+                key=record.key,
+                canonical_name=record.name,
+                score=1.0,
+            )
+            for record in sorted(records, key=lambda item: item.key.code)
+        )
 
     async def get_parameter_codes(
         self,

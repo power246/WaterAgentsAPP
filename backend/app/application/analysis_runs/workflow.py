@@ -144,8 +144,3 @@ class WorkflowContext:
 
 class AnalysisWorkflow(Protocol):
     async def run(self, context: WorkflowContext) -> None: ...
-
-
-class DefaultFakeWorkflow:
-    async def run(self, context: WorkflowContext) -> None:
-        context.cancellation.checkpoint()

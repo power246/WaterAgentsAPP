@@ -20,7 +20,12 @@ from app.application.analysis_runs.persistence import (
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from tests.m4_support import MODEL_CATALOG, create_request, create_request_bytes
+from tests.m4_support import (
+    MODEL_CATALOG,
+    NoOpWorkflow,
+    create_request,
+    create_request_bytes,
+)
 
 
 class StepClock:
@@ -258,6 +263,7 @@ def test_persistence_attempt_timeout_must_be_finite_and_positive(timeout) -> Non
             StepClock(),
             model_catalog=MODEL_CATALOG,
             transcript_store=InMemoryTranscriptStore(),
+            workflow=NoOpWorkflow(),
             persistence_attempt_timeout=timeout,
         )
 

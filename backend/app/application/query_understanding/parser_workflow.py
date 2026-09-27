@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import datetime
 from math import isfinite
-from typing import NoReturn, Protocol, TypeVar
+from typing import NoReturn, Protocol
 from uuid import UUID
 
 from pydantic import ValidationError
 
 from app.application.analysis_runs.models import AgentRole, PublicError
+from app.application.analysis_runs.cancellation import await_with_cancellation
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
     CancellationToken,
@@ -21,6 +22,9 @@ from app.application.query_understanding.context_models import (
     AnalysisContextResolution,
     AnalysisContextResolutionStatus,
     ParsedIntentV1,
+)
+from app.application.query_understanding.context_resolver import (
+    ContextDependencyError,
 )
 from app.application.query_understanding.parser_models import (
     ParserFinishReason,
@@ -56,9 +60,6 @@ class _ParserModelUnavailable(Exception):
 
 class _ParserOutputRejected(Exception):
     pass
-
-
-ResultT = TypeVar("ResultT")
 
 
 class QueryParserWorkflow(AnalysisWorkflow):
@@ -107,33 +108,27 @@ class QueryParserWorkflow(AnalysisWorkflow):
             analysis_timezone=context.run.configuration.analysis_timezone,
             private_values=self._private_values,
         )
-        operation = await context.operations.create_operation(
-            run_id,
-            session.session_id,
-        )
-        input_item = await context.operations.reserve_transcript_item(
-            run_id,
-            session_id=session.session_id,
-            operation_id=operation.operation_id,
-        )
-        context.cancellation.checkpoint()
-        await context.operations.finalize_transcript_item(
-            run_id,
-            input_item.item_id,
-            "query_parser_input",
-            1,
-            parser_request,
-            private_values=self._private_values,
-        )
-
         parsed_intent: ParsedIntentV1 | None = None
         for attempt in range(2):
             context.cancellation.checkpoint()
-            if attempt:
-                operation = await context.operations.create_operation(
-                    run_id,
-                    session.session_id,
-                )
+            operation = await context.operations.create_operation(
+                run_id,
+                session.session_id,
+            )
+            input_item = await context.operations.reserve_transcript_item(
+                run_id,
+                session_id=session.session_id,
+                operation_id=operation.operation_id,
+            )
+            context.cancellation.checkpoint()
+            await context.operations.finalize_transcript_item(
+                run_id,
+                input_item.item_id,
+                "query_parser_input",
+                1,
+                parser_request,
+                private_values=self._private_values,
+            )
             try:
                 response = await self._generate_message(
                     context,
@@ -177,7 +172,7 @@ class QueryParserWorkflow(AnalysisWorkflow):
         assert parsed_intent is not None
         context.cancellation.checkpoint()
         try:
-            resolution = await self._await_with_cancellation(
+            resolution = await await_with_cancellation(
                 self._context_resolver.resolve(
                     context.request,
                     parsed_intent,
@@ -188,13 +183,22 @@ class QueryParserWorkflow(AnalysisWorkflow):
             )
         except (WorkflowStopped, asyncio.CancelledError):
             raise
+        except ContextDependencyError as error:
+            await self._fail(
+                context,
+                session.session_id,
+                code=error.code,
+                message=error.public_message,
+                failed_stage=error.failed_stage,
+                retryable=error.retryable,
+            )
         except PortError:
             await self._fail(
                 context,
                 session.session_id,
-                code="geocoding_unavailable",
-                message="Location services are temporarily unavailable.",
-                failed_stage="location_resolution",
+                code="query_resolution_unavailable",
+                message="Query resolution services are temporarily unavailable.",
+                failed_stage="query_resolution",
                 retryable=True,
             )
         if resolution.context is None:
@@ -258,10 +262,13 @@ class QueryParserWorkflow(AnalysisWorkflow):
             context.cancellation.checkpoint()
 
         try:
-            response = await self._await_with_cancellation(
+            response = await await_with_cancellation(
                 self._parser.generate(parser_request, on_delta),
                 context.cancellation,
                 timeout=self._timeout_seconds,
+                timeout_error=lambda: PortTimeoutError(
+                    "query parser timed out"
+                ),
             )
         except (WorkflowStopped, asyncio.CancelledError):
             raise
@@ -364,32 +371,6 @@ class QueryParserWorkflow(AnalysisWorkflow):
             failed_stage=failed_stage,
             retryable=retryable,
         )
-
-    @staticmethod
-    async def _await_with_cancellation(
-        awaitable: Awaitable[ResultT],
-        cancellation: CancellationToken,
-        *,
-        timeout: float | None = None,
-    ) -> ResultT:
-        work = asyncio.ensure_future(awaitable)
-        stopped = asyncio.create_task(cancellation.wait())
-        try:
-            done, _ = await asyncio.wait(
-                (work, stopped),
-                timeout=timeout,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancellation.is_requested() or stopped in done:
-                raise WorkflowStopped()
-            if work not in done:
-                raise PortTimeoutError("query parser timed out")
-            return work.result()
-        finally:
-            for task in (work, stopped):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(work, stopped, return_exceptions=True)
 
     @staticmethod
     def _resolution_stage(status: AnalysisContextResolutionStatus) -> str:

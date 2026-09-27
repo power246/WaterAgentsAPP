@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable
-from typing import Protocol, TypeVar
+from typing import Protocol
 
+from app.application.analysis_runs.cancellation import await_with_cancellation
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
     CancellationToken,
@@ -25,9 +25,6 @@ class TopologyBuildingStage(Protocol):
     async def build(self, context: AnalysisContext) -> HydrologyGraph: ...
 
 
-ResultT = TypeVar("ResultT")
-
-
 class QueryTopologyWorkflow(AnalysisWorkflow):
     """Runs the M4 query-understanding and topology stages in one owned task."""
 
@@ -43,7 +40,7 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
         analysis_context = await self._query_understanding.understand(context)
         context.cancellation.checkpoint()
         try:
-            graph = await self._await_with_cancellation(
+            graph = await await_with_cancellation(
                 self._topology_builder.build(analysis_context),
                 context.cancellation,
             )
@@ -96,24 +93,3 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
             graph,
         )
         context.cancellation.checkpoint()
-
-    @staticmethod
-    async def _await_with_cancellation(
-        awaitable: Awaitable[ResultT],
-        cancellation: CancellationToken,
-    ) -> ResultT:
-        work = asyncio.ensure_future(awaitable)
-        stopped = asyncio.create_task(cancellation.wait())
-        try:
-            done, _ = await asyncio.wait(
-                (work, stopped),
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            if cancellation.is_requested() or stopped in done:
-                raise WorkflowStopped()
-            return work.result()
-        finally:
-            for task in (work, stopped):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(work, stopped, return_exceptions=True)

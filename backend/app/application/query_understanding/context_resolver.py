@@ -22,7 +22,26 @@ from app.application.query_understanding.parameter_resolver import ParameterReso
 from app.application.transcripts.models import AnalysisRequestV1
 from app.domain import ParameterCapabilityRegistry
 from app.domain.common import normalize_utc_datetime
-from app.ports import ClockPort
+from app.ports import (
+    ClockPort,
+    PortError,
+)
+
+
+class ContextDependencyError(RuntimeError):
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        failed_stage: str,
+        retryable: bool,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.public_message = message
+        self.failed_stage = failed_stage
+        self.retryable = retryable
 
 
 class AnalysisContextResolver:
@@ -58,7 +77,18 @@ class AnalysisContextResolver:
                 AnalysisContextResolutionStatus.QUERY_CLARIFICATION_REQUIRED
             )
 
-        location = await self._location_resolver.resolve(request.target, parsed_intent)
+        try:
+            location = await self._location_resolver.resolve(
+                request.target,
+                parsed_intent,
+            )
+        except PortError as error:
+            raise ContextDependencyError(
+                code="location_resolution_unavailable",
+                message="Location resolution services are temporarily unavailable.",
+                failed_stage="location_resolution",
+                retryable=True,
+            ) from error
         if location.target is None:
             return self._failure(
                 AnalysisContextResolutionStatus(location.status.value)
@@ -79,7 +109,17 @@ class AnalysisContextResolver:
                 AnalysisContextResolutionStatus(temporal.status.value)
             )
 
-        parameters = await self._parameter_resolver.resolve(parsed_intent.parameters)
+        try:
+            parameters = await self._parameter_resolver.resolve(
+                parsed_intent.parameters
+            )
+        except PortError as error:
+            raise ContextDependencyError(
+                code="parameter_catalog_unavailable",
+                message="The parameter catalog is temporarily unavailable.",
+                failed_stage="parameter_resolution",
+                retryable=True,
+            ) from error
         if parameters.status is not ParameterResolutionStatus.SUCCESS:
             return self._failure(
                 AnalysisContextResolutionStatus(parameters.status.value)

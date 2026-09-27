@@ -90,7 +90,7 @@ python scripts/run_history_smoke.py
 
 Expected final stdout is `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"<test DB>"}`. The history smoke fully stops its first Uvicorn child process before starting a freshly imported application in a second child process against the same database. Both smoke scripts use cross-platform process APIs with terminate, bounded wait, and kill fallback; they do not invoke a shell or GNU utility. They bypass environment proxies and fail clearly if the test database variable or connection is missing.
 
-The standalone run/SSE and M4 workflow smokes are deterministic and do not require PostgreSQL or external credentials. The M4 smoke composes the production parser/resolver/availability/topology workflow with fixed model, geocoding, NLDI, WDFN, and Samples fixtures:
+The standalone run/SSE and M4 workflow smokes are deterministic and do not require PostgreSQL or external credentials. The M4 smoke uses the same composition seam as production with fixed model, geocoding, NLDI, WDFN, and Samples fixtures:
 
 ```text
 python scripts/run_sse_smoke.py
@@ -156,6 +156,8 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_PROVIDER_HTTP_RETRY_DELAY_SECONDS` | `0.25` |
 | `WATERAGENTS_GOOGLE_GEOCODING_API_KEY` | unset; backend-only secret |
 | `WATERAGENTS_USGS_API_KEY` | unset; backend-only optional rate-limit secret |
+| `WATERAGENTS_OPENAI_API_KEY` | unset; required backend-only parser secret |
+| `WATERAGENTS_OPENAI_BASE_URL` | `https://api.openai.com/v1` |
 | `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `120` |
 | `WATERAGENTS_DB_HOST` | `127.0.0.1` |
 | `WATERAGENTS_DB_PORT` | `5432` |
@@ -175,7 +177,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
-Run creation requires one catalog selection for each model role. The catalog stores only public model identities and role metadata; endpoints, credentials, API keys, and authorization values are not valid catalog fields. An empty default keeps health/startup available for configuration checks, but create requests are rejected until both roles are configured.
+Production startup builds the complete M4 runtime before opening the database. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The catalog stores only public model identities and role metadata; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
 
 ### Local PostgreSQL with Compose
 

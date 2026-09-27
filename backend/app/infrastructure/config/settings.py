@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -89,6 +90,11 @@ class AppSettings(BaseSettings):
     )
     google_geocoding_api_key: SecretStr | None = None
     usgs_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        min_length=1,
+    )
     topology_stage_timeout_seconds: float = Field(
         default=120,
         gt=0,
@@ -139,6 +145,7 @@ class AppSettings(BaseSettings):
         "db_password",
         "google_geocoding_api_key",
         "usgs_api_key",
+        "openai_api_key",
         mode="before",
     )
     @classmethod
@@ -194,6 +201,23 @@ class AppSettings(BaseSettings):
             value = value.strip()
             return value or None
         return value
+
+    @field_validator("openai_base_url")
+    @classmethod
+    def normalize_openai_base_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme not in {"https", "http"}
+            or not parsed.netloc
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("openai_base_url must be an HTTP(S) URL")
+        return normalized
 
     @field_validator("log_level", mode="before")
     @classmethod

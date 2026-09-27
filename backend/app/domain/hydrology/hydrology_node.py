@@ -75,10 +75,15 @@ class HydrologyNode(DomainModel):
 
 def _exclusion_key(
     reason: HydrologyExclusionReason,
-) -> tuple[str, int, str, tuple[int, str, str], int, str]:
+) -> tuple[object, ...]:
     return (
         reason.code.value,
         *comid_key(reason.branch_root_comid),
         coverage_key(reason.coverage_unit),
         *comid_key(reason.stop_comid),
+        *_optional_comid_key(reason.blocked_upstream_comid),
     )
+
+
+def _optional_comid_key(comid: str | None) -> tuple[int, str]:
+    return (-1, "") if comid is None else comid_key(comid)

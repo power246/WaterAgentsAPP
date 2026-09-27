@@ -239,7 +239,7 @@ def test_application_forwards_the_record_identity_factory() -> None:
     run(exercise)
 
 
-def test_default_workflow_completes_and_requests_without_a_key_are_independent() -> None:
+def test_explicit_test_workflow_completes_and_unkeyed_requests_are_independent() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
             responses = [

@@ -453,7 +453,7 @@ python backend/scripts/health_smoke.py
 python backend/scripts/session_sse_smoke.py
 ```
 
-Session/SSE smoke 成功时 stdout 为 `{"completed":"passed","cancelled":"passed"}`。Completed 使用默认 workflow；cancelled 通过 app factory 注入 gate，在收到 created/keepalive、断线重连后保持 gate 关闭并调用 cancel，验证立即且幂等的响应和唯一 cancelled event，然后释放 gate。两条路径均检查 terminal EOF、Last-Event-ID 续传和已消费完后的 204。
+Session/SSE smoke 成功时 stdout 为 `{"completed":"passed","cancelled":"passed"}`。Completed 通过 app factory 显式注入无副作用完成 workflow；cancelled 显式注入 gate，在收到 created/keepalive、断线重连后保持 gate 关闭并调用 cancel，验证立即且幂等的响应和唯一 cancelled event，然后释放 gate。两条路径均检查 terminal EOF、Last-Event-ID 续传和已消费完后的 204；正式入口不提供默认 fake workflow。
 
 脚本使用动态 loopback socket、真实 Uvicorn 和正式 HTTP routes，不调用 shell/进程信号、不使用固定端口或生产测试开关。HTTP 客户端忽略环境代理；成功、断言失败、调用 task 被取消和 startup 失败的服务器清理由测试覆盖。完整 tests 中的 smoke 清理测试同样需要允许本机 loopback bind。
 

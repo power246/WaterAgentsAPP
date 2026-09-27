@@ -50,6 +50,29 @@ def test_transient_get_is_retried_once_and_success_is_returned() -> None:
     assert calls == 2
 
 
+def test_post_json_sends_body_and_does_not_retry_non_idempotent_request() -> None:
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(503, request=request)
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(PortHttpError):
+                await http.post_json(
+                    "https://provider.test/generate",
+                    {"model": "parser-v1"},
+                    provider="fixture",
+                    operation="generate",
+                )
+
+    run(exercise())
+    assert len(calls) == 1
+    assert calls[0].method == "POST"
+    assert calls[0].read() == b'{"model":"parser-v1"}'
+
+
 @pytest.mark.parametrize(
     ("status", "error_type", "expected_calls"),
     [
