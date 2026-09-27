@@ -1477,9 +1477,7 @@ def test_lifespan_repairs_real_postgres_without_restarting_workflow() -> None:
         asyncio.run(exercise(settings))
 
 
-def test_m4_context_history_projection_survives_real_postgres_restart(
-    postgres_settings: AppSettings,
-) -> None:
+def test_m4_context_history_projection_survives_real_postgres_restart() -> None:
     class Workflow:
         def __init__(self) -> None:
             self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
@@ -1490,8 +1488,8 @@ def test_m4_context_history_projection_survives_real_postgres_restart(
             await self.release.wait()
             context.cancellation.checkpoint()
 
-    async def exercise() -> None:
-        settings = postgres_settings.model_copy(update={
+    async def exercise(base_settings: AppSettings) -> None:
+        settings = base_settings.model_copy(update={
             "transcript_inline_max_bytes": 256,
             "transcript_preview_bytes": 40,
         })
@@ -1556,7 +1554,8 @@ def test_m4_context_history_projection_survives_real_postgres_restart(
             )
             assert listed.context_summary == detail.run.context_summary
 
-    asyncio.run(exercise())
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
 
 
 async def _count_items(engine: AsyncEngine, item_ids: tuple[UUID, ...]) -> int:
