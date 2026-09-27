@@ -489,6 +489,12 @@
 - 验证：focused contract/smoke `6 passed`、standalone SSE focused `21 passed`、完整非 PostgreSQL backend regression `1109 passed`，`compileall`、offline audit、run SSE、M4 workflow 和 `git diff --check` 通过；USGS OGC v1 refresh 为 `1` 个实际请求、`154/154`、无 key/name/unit drift且未写 manifest。真实 PostgreSQL `17` 个用例、health/history smoke、Google/NLDI/Samples 与真实 parser provider contract smoke 因未配置专用测试库/凭据而为 `not run`，三平台 CI 保持 `partial`。
 - 提交：`91ba2a6`。
 
+#### Milestone 10 审查修复记录（2026-09-27）
+
+- 实现：生产 lifespan 统一通过 `build_m4_runtime(settings)` 装配 OpenAI parser、Google/NLDI/USGS resolver、availability 与 topology，缺组件在数据库启动前失败；逐 child 保存 topology 上限身份，按 location/parameter 区分 resolver 依赖错误，并为每次 repair 调用保存同 operation 的实际 input。同步收束共用取消等待和 availability 预编译索引，未新建完成说明文档。
+- 验证：新增 adapter/runtime/错误语义/双支流/repair/partial 回归；完整非 PostgreSQL backend `1091 passed`，入口相关 focused `130 passed`，`compileall`、M4 workflow smoke（mixed=`partial`）、standalone SSE、154 项离线 audit 与 `git diff --check` 通过。专用 PostgreSQL、真实 Google/NLDI/WDFN/Samples/OpenAI 请求和三平台 CI 因本机未配置继续为 `not run`/`partial`。
+- 提交：`f1d57ca`。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |
