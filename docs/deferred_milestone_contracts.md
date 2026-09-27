@@ -500,6 +500,14 @@ cancelled
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。[Milestone 11–16](M3/m3_implementation_todo.md#milestone-11认证凭据与公开-metadata-脱敏) 保留既有证据；[Milestone 17–19](M3/m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 已完成本机实现与最终复审。 | 补齐 Ubuntu/macOS/Windows 完整测试、两项 smoke 及同一已保存 PostgreSQL 的跨系统核对后，才可在最终承接表登记 `implemented`。 |
 
+### M4 待验收索引
+
+M4 Milestone 0–10 已完成本机实现与契约审计；这里只索引本机证据，不把缺少的隔离 PostgreSQL、需凭据 provider/parser smoke 或三平台 CI 冒充中心最终承接。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07` | [M4 契约覆盖矩阵](M4/m4_implementation_todo.md#契约覆盖矩阵)、[实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[API/前端接入](M4/m4_query_understanding_topology_api.md)和[154 项 capability 目录](M4/m4_parameter_capability_catalog.md)。固定 fake workflow、离线 manifest 审计、1 请求官方 refresh、完整非 PostgreSQL backend regression 与 standalone run SSE smoke 已在 Windows 本机通过。 | 在专用 PostgreSQL 测试库运行完整 persistence/health/history/restart，并补齐 Google 与已配置 parser provider contract smoke 及 Ubuntu/macOS/Windows 同一提交 CI 后，再评估中心最终承接。 |
+
 未新增、拆分、替换或取消 contract；Milestone 11–16 是既有 M3/Global/MR 约束的审查修复分解。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
 ## 14. 维护规则

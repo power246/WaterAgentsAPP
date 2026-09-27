@@ -2,7 +2,7 @@
 
 更新日期：2026-09-27
 
-> 状态：Milestone 9 协议已实现，Milestone 10 集成验收尚未完成。本文在 M3 API 基线上定义最终 create request、M4 typed content 和读模型扩展；未列出的幂等、历史、全文、取消、补写和 SSE 规则继续以 [M3 API 文档](../M3/m3_transcript_history_api.md) 为准，实施顺序与证据门禁见 [M4 Implementation TODO](m4_implementation_todo.md)。
+> 状态：Milestone 9 协议与 Milestone 10 本机集成审计已完成。本文在 M3 API 基线上定义最终 create request、M4 typed content 和读模型扩展；未列出的幂等、历史、全文、取消、补写和 SSE 规则继续以 [M3 API 文档](../M3/m3_transcript_history_api.md) 为准，实际证据与仍未运行的外部门禁见 [M4 Implementation TODO](m4_implementation_todo.md)。
 
 ## 1. 路由与传输不变
 

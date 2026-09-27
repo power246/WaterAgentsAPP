@@ -1,8 +1,8 @@
 # M4 Query Understanding + Hydrology Topology 实施设计
 
-更新日期：2026-09-25
+更新日期：2026-09-27
 
-> 状态：设计完成，尚未实现。本文用于后续编码与审查；实际施工顺序、复选项和证据记录见 [M4 Implementation TODO](m4_implementation_todo.md)。
+> 状态：Milestone 0–10 已完成本机实现与集成审计。固定 fake workflow、154 项离线审计、运行时协议和 M1–M3 非 PostgreSQL 回归已有本机证据；隔离 PostgreSQL、需凭据 provider/parser smoke 与三平台 CI 仍按实际环境保持 `not run`/`partial`。实际复选项和证据记录见 [M4 Implementation TODO](m4_implementation_todo.md)。
 
 本文把 [M4 设计决策](m4_query_understanding_topology_design.md) 落到模块、类型、workflow、ports、持久化和测试接缝。API 字段与公开错误见 [M4 API 文档](m4_query_understanding_topology_api.md)。M4 继续遵守 M3 的四表、typed-content registry、统一 writer/reader 和两层 SSE，不新增第二套运行记录。
 
@@ -44,7 +44,7 @@ M5 必须重新验证 inlet 的真实数据，M6 才能在 evidence gate 通过�
 
 ## 3. 模块与依赖方向
 
-建议在当前骨架内增加以下最小模块，不建立 `m4/` 技术孤岛：
+实际实现落在当前骨架的以下模块中，不建立 `m4/` 技术孤岛：
 
 ```text
 backend/app/
@@ -54,17 +54,21 @@ backend/app/
     analysis_runs/
       models.py                      # run 配置/快照扩展
     query_understanding/
-      models.py                      # ParsedIntent、AnalysisContext
-      service.py                     # parser + deterministic resolution workflow
-      resolvers.py                   # location/date/parameter/model resolution
+      context_models.py              # ParsedIntent、AnalysisContext
+      parser_workflow.py             # parser session 与一次 schema repair
+      context_resolver.py            # deterministic resolution orchestration
+      location_resolver.py
+      date_resolver.py
+      parameter_resolver.py
     hydrology_topology/
-      models.py                      # availability query/result、graph build DTO
       builder.py                     # bounded deterministic BFS
+    station_availability/
+      service.py                     # 参数/时间 qualification
     transcripts/
       registry.py                    # M4 typed-content 注册
   domain/
     hydrology/
-      topology.py                    # HydrologyGraph、node、edge、coverage invariant
+      hydrology_graph.py             # HydrologyGraph invariant
       parameter_capability.py        # 可执行能力注册项
   ports/
     geocoding.py                     # 地点解析与行政区事实
@@ -528,7 +532,7 @@ WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS=120
 
 ### 16.5 集成边界
 
-使用 fake geocoder/NLDI/WDFN/model 的固定 fixtures 证明完整 M4 workflow，不依赖付费或实时远端结果作为唯一测试。另设受凭据和网络条件控制的 adapter contract smoke，记录真实 API version、请求量和失败，不把 `not run` 写成通过。
+`scripts/m4_workflow_smoke.py` 使用固定 fake model/geocoder/NLDI/WDFN/Samples 组合真实 application pipeline，覆盖 frontend target/date、query fallback、mixed、分段部分 qualification、无 source、技术失败、幂等与持久化内容 reload。`scripts/audit_parameter_capabilities.py` 默认离线审计 154 项；显式 `--refresh-official` 才读取 USGS OGC v1，并且只报告 drift、不修改 manifest。其余 adapter/parser contract smoke 继续受凭据和网络条件控制，记录真实 API version、请求量和失败，不把 `not run` 写成通过。
 
 M4 内部测试只证明本切片契约和接缝，不产生“M4 中间态”产品；M9 完成后才开始正式前后端联调并统一验收，包括 M5 实际 evidence、M6 reasoning、M7 调度、M8 memory 和 M9 前端/设置。
 

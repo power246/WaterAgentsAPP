@@ -376,8 +376,11 @@ class HydrologyGraphBuilder:
                 async with asyncio.timeout_at(deadline):
                     return await call()
             except PortError as error:
-                if error.operation is None:
-                    error.operation = operation
+                # Normalize provider-specific sub-operations at this application
+                # boundary. Public workflow errors distinguish topology lookup from
+                # station qualification, not the adapter method that happened to
+                # fail inside either operation.
+                error.operation = operation
                 raise
             except TimeoutError:
                 raise PortTimeoutError(

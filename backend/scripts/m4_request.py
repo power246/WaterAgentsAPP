@@ -6,8 +6,9 @@ def smoke_request(
     query: str,
     *,
     time_resolution: str | None = None,
+    settings: AppSettings | None = None,
 ) -> dict[str, object]:
-    settings = AppSettings()
+    settings = settings or AppSettings()
     selections: dict[ModelRole, dict[str, str]] = {}
     for role in ModelRole:
         capability = next(

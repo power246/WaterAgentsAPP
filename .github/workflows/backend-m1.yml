@@ -50,6 +50,17 @@ jobs:
         run: uv sync --project backend --extra dev --locked
       - name: Run complete test suite
         run: uv run --project backend --locked python -m pytest backend/tests -q
+      - name: Run offline M4 contract audit
+        run: uv run --project backend --locked python backend/scripts/audit_parameter_capabilities.py
+      - name: Run in-memory run SSE and M4 workflow smoke tests
+        env:
+          HTTP_PROXY: http://127.0.0.1:1
+          HTTPS_PROXY: http://127.0.0.1:1
+          ALL_PROXY: http://127.0.0.1:1
+          NO_PROXY: ""
+        run: |
+          uv run --project backend --locked python backend/scripts/run_sse_smoke.py
+          uv run --project backend --locked python backend/scripts/m4_workflow_smoke.py
       - name: Run Uvicorn health smoke test
         env:
           HTTP_PROXY: http://127.0.0.1:1

@@ -309,6 +309,8 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 6. M4: Query Understanding + Hydrology Topology
 
+状态：Milestone 0–10 已完成本机实现与契约审计。固定 fake workflow 和完整非 PostgreSQL backend regression 已通过；隔离 PostgreSQL、需凭据 provider/parser smoke 和三平台 CI 仍以实际结果保持 `not run`/`partial`。M4 不实现 M5–M9 的 observation/evidence、reasoning、调度、memory 或前端。
+
 详细方向、类型、API 和施工顺序已定型于 [M4 设计决策](M4/m4_query_understanding_topology_design.md)、[M4 实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[M4 API](M4/m4_query_understanding_topology_api.md) 与 [M4 Implementation TODO](M4/m4_implementation_todo.md)。问题解析 Agent 在本次 run 下执行独立 session，不绑定水体 COMID；输入、实际模型过程及结构化输出复用 M3 的存储和完整读取能力。BFS 是 run 的确定性过程，不建立 Agent session。
 
 目标：

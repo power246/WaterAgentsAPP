@@ -24,6 +24,10 @@ from tests.m4_support import create_test_app
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 API_GUIDE = REPOSITORY_ROOT / "docs" / "M4" / "m4_query_understanding_topology_api.md"
+IMPLEMENTATION_TODO = (
+    REPOSITORY_ROOT / "docs" / "M4" / "m4_implementation_todo.md"
+)
+DEFERRED_CONTRACTS = REPOSITORY_ROOT / "docs" / "deferred_milestone_contracts.md"
 
 
 def documented_json() -> list[dict[str, object]]:
@@ -163,3 +167,33 @@ def test_documented_openapi_and_sse_contract_are_runtime_derived() -> None:
         assert f'"{event_name}"' in session_source
         assert f"event: {event_name}" in guide
     assert re.search(r"^event: topology_ready", guide, re.MULTILINE) is None
+
+
+def test_m4_contract_matrix_covers_the_normative_contract_id_set() -> None:
+    expected = {
+        *(f"GLOBAL-C{index:02}" for index in range(1, 12)),
+        *(f"M4-C{index:02}" for index in range(1, 14)),
+        *(f"M4-A{index:02}" for index in range(1, 8)),
+    }
+    contracts = DEFERRED_CONTRACTS.read_text(encoding="utf-8")
+    normative = set(
+        re.findall(r"\*\*((?:GLOBAL|M4)-[CA]\d{2})\b", contracts)
+    )
+    assert expected <= normative
+
+    todo = IMPLEMENTATION_TODO.read_text(encoding="utf-8")
+    matrix = todo.split("## 契约覆盖矩阵", 1)[1].split(
+        "## 实际完成记录格式", 1
+    )[0]
+    covered: set[str] = set()
+    pattern = re.compile(
+        r"(GLOBAL|M4)-([CA])(\d{2})"
+        r"(?:–(?:(?:GLOBAL|M4)-)?(?:[CA])?(\d{2}))?"
+    )
+    for prefix, kind, start_text, end_text in pattern.findall(matrix):
+        start = int(start_text)
+        end = int(end_text or start_text)
+        covered.update(
+            f"{prefix}-{kind}{index:02}" for index in range(start, end + 1)
+        )
+    assert covered == expected

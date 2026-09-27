@@ -13,6 +13,7 @@ from app.api.schemas.analysis_runs import AnalysisRunResponse, RunStatusResponse
 from app.application.analysis_runs.models import RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.config import AppSettings
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 from app.main import create_app
 try:
@@ -21,6 +22,22 @@ except ModuleNotFoundError:  # Direct `python scripts/run_sse_smoke.py` executio
     from m4_request import smoke_request
 
 BASE = "/api/analysis/runs"
+SMOKE_SETTINGS = AppSettings(
+    analysis_timezone="America/Chicago",
+    log_level="warning",
+    model_catalog=(
+        {
+            "provider": "fixture",
+            "model": "parser-v1",
+            "roles": ["query_parser"],
+        },
+        {
+            "provider": "fixture",
+            "model": "waterbody-v1",
+            "roles": ["waterbody"],
+        },
+    ),
+)
 
 
 class SmokeServer(uvicorn.Server):
@@ -140,12 +157,17 @@ async def verify_terminal_reconnect(client: httpx.AsyncClient, path: str, run_id
 
 
 async def completed_smoke() -> None:
-    app = create_app(AppSettings(analysis_timezone="America/Chicago", log_level="warning"))
+    app = create_app(
+        SMOKE_SETTINGS,
+        transcript_store=InMemoryTranscriptStore(),
+    )
     async with running_server(app) as client:
         created = await client.post(
             BASE,
             json=smoke_request(
-                "M3 run smoke completed", time_resolution="6h"
+                "M3 run smoke completed",
+                time_resolution="6h",
+                settings=SMOKE_SETTINGS,
             ),
         )
         assert created.status_code == 201, created.text
@@ -180,14 +202,19 @@ async def completed_smoke() -> None:
 async def cancelled_smoke() -> None:
     workflow = GatedWorkflow()
     app = create_app(
-        AppSettings(analysis_timezone="America/Chicago", log_level="warning"),
+        SMOKE_SETTINGS,
         workflow=workflow,
         keepalive_interval=0.01,
+        transcript_store=InMemoryTranscriptStore(),
     )
     async with running_server(app) as client:
         try:
             created = await client.post(
-                BASE, json=smoke_request("M3 run smoke cancelled")
+                BASE,
+                json=smoke_request(
+                    "M3 run smoke cancelled",
+                    settings=SMOKE_SETTINGS,
+                ),
             )
             snapshot = AnalysisRunResponse.model_validate(created.json())
             await workflow.started.wait()
