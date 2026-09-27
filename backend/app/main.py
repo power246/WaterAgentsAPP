@@ -20,6 +20,10 @@ from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceWriteBatch,
 )
+from app.application.analysis_runs.query_topology_workflow import (
+    QueryTopologyWorkflow,
+    TopologyBuildingStage,
+)
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import (
@@ -56,6 +60,7 @@ def create_app(
     workflow: AnalysisWorkflow | None = None,
     query_parser: QueryParserPort | None = None,
     query_context_resolver: QueryContextResolver | None = None,
+    topology_builder: TopologyBuildingStage | None = None,
     query_parser_private_values: tuple[str, ...] = (),
     id_factory: Callable[[], UUID] = uuid4,
     record_id_factory: Callable[[], UUID] = uuid4,
@@ -81,15 +86,25 @@ def create_app(
     resolved_parameter_capabilities = (
         parameter_capability_registry or load_parameter_capability_registry()
     )
-    if workflow is not None and query_parser is not None:
-        raise ValueError("workflow and query_parser cannot both be configured")
-    if (query_parser is None) != (query_context_resolver is None):
+    m4_components = (query_parser, query_context_resolver, topology_builder)
+    if workflow is not None and any(item is not None for item in m4_components):
         raise ValueError(
-            "query_parser and query_context_resolver must be configured together"
+            "workflow cannot be configured with M4 workflow components"
+        )
+    if any(item is not None for item in m4_components) and not all(
+        item is not None for item in m4_components
+    ):
+        raise ValueError(
+            "query_parser, query_context_resolver, and topology_builder "
+            "must be configured together"
         )
     resolved_workflow = workflow
-    if query_parser is not None and query_context_resolver is not None:
-        resolved_workflow = QueryParserWorkflow(
+    if (
+        query_parser is not None
+        and query_context_resolver is not None
+        and topology_builder is not None
+    ):
+        parser_workflow = QueryParserWorkflow(
             query_parser,
             query_context_resolver,
             QueryParserPromptBuilder(resolved_parameter_capabilities),
@@ -97,6 +112,7 @@ def create_app(
             timeout_seconds=resolved_settings.query_parser_timeout_seconds,
             private_values=query_parser_private_values,
         )
+        resolved_workflow = QueryTopologyWorkflow(parser_workflow, topology_builder)
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:

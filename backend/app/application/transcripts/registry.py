@@ -42,6 +42,7 @@ from app.application.transcripts.redaction import redact, redact_tags
 from app.domain.attribution.analysis_detail import AnalysisDetail
 from app.domain.common import JsonValue
 from app.domain.domain_model import DomainModel
+from app.domain.hydrology import HydrologyGraph
 
 
 class UnsupportedTranscriptContentError(ValueError):
@@ -477,6 +478,11 @@ def create_production_registry() -> TranscriptRegistry:
         content_type="query_understood",
         content_schema_version=1,
         adapter=TypeAdapter(AnalysisContext),
+    ))
+    registry.register(ContentRegistration(
+        content_type="topology_ready",
+        content_schema_version=1,
+        adapter=TypeAdapter(HydrologyGraph),
     ))
     registry.register(ContentRegistration(
         content_type="lifecycle_event",

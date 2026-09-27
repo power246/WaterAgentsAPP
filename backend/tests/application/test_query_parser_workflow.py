@@ -4,6 +4,7 @@ import logging
 from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from uuid import uuid4
 
 import pytest
 
@@ -17,7 +18,9 @@ from app.application.query_understanding import (
     ParserFinishReason,
     ParsedIntentV1,
     QueryParserInputV1,
+    QueryParserPromptBuilder,
     QueryParserResponse,
+    QueryParserWorkflow,
     ResolvedParameterIntent,
     ResolvedTarget,
     SupportingIntentReason,
@@ -26,7 +29,10 @@ from app.application.query_understanding import (
 )
 from app.application.transcripts.models import GenerationStatus, MessageEndReason
 from app.domain import GeoPoint, ParameterKey
-from app.infrastructure.config import AppSettings
+from app.infrastructure.config import (
+    AppSettings,
+    load_parameter_capability_registry,
+)
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.ports import PortUnavailableError
 from tests.m4_support import create_request_bytes, create_test_app
@@ -179,15 +185,21 @@ async def parser_runtime(
     timeout: float = 0.2,
     private_values: tuple[str, ...] = (),
 ):
+    workflow = QueryParserWorkflow(
+        parser,
+        resolver,
+        QueryParserPromptBuilder(load_parameter_capability_registry()),
+        error_id_factory=uuid4,
+        timeout_seconds=timeout,
+        private_values=private_values,
+    )
     application = create_test_app(
         settings=AppSettings(
             analysis_timezone="America/New_York",
             query_parser_timeout_seconds=timeout,
         ),
         clock=FixedClock(),
-        query_parser=parser,
-        query_context_resolver=resolver,
-        query_parser_private_values=private_values,
+        workflow=workflow,
         transcript_store=InMemoryTranscriptStore(),
     )
     async with application.router.lifespan_context(application):

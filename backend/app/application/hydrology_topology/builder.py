@@ -35,6 +35,7 @@ from app.domain import (
 )
 from app.ports import (
     InvalidPortResponseError,
+    PortError,
     PortTimeoutError,
     StationInventoryPort,
     TopologyDataPort,
@@ -374,6 +375,10 @@ class HydrologyGraphBuilder:
             try:
                 async with asyncio.timeout_at(deadline):
                     return await call()
+            except PortError as error:
+                if error.operation is None:
+                    error.operation = operation
+                raise
             except TimeoutError:
                 raise PortTimeoutError(
                     "Hydrology topology deadline was exhausted.",

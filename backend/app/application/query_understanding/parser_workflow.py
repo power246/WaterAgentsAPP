@@ -86,6 +86,9 @@ class QueryParserWorkflow(AnalysisWorkflow):
         self._private_values = private_values
 
     async def run(self, context: WorkflowContext) -> None:
+        await self.understand(context)
+
+    async def understand(self, context: WorkflowContext) -> AnalysisContext:
         context.cancellation.checkpoint()
         run_id = context.run.run_id
         session = await context.operations.prepare_agent_session(
@@ -213,6 +216,7 @@ class QueryParserWorkflow(AnalysisWorkflow):
             run_id,
             session.session_id,
         )
+        return resolution.context
 
     async def _generate_message(
         self,

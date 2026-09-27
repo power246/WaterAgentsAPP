@@ -77,6 +77,7 @@ def test_production_registry_has_only_real_writable_types() -> None:
         ("query_parser_input", 1),
         ("query_parser_message", 1),
         ("query_understood", 1),
+        ("topology_ready", 1),
     )
     assert ("fixture_message", 1) not in registry.registered_keys
     with pytest.raises(UnsupportedTranscriptContentError):

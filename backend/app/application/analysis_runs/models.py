@@ -36,6 +36,14 @@ class RunStatus(DomainEnum):
     COMPLETED_WITH_PERSISTENCE_ERROR = "completed_with_persistence_error"
 
 
+class AnalysisPhase(DomainEnum):
+    QUEUED = "queued"
+    QUERY_UNDERSTANDING = "query_understanding"
+    TOPOLOGY_BUILDING = "topology_building"
+    TOPOLOGY_READY = "topology_ready"
+    TERMINAL = "terminal"
+
+
 class AgentSessionStatus(DomainEnum):
     PENDING = "pending"
     RUNNING = "running"

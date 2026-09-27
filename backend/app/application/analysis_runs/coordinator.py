@@ -26,6 +26,7 @@ from app.application.analysis_runs.creation import (
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
+    AnalysisPhase,
     AnalysisConfigurationSnapshot,
     AnalysisRunSnapshot,
     CorrelationContext,
@@ -1489,6 +1490,12 @@ class RunCoordinator:
             )
             if identity is None:
                 raise ValueError("transcript item identity is not reserved in this run")
+            self._validate_m4_content_scope_locked(
+                runtime,
+                identity,
+                content_type,
+                content_schema_version,
+            )
             reserved_references = tuple(
                 TranscriptContentRef(
                     run_id=candidate.snapshot.run_id,
@@ -1519,6 +1526,16 @@ class RunCoordinator:
                 finalized,
                 self._clock.now(),
             )
+            content_ref = TranscriptContentRef(
+                run_id=runtime.snapshot.run_id,
+                item_id=identity.item_id,
+            )
+            if (content_type, content_schema_version) == ("query_understood", 1):
+                runtime.context_ref = content_ref
+                runtime.analysis_phase = AnalysisPhase.TOPOLOGY_BUILDING
+            elif (content_type, content_schema_version) == ("topology_ready", 1):
+                runtime.topology_ref = content_ref
+                runtime.analysis_phase = AnalysisPhase.TOPOLOGY_READY
             self._transcript_writer.enqueue_locked(
                 runtime,
                 item_ids=(identity.item_id,),
@@ -1557,6 +1574,14 @@ class RunCoordinator:
                     RunStatus.RUNNING,
                 )
             session_runtime = self._lookup_agent_session_locked(runtime, session_key)
+            if (
+                (content_type, content_schema_version)
+                == ("query_parser_message", 1)
+                and session_runtime.summary.agent_role is not AgentRole.QUERY_PARSER
+            ):
+                raise ValueError(
+                    "query_parser_message must belong to the query_parser session"
+                )
             if session_runtime.summary.status not in _SESSION_TRANSITIONS:
                 raise InvalidAgentSessionTransitionError(
                     session_runtime.summary,
@@ -2287,6 +2312,10 @@ class RunCoordinator:
                     event,
                 )
             runtime.snapshot = snapshot
+            if resolved is RunStatus.RUNNING:
+                runtime.analysis_phase = AnalysisPhase.QUERY_UNDERSTANDING
+            elif resolved not in _RUN_TRANSITIONS:
+                runtime.analysis_phase = AnalysisPhase.TERMINAL
             if event is not None:
                 runtime.events.append(event)
                 runtime.last_error = (
@@ -2605,6 +2634,33 @@ class RunCoordinator:
         runtime.next_transcript_sequence += 1
         runtime.transcript_items.append(item)
         return item
+
+    @staticmethod
+    def _validate_m4_content_scope_locked(
+        runtime: RunRuntime,
+        identity: TranscriptItemIdentity,
+        content_type: str,
+        content_schema_version: int,
+    ) -> None:
+        key = content_type, content_schema_version
+        if key in {("query_parser_input", 1), ("query_understood", 1)}:
+            if identity.session_id is None:
+                raise ValueError(f"{content_type} must belong to a parser session")
+            session = RunCoordinator._lookup_agent_session_locked(
+                runtime,
+                identity.session_id,
+            )
+            if session.summary.agent_role is not AgentRole.QUERY_PARSER:
+                raise ValueError(f"{content_type} must belong to a parser session")
+        if key == ("query_understood", 1) and runtime.context_ref is not None:
+            raise ValueError("query_understood must be unique within a run")
+        if key == ("topology_ready", 1):
+            if identity.session_id is not None:
+                raise ValueError("topology_ready must be run-owned")
+            if runtime.context_ref is None:
+                raise ValueError("topology_ready requires query_understood")
+            if runtime.topology_ref is not None:
+                raise ValueError("topology_ready must be unique within a run")
 
     @staticmethod
     def _lookup_agent_session_locked(
