@@ -1,0 +1,546 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Iterable
+from datetime import timedelta
+
+from app.domain import (
+    AvailabilityCoverageSource,
+    AvailabilityTimeRange,
+    CoverageUnit,
+    MonitoringLocationMetadata,
+    MonitoringStation,
+    ParameterCapability,
+    ParameterCapabilityRegistry,
+    ParameterKey,
+    ParameterProvider,
+    SamplePeriodOfRecord,
+    SeriesRef,
+    StationAvailability,
+    StationAvailabilityRequest,
+    TimeSeriesMetadata,
+    UsgsParameterMetadata,
+    normalize_parameter_concept,
+)
+from app.ports import (
+    ClockPort,
+    InvalidPortResponseError,
+    PortTimeoutError,
+    StationMetadataPort,
+    TopologyDataPort,
+)
+
+PROVIDER = "station_inventory"
+
+
+class StationAvailabilityService:
+    def __init__(
+        self,
+        *,
+        topology: TopologyDataPort,
+        metadata: StationMetadataPort,
+        capability_registry: ParameterCapabilityRegistry,
+        clock: ClockPort,
+    ) -> None:
+        self._topology = topology
+        self._metadata = metadata
+        self._registry = capability_registry
+        self._clock = clock
+        self._sample_key_by_label = self._build_sample_label_index()
+
+    async def check_availability(
+        self,
+        request: StationAvailabilityRequest,
+        *,
+        deadline: float | None = None,
+    ) -> tuple[StationAvailability, ...]:
+        capabilities = self._capabilities(request)
+        self._ensure_deadline(deadline)
+        associated = await self._topology.get_monitoring_sites(
+            request.comid,
+            deadline=deadline,
+        )
+        stations = self._associated_stations(
+            associated,
+            comid=request.comid,
+        )
+        if not stations:
+            return ()
+
+        time_series_parameters = self._routed_parameters(
+            capabilities,
+            ParameterProvider.WDFN_TIME_SERIES,
+        )
+        sample_parameters = self._routed_parameters(
+            capabilities,
+            ParameterProvider.USGS_SAMPLES,
+        )
+        references = await self._provider_references(
+            request,
+            stations,
+            time_series_parameters,
+            sample_parameters,
+            capabilities,
+            deadline,
+        )
+
+        references_by_station: dict[str, list[SeriesRef]] = {
+            station_id: [] for station_id in stations
+        }
+        for reference in references:
+            references_by_station[reference.station_id].append(reference)
+
+        checked_at = self._clock.now()
+        results: list[StationAvailability] = []
+        for station_id in sorted(stations):
+            station_references = tuple(
+                sorted(
+                    references_by_station[station_id],
+                    key=self._series_ref_sort_key,
+                )
+            )
+            if not station_references:
+                continue
+            covered_units = tuple(
+                sorted(
+                    {
+                        unit
+                        for reference in station_references
+                        for unit in reference.covered_units
+                    },
+                    key=self._coverage_sort_key,
+                )
+            )
+            providers = tuple(
+                sorted(
+                    {reference.provider for reference in station_references},
+                    key=lambda provider: provider.value,
+                )
+            )
+            results.append(
+                StationAvailability(
+                    station=stations[station_id],
+                    comid=request.comid,
+                    providers=providers,
+                    covered_units=covered_units,
+                    series_refs=station_references,
+                    checked_at=checked_at,
+                )
+            )
+        return tuple(results)
+
+    async def _provider_references(
+        self,
+        request: StationAvailabilityRequest,
+        stations: dict[str, MonitoringStation],
+        time_series_parameters: tuple[ParameterKey, ...],
+        sample_parameters: tuple[ParameterKey, ...],
+        capabilities: dict[ParameterKey, ParameterCapability],
+        deadline: float | None,
+    ) -> tuple[SeriesRef, ...]:
+        self._ensure_deadline(deadline)
+        tasks: list[asyncio.Task[tuple[SeriesRef, ...]]] = []
+        if time_series_parameters:
+            tasks.append(
+                asyncio.create_task(
+                    self._time_series_references(
+                        request,
+                        stations,
+                        time_series_parameters,
+                        capabilities,
+                        deadline,
+                    )
+                )
+            )
+        if sample_parameters:
+            tasks.append(
+                asyncio.create_task(
+                    self._sample_references(
+                        request,
+                        stations,
+                        sample_parameters,
+                        deadline,
+                    )
+                )
+            )
+        try:
+            groups = await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        return tuple(reference for group in groups for reference in group)
+
+    def _capabilities(
+        self,
+        request: StationAvailabilityRequest,
+    ) -> dict[ParameterKey, ParameterCapability]:
+        capabilities: dict[ParameterKey, ParameterCapability] = {}
+        for unit in request.coverage_units:
+            capability = self._registry.get(unit.parameter)
+            if capability is None:
+                raise ValueError("availability parameter is not executable")
+            capabilities[unit.parameter] = capability
+        return capabilities
+
+    @staticmethod
+    def _routed_parameters(
+        capabilities: dict[ParameterKey, ParameterCapability],
+        provider: ParameterProvider,
+    ) -> tuple[ParameterKey, ...]:
+        return tuple(
+            sorted(
+                (
+                    key
+                    for key, capability in capabilities.items()
+                    if provider in capability.availability_providers
+                ),
+                key=lambda key: (key.code_system, key.code),
+            )
+        )
+
+    def _associated_stations(
+        self,
+        stations: tuple[MonitoringStation, ...],
+        *,
+        comid: str,
+    ) -> dict[str, MonitoringStation]:
+        by_id: dict[str, MonitoringStation] = {}
+        for station in stations:
+            if station.associated_comid != comid:
+                raise self._invalid_metadata("get_monitoring_sites")
+            previous = by_id.get(station.station_id)
+            if previous is not None and previous != station:
+                raise self._invalid_metadata("get_monitoring_sites")
+            by_id[station.station_id] = station
+        return by_id
+
+    async def _time_series_references(
+        self,
+        request: StationAvailabilityRequest,
+        stations: dict[str, MonitoringStation],
+        parameters: tuple[ParameterKey, ...],
+        capabilities: dict[ParameterKey, ParameterCapability],
+        deadline: float | None,
+    ) -> tuple[SeriesRef, ...]:
+        self._ensure_deadline(deadline)
+        raw_parameters = await self._metadata.get_parameter_codes(
+            parameters,
+            deadline=deadline,
+        )
+        parameter_directory = self._parameter_directory(
+            raw_parameters,
+            requested=set(parameters),
+            capabilities=capabilities,
+        )
+        if not parameter_directory:
+            return ()
+
+        station_ids = tuple(sorted(stations))
+        self._ensure_deadline(deadline)
+        raw_locations = await self._metadata.get_monitoring_locations(
+            station_ids,
+            deadline=deadline,
+        )
+        location_directory = self._location_directory(
+            raw_locations,
+            requested=set(station_ids),
+        )
+        if not location_directory:
+            return ()
+
+        routed_stations = tuple(sorted(location_directory))
+        routed_parameters = tuple(
+            sorted(
+                parameter_directory,
+                key=lambda key: (key.code_system, key.code),
+            )
+        )
+        self._ensure_deadline(deadline)
+        series = await self._metadata.get_time_series_metadata(
+            routed_stations,
+            routed_parameters,
+            deadline=deadline,
+        )
+        return self._qualify_time_series(
+            request,
+            series,
+            stations=set(routed_stations),
+            parameters=set(routed_parameters),
+            capabilities=capabilities,
+        )
+
+    def _parameter_directory(
+        self,
+        records: tuple[UsgsParameterMetadata, ...],
+        *,
+        requested: set[ParameterKey],
+        capabilities: dict[ParameterKey, ParameterCapability],
+    ) -> dict[ParameterKey, UsgsParameterMetadata]:
+        by_key: dict[ParameterKey, UsgsParameterMetadata] = {}
+        for record in records:
+            capability = capabilities.get(record.key)
+            if record.key not in requested or capability is None:
+                raise self._invalid_metadata("get_parameter_codes")
+            if (
+                record.name != capability.official_name
+                or record.unit != capability.canonical_unit
+            ):
+                raise self._invalid_metadata("get_parameter_codes")
+            if record.key in by_key:
+                raise self._invalid_metadata("get_parameter_codes")
+            by_key[record.key] = record
+        return by_key
+
+    def _location_directory(
+        self,
+        records: tuple[MonitoringLocationMetadata, ...],
+        *,
+        requested: set[str],
+    ) -> dict[str, MonitoringLocationMetadata]:
+        by_id: dict[str, MonitoringLocationMetadata] = {}
+        for record in records:
+            if record.station_id not in requested or record.station_id in by_id:
+                raise self._invalid_metadata("get_monitoring_locations")
+            by_id[record.station_id] = record
+        return by_id
+
+    def _qualify_time_series(
+        self,
+        request: StationAvailabilityRequest,
+        records: tuple[TimeSeriesMetadata, ...],
+        *,
+        stations: set[str],
+        parameters: set[ParameterKey],
+        capabilities: dict[ParameterKey, ParameterCapability],
+    ) -> tuple[SeriesRef, ...]:
+        seen_identities: set[str] = set()
+        references: list[SeriesRef] = []
+        for record in records:
+            capability = capabilities.get(record.parameter)
+            if (
+                record.station_id not in stations
+                or record.parameter not in parameters
+                or capability is None
+                or record.unit != capability.canonical_unit
+                or record.series_id in seen_identities
+            ):
+                raise self._invalid_metadata("get_time_series_metadata")
+            seen_identities.add(record.series_id)
+            references.extend(self._time_series_refs_for_record(request, record))
+        return tuple(sorted(references, key=self._series_ref_sort_key))
+
+    def _time_series_refs_for_record(
+        self,
+        request: StationAvailabilityRequest,
+        record: TimeSeriesMetadata,
+    ) -> tuple[SeriesRef, ...]:
+        units = self._units_for_parameter(request, record.parameter)
+        historical = self._ranges_by_index(request.historical_ranges)
+        prediction = self._ranges_by_index(request.prediction_baseline_ranges)
+        by_source: dict[AvailabilityCoverageSource, list[CoverageUnit]] = {}
+        for unit in units:
+            if unit.segment_index in historical:
+                requested = historical[unit.segment_index]
+                if record.begin <= requested.start and record.end >= requested.end:
+                    by_source.setdefault(
+                        AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_ENVELOPE,
+                        [],
+                    ).append(unit)
+            else:
+                baseline = prediction[unit.segment_index]
+                if record.begin <= baseline.end and record.end >= baseline.start:
+                    by_source.setdefault(
+                        AvailabilityCoverageSource.PREDICTION_TIME_SERIES_BASELINE,
+                        [],
+                    ).append(unit)
+        return tuple(
+            SeriesRef(
+                provider=ParameterProvider.WDFN_TIME_SERIES,
+                station_id=record.station_id,
+                parameter=record.parameter,
+                series_identity=record.series_id,
+                coverage_source=source,
+                covered_units=tuple(sorted(source_units, key=self._coverage_sort_key)),
+            )
+            for source, source_units in sorted(
+                by_source.items(),
+                key=lambda item: item[0].value,
+            )
+        )
+
+    async def _sample_references(
+        self,
+        request: StationAvailabilityRequest,
+        stations: dict[str, MonitoringStation],
+        parameters: tuple[ParameterKey, ...],
+        deadline: float | None,
+    ) -> tuple[SeriesRef, ...]:
+        requested = set(parameters)
+        references: list[SeriesRef] = []
+        for station_id in sorted(stations):
+            self._ensure_deadline(deadline)
+            periods = await self._metadata.get_sample_periods(
+                station_id,
+                deadline=deadline,
+            )
+            references.extend(
+                self._qualify_sample_periods(
+                    request,
+                    station_id,
+                    periods,
+                    requested=requested,
+                )
+            )
+        return tuple(sorted(references, key=self._series_ref_sort_key))
+
+    def _qualify_sample_periods(
+        self,
+        request: StationAvailabilityRequest,
+        station_id: str,
+        records: tuple[SamplePeriodOfRecord, ...],
+        *,
+        requested: set[ParameterKey],
+    ) -> tuple[SeriesRef, ...]:
+        seen_identities: set[str] = set()
+        references: list[SeriesRef] = []
+        for record in records:
+            if (
+                record.station_id != station_id
+                or record.provider_identity in seen_identities
+            ):
+                raise self._invalid_metadata("get_sample_periods")
+            seen_identities.add(record.provider_identity)
+            parameter = self._sample_key_by_label.get(
+                normalize_parameter_concept(record.characteristic)
+            )
+            if (
+                parameter is None
+                or parameter not in requested
+                or record.result_count == 0
+                or record.activity_count == 0
+            ):
+                continue
+            references.extend(self._sample_refs_for_record(request, record, parameter))
+        return tuple(sorted(references, key=self._series_ref_sort_key))
+
+    def _sample_refs_for_record(
+        self,
+        request: StationAvailabilityRequest,
+        record: SamplePeriodOfRecord,
+        parameter: ParameterKey,
+    ) -> tuple[SeriesRef, ...]:
+        units = self._units_for_parameter(request, parameter)
+        historical = self._ranges_by_index(request.historical_ranges)
+        prediction = self._ranges_by_index(request.prediction_baseline_ranges)
+        by_source: dict[AvailabilityCoverageSource, list[CoverageUnit]] = {}
+        for unit in units:
+            if unit.segment_index in historical:
+                requested = historical[unit.segment_index]
+                requested_end = (requested.end - timedelta(microseconds=1)).date()
+                if (
+                    record.first_activity <= requested.start.date()
+                    and record.most_recent_activity >= requested_end
+                ):
+                    by_source.setdefault(
+                        AvailabilityCoverageSource.HISTORICAL_SAMPLE_PERIOD,
+                        [],
+                    ).append(unit)
+            else:
+                baseline = prediction[unit.segment_index]
+                if (
+                    record.first_activity <= baseline.end.date()
+                    and record.most_recent_activity >= baseline.start.date()
+                ):
+                    by_source.setdefault(
+                        AvailabilityCoverageSource.PREDICTION_SAMPLE_BASELINE,
+                        [],
+                    ).append(unit)
+        return tuple(
+            SeriesRef(
+                provider=ParameterProvider.USGS_SAMPLES,
+                station_id=record.station_id,
+                parameter=parameter,
+                series_identity=record.provider_identity,
+                coverage_source=source,
+                covered_units=tuple(sorted(source_units, key=self._coverage_sort_key)),
+            )
+            for source, source_units in sorted(
+                by_source.items(),
+                key=lambda item: item[0].value,
+            )
+        )
+
+    def _build_sample_label_index(self) -> dict[str, ParameterKey]:
+        matches: dict[str, set[ParameterKey]] = {}
+        for capability in self._registry.capabilities:
+            if ParameterProvider.USGS_SAMPLES not in (
+                capability.availability_providers
+            ):
+                continue
+            for label in {
+                capability.canonical_name,
+                capability.official_name,
+                *capability.aliases_en,
+            }:
+                matches.setdefault(
+                    normalize_parameter_concept(label),
+                    set(),
+                ).add(capability.key)
+        return {
+            label: next(iter(keys))
+            for label, keys in matches.items()
+            if len(keys) == 1
+        }
+
+    @staticmethod
+    def _units_for_parameter(
+        request: StationAvailabilityRequest,
+        parameter: ParameterKey,
+    ) -> tuple[CoverageUnit, ...]:
+        return tuple(
+            unit for unit in request.coverage_units if unit.parameter == parameter
+        )
+
+    @staticmethod
+    def _ranges_by_index(
+        ranges: Iterable[AvailabilityTimeRange],
+    ) -> dict[int, AvailabilityTimeRange]:
+        return {item.segment_index: item for item in ranges}
+
+    @staticmethod
+    def _coverage_sort_key(unit: CoverageUnit) -> tuple[int, str, str]:
+        return unit.segment_index, unit.parameter.code_system, unit.parameter.code
+
+    @staticmethod
+    def _series_ref_sort_key(
+        reference: SeriesRef,
+    ) -> tuple[str, str, str, str, str]:
+        return (
+            reference.provider.value,
+            reference.parameter.code_system,
+            reference.parameter.code,
+            reference.coverage_source.value,
+            reference.series_identity,
+        )
+
+    @staticmethod
+    def _invalid_metadata(operation: str) -> InvalidPortResponseError:
+        return InvalidPortResponseError(
+            "Provider metadata identities are inconsistent.",
+            provider=PROVIDER,
+            operation=operation,
+        )
+
+    @staticmethod
+    def _ensure_deadline(deadline: float | None) -> None:
+        if (
+            deadline is not None
+            and asyncio.get_running_loop().time() >= deadline
+        ):
+            raise PortTimeoutError(
+                "Station availability deadline was exhausted.",
+                provider=PROVIDER,
+                operation="check_availability",
+            )

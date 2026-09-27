@@ -1,4 +1,9 @@
 from app.domain.hydrology.administrative_location import AdministrativeLocation
+from app.domain.hydrology.availability_coverage_source import (
+    AvailabilityCoverageSource,
+)
+from app.domain.hydrology.availability_time_range import AvailabilityTimeRange
+from app.domain.hydrology.coverage_unit import CoverageUnit
 from app.domain.hydrology.geocoding_candidate import GeocodingCandidate
 from app.domain.hydrology.location import GeoPoint
 from app.domain.hydrology.monitoring_station import MonitoringStation
@@ -28,6 +33,11 @@ from app.domain.hydrology.monitoring_location_metadata import (
 )
 from app.domain.hydrology.river_segment import RiverSegment
 from app.domain.hydrology.sample_period_of_record import SamplePeriodOfRecord
+from app.domain.hydrology.series_ref import SeriesRef
+from app.domain.hydrology.station_availability import StationAvailability
+from app.domain.hydrology.station_availability_request import (
+    StationAvailabilityRequest,
+)
 from app.domain.hydrology.time_series_kind import TimeSeriesKind
 from app.domain.hydrology.time_series_metadata import TimeSeriesMetadata
 from app.domain.hydrology.usgs_parameter_metadata import UsgsParameterMetadata
@@ -35,6 +45,9 @@ from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
 
 __all__ = [
     "AdministrativeLocation",
+    "AvailabilityCoverageSource",
+    "AvailabilityTimeRange",
+    "CoverageUnit",
     "GeocodingCandidate",
     "GeoPoint",
     "MonitoringStation",
@@ -52,6 +65,9 @@ __all__ = [
     "ParameterProvider",
     "ParameterRole",
     "SamplePeriodOfRecord",
+    "SeriesRef",
+    "StationAvailability",
+    "StationAvailabilityRequest",
     "RiverSegment",
     "TimeSeriesKind",
     "TimeSeriesMetadata",

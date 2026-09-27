@@ -3,7 +3,6 @@ from typing import Protocol, TypeVar
 from app.domain.hydrology import (
     GeoPoint,
     MonitoringStation,
-    ParameterKey,
     RiverSegment,
 )
 
@@ -45,16 +44,6 @@ class TopologyDataPort(Protocol):
         comid: str,
         *,
         deadline: float | None = None,
-    ) -> tuple[MonitoringStation, ...]: ...
-
-
-class MonitoringStationPort(Protocol):
-    """An empty tuple means no station matched; unavailability is a port error."""
-
-    async def find_for_segment(
-        self,
-        comid: str,
-        parameters: tuple[ParameterKey, ...],
     ) -> tuple[MonitoringStation, ...]: ...
 
 

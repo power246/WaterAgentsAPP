@@ -18,6 +18,8 @@ from app.domain import (
     ParameterKey,
     RiverSegment,
     SamplePeriodOfRecord,
+    StationAvailability,
+    StationAvailabilityRequest,
     TimeSeriesMetadata,
     UsgsParameterMetadata,
 )
@@ -31,7 +33,6 @@ from app.ports import (
     InvalidPortResponseError,
     KeyStorePort,
     LLMPort,
-    MonitoringStationPort,
     ParameterCatalogPort,
     PortAuthenticationError,
     PortConfigurationError,
@@ -43,6 +44,7 @@ from app.ports import (
     PortUnavailableError,
     RAGIndexPort,
     StationMetadataPort,
+    StationInventoryPort,
     TopologyDataPort,
     TranscriptReadStorePort,
     TranscriptStorePort,
@@ -65,10 +67,10 @@ def test_all_port_contracts_are_public_protocols() -> None:
         GeocodingPort,
         KeyStorePort,
         LLMPort,
-        MonitoringStationPort,
         ParameterCatalogPort,
         RAGIndexPort,
         StationMetadataPort,
+        StationInventoryPort,
         TopologyDataPort,
         TranscriptReadStorePort,
         TranscriptStorePort,
@@ -89,12 +91,12 @@ def test_port_method_sync_and_async_semantics() -> None:
         TopologyDataPort.get_segment,
         TopologyDataPort.get_direct_upstreams,
         TopologyDataPort.get_monitoring_sites,
-        MonitoringStationPort.find_for_segment,
         ParameterCatalogPort.find_candidates,
         StationMetadataPort.get_parameter_codes,
         StationMetadataPort.get_monitoring_locations,
         StationMetadataPort.get_time_series_metadata,
         StationMetadataPort.get_sample_periods,
+        StationInventoryPort.check_availability,
         WaterObservationPort.fetch,
         WeatherObservationPort.fetch,
         WeatherForecastPort.fetch,
@@ -138,10 +140,6 @@ def test_port_method_sync_and_async_semantics() -> None:
             TopologyDataPort.get_monitoring_sites,
             ("self", "comid", "deadline"),
         ),
-        (
-            MonitoringStationPort.find_for_segment,
-            ("self", "comid", "parameters"),
-        ),
         (ParameterCatalogPort.find_candidates, ("self", "concept")),
         (
             StationMetadataPort.get_parameter_codes,
@@ -158,6 +156,10 @@ def test_port_method_sync_and_async_semantics() -> None:
         (
             StationMetadataPort.get_sample_periods,
             ("self", "station_id", "deadline"),
+        ),
+        (
+            StationInventoryPort.check_availability,
+            ("self", "request", "deadline"),
         ),
         (TranscriptStorePort.get_creation, ("self", "idempotency_key")),
         (TranscriptStorePort.create_run, ("self", "candidate")),
@@ -188,12 +190,12 @@ def test_stable_ports_use_domain_types() -> None:
     topology = inspect.signature(TopologyDataPort.get_segment)
     upstreams = inspect.signature(TopologyDataPort.get_direct_upstreams)
     associated_sites = inspect.signature(TopologyDataPort.get_monitoring_sites)
-    stations = inspect.signature(MonitoringStationPort.find_for_segment)
     parameter_catalog = inspect.signature(ParameterCatalogPort.find_candidates)
     parameter_metadata = inspect.signature(StationMetadataPort.get_parameter_codes)
     locations = inspect.signature(StationMetadataPort.get_monitoring_locations)
     series = inspect.signature(StationMetadataPort.get_time_series_metadata)
     samples = inspect.signature(StationMetadataPort.get_sample_periods)
+    availability = inspect.signature(StationInventoryPort.check_availability)
 
     assert geocoding.parameters["location_text"].annotation is str
     assert geocoding.return_annotation == tuple[GeocodingCandidate, ...]
@@ -204,14 +206,14 @@ def test_stable_ports_use_domain_types() -> None:
     assert topology.return_annotation == RiverSegment | None
     assert upstreams.return_annotation == tuple[RiverSegment, ...]
     assert associated_sites.return_annotation == tuple[MonitoringStation, ...]
-    assert stations.parameters["parameters"].annotation == tuple[ParameterKey, ...]
-    assert stations.return_annotation == tuple[MonitoringStation, ...]
     assert parameter_catalog.parameters["concept"].annotation is str
     assert parameter_catalog.return_annotation == tuple[ParameterCatalogCandidate, ...]
     assert parameter_metadata.return_annotation == tuple[UsgsParameterMetadata, ...]
     assert locations.return_annotation == tuple[MonitoringLocationMetadata, ...]
     assert series.return_annotation == tuple[TimeSeriesMetadata, ...]
     assert samples.return_annotation == tuple[SamplePeriodOfRecord, ...]
+    assert availability.parameters["request"].annotation is StationAvailabilityRequest
+    assert availability.return_annotation == tuple[StationAvailability, ...]
 
 
 def test_deferred_ports_are_generic_without_guessing_dtos() -> None:
@@ -329,8 +331,8 @@ def test_query_protocols_document_empty_and_unavailable_as_distinct() -> None:
         GeocodingPort,
         ComidLookupPort,
         TopologyDataPort,
-        MonitoringStationPort,
         StationMetadataPort,
+        StationInventoryPort,
         ParameterCatalogPort,
         WaterObservationPort,
         WeatherObservationPort,
