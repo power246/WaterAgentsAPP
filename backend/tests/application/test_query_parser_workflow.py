@@ -392,9 +392,19 @@ def test_two_schema_invalid_outputs_fail_without_third_call_or_context() -> None
 @pytest.mark.parametrize(
     "failure",
     [
-        PortUnavailableError("provider unavailable"),
-        InvalidPortResponseError("streamed parser terminal mismatch"),
-        BLOCK,
+        pytest.param(
+            PortUnavailableError("provider unavailable"),
+            id="provider-unavailable",
+        ),
+        pytest.param(
+            InvalidPortResponseError("invalid streamed output item"),
+            id="invalid-output-item",
+        ),
+        pytest.param(
+            InvalidPortResponseError("invalid incomplete reason"),
+            id="invalid-incomplete-reason",
+        ),
+        pytest.param(BLOCK, id="timeout"),
     ],
 )
 def test_technical_parser_failure_never_repairs_resolves_or_publishes_context(
@@ -417,6 +427,9 @@ def test_technical_parser_failure_never_repairs_resolves_or_publishes_context(
             assert coordinator._runs[created.run_id].last_error.code == (
                 "parser_model_unavailable"
             )
+            assert coordinator._runs[created.run_id].agent_sessions[
+                session.session_id
+            ].last_error.code == "parser_model_unavailable"
             message = next(
                 item for item in items
                 if item.content.content_type == "query_parser_message"

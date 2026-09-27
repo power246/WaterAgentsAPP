@@ -502,6 +502,13 @@
 - 验证：仓库根执行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/infrastructure/test_provider_http.py backend/tests/application/test_query_parser_workflow.py -q` 为 `52 passed`；`backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q --ignore=backend/tests/persistence/test_postgres_persistence.py` 为 `1158 passed`；`backend/.venv/Scripts/python.exe -B backend/scripts/m4_workflow_smoke.py` 通过且 mixed coverage 为 `partial`；`backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py` 输出 `{"completed":"passed","cancelled":"passed"}`；`git diff --check` 通过。
 - 未运行：未设置 `WATERAGENTS_TEST_DB_NAME`、OpenAI/Google provider 凭据且无 `backend/.env`，专用 PostgreSQL 与真实 provider smoke 为 `not run`；本轮仅是 M4 parser streaming 的本机离线/fixture 回归，不代表 M4 最终验收全部完成。
 
+#### Milestone 10 parser terminal schema 收敛记录（2026-09-27）
+
+- 实现：`response.completed.response.output` 只接受 reasoning 和 message item，reasoning 不进入公开正文，message content 只接受 `output_text`/refusal；terminal 或 `response.output_item.added`/`done` 中的 function/custom/MCP/built-in tool call 及未知类型均作为 invalid provider response。incomplete reason 仅将 `max_output_tokens`/`max_messages` 映射为 length、`content_filter` 映射为 content filter，`steered`、旧 `max_tokens` 别名、未知/缺失/非字符串值均作为技术失败；未修改 resolver、topology、availability、数据库 schema 或其他 provider。
+- 环境与验证：复用仓库 `backend/.venv` 的 Python `3.13.2`。focused 命令 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/infrastructure/test_provider_http.py backend/tests/application/test_query_parser_workflow.py -q` 为 `66 passed`；完整非 PostgreSQL 命令首次在沙箱内因 Windows 系统临时目录 ACL 得到 `1142 passed, 30 errors`（均为 `pytest-of-power24` 的 `PermissionError`，无断言失败），在沙箱外原样复跑为 `1172 passed`；`backend/.venv/Scripts/python.exe -B backend/scripts/m4_workflow_smoke.py` 通过且 mixed coverage 为 `partial`；`backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py` 输出 `{"completed":"passed","cancelled":"passed"}`。
+- 孤儿扫描：定义、导出、production caller、test caller 四层扫描确认代码/测试无 `post_json`，本轮未新增 production helper/class/export，parser helper 均有生产调用，M4 composition root 使用 OpenAI adapter/HTTP client，M4 新增模块均有 production importer；旧 `_output_text` helper 和旧整包 JSON fixture/test 名无残留。保留 origin/main 已有的 RunCoordinator 测试状态方法、`TranscriptRegistry.parse_many`、`extract_analysis_detail_references`、`PostgresTranscriptStore.commit_batch`，并保留 M5 接力契约 `WaterObservationPort`。
+- 未运行：`WATERAGENTS_TEST_DB_NAME`、OpenAI/Google provider 凭据均未设置且无 `backend/.env`，专用 PostgreSQL 与真实 provider smoke 为 `not run`；本轮结果不代表 M4 最终验收全部完成。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |

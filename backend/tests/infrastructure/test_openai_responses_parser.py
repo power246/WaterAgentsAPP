@@ -79,10 +79,15 @@ def output_text_done(text: object) -> bytes:
     return sse_event("response.output_text.done", text=text)
 
 
-def completed_terminal(text: object) -> bytes:
+def completed_terminal(
+    text: object,
+    *,
+    leading_output: Iterable[object] = (),
+) -> bytes:
     return terminal_event(
         "completed",
         output=[
+            *leading_output,
             {
                 "type": "message",
                 "content": [{"type": "output_text", "text": text}],
@@ -127,7 +132,7 @@ def response_for(request: httpx.Request, chunks: Iterable[bytes]) -> httpx.Respo
     )
 
 
-def test_completed_response_streams_deltas_before_terminal_in_order() -> None:
+def test_completed_reasoning_and_message_stream_deltas_before_terminal() -> None:
     requests: list[httpx.Request] = []
     first = sse_event(
         "response.output_text.delta",
@@ -137,7 +142,19 @@ def test_completed_response_streams_deltas_before_terminal_in_order() -> None:
     unicode_split = second.index("河".encode()) + 1
     stream = GatedStream(
         (
+            sse_event(
+                "response.output_item.added",
+                item={"type": "reasoning"},
+            ),
             sse_event("response.reasoning_text.delta", delta="not public"),
+            sse_event(
+                "response.output_item.done",
+                item={"type": "reasoning"},
+            ),
+            sse_event(
+                "response.output_item.added",
+                item={"type": "message"},
+            ),
             first[:9],
             first[9:31],
             first[31:],
@@ -146,7 +163,14 @@ def test_completed_response_streams_deltas_before_terminal_in_order() -> None:
             second[:unicode_split],
             second[unicode_split:],
             output_text_done('{"location_mention":"河流"}'),
-            completed_terminal('{"location_mention":"河流"}'),
+            sse_event(
+                "response.output_item.done",
+                item={"type": "message"},
+            ),
+            completed_terminal(
+                '{"location_mention":"河流"}',
+                leading_output=({"type": "reasoning", "summary": []},),
+            ),
         ),
     )
 
@@ -280,12 +304,139 @@ def test_completed_text_contract_mismatch_is_a_safe_invalid_response(
     run(exercise())
 
 
+def test_completed_terminal_rejects_tool_call_without_leaking_arguments(
+    caplog,
+) -> None:
+    tool_arguments = "terminal-tool-arguments-private"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(
+            request,
+            (
+                sse_event("response.output_text.delta", delta="{}"),
+                output_text_done("{}"),
+                terminal_event(
+                    "completed",
+                    output=[
+                        {"type": "reasoning", "summary": []},
+                        {
+                            "type": "function_call",
+                            "name": "unexpected_tool",
+                            "arguments": tool_arguments,
+                        },
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "{}"}],
+                        },
+                    ],
+                ),
+            ),
+        )
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError) as captured:
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/v1",
+                ).generate(parser_request(), _noop)
+        rendered = f"{captured.value!s} {captured.value!r}"
+        assert tool_arguments not in rendered
+
+    with caplog.at_level(logging.WARNING, logger="wateragents.providers"):
+        run(exercise())
+    assert tool_arguments not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("event_type", "item_type"),
+    [
+        ("response.output_item.added", "function_call"),
+        ("response.output_item.done", "web_search_call"),
+    ],
+    ids=("added-function-call", "done-built-in-tool-call"),
+)
+def test_output_item_event_rejects_tool_call_without_leaking_arguments(
+    event_type: str,
+    item_type: str,
+    caplog,
+) -> None:
+    tool_arguments = "streamed-tool-arguments-private"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(
+            request,
+            (
+                sse_event(
+                    event_type,
+                    item={"type": item_type, "arguments": tool_arguments},
+                ),
+            ),
+        )
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError) as captured:
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/v1",
+                ).generate(parser_request(), _noop)
+        rendered = f"{captured.value!s} {captured.value!r}"
+        assert tool_arguments not in rendered
+
+    with caplog.at_level(logging.WARNING, logger="wateragents.providers"):
+        run(exercise())
+    assert tool_arguments not in caplog.text
+
+
+def test_completed_message_rejects_unknown_content_type() -> None:
+    private_content = "unknown-content-private"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(
+            request,
+            (
+                sse_event("response.output_text.delta", delta="{}"),
+                output_text_done("{}"),
+                terminal_event(
+                    "completed",
+                    output=[
+                        {
+                            "type": "message",
+                            "content": [
+                                {
+                                    "type": "unknown_content",
+                                    "data": private_content,
+                                }
+                            ],
+                        }
+                    ],
+                ),
+            ),
+        )
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError) as captured:
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/v1",
+                ).generate(parser_request(), _noop)
+        rendered = f"{captured.value!s} {captured.value!r}"
+        assert private_content not in rendered
+
+    run(exercise())
+
+
 @pytest.mark.parametrize(
     ("reason", "expected"),
     [
         ("max_output_tokens", ParserFinishReason.LENGTH),
+        ("max_messages", ParserFinishReason.LENGTH),
         ("content_filter", ParserFinishReason.CONTENT_FILTER),
-        ("other", ParserFinishReason.CONTENT_FILTER),
     ],
 )
 def test_incomplete_terminal_maps_finish_reason(
@@ -315,6 +466,55 @@ def test_incomplete_terminal_maps_finish_reason(
         assert response.text == "{"
         assert response.finish_reason is expected
         assert deltas == ["{"]
+
+    run(exercise())
+
+
+@pytest.mark.parametrize(
+    "response_fields",
+    [
+        {"incomplete_details": {"reason": "steered"}},
+        {"incomplete_details": {"reason": "other"}},
+        {"incomplete_details": {"reason": "max_tokens"}},
+        {},
+        {"incomplete_details": None},
+        {"incomplete_details": "invalid"},
+        {"incomplete_details": {}},
+        {"incomplete_details": {"reason": None}},
+        {"incomplete_details": {"reason": 1}},
+    ],
+    ids=(
+        "steered",
+        "unknown",
+        "removed-max-tokens-alias",
+        "details-missing",
+        "details-null",
+        "details-non-object",
+        "reason-missing",
+        "reason-null",
+        "reason-non-string",
+    ),
+)
+def test_invalid_incomplete_reason_is_a_typed_invalid_response(
+    response_fields: dict[str, object],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(
+            request,
+            (
+                sse_event("response.output_text.delta", delta="{"),
+                terminal_event("incomplete", **response_fields),
+            ),
+        )
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError):
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/v1",
+                ).generate(parser_request(), _noop)
 
     run(exercise())
 

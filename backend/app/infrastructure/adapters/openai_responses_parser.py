@@ -27,8 +27,6 @@ _IGNORED_EVENT_TYPES = frozenset(
         "response.queued",
         "response.created",
         "response.in_progress",
-        "response.output_item.added",
-        "response.output_item.done",
         "response.content_part.added",
         "response.content_part.done",
         "response.output_text.annotation.added",
@@ -117,6 +115,23 @@ class OpenAIResponsesParserAdapter:
                 if event_type in {"response.refusal.delta", "response.refusal.done"}:
                     saw_refusal = True
                     continue
+                if event_type in {
+                    "response.output_item.added",
+                    "response.output_item.done",
+                }:
+                    item = require_mapping(
+                        root.get("item"),
+                        provider=PROVIDER,
+                        operation="generate",
+                    )
+                    item_type = require_string(
+                        item.get("type"),
+                        provider=PROVIDER,
+                        operation="generate",
+                    )
+                    if item_type not in {"message", "reasoning"}:
+                        raise invalid_response(PROVIDER, "generate")
+                    continue
                 if event_type == "error":
                     raise self._unavailable()
                 if event_type in {
@@ -200,15 +215,20 @@ class OpenAIResponsesParserAdapter:
             else:
                 raise invalid_response(PROVIDER, "generate")
         elif status == "incomplete":
-            raw_details = response.get("incomplete_details")
-            if raw_details is not None and not isinstance(raw_details, dict):
-                raise invalid_response(PROVIDER, "generate")
-            reason = raw_details.get("reason") if raw_details else None
-            finish_reason = (
-                ParserFinishReason.LENGTH
-                if reason in {"max_output_tokens", "max_tokens"}
-                else ParserFinishReason.CONTENT_FILTER
+            details = require_mapping(
+                response.get("incomplete_details"),
+                provider=PROVIDER,
+                operation="generate",
             )
+            reason = details.get("reason")
+            if not isinstance(reason, str):
+                raise invalid_response(PROVIDER, "generate")
+            if reason in {"max_output_tokens", "max_messages"}:
+                finish_reason = ParserFinishReason.LENGTH
+            elif reason == "content_filter":
+                finish_reason = ParserFinishReason.CONTENT_FILTER
+            else:
+                raise invalid_response(PROVIDER, "generate")
         elif status in {"failed", "cancelled"}:
             raise OpenAIResponsesParserAdapter._unavailable()
         else:
@@ -223,7 +243,7 @@ class OpenAIResponsesParserAdapter:
             operation="generate",
         )
         output = require_list(
-            root.get("output", []),
+            root.get("output"),
             provider=PROVIDER,
             operation="generate",
         )
@@ -235,10 +255,17 @@ class OpenAIResponsesParserAdapter:
                 provider=PROVIDER,
                 operation="generate",
             )
-            if item.get("type") != "message":
+            item_type = require_string(
+                item.get("type"),
+                provider=PROVIDER,
+                operation="generate",
+            )
+            if item_type == "reasoning":
                 continue
+            if item_type != "message":
+                raise invalid_response(PROVIDER, "generate")
             content = require_list(
-                item.get("content", []),
+                item.get("content"),
                 provider=PROVIDER,
                 operation="generate",
             )
@@ -248,13 +275,22 @@ class OpenAIResponsesParserAdapter:
                     provider=PROVIDER,
                     operation="generate",
                 )
-                if part.get("type") == "refusal":
+                part_type = require_string(
+                    part.get("type"),
+                    provider=PROVIDER,
+                    operation="generate",
+                )
+                if part_type == "refusal":
+                    if not isinstance(part.get("refusal"), str):
+                        raise invalid_response(PROVIDER, "generate")
                     saw_refusal = True
-                elif part.get("type") == "output_text":
+                elif part_type == "output_text":
                     text = part.get("text")
                     if not isinstance(text, str):
                         raise invalid_response(PROVIDER, "generate")
                     texts.append(text)
+                else:
+                    raise invalid_response(PROVIDER, "generate")
         return ("".join(texts) if texts else None), saw_refusal
 
     @staticmethod
