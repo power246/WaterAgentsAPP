@@ -439,7 +439,7 @@ def test_completed_message_rejects_unknown_content_type() -> None:
         ("content_filter", ParserFinishReason.CONTENT_FILTER),
     ],
 )
-def test_incomplete_terminal_maps_finish_reason(
+def test_incomplete_terminal_allows_reasoning_and_partial_message(
     reason: str,
     expected: ParserFinishReason,
 ) -> None:
@@ -451,6 +451,13 @@ def test_incomplete_terminal_maps_finish_reason(
                 terminal_event(
                     "incomplete",
                     incomplete_details={"reason": reason},
+                    output=[
+                        {"type": "reasoning", "summary": []},
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "{"}],
+                        },
+                    ],
                 ),
             ),
         )
@@ -466,6 +473,80 @@ def test_incomplete_terminal_maps_finish_reason(
         assert response.text == "{"
         assert response.finish_reason is expected
         assert deltas == ["{"]
+
+    run(exercise())
+
+
+@pytest.mark.parametrize(
+    "item_type",
+    ["function_call", "mcp_call"],
+    ids=("function-call", "mcp-call"),
+)
+def test_incomplete_terminal_rejects_tool_item_without_leaking_arguments(
+    item_type: str,
+    caplog,
+) -> None:
+    tool_arguments = "incomplete-tool-arguments-private"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(
+            request,
+            (
+                terminal_event(
+                    "incomplete",
+                    incomplete_details={"reason": "max_output_tokens"},
+                    output=[
+                        {"type": "reasoning", "summary": []},
+                        {"type": item_type, "arguments": tool_arguments},
+                    ],
+                ),
+            ),
+        )
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError) as captured:
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/v1",
+                ).generate(parser_request(), _noop)
+        rendered = f"{captured.value!s} {captured.value!r}"
+        assert tool_arguments not in rendered
+
+    with caplog.at_level(logging.WARNING, logger="wateragents.providers"):
+        run(exercise())
+    assert tool_arguments not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "output_fields",
+    [{}, {"output": None}, {"output": {}}],
+    ids=("missing", "null", "non-list"),
+)
+def test_incomplete_terminal_rejects_invalid_output_container(
+    output_fields: dict[str, object],
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(
+            request,
+            (
+                terminal_event(
+                    "incomplete",
+                    incomplete_details={"reason": "max_output_tokens"},
+                    **output_fields,
+                ),
+            ),
+        )
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError):
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/v1",
+                ).generate(parser_request(), _noop)
 
     run(exercise())
 
@@ -503,7 +584,16 @@ def test_invalid_incomplete_reason_is_a_typed_invalid_response(
             request,
             (
                 sse_event("response.output_text.delta", delta="{"),
-                terminal_event("incomplete", **response_fields),
+                terminal_event(
+                    "incomplete",
+                    output=[
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "{"}],
+                        }
+                    ],
+                    **response_fields,
+                ),
             ),
         )
 

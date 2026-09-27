@@ -199,17 +199,21 @@ class OpenAIResponsesParserAdapter:
         expected_status = event_type.removeprefix("response.")
         if status != expected_status:
             raise invalid_response(PROVIDER, "generate")
+        if status in {"failed", "cancelled"}:
+            raise OpenAIResponsesParserAdapter._unavailable()
+        if status not in {"completed", "incomplete"}:
+            raise invalid_response(PROVIDER, "generate")
+        terminal_text, terminal_refusal = (
+            OpenAIResponsesParserAdapter._terminal_output(response)
+        )
         if status == "completed":
-            completed_text, terminal_refusal = (
-                OpenAIResponsesParserAdapter._completed_output(response)
-            )
             if saw_refusal or terminal_refusal:
                 finish_reason = ParserFinishReason.CONTENT_FILTER
             elif (
                 text
                 and done_text is not None
-                and completed_text is not None
-                and text == done_text == completed_text
+                and terminal_text is not None
+                and text == done_text == terminal_text
             ):
                 finish_reason = ParserFinishReason.STOP
             else:
@@ -229,14 +233,10 @@ class OpenAIResponsesParserAdapter:
                 finish_reason = ParserFinishReason.CONTENT_FILTER
             else:
                 raise invalid_response(PROVIDER, "generate")
-        elif status in {"failed", "cancelled"}:
-            raise OpenAIResponsesParserAdapter._unavailable()
-        else:
-            raise invalid_response(PROVIDER, "generate")
         return QueryParserResponse(text=text, finish_reason=finish_reason)
 
     @staticmethod
-    def _completed_output(response: object) -> tuple[str | None, bool]:
+    def _terminal_output(response: object) -> tuple[str | None, bool]:
         root = require_mapping(
             response,
             provider=PROVIDER,
