@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from math import isfinite
 
 import httpx
@@ -23,6 +26,73 @@ from app.ports import (
 logger = logging.getLogger("wateragents.providers")
 
 QueryValue = str | int | float | bool
+
+
+@dataclass(frozen=True, slots=True)
+class ServerSentEvent:
+    event: str | None
+    data: str
+
+
+class _SseDecoder:
+    def __init__(self) -> None:
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+        self._buffer = ""
+        self._event: str | None = None
+        self._data: list[str] = []
+
+    def feed(self, chunk: bytes) -> tuple[ServerSentEvent, ...]:
+        self._buffer += self._decoder.decode(chunk)
+        events: list[ServerSentEvent] = []
+        while True:
+            line_end = self._line_end()
+            if line_end is None:
+                break
+            index, separator_length = line_end
+            line = self._buffer[:index]
+            self._buffer = self._buffer[index + separator_length :]
+            event = self._process_line(line)
+            if event is not None:
+                events.append(event)
+        return tuple(events)
+
+    def finish(self) -> None:
+        self._buffer += self._decoder.decode(b"", final=True)
+        if self._buffer or self._event is not None or self._data:
+            raise ValueError("incomplete SSE frame")
+
+    def _line_end(self) -> tuple[int, int] | None:
+        for index, character in enumerate(self._buffer):
+            if character == "\n":
+                return index, 1
+            if character == "\r":
+                if index + 1 == len(self._buffer):
+                    return None
+                return index, 2 if self._buffer[index + 1] == "\n" else 1
+        return None
+
+    def _process_line(self, line: str) -> ServerSentEvent | None:
+        if not line:
+            if not self._data:
+                self._event = None
+                return None
+            event = ServerSentEvent(
+                event=self._event,
+                data="\n".join(self._data),
+            )
+            self._event = None
+            self._data = []
+            return event
+        if line.startswith(":"):
+            return None
+        field, separator, value = line.partition(":")
+        if separator and value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            self._event = value
+        elif field == "data":
+            self._data.append(value)
+        return None
 
 
 class ProviderHttpClient:
@@ -129,6 +199,83 @@ class ProviderHttpClient:
                 operation=operation,
             ) from error
 
+    @asynccontextmanager
+    async def post_sse(
+        self,
+        url: str,
+        body: Mapping[str, object],
+        *,
+        provider: str,
+        operation: str,
+        headers: Mapping[str, str] | None = None,
+        deadline: float | None = None,
+    ) -> AsyncIterator[AsyncIterator[ServerSentEvent]]:
+        client = self._client
+        if client is None:
+            raise RuntimeError("provider HTTP client is not open")
+        try:
+            timeout = self._remaining_timeout(deadline, provider, operation)
+            async with asyncio.timeout(timeout):
+                async with client.stream(
+                    "POST",
+                    url,
+                    headers=headers,
+                    json=body,
+                    timeout=timeout,
+                ) as response:
+                    self._raise_for_status(
+                        response.status_code,
+                        provider=provider,
+                        operation=operation,
+                    )
+                    content_type = response.headers.get("content-type", "")
+                    media_type = content_type.partition(";")[0].strip().casefold()
+                    if media_type != "text/event-stream":
+                        raise InvalidPortResponseError(
+                            "Provider returned an invalid event stream.",
+                            provider=provider,
+                            operation=operation,
+                        )
+                    yield self._iter_sse(
+                        response,
+                        provider=provider,
+                        operation=operation,
+                    )
+        except PortError as error:
+            self._log_failure(error, 1)
+            raise
+        except (TimeoutError, httpx.TimeoutException) as error:
+            port_error = PortTimeoutError(
+                "Provider request timed out.",
+                provider=provider,
+                operation=operation,
+            )
+            self._log_failure(port_error, 1)
+            raise port_error from error
+        except (
+            httpx.InvalidURL,
+            httpx.UnsupportedProtocol,
+        ) as error:
+            port_error = PortConfigurationError(
+                "Provider endpoint configuration is invalid.",
+                provider=provider,
+                operation=operation,
+            )
+            self._log_failure(port_error, 1)
+            raise port_error from error
+        except (
+            httpx.ConnectError,
+            httpx.NetworkError,
+            httpx.RemoteProtocolError,
+        ) as error:
+            port_error = PortUnavailableError(
+                "Provider is unavailable.",
+                provider=provider,
+                operation=operation,
+            )
+            self._log_failure(port_error, 1)
+            raise port_error from error
+
     async def get_bytes(
         self,
         url: str,
@@ -148,6 +295,34 @@ class ProviderHttpClient:
             headers=headers,
             deadline=deadline,
         )
+
+    async def _iter_sse(
+        self,
+        response: httpx.Response,
+        *,
+        provider: str,
+        operation: str,
+    ) -> AsyncIterator[ServerSentEvent]:
+        decoder = _SseDecoder()
+        received = 0
+        try:
+            async for chunk in response.aiter_bytes():
+                received += len(chunk)
+                if received > self._max_response_bytes:
+                    raise PortResponseLimitError(
+                        "Provider response exceeded the configured size limit.",
+                        provider=provider,
+                        operation=operation,
+                    )
+                for event in decoder.feed(chunk):
+                    yield event
+            decoder.finish()
+        except (UnicodeDecodeError, ValueError) as error:
+            raise InvalidPortResponseError(
+                "Provider returned an invalid event stream.",
+                provider=provider,
+                operation=operation,
+            ) from error
 
     async def _request_bytes(
         self,

@@ -495,6 +495,11 @@
 - 验证：新增 adapter/runtime/错误语义/双支流/repair/partial 回归；完整非 PostgreSQL backend `1091 passed`，入口相关 focused `130 passed`，`compileall`、M4 workflow smoke（mixed=`partial`）、standalone SSE、154 项离线 audit 与 `git diff --check` 通过。专用 PostgreSQL、真实 Google/NLDI/WDFN/Samples/OpenAI 请求和三平台 CI 因本机未配置继续为 `not run`/`partial`。
 - 提交：`f1d57ca`。
 
+#### Milestone 10 production parser streaming 补充记录（2026-09-27）
+
+- 实现：OpenAI Responses parser 改为单次 POST SSE，`stream=true`，只按接收顺序转发并累积 `response.output_text.delta`；completed/incomplete/refusal/failed/cancelled/error 与非法或缺失终态均收敛到既有 typed finish/error 语义，取消、超时和大小上限会关闭响应流。未修改 topology、resolver、availability、数据库 schema 或其他 provider 行为。
+- 验证：parser/HTTP/workflow focused `45 passed`、M4 workflow smoke 通过、完整非 PostgreSQL backend `1148 passed`，`git diff --check` 通过；精确完整命令首次受系统 pytest 临时目录 ACL 阻断，沙箱外原命令重跑通过。专用 PostgreSQL 与真实 OpenAI/provider smoke 因未配置专用测试库/凭据记为 `not run`。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |
