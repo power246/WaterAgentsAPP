@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-17
+更新日期：2026-09-25
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -28,6 +28,9 @@ M2 的旧整体 session 模型只保留为历史实现证据；M3 已在 `backen
    - 不要求最终推理准确，但要求该阶段的架构边界和数据形态成立。
    - 这是开发过程中的接力检查点，不是用户正式测试版本。
    - 中间结果不需要面向前端、用户或其他 milestone 保持长期兼容。
+   - M1–M9 始终是同一项目进程中的一套系统；M9 完成前不存在可部署或可正式联调的“M4 版”等产品中间态。
+   - 配置、request、DTO、lifecycle、SSE 和数据库 schema 直接更新当前唯一模型；不得仅因 Milestone 切换增加版本号、旧版只读 union、兼容分支或临时 UI/API gate。开发数据与 fixture 按当前 HEAD 迁移或重建。
+   - 正式前后端联调和第一版整体验收只在 M9 完成后开始；届时冻结第一份对外基线，后续真实发布变更再评估版本化与迁移。
 
 2. 每个 milestone 都要留下可继续接力的开发边界。
    - 后续 agent 应该能基于上一阶段的产物继续实现，不需要重推架构。
@@ -306,7 +309,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 6. M4: Query Understanding + Hydrology Topology
 
-按 D51，问题解析 Agent 在本次 run 下执行独立 session，不绑定水体 COMID；输入、实际调用过程及结构化输出复用 M3 的存储和完整读取能力。解析结果可以包含目标 COMID 和坐标，后端以此向上游 BFS 并组织水文 DAG。真实解析 session 及输出由本阶段接入，验收见 `M4-C01`/`M4-A01`。
+详细方向、类型、API 和施工顺序已定型于 [M4 设计决策](M4/m4_query_understanding_topology_design.md)、[M4 实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[M4 API](M4/m4_query_understanding_topology_api.md) 与 [M4 Implementation TODO](M4/m4_implementation_todo.md)。问题解析 Agent 在本次 run 下执行独立 session，不绑定水体 COMID；输入、实际模型过程及结构化输出复用 M3 的存储和完整读取能力。BFS 是 run 的确定性过程，不建立 Agent session。
 
 目标：
 
@@ -320,28 +323,35 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 - `ParameterResolver`
 - `BuildHydrologyTopology`
 - `HydrologyGraph`
-- `topology_ready` SSE event
+- 直接扩展当前 `analysis_request v1`、`lifecycle_event v2` 和唯一 run configuration；不建立 M4 版本
+- `query_parser_input/message v1`
+- `query_understood v1`、`topology_ready v1` typed content
 
 主要能力：
 
-- 解析位置到经纬度和目标 COMID。
-- 将用户参数描述语义匹配到 USGS parameter code。
+- 前端 target/date 优先；缺失时才使用 query 候选，实质冲突失败而非静默覆盖。
+- 前端不提供参数表单；解析 LLM 可对新目标自主推测参数，few-shot 只指导 schema，确定性 capability registry 决定最终 `ParameterKey`。
+- 解析位置到经纬度和目标 COMID；第一版只支持 CONUS，坐标使用 NLDI position，不吸附到附近河道。
 - 根据时间范围判断 `gap_filling / prediction / mixed`。
-- 接收 `memory_mode: stateless | memory_augmented`。
-- 接收 `time_resolution: 6h | 12h | 24h`。
+- 前端分别选择 parser model 和 waterbody model；parser 不注册或获准调用 geocoding/NLDI/parameter-search 工具，结构化 schema 最多修复一次。
+- 接收并固化 `memory_mode: stateless | memory_augmented` 接缝，不在 M4 单独实现或拒绝 M8 行为。
+- 接收 `time_resolution: auto | 6h | 12h | 24h`；auto 为 1–7 天选 6h、8–15 天选 12h，省略 API 字段为 12h/default。
 - 输出 `time_resolution_source: frontend | default | auto`。
-- 第一版只接受日期范围，结束日期包含整天；按 session 的 IANA timezone 解释后转换为 UTC。
-- 参数解析结果使用 `ParameterKey(code_system, code)`，第一版默认 `code_system=usgs`。
-- 构建上游拓扑，找到可用检测站和 agent 顺序。
+- 第一版只接受 run 当地今天前后各 7 天内的 date-only 范围，结束日期包含整天；按固化 IANA timezone 转 UTC，越界不截短。
+- 参数解析结果使用 `ParameterKey(code_system, code)`；第一版正式联调基线按 [M4 参数能力目录](M4/m4_parameter_capability_catalog.md) 交付 154 个已接通数据源、单位和 evidence 规则的可执行能力，覆盖主要水文与水质问题。`usgs:00060` discharge 是每次分析必带的支持参数；单次用户目标参数最多 6 项，自动加入的支持参数不占该上限。
+- NLDI 提供河网/站点关联，WDFN OGC API v1 metadata 判断参数 × 时间段资格；旧 WaterServices 不进入新生产基线。
+- 按每条支流最近充分规则构建上游拓扑；默认 100 km、12 hop、128 node、并发 8，保存完整 BFS 范围、active path union 和结构化排除原因。
+- parser session 流继续使用 M3 过程事件；run snapshot 只引用完整 `topology_ready` 原记录，不新增第三条流或内联大图。
 
 阶段自测验收：
 
-- 使用 fake NLDI/geocoding adapter 时，固定 query 可以稳定产出 `AnalysisContext`。
-- `params_used` 能显示实际映射到的参数。
-- 日期边界、DST 和 resolution source 能稳定写入 `AnalysisContext`。
+- 使用 fake model/geocoding/NLDI/WDFN adapter 时，固定 query 可以稳定产出同一 `AnalysisContext` 与 `HydrologyGraph`。
+- `params_used` 显示最终 `ParameterKey`、explicit/inferred 来源和简短 rationale；歧义、unsupported、完全无参数或超过上限均在 topology 前停止。
+- 前端/query 优先级、±7 天、inclusive end、DST、auto resolution 与 mixed 切分可重现。
 - mixed 时间范围能拆出历史段和预测段。
-- topology 结果能标记 target、inlet、active/excluded。
-- SSE 能发送 `query_understood` 和 `topology_ready`。
+- topology 对参数 × segment 分别停止，稳定标记 target、inlet、active/excluded、no source/search limit；技术失败不冒充 empty。
+- `query_understood` 归 parser session，`topology_ready` 归 run；两层 SSE 的补发、重连、引用和取消继续满足 M3。
+- M4 自测只验证内部切片契约，最终产品在 M1–M9 全部完成后统一端到端验收。
 
 ## 7. M5: Evidence Tools + EvidenceBundle
 
@@ -382,6 +392,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - 可调用确定性 Python 库或 API 执行量纲校验与换算
   - 未知换算不得由 Agent 猜测
 - M5 可以定型 upstream-result/RAG evidence tool 的槽位和 unavailable 语义；真实 upstream producer 由 M7 接入，真实 transcript-RAG producer 由 M8 接入，不在 M5 production path 中用 hidden fake 冒充完成。
+- 复用 M4 单一 parameter capability registry，将 evidence 按“参数 × 时间段”分为直接、明确允许的侧面和完全缺失；关系类型与不足事实进入 bundle。provider unavailable/invalid 不能伪装成 empty/no evidence。
 
 阶段自测验收：
 
@@ -402,6 +413,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 - 可疑观测原样保留并降权；明确无效观测保留为 evidence，但不能作为 observed quantified result。
 - aggregation tool 能对 fake raw series 输出 `6h / 12h / 24h` 聚合结果。
 - tool call 和 tool result 能写入 transcript。
+- M4 的 availability qualification 不当作真实 evidence；直接/侧面/empty/unavailable 可由确定性 gate 输入稳定区分。
 
 ## 8. M6: Single-Agent Reasoning
 
@@ -429,18 +441,19 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - `mode`
 - agent 调用 mandatory evidence tools。
 - agent 可按需调用 optional evidence tools。
-- agent 判断 evidence sufficiency。
+- 调用水体模型前由确定性 gate 按“参数 × 时间段”判断 evidence sufficiency。
 - 证据充分时输出 quantified result，并可附带风险/趋势。
-- 只能判断方向时输出 directional result。
-- 完全缺乏证据时输出 indeterminate result，而不是省略时间窗口。
+- 只有 capability 白名单侧面证据时可输出受限 directional result，并显式降低置信度。
+- 完全缺乏证据时不调用对应水体模型，由确定性逻辑输出 indeterminate，而不是省略时间窗口或消耗 token 生成措辞。
 - 结果包含 `analysis_detail`、`attribution_summary`、`evidence_chain`。
 
 阶段自测验收：
 
 - 用 fake evidence bundle 可以跑出一个完整 `InferenceResult`。
 - 当存在目标检测站读数时，最终读数锚定 observed value。
-- 当无检测站链路或目标参数无观测支撑时，不输出具体数值，只输出趋势/风险判断。
+- 当无直接检测站链路但存在 capability 允许的侧面证据时，不输出具体数值，只输出明确降级的趋势/风险判断；完全无证据时走下一条确定性 indeterminate，不能调用模型。
 - 完全无可用证据时仍为每个窗口输出带 reason code 的结构化空判断。
+- 通过模型调用计数验证全部无证据为 0 次，部分无证据只调用通过门禁的范围；unavailable/invalid 不走无证据降级。
 - 每个 time window 都有 source、confidence、evidence refs。
 - attribution factor 都能追溯到 evidence refs，并标记 `basis: observed | correlated | inferred | hypothesized`。
 - confidence 规则在本 milestone 设计，保留 Agent 自主判断，不与 outcome status 做 Domain 硬绑定。

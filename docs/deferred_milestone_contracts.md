@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-09-17
+更新日期：2026-09-25
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -25,8 +25,8 @@
 
 ## 2. 跨 Milestone 硬约束
 
-- **GLOBAL-C01 — 新旧边界**：新系统只以当前架构、Milestone 和功能设计为依据。`backend_bk/`、`frontend_bk/` 及旧契约文档不是需求、行为、数据源、兼容或测试依据。
-- **GLOBAL-C02 — 内部演进**：M1–M9 是内部演进阶段。阶段性 request、DTO、fake adapter 和测试入口可在后续 Milestone 中直接收敛，不为中间状态建立兼容层。
+- **GLOBAL-C01 — 新旧边界**：新系统只以当前架构、Milestone 和功能设计为依据。`backend_bk/`、`frontend_bk/` 及旧契约文档属于完全独立、最终丢弃的归档系统，不是需求、行为、数据源、兼容或测试依据；设计、实现、测试、评审和验收新系统时不得读取、导入、复制、适配、枚举或测试其中的代码、服务、接口、数据模型、依赖、配置、缓存或行为。未来新前端依据届时产品设计和新后端最终契约独立实现，不继承归档前端。
+- **GLOBAL-C02 — 单一首版演进与验收边界**：M1–M9 是同一项目进程中的一套第一版系统，只按 Milestone 组织开发接力和内部自测；不存在可独立使用、正式联调或需要长期兼容的“M4 版”等产品中间态。M9 完成后才开始正式前后端联调和第一版整体验收。在此之前，阶段性 request、configuration、DTO、lifecycle、SSE、数据库 schema、fake adapter 和 fixture 直接更新为当前唯一形态；新增配置就在同一个配置模型/文件中增加字段并同步所有消费者，不得只因 Milestone 变化增加版本号、旧版只读 union、兼容分支、迁移层、临时 feature flag 或“当前阶段未启用”的产品行为。开发历史数据可按当前 HEAD 迁移或重建；既有 M2/M3 文档中的 legacy reader/历史版本描述只记录已经发生的实现，不构成最终产品兼容承诺，也不能作为后续新增 milestone 版本的先例，正式联调前可随当前模型收敛删除。第一版对外基线在 M9 后冻结，之后才根据真实发布兼容需要决定版本化与持久化迁移。
 - **GLOBAL-C03 — COMID 身份**：第一版业务身份只使用 COMID；只有出现非 COMID 水体的真实需求时才设计通用 `Waterbody`。
 - **GLOBAL-C04 — 时间身份**：时间事实统一存 UTC。用户时间语义按 session 固化的 IANA timezone 解释，全局设置修改不得改变已有 session。
   - 按 [M3 D54](M3/m3_transcript_history_design.md#d54所有业务表的每条记录都保留时间信息) 和 [D55](M3/m3_transcript_history_design.md#d55通用时间最多两列occurred_at-复用创建时间)，每条业务表记录保存时间，通用列按生命周期使用 created_at 与按需的 updated_at。M3 的 run/session 表使用两列，原记录/大正文表仅使用 created_at；transcript API occurred_at 从原创建时间装配，不另存同义列。原创建/真实变更时确定时间，保存重试与读取不刷新，观测时间和预测窗口等正文业务事实保留。
@@ -252,25 +252,33 @@ Contract changes:
 
 - **M4-C01 — Final request/context**：定型 analysis request 和 `AnalysisContext`，包含 query、位置/COMID、参数、日期范围、mode、memory mode 和时间粒度；直接替换阶段性 M2 request，不建兼容层。
   - 按 D51，问题解析 Agent 在本次 run 下执行独立 session，保存自身输入、实际调用过程和结构化输出，复用 M3 transcript 能力。session 本身不绑定水体 COMID，解析输出正常包含真实目标信息；后续 BFS 和水体推理使用该结果，不另造同义解析快照。
-- **M4-C02 — 日期语义**：第一版只接受日期范围，结束日期包含整天；按 session 固化的 IANA timezone 解释后转换为 UTC。
-- **M4-C03 — 自动粒度**：定义可测试的自动时间粒度规则；只有该规则实际选择粒度时才使用 `time_resolution_source=auto`。
-- **M4-C04 — 参数身份**：参数使用 `ParameterKey(code_system, code)`，第一版默认 `code_system=usgs`。
-- **M4-C05 — 位置与模式**：解析位置到经纬度和目标 COMID，并根据时间范围判断 `gap_filling / prediction / mixed`。
+- **M4-C02 — 日期语义**：第一版只接受 run 当地 `today-7` 到 `today+7` 闭区间内的 date-only 范围，结束日期包含整天；按固化 IANA timezone 转换为 UTC `[start,end)`。严格早于今天为 gap filling，今天起为 prediction，跨今天为 mixed 并在当地午夜切分。
+- **M4-C03 — 自动粒度**：前端提供 `auto/6h/12h/24h`；auto 对 1–7 个日历日选 6h、8–15 日选 12h，24h 只显式选择。非前端 API 省略时为 12h/default；只有 auto 实际解析才写 `time_resolution_source=auto`，最大 60 windows。
+- **M4-C04 — 参数身份与能力**：参数使用 `ParameterKey(code_system, code)`。解析 LLM 可以在少量 few-shot 外自主推测目标参数并给出简短 rationale；确定性 capability registry 是执行权威，完整目录只发现候选。第一版正式联调基线按 [M4 参数能力目录](M4/m4_parameter_capability_catalog.md) 交付 154 个真正可执行的参数能力，覆盖流量/水力、通用现场指标、氧与有机负荷、营养盐、主要离子、固体/沉积物、金属、微生物和常见有机污染物等主要问题族；每项都必须接通单位、数据源、可用性查询和 evidence 规则，不能只登记名称。`usgs:00060` discharge 是每次分析自动加入的必需支持参数，也允许作为用户目标参数；单次最多 6 个不同的用户目标参数，自动加入的支持参数不占该上限。无匹配、多义、unsupported 或超限时不截断/替换后继续。
+- **M4-C05 — 位置与模式**：解析位置到经纬度和目标 COMID，并根据时间范围判断 `gap_filling / prediction / mixed`。首期只接受 CONUS 48 州与 District of Columbia；行政区与 NHDPlusV2 COMID 是两道门禁。坐标使用 NLDI position point-in-polygon，不用近邻 hydrolocation 吸附；COMID/坐标同时提供时必须一致。
 - **M4-C06 — Topology**：按 D50，以用户目标水体为基准向上游 BFS，寻找有水质数据的水体作为推理源头；构建 `HydrologyGraph`，标记 target、inlet、active/excluded，确定由上游向目标推进的 DAG 顺序。数据可用标准和搜索边界在 M4 定型。
   - 按 D71 保留本次 BFS 范围、实际参与与排除等原业务事实，以区分范围内不参与和参与未开始的水体；这些是 run 原记录，不是额外地图快照。上游没有带检测站点的水体是用户给出的排除示例，具体规则结合数据可用标准定型，不将示例当作唯一判定条件。
   - 按 D59，发现节点或确定 DAG 不预建对应 Agent session；尚未执行节点由 run 的拓扑及实际过程记录表示，session 在后续满足依赖并准备执行时创建。
-- **M4-C07 — Typed events**：定义 `query_understood` 和 `topology_ready` 的实际 typed 内容，保持解析 session 与 run 拓扑事实的原归属。按 D69 的最终两层协议确定公开通知/过程的映射及引用，不再把所有 payload 强制放入 M2 单条整体流；run 通知保持轻量，具体事件名称、envelope 和续传语义随后定型。
+- **M4-C07 — Typed contents 与两层流**：直接扩展当前 `analysis_request v1`、`lifecycle_event v2`、唯一 run configuration 和 `run_snapshot v1`，并注册新的 `query_parser_input v1`、`query_parser_message v1`、`query_understood v1`、`topology_ready v1`。M1–M9 内不为阶段数据建立 V1/V2 read union，也不因 M4 改名或升级既有版本；所有当前字段、fixture 和消费者同步更新。保持解析 session 与 run topology 原归属。按 D69 的两层协议映射：parser 文本走 session 消息事件，context 走 session transcript_item，完整 graph 归 run；run snapshot 只提供阶段和原 item 引用，不新增 `query_understood/topology_ready` SSE event 或第三条流。
   - 问题解析 Agent 的实际流式文本按 D79 接入，片段用于实时过程，正文按消息保存；解析成功的结构化内容仍须通过原模型校验，不能将尚未完成的文本直接当作 query_understood。M3 使用测试类型验证通用能力，不提前伪造真实解析输出。
-- **M4-C08 — History query 扩展**：在 M3 history DTO 上增加真实解析得到的 target COMID/location、time range、mode 和 parameters，并从持久化的版本化 AnalysisContext 投影，不从 query 文本临时重算。
+- **M4-C08 — History query 扩展**：在 M3 history DTO 上增加 nullable `context_summary`，包含真实 target/location、date range、mode、实际 resolution 和 params；只从持久化的版本化 AnalysisContext 投影，不从 query 文本临时重算。损坏/未知内容进入 issues，不用 null 冒充未解析。
+- **M4-C09 — 输入优先级与模型权限**：前端只提供地图 target（COMID/坐标）、date range、resolution、两个模型选择和 memory mode；不提供参数表单。target/date 有值时高于 query，缺失时才用自然语言；实质冲突、缺失、歧义或越界均在 topology 前失败。前端分别选择 parser/waterbody provider+model，后端按角色模型目录校验并固化，不接收/回显 key；parser 只有 schema invalid 时最多修复一次，不注册也不授权外部工具，不静默 failover。
+- **M4-C10 — Availability**：NLDI 只提供河网/站点关联；USGS WDFN OGC API v1 或 capability 指定的同等级 metadata 判断“参数 × time segment”候选资格，旧 WaterServices 不进入新基线。历史要求 metadata envelope 覆盖请求段，预测要求起点前 48h 内存在近期基线可能；actual evidence 仍由 M5 重新验证。empty 与 unavailable/invalid 必须分开。
+- **M4-C11 — Bounded deterministic BFS**：每条支流按 coverage unit 找最近合格 inlet；已覆盖单元停止、未覆盖继续。默认硬限制为 100 km/路径、12 hop/路径、128 unique nodes/整图、8 并发；按 `(depth,distance,comid)` 稳定合并。自然无源与达到上限分别记录，技术失败不能降级成无数据。
+- **M4-C12 — Evidence gate 接缝**：M4 只产出 context、graph 与 availability qualification。M5/M6 必须按“目标参数 × 时间段”判断直接/白名单侧面/完全无证据，并对同一单元额外要求必需 discharge 的直接或白名单侧面证据；任一必需部分完全无证据都跳过对应模型并产生 deterministic indeterminate。`partial_topology`/`insufficient_evidence` 是覆盖与结果语义，不新增 run 状态。
+- **M4-C13 — Milestone 集成边界**：`memory_mode` 在 request/config/context 中稳定传递，由 M8 实现；M4 不增加临时 unsupported 响应、UI feature flag 或假行为。M4 有内部契约测试，但不形成独立产品版本；M9 完成后才开始正式前后端联调和第一版统一端到端验收。
 
 ### 验收重点
 
-- **M4-A01**：固定 query 在 fake geocoding/NLDI adapter 下稳定生成 `AnalysisContext` 和 topology。
+- **M4-A01**：固定 query 在 fake model/geocoding/NLDI/WDFN adapter 下稳定生成相同 `AnalysisContext` 和 topology。
   - 按 D71 验证 BFS 范围内被排除与参与的水体事实可保存并用于当前/历史状态装配，不因没有 Agent session 而丢弃被排除节点，也不为其预建会话。
   - 验证问题解析 session 归属于原 run，输入、实际过程与结构化输出可持久化和完整读取，目标 COMID 属于解析结果而非解析 session 的水体身份；后续流程使用同一解析事实。
-- **M4-A02**：日期边界、DST、resolution source 和 mixed mode 拆分可通过测试重现。
-- **M4-A03**：结果显示实际解析的 ParameterKey，不退回仅按裸 code 识别参数。
+- **M4-A02**：前端/query 优先级与冲突、±7 日期边界、DST、auto/default resolution 和 mixed mode 拆分可通过 fake clock 重现。
+- **M4-A03**：few-shot 未覆盖目标仍可自主推测；结果显示实际 ParameterKey、explicit/inferred 与 rationale，并区分用户目标和自动支持参数。歧义、unsupported、无参数、>6 个用户目标以及模型 schema 两次失败都不进入 topology；manifest 精确覆盖 [M4 参数能力目录](M4/m4_parameter_capability_catalog.md) 的 154 个条目，逐项验证执行要素，discharge 必带、不占目标上限且不重复。
 - **M4-A04**：新增内容按原归属保存，公开表示遵守 D69/D73 两层流规则：run 重连同步最新完整轻量状态，session 按游标补齐过程且不重复展示；不能把无需补播 run 中间通知误判为过程记录缺失；不能把所有事件强制共用旧 M2 单流序号或把 transcript_sequence 直接作为两流通用游标。
+- **M4-A05**：CONUS/DC、非支持地域、无 COMID、target mismatch 分开；parser 的真实 tool roster 为空，两个模型选择固化且没有 secret 泄漏。
+- **M4-A06**：同层外部响应随机完成仍产生字节稳定的 graph/layers；参数 × segment 部分覆盖继续、三重上限、汇流/重复/环、natural empty 与 provider failure 均有固定 fixture。
+- **M4-A07**：WDFN v1 metadata 只形成 qualification，M5 actual evidence gate 仍是必经路径；旧 WaterServices URL 不进入 production adapter/config。
 
 ## 7. M5：Evidence Tools + EvidenceBundle
 
@@ -286,12 +294,14 @@ Contract changes:
 - **M5-C08 — Unit 系统**：维护 `ParameterKey -> canonical_unit`，保留源单位、转换结果和换算 provenance；量纲校验和换算只能调用确定性库/API，未知换算不得由 Agent 猜测。
 - **M5-C09 — Event 容量**：新增 evidence event 继续使用 LifecycleEvent；大 tool/evidence payload 使用 preview + reference，不把无界 raw data 放入 SSE replay buffer。
 - **M5-C10 — 延后 producer**：M5 可以定型 upstream-result/RAG evidence tool 的 request/result 槽位和 unavailable 语义，但真实 upstream producer 由 M7 接入，真实 transcript-RAG producer 由 M8 接入；不得在 M5 production path 中用隐藏 fake 冒充已实现能力。
+- **M5-C11 — Sufficiency input**：按 M4 的 `ParameterCapability` 和“参数 × 时间段”组织直接证据、允许的侧面证据与完全缺失；侧面证据关系必须来自 capability registry，保留关系类型和不足标记，不能由 Agent 临时声明。provider unavailable/invalid 不得被归类为 no evidence。
 
 ### 验收重点
 
 - **M5-A01**：每个 evidence tool 通过 fake adapter 返回结构完整、可追溯的 EvidenceFragment。
 - **M5-A02**：聚合和单位换算完全由确定性代码执行，原值、单位和 provenance 不丢失。
 - **M5-A03**：tool call/result 可写入 transcript，公开 event 不泄露 secret 或无界 payload。
+- **M5-A04**：同一 bundle 中直接、白名单侧面、empty、unavailable/invalid 可确定性区分，并可为 M6 gate 按参数 × 时间段读取；M4 availability qualification 不被冒充为实际 evidence。
 
 ## 8. M6：Single-Agent Reasoning
 
@@ -313,6 +323,7 @@ Contract changes:
 - **M6-C12 — Correlation**：按 M3 D50–D52，以 run_id 关联整次分析的 SSE、日志与 transcript，适用的 Agent 记录使用独立 session_id；session_id 统一标识 Agent 上下文与本次完整执行，不另生成同义 agent_id。agent_role 表达职责，stage name 表达阶段，真实模型/工具等调用生成 operation_id UUID；开始/结束及直接关联 hook 保留操作身份，模型原 tool_call_id 保留在类型 payload 中。COMID、角色、Agent 名称和工具名称不代替执行身份。
 - **M6-C13 — History result 扩展**：在 M3 history/detail DTO 上增加真实 final result summary 和 final confidence；值必须来自持久化 result，不在 history 查询时重新推理。
 - **M6-C14 — 综合水质指标**：承接 M3 D21，用户所称“总体预测值”是跨多个参数的综合水质指标。定型所用指标、计算口径、单位/尺度、所需参数与缺失参数处理，提供有可追溯依据的结果；不能用 overall_confidence 或未经定义的分时段均值替代。对应水体的分时段预测、综合指标及推理概述/总结须能关联到真实 AnalysisDetail/transcript。
+- **M6-C15 — 模型调用前门禁**：在每个水体模型调用前按“参数 × 时间段”执行确定性 sufficiency gate。有直接证据或 capability 明确允许的侧面证据才进入 LLM；只有侧面证据时必须保留不足事实并限制结果/置信度。完全无证据的单元不调用 LLM，直接生成 reason=`insufficient_evidence` 的 indeterminate；全部单元无证据时整个水体乃至 run 都不得为了生成措辞而调用水体模型。该门禁不把 provider unavailable 当 empty。
 
 ### 验收重点
 
@@ -321,6 +332,7 @@ Contract changes:
 - **M6-A03**：冲突观测、无证据和未知单位不会被静默猜测或丢弃。
 - **M6-A04**：completed event、日志和 transcript 中的 result identity/版本一致。
 - **M6-A05**：综合水质指标按 M6-C14 定型的规则产出，已知输入可验证，缺失参数时按明确规则表达可用性，指标与置信度不混淆；持久化后能读取原结果和推理依据。
+- **M6-A06**：通过模型调用计数证明全无证据为 0 次、部分无证据只调用通过门禁的范围；确定性 indeterminate 覆盖所有计划窗口，允许侧面证据的结果明确降级且引用关系闭包成立。
 
 ## 9. M7：Topology-Driven Multi-Agent Workflow
 

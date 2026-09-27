@@ -2,13 +2,15 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-17
+更新日期：2026-09-25
 
 本文档是当前后端架构骨架的最终版，也是给后续设计/实现 agent 阅读的架构引入文档。它只回答最高层问题：WaterAgents 后端要解决什么问题、第一版需要哪些大功能、系统分成哪些层、层与层之间如何协作。
 
 本文档不写 milestone，不分配具体 agent 任务，不选择具体数据库 schema，不展开每个功能的实现细节。后续 milestone 文档会在本文基础上说明需要哪些 agent 完成哪些功能；具体功能设计再由功能实现 agent 逐项细化。
 
 M3 及之后必须承接的已确认功能，统一登记在 [deferred_milestone_contracts.md](deferred_milestone_contracts.md)。
+
+M1–M9 是同一套第一版系统的内部实施切片，不是九个可独立使用或需要互相兼容的产品版本。各阶段的自测只用于开发接力；M9 完成后才开始正式前后端联调和第一版整体验收。在此之前，请求、配置、DTO、SSE、数据库 schema 和测试 fixture 都直接向最终形态演进：新增字段就更新当前唯一模型及其所有消费者，不因进入新的 Milestone 建立 `M4 configuration`、`M4 lifecycle`、旧版只读 union、阶段 feature flag 或中间态迁移层。既有 `content_schema_version` 等协议字段继续使用当前值，不能只因为 Milestone 编号变化而升级；第一版正式验收基线冻结后，才按真实发布兼容需求决定版本和迁移策略。
 
 跨操作系统可迁移性与简单迁移是全局约束（GLOBAL-C11）：macOS、Windows、Linux 共用业务代码、依赖锁、配置格式和 schema，换系统通过目标环境配置与重新安装依赖完成；平台差异只在基础设施入口处理。M3 提供统一检查/启动命令及跨系统迁移验收，历史身份与全文引用不依赖宿主机路径。具体步骤见 [迁移指南](M3/m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)。
 
@@ -89,9 +91,9 @@ schema 版本按 [M3 D63](M3/m3_transcript_history_design.md#d63schema-版本严
 
 以下是已确认的主流程，供后续设计、实现和前端接入共同参考。
 
-1. **用户提交问题，创建 run。** 用户输入 query，选择地点和时间，说明想了解的问题。一次新的提交创建一个新的 run；即使 query 相同，新的用户操作也使用新的创建 key。只有请求重试才原样复用 key 和请求体，重试返回原创建回执，不重新执行分析。
-2. **准备解析时创建问题解析 session。** 问题解析 Agent 解析用户问题和前端参数，输出结构化需求，例如待查询的水质参数、地点坐标、目标 COMID 和时间范围。该 session 的输入、实际调用过程及结构化输出归属于本次 run，供后续流程使用和历史查阅。
-3. **后端向上游寻找推理源头。** 以解析出的目标水体为基准，沿水文网络向上游 BFS，寻找有水质数据的水体作为推理源头；后续推理从这些水体向目标水体推进。数据可用标准和搜索边界由拓扑设计进一步确定。
+1. **用户提交问题，创建 run。** 用户输入 query，在地图选择 COMID/坐标、日期、时间粒度，并分别选择解析模型和水体模型；前端不提供参数表单。一次新的提交创建一个新的 run；即使 query 相同，新的用户操作也使用新的创建 key。只有请求重试才原样复用 key 和请求体，重试返回原创建回执，不重新执行分析。
+2. **准备解析时创建问题解析 session。** 问题解析 Agent 从 query 提取或自主推测参数，并在前端 target/date 缺失时给出候选；它没有 geocoding、NLDI 或参数搜索工具权限。随后确定性 resolver 验证 CONUS/COMID、日期、实际粒度、mode 与 ParameterKey。该 session 的安全输入、实际模型过程及唯一 `AnalysisContext` 归属于本次 run；缺失、冲突、歧义、unsupported 或越界在 topology 前失败。
+3. **后端向上游寻找推理源头。** 以解析出的目标水体为基准，沿水文网络向上游做有界稳定 BFS。NLDI 提供河网/站点关联，WDFN v1 metadata 按“参数 × 时间段”判断候选 inlet；每条支流找到最近充分来源后只停止已覆盖单元。完整搜索范围、active path union、自然无源和上限停止均保留，技术故障不冒充无数据。
 4. **组织 DAG 并按依赖调度。** 后端依据水文网络构建有向无环图，组织水体 Agent 之间的信息传递。从推理源头开始执行；一个水体 Agent 必须等所有上游推理完成后才开始，同一 run 中只触发一次。汇流节点不能收到一个上游结果就提前执行，其他上游结果也不触发第二次 session。
 5. **准备执行时创建水体 session，完成自己的推理 loop。** 该水体满足执行条件后创建独立 session，接收输入与上游结果，通过工具等外部能力收集证据，完成推理并输出该水体结果。过程中的真实消息、调用、证据、错误和最终结果保留稳定身份及引用；结果沿 DAG 传给下游。各 session 的结果保持各自归属，整次 run 的汇总引用这些原结果。尚未进入执行准备的水体不预建空 session，已创建会话失败或取消仍保留已有事实。
 6. **完成整次分析并保存过程。** 当本次分析的各 Agent 输出结束，形成 run 的整体结果。记录在执行过程中按持久化规则持续保存，不等结束后才一次性保存。创建幂等、状态与适用记录原子提交、补写重试、凭据脱敏和清理门槛沿用 M3 契约；保存重试不会重跑问题解析或水体 Agent，业务完成也不能代替全部保存确认。
@@ -167,12 +169,15 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 
 2. Query Understanding
    - 问题解析 Agent 在 run 下执行一个独立 session，保存自身输入、调用过程与结构化输出。
-   - 从用户 query 和前端参数中解析位置、目标 COMID、目标参数、时间范围、时间粒度、推理模式。
-   - 参数解析使用语义匹配方式，将用户描述映射到最接近的 USGS parameter codes。
+   - 前端 target/date 有值时优先，缺失时才使用 query 候选；front/query 实质冲突不静默覆盖。
+   - 参数只由 query parser 提取或自主推测，few-shot 不构成硬编码模板；deterministic capability registry 最终映射 ParameterKey，不能按向量最高项直接执行。第一版正式联调按 [M4 参数能力目录](M4/m4_parameter_capability_catalog.md) 接通 154 项能力，单次最多 6 个用户目标，必需 discharge 不占上限。
+   - 第一版只支持 CONUS、当地今天前后各 7 天，以及 `auto/6h/12h/24h`；mode 从日期确定性推导。
+   - 前端分别选择 parser/waterbody model，parser 无外部工具权限；memory mode 作为 M8 接缝固化。
 
 3. Hydrology Topology
-   - 以目标 COMID 为基准向上游 BFS，寻找有水质数据的推理源头。
-   - 根据水文网络组织 DAG，确定由源头向目标推进的依赖顺序。
+   - 以目标 COMID 为基准，按参数 × 时间段向上游 BFS，寻找每条支流最近的合格 evidence source。
+   - 默认限制 100 km/路径、12 hop/路径、128 node/图和 8 并发，稳定生成完整范围、active/excluded、排除原因与 DAG 顺序。
+   - M4 availability metadata 只是候选资格；M5 仍须读取并校验真实数据。
 
 4. Evidence System
    - 获取、组织和追踪证据。
@@ -186,7 +191,7 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 
 6. Result Model
    - 支持 `6h / 12h / 24h` 时间粒度。
-   - 默认时间粒度是 `12h`。
+   - 前端粒度默认 `auto`：1–7 个日历日解析为 6h，8–15 日解析为 12h；非前端 API 省略字段才使用 `12h/default`。
    - 每个时间窗口标记 `observed / inferred / predicted`。
    - 支持每个时间窗、每个参数和整体结果的置信度。
 
@@ -226,9 +231,9 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 
 ### 3.3 证据不足时保持保守
 
-如果目标 COMID 没有检测站，上游也找不到任何可用检测站链路，即使有天气和 EPA 等环境证据，第一版也不输出具体水质数值。
+如果目标 COMID 没有直接检测站读数，但 capability registry 明确允许使用同参数上游、相邻时间基线或特定环境关系等侧面证据，可以输出受限的趋势/风险判断；必须展示证据较弱并降低置信度，不能伪装为 observed。
 
-如果目标参数完全没有观测支撑，例如用户请求 pH，但目标和上游都没有 pH 类观测，则只能输出趋势/风险判断。
+如果某个“参数 × 时间段”完全没有直接或允许的侧面证据，则不调用对应水体推理模型，由确定性逻辑输出 `indeterminate / insufficient_evidence`。全部范围都无证据时整次 reasoning 阶段不消耗模型 token。外部服务 unavailable/invalid 不是“无证据”，必须按技术失败处理。
 
 ### 3.4 Evidence 是 agent 推理的中心
 
@@ -394,26 +399,26 @@ Application 层表达用例和流程。它不做水文数学判断，不调用�
 
 核心职责：
 
-- 创建和管理 analysis session。
+- 创建和管理 analysis run 及真正执行时才产生的 Agent sessions。
 - 初始化 live transcript。
 - 编排 query understanding、topology、evidence、reasoning、结果聚合。
-- 处理 SSE 事件推送。
-- 处理 session cancel。
-- 处理历史 session 查询。
+- 处理 run 通知与 session 过程两层 SSE。
+- 处理 run 级 cancel 并向已创建的未终态 sessions 传播。
+- 处理历史 run、session 与 transcript 查询。
 - 保证每次运行的状态转换可记录。
 
 核心 workflow：
 
 ```text
-CreateAnalysisSession
+CreateAnalysisRun
   -> PrepareAnalysisContext
   -> BuildHydrologyTopology
   -> RunTopologyDrivenAgents
   -> PersistTranscriptAndResult
-  -> CompleteSession
+  -> CompleteRun
 ```
 
-Session 状态建议：
+Run 状态：
 
 ```text
 pending
@@ -424,9 +429,11 @@ cancelled
 completed_with_persistence_error
 ```
 
+Agent session 使用 `pending / running / completed / failed / cancelled`，不使用 run 专属的 `completed_with_persistence_error`。
+
 M3 的完成判定按 [D38](M3/m3_transcript_history_design.md#d38终态选定前检查既有写入后续保存失败保留终态)：分析结束时检查此前固定范围内的必需写入，再由现有状态机选定唯一终态。完成事件自身与适用收尾写入随后失败时，当前读取返回持久化警告，业务终态保持不变；completed 不代表全部必需写入已确认，内存清理仍等待全部保存、workflow 收敛及保留窗口到期。
 
-Application 层只负责流程推进。证据是否足够继续推理，由 Reasoning & Agent 层判断。
+Application 层负责编排流程和调用模型前的确定性 evidence gate；Agent 只对通过门禁的范围进行推理，不能自行绕过完全无证据的停止规则。
 
 ## 7. Domain Layer
 
@@ -440,7 +447,7 @@ Domain 层定义稳定业务概念。它应该是最少依赖、最容易测试�
 
 - `MonitoringStation`
   - 检测站，例如 USGS station。
-  - 包含 station id、位置、关联 COMID、可用参数。
+  - 包含 station id、位置和关联 COMID；参数 × 时间覆盖通过独立 `StationAvailability` 表达，metadata 不冒充实际 evidence。
 
 - `WaterQualityParameter`
   - `ParameterKey(code_system, code)`、参数名、canonical unit、参数类别。
@@ -450,9 +457,9 @@ Domain 层定义稳定业务概念。它应该是最少依赖、最容易测试�
 
 - `TimeResolution`
   - `6h / 12h / 24h`。
-  - 默认 `12h`。
-  - 另存 `time_resolution_source: frontend | default | auto`。
-  - 分析时区使用可配置 IANA timezone，默认 `America/Chicago`；session 固化当时使用的时区。
+  - 前端 preference 默认 `auto`；1–7 天解析为 6h，8–15 天解析为 12h。非前端 API 省略字段才使用 `12h/default`。
+  - `AnalysisContext` 保存实际 `time_resolution` 与 `time_resolution_source: frontend | default | auto`。
+  - 分析时区使用可配置 IANA timezone，默认 `America/Chicago`；run 固化当时使用的时区。
 
 - `TimeSegment`
   - `{start, end, mode}`。
@@ -588,6 +595,8 @@ distance_to_target
 - upstream current-session result evidence
 - transcript RAG evidence，当 `memory_mode=memory_augmented`
 
+其中 discharge/flow 使用 `usgs:00060` 作为每次分析计划都必须包含的支持参数；它也可以是用户目标参数，但自动支持角色不占单次用户目标参数上限。目标参数和 discharge 都经过“直接 / capability 允许的侧面 / 完全缺失”门禁，任一必需部分完全无证据时，对应水体 × 时间段不调用推理模型。
+
 第一版 optional evidence tools 候选：
 
 - EPA facility evidence
@@ -685,8 +694,9 @@ Evidence sufficiency decision 属于 Reasoning 层。它决定当前证据是否
 
 - 当前真实检测站数据优先。
 - 当前真实检测站数据与历史记忆冲突时，当前真实检测站数据绝对优先。
-- 无检测站链路时，不给具体数值。
-- 目标参数完全无观测支撑时，不给具体数值。
+- 无直接检测站链路但有 capability 白名单侧面证据时，只允许受限的相关/方向判断，并保留不足事实、降低置信度。
+- 某个参数 × 时间段完全没有直接或允许的侧面证据时，不调用对应水体模型，确定性生成 `indeterminate / insufficient_evidence`。
+- provider unavailable/invalid 不得当作 empty/no evidence 降级；它是技术失败。
 - 未来天气覆盖不完整时，可以继续预测，但降低超出证据覆盖部分的置信度。
 
 ### 9.4 上游到下游传递
@@ -808,7 +818,9 @@ Ports 定义核心层需要的外部能力接口。它们是边界，不是业�
 GeocodingPort
 ComidLookupPort
 TopologyDataPort
-MonitoringStationPort
+StationInventoryPort
+ParameterCatalogPort
+ModelCatalogPort
 WaterObservationPort
 WeatherObservationPort
 WeatherForecastPort
@@ -830,8 +842,8 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 
 候选 adapters：
 
-- NLDI adapter：COMID lookup、坐标、上游 flowlines、USGS station。
-- NWIS adapter：水质/流量观测。
+- NLDI adapter：NHDPlusV2 position/COMID、direct upstream flowlines 与 monitoring-site 水文关联；不得用近邻吸附掩盖无覆盖。
+- USGS Water Data OGC API v1 adapter：monitoring location、time-series metadata 及后续水质/流量观测；新生产基线不依赖即将退役的旧 WaterServices。
 - NOAA weather adapter：历史天气、预警、未来预报。
 - EPA facility adapter：附近设施。
 - Google geocoding adapter：地名转坐标。
@@ -850,20 +862,18 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 建议第一版主流程：
 
 ```text
-1. Frontend POST 创建 analysis session
-2. Backend 创建 session，初始化 LiveTranscriptBuffer
-3. Frontend 通过 SSE 订阅 session events
-4. Query Understanding 解析 query、位置、参数、时间、resolution、mode、memory_mode
-5. Hydrology Topology 构建 COMID 图，找到站点和 agent 顺序
-6. 每个 agent 根据任务和 topology 决定 mandatory evidence tools
-7. Evidence tools 获取基础证据
-8. Agent 按需调用 optional evidence tools
-9. Agent 判断 evidence sufficiency
-10. Agent 基于 time_range/time_segments/time_resolution 生成结果
-11. Agent 生成 analysis_detail 和 attribution_summary
-12. Application 写 transcript，推 SSE event
-13. Session 进入 completed / failed / cancelled 等终态
-14. 历史 session 和 transcript 可从数据库查询
+1. Frontend POST 创建 analysis run：query、地图 target、日期/粒度、两个模型选择与 memory mode
+2. Backend 原子保存 request/run 配置，初始化 M3 live state；Frontend 订阅 run SSE
+3. 准备解析时创建 query_parser session，按需订阅其 session SSE
+4. Parser LLM 只输出候选意图；deterministic resolver 生成唯一 AnalysisContext
+5. Hydrology Topology 按参数 × 时间段构建有界 COMID 图，保存候选 inlet、active/excluded 和原图引用
+6. M5 Evidence tools 获取并校验真实直接/侧面证据，不能把 availability metadata 当观测
+7. 调用水体模型前按参数 × 时间段执行确定性 sufficiency gate；完全无证据的范围直接 indeterminate
+8. 对通过门禁的范围，Agent 调 mandatory tools 并按需调用 optional tools
+9. Agent 基于 time_range/time_segments/time_resolution 生成结果、analysis_detail 和 attribution_summary
+10. M7 按 active DAG 在真正准备执行时创建水体 session，并由上游向目标传播
+11. Application 始终经 M3 统一入口写 transcript，run/session 两层 SSE 推送轻量通知与过程
+12. run/session 进入各自终态，历史 run、原 graph、结果与 session transcript 从数据库读取
 ```
 
 ### 13.1 成功标准
@@ -871,17 +881,18 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 第一版 demo 的核心成功标准：
 
 ```text
-用户输入位置、参数、时间范围、时间粒度和 memory mode 后，
-后端创建 session，
+用户输入 query，在地图选择位置和日期/粒度，并选择解析模型、水体模型和 memory mode 后，
+后端创建 run；参数由解析模型自主推测并通过确定性能力校验，
 构建水流拓扑，
 收集基础证据，
-按拓扑运行 agent，
+无证据范围不调用模型，对通过门禁的范围按拓扑运行 agent，
 返回带证据链和置信度的 6h/12h/24h 结果，
 并允许用户查看历史 transcript。
 ```
 
 如果证据足够，结果包含具体数值。
-如果证据不足，结果返回趋势/风险判断，并说明为什么不能给具体数值。
+如果只有明确允许的侧面证据，结果可以返回降级的趋势/风险判断并说明限制。
+如果完全没有证据，结果为确定性 indeterminate，并明确没有执行水体模型。
 
 ## 14. 建议目录骨架
 
