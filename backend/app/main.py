@@ -27,6 +27,7 @@ from app.application.analysis_runs.query_topology_workflow import (
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import (
+    AnalysisContext,
     QueryContextResolver,
     QueryParserPort,
     QueryParserPromptBuilder,
@@ -34,6 +35,8 @@ from app.application.query_understanding import (
 )
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
+from app.application.transcripts.stream_models import RunSnapshotEvent
+from app.domain import HydrologyGraph
 from app.domain.hydrology import ParameterCapabilityRegistry
 from app.infrastructure.config import (
     AppSettings,
@@ -214,6 +217,46 @@ def create_app(
             ].pop("default", None)
         schemas.update(definitions)
         schemas["CreateAnalysisRunRequest"] = create_schema
+        for public_model in (AnalysisContext, HydrologyGraph, RunSnapshotEvent):
+            public_schema = public_model.model_json_schema(
+                ref_template="#/components/schemas/{model}",
+            )
+            schemas.update(public_schema.pop("$defs", {}))
+            schemas[public_model.__name__] = public_schema
+        schema["x-m4-public-errors"] = [
+            {"code": code, "failed_stage": stage, "retryable": retryable}
+            for code, stage, retryable in (
+                ("query_parse_failed", "query_parsing", False),
+                ("query_clarification_required", "query_resolution", False),
+                ("location_required", "location_resolution", False),
+                ("location_ambiguous", "location_resolution", False),
+                ("location_conflict", "location_resolution", False),
+                ("location_outside_supported_region", "location_resolution", False),
+                ("location_not_supported", "location_resolution", False),
+                ("target_mismatch", "location_resolution", False),
+                ("date_range_required", "date_resolution", False),
+                ("date_range_conflict", "date_resolution", False),
+                ("date_range_out_of_bounds", "date_resolution", False),
+                ("resolution_conflict", "date_resolution", False),
+                ("parameter_required", "parameter_resolution", False),
+                ("parameter_ambiguous", "parameter_resolution", False),
+                ("parameter_unsupported", "parameter_resolution", False),
+                ("too_many_parameters", "parameter_resolution", False),
+                ("parser_model_unavailable", "query_parsing", True),
+                ("geocoding_unavailable", "location_resolution", True),
+                ("topology_lookup_failed", "topology_building", True),
+                ("station_availability_failed", "topology_building", True),
+                ("topology_invalid", "topology_building", False),
+            )
+        ]
+        schema["x-m4-parameter-capability-baseline"] = {
+            "count": len(resolved_parameter_capabilities.capabilities),
+            "required_support": [
+                capability.key.model_dump(mode="json")
+                for capability in resolved_parameter_capabilities.required_support
+            ],
+            "max_target_parameters": 6,
+        }
         return schema
 
     application.openapi = openapi_with_create_body

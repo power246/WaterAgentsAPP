@@ -403,6 +403,14 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
             }
             assert runtime.context_ref.item_id in finalized_ids
             assert runtime.topology_ref.item_id in finalized_ids
+            ready_stream = await coordinator.subscribe_run(created.run_id)
+            ready_snapshot = await anext(ready_stream)
+            await ready_stream.aclose()
+            assert ready_snapshot.analysis_phase is AnalysisPhase.TOPOLOGY_READY
+            assert ready_snapshot.context_ref == runtime.context_ref
+            assert ready_snapshot.topology_ref == runtime.topology_ref
+            assert "nodes" not in ready_snapshot.model_dump_json()
+            assert "edges" not in ready_snapshot.model_dump_json()
 
             store.release_topology_write.set()
             await wait_quiesced(coordinator, created.run_id)
@@ -413,6 +421,12 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
 
             assert terminal.status is RunStatus.COMPLETED
             assert runtime.analysis_phase is AnalysisPhase.TERMINAL
+            reconnect = await coordinator.subscribe_run(created.run_id)
+            terminal_snapshot = await anext(reconnect)
+            await reconnect.aclose()
+            assert terminal_snapshot.analysis_phase is AnalysisPhase.TERMINAL
+            assert terminal_snapshot.context_ref == ready_snapshot.context_ref
+            assert terminal_snapshot.topology_ref == ready_snapshot.topology_ref
             assert len(sessions) == 1
             assert sessions[0].agent_role is AgentRole.QUERY_PARSER
             assert sessions[0].status is AgentSessionStatus.COMPLETED

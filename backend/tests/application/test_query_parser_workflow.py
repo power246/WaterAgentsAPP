@@ -177,6 +177,16 @@ class FakeContextResolver:
         )
 
 
+class FailingContextResolver:
+    async def resolve(self, *args, **kwargs):
+        del args, kwargs
+        raise PortUnavailableError(
+            "Authorization: Bearer geocoder-secret",
+            provider="google_geocoding",
+            operation="reverse",
+        )
+
+
 @asynccontextmanager
 async def parser_runtime(
     parser: FakeParser,
@@ -553,6 +563,29 @@ def test_provider_error_details_are_not_copied_to_transcript_or_logs(caplog) -> 
             )
             assert "parser-secret" not in "".join(
                 record.getMessage() for record in caplog.records
+            )
+
+    run(exercise())
+
+
+def test_location_dependency_failure_maps_to_safe_retryable_public_error() -> None:
+    async def exercise() -> None:
+        parser = FakeParser(successful_response())
+        resolver = FailingContextResolver()
+        async with parser_runtime(parser, resolver) as coordinator:
+            created, terminal = await create_and_wait(coordinator)
+            session, items = await session_content(coordinator, created.run_id)
+            error = coordinator._runs[created.run_id].last_error
+
+            assert terminal.status is RunStatus.FAILED
+            assert session.status is AgentSessionStatus.FAILED
+            assert error.code == "geocoding_unavailable"
+            assert error.failed_stage == "location_resolution"
+            assert error.retryable is True
+            assert error.message == "Location services are temporarily unavailable."
+            assert "geocoder-secret" not in error.model_dump_json()
+            assert "geocoder-secret" not in "".join(
+                item.content.safe_body for item in items
             )
 
     run(exercise())

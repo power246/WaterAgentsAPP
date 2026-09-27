@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import httpx
+import pytest
 
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.models import RunStatus
@@ -18,7 +19,11 @@ from app.application.transcripts.models import (
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.ports.errors import PortUnavailableError
-from tests.m4_support import create_request, create_test_app as create_app
+from tests.m4_support import (
+    analysis_context,
+    create_request,
+    create_test_app as create_app,
+)
 
 BASE = "/api/analysis/runs"
 
@@ -243,6 +248,109 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
             )
             assert fallback.status_code == 404
             coordinator._runs[run_id] = runtime
+
+    run(exercise)
+
+
+@pytest.mark.parametrize("damage", ["unknown", "corrupt"])
+def test_context_summary_and_original_reference_survive_reload_and_report_damage(
+    damage: str,
+) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = GatedWorkflow()
+        settings = AppSettings(
+            _env_file=None,
+            transcript_inline_max_bytes=256,
+            transcript_preview_bytes=20,
+        )
+        async with app_client(
+            store=store,
+            workflow=workflow,
+            settings=settings,
+        ) as (application, client):
+            request = create_request("Will dissolved oxygen become unsafe?")
+            created = await client.post(BASE, json=request)
+            run_id = UUID(created.json()["run_id"])
+            _, release = await workflow.started.get()
+            coordinator = application.state.run_coordinator
+            session = await coordinator.prepare_agent_session(
+                run_id,
+                agent_role="query_parser",
+            )
+            await coordinator.mark_agent_session_running(run_id, session.session_id)
+            context_item = await coordinator.reserve_transcript_item(
+                run_id,
+                session_id=session.session_id,
+            )
+            await coordinator.finalize_transcript_item(
+                run_id,
+                context_item.item_id,
+                "query_understood",
+                1,
+                analysis_context(request["query"]),
+            )
+            await wait_saved(application, run_id)
+
+            listed = (await client.get(BASE)).json()["items"][0]
+            summary = listed["context_summary"]
+            assert summary["target_comid"] == "12345678"
+            assert summary["params_used"] == [{
+                "code_system": "usgs",
+                "code": "00300",
+                "canonical_name": "dissolved oxygen",
+                "source": "explicit",
+                "rationale": "Dissolved oxygen is explicitly requested.",
+            }]
+            assert summary["supporting_params"] == [{
+                "code_system": "usgs",
+                "code": "00060",
+                "canonical_name": "discharge",
+            }]
+            detail = (await client.get(f"{BASE}/{run_id}?view=history")).json()
+            assert all(
+                item["content_type"] != "query_understood"
+                for item in detail["items"]
+            )
+            context_view = next(
+                item
+                for item in detail["referenced_items"]
+                if item["content_type"] == "query_understood"
+            )
+            assert context_view["scope"]["agent_role"] == "query_parser"
+            assert context_view["content"]["kind"] == "reference"
+            full = await client.get(
+                f"{BASE}/{run_id}/transcript/{context_item.item_id}/content?view=history"
+            )
+            assert full.status_code == 200
+            assert json.loads(full.json()["text"])["target"]["comid"] == "12345678"
+
+            stored_item = store._items[context_item.item_id]
+            if damage == "unknown":
+                store._items[context_item.item_id] = stored_item.model_copy(
+                    update={"content_schema_version": 99}
+                )
+                expected_code = "transcript_content_unsupported"
+            else:
+                content = store._contents[context_item.item_id]
+                store._contents[context_item.item_id] = content.model_copy(
+                    update={"body": '{"schema_version":1}'}
+                )
+                expected_code = "transcript_content_corrupt"
+
+            damaged = (await client.get(BASE)).json()["items"][0]
+            assert damaged["context_summary"] is None
+            assert {issue["error"]["code"] for issue in damaged["issues"]} == {
+                expected_code
+            }
+            damaged_detail = (
+                await client.get(f"{BASE}/{run_id}?view=history")
+            ).json()
+            assert damaged_detail["run"]["context_summary"] is None
+            assert expected_code in {
+                issue["error"]["code"] for issue in damaged_detail["issues"]
+            }
+            release.set()
 
     run(exercise)
 

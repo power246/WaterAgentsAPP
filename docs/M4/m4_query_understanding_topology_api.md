@@ -1,8 +1,8 @@
 # M4 Query Understanding + Hydrology Topology API / 前端接入
 
-更新日期：2026-09-25
+更新日期：2026-09-27
 
-> 状态：设计完成，尚未实现。本文在 M3 API 基线上定义最终 create request、M4 typed content 和读模型扩展；未列出的幂等、历史、全文、取消、补写和 SSE 规则继续以 [M3 API 文档](../M3/m3_transcript_history_api.md) 为准，实施顺序与证据门禁见 [M4 Implementation TODO](m4_implementation_todo.md)。
+> 状态：Milestone 9 协议已实现，Milestone 10 集成验收尚未完成。本文在 M3 API 基线上定义最终 create request、M4 typed content 和读模型扩展；未列出的幂等、历史、全文、取消、补写和 SSE 规则继续以 [M3 API 文档](../M3/m3_transcript_history_api.md) 为准，实施顺序与证据门禁见 [M4 Implementation TODO](m4_implementation_todo.md)。
 
 ## 1. 路由与传输不变
 
@@ -206,7 +206,7 @@ parser-session-owned、可流式：
 {
   "text": "{\"location_mention\":null,\"coordinate_mention\":null,\"start_date\":null,\"end_date\":null,\"parameters\":[{\"concept\":\"dissolved oxygen\",\"rationale\":\"Dissolved oxygen is explicitly requested.\",\"explicitly_named\":true}],\"ambiguities\":[]}",
   "generation_status": "completed",
-  "end_reason": "stop"
+  "end_reason": "completed"
 }
 ```
 
@@ -316,21 +316,21 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
         {
           "parameter": {
             "code_system": "usgs",
-            "code": "00300"
+            "code": "00060"
           },
           "segment_index": 0
         },
         {
           "parameter": {
             "code_system": "usgs",
-            "code": "00060"
+            "code": "00300"
           },
           "segment_index": 0
         }
       ],
       "station_refs": [
         {
-          "provider": "usgs_wdfn",
+          "provider": "wdfn_time_series",
           "station_id": "USGS-01234567",
           "series_refs": ["series-safe-identifier"]
         }
@@ -345,7 +345,7 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
       "coverage_unit": {
         "parameter": {
           "code_system": "usgs",
-          "code": "00300"
+          "code": "00060"
         },
         "segment_index": 0
       },
@@ -359,7 +359,7 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
       "coverage_unit": {
         "parameter": {
           "code_system": "usgs",
-          "code": "00060"
+          "code": "00300"
         },
         "segment_index": 0
       },
@@ -412,7 +412,9 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
     {
       "code_system": "usgs",
       "code": "00300",
-      "canonical_name": "dissolved oxygen"
+      "canonical_name": "dissolved oxygen",
+      "source": "explicit",
+      "rationale": "Dissolved oxygen is explicitly requested and is the direct indicator for the stated oxygen-safety risk."
     }
   ],
   "supporting_params": [

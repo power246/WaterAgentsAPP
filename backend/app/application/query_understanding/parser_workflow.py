@@ -36,7 +36,7 @@ from app.application.transcripts.models import (
     MessageEndReason,
 )
 from app.application.transcripts.redaction import redact, redact_text
-from app.ports import PortTimeoutError
+from app.ports import PortError, PortTimeoutError
 
 
 class QueryContextResolver(Protocol):
@@ -176,15 +176,27 @@ class QueryParserWorkflow(AnalysisWorkflow):
 
         assert parsed_intent is not None
         context.cancellation.checkpoint()
-        resolution = await self._await_with_cancellation(
-            self._context_resolver.resolve(
-                context.request,
-                parsed_intent,
-                analysis_timezone=context.run.configuration.analysis_timezone,
-                decision_instant=context.run.created_at,
-            ),
-            context.cancellation,
-        )
+        try:
+            resolution = await self._await_with_cancellation(
+                self._context_resolver.resolve(
+                    context.request,
+                    parsed_intent,
+                    analysis_timezone=context.run.configuration.analysis_timezone,
+                    decision_instant=context.run.created_at,
+                ),
+                context.cancellation,
+            )
+        except (WorkflowStopped, asyncio.CancelledError):
+            raise
+        except PortError:
+            await self._fail(
+                context,
+                session.session_id,
+                code="geocoding_unavailable",
+                message="Location services are temporarily unavailable.",
+                failed_stage="location_resolution",
+                retryable=True,
+            )
         if resolution.context is None:
             status = resolution.status
             await self._fail(

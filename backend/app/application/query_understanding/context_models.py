@@ -208,8 +208,19 @@ class AnalysisContext(DomainModel):
     mode: InferenceMode
     time_resolution: TimeResolution
     time_resolution_source: TimeResolutionSource
-    params_used: tuple[ResolvedParameterIntent, ...]
-    supporting_params: tuple[SupportingParameterIntent, ...]
+    params_used: tuple[ResolvedParameterIntent, ...] = Field(
+        json_schema_extra={"minItems": 1, "maxItems": 6},
+        description=(
+            "One to six user target parameters from the 154-item capability "
+            "baseline, including explicit/inferred source and rationale."
+        ),
+    )
+    supporting_params: tuple[SupportingParameterIntent, ...] = Field(
+        description=(
+            "System support parameters kept separate from user targets; "
+            "the execution plan always includes USGS 00060 discharge."
+        ),
+    )
     parser_model: ModelSelection
     waterbody_model: ModelSelection
     memory_mode: MemoryMode

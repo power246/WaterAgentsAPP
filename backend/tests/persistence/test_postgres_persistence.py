@@ -63,6 +63,7 @@ from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
 from tests.m4_support import (
     MODEL_CATALOG,
+    analysis_context,
     create_request,
     create_request_bytes,
     create_test_app as create_app,
@@ -1474,6 +1475,88 @@ def test_lifespan_repairs_real_postgres_without_restarting_workflow() -> None:
 
     with temporary_migrated_schema() as settings:
         asyncio.run(exercise(settings))
+
+
+def test_m4_context_history_projection_survives_real_postgres_restart(
+    postgres_settings: AppSettings,
+) -> None:
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise() -> None:
+        settings = postgres_settings.model_copy(update={
+            "transcript_inline_max_bytes": 256,
+            "transcript_preview_bytes": 40,
+        })
+        workflow = Workflow()
+        first_app = create_app(
+            settings,
+            workflow=workflow,
+            shutdown_grace_period=0,
+        )
+        async with first_app.router.lifespan_context(first_app):
+            coordinator = first_app.state.run_coordinator
+            query = "Will dissolved oxygen become unsafe?"
+            created = await coordinator.create_run(create_request_bytes(query))
+            await workflow.calls.get()
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            context_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                context_item.item_id,
+                "query_understood",
+                1,
+                analysis_context(query),
+            )
+            await coordinator.complete_agent_session(
+                created.run_id,
+                session.session_id,
+            )
+            workflow.release.set()
+            await coordinator._runs[created.run_id].workflow_quiesced.wait()
+            await _wait_persistence(coordinator, created.run_id)
+
+        second_app = create_app(settings, shutdown_grace_period=0)
+        async with second_app.router.lifespan_context(second_app):
+            reader = second_app.state.transcript_reader
+            detail = await reader.get_run(created.run_id, ReadView.HISTORY)
+            assert detail.run.context_summary is not None
+            assert detail.run.context_summary.target_comid == "12345678"
+            assert detail.run.context_summary.params_used[0].source.value == "explicit"
+            assert detail.run.context_summary.params_used[0].rationale == (
+                "Dissolved oxygen is explicitly requested."
+            )
+            context_view = next(
+                item
+                for item in detail.referenced_items
+                if item.content_type == "query_understood"
+            )
+            assert context_view.scope.agent_role is AgentRole.QUERY_PARSER
+            assert context_view.content.kind == "reference"
+            history = await reader.list_runs(limit=200, cursor=None)
+            listed = next(
+                item for item in history.items if item.run_id == created.run_id
+            )
+            assert listed.context_summary == detail.run.context_summary
+
+    asyncio.run(exercise())
 
 
 async def _count_items(engine: AsyncEngine, item_ids: tuple[UUID, ...]) -> int:

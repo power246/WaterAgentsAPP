@@ -2151,6 +2151,9 @@ class RunCoordinator:
         )
         return snapshot_from_state(
             runtime.snapshot,
+            runtime.analysis_phase,
+            runtime.context_ref,
+            runtime.topology_ref,
             sessions,
             waterbodies,
             self._transcript_writer.info_locked(runtime),

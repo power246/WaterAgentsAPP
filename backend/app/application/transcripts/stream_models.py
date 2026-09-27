@@ -6,6 +6,7 @@ from pydantic import Field, StrictBool
 
 from app.application.analysis_runs.models import (
     AgentSessionStatus,
+    AnalysisPhase,
     AnalysisRunSnapshot,
     RunStatus,
     SessionSummary,
@@ -14,6 +15,7 @@ from app.application.analysis_runs.persistence import PersistenceInfo
 from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
+    TranscriptContentRef,
     TranscriptItem,
     TranscriptMetadata,
 )
@@ -38,8 +40,11 @@ class RunSnapshotEvent(DomainModel):
     schema_version: Literal[1] = 1
     run_id: UUID
     status: RunStatus
+    analysis_phase: AnalysisPhase
     created_at: UtcDatetime
     updated_at: UtcDatetime
+    context_ref: TranscriptContentRef | None
+    topology_ref: TranscriptContentRef | None
     sessions: tuple[SessionSummary, ...] = ()
     waterbodies: tuple[RunWaterbodySummary, ...] = ()
     persistence: PersistenceInfo
@@ -154,6 +159,9 @@ class StreamingMessage:
 
 def snapshot_from_state(
     snapshot: AnalysisRunSnapshot,
+    analysis_phase: AnalysisPhase,
+    context_ref: TranscriptContentRef | None,
+    topology_ref: TranscriptContentRef | None,
     sessions: tuple[SessionSummary, ...],
     waterbodies: tuple[RunWaterbodySummary, ...],
     persistence: PersistenceInfo,
@@ -161,8 +169,11 @@ def snapshot_from_state(
     return RunSnapshotEvent(
         run_id=snapshot.run_id,
         status=snapshot.status,
+        analysis_phase=analysis_phase,
         created_at=snapshot.created_at,
         updated_at=snapshot.updated_at,
+        context_ref=context_ref,
+        topology_ref=topology_ref,
         sessions=sessions,
         waterbodies=waterbodies,
         persistence=persistence,

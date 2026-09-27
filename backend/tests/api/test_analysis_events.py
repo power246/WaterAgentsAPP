@@ -134,8 +134,11 @@ def test_encoder_uses_optional_integer_id_and_one_json_data_line() -> None:
     event = RunSnapshotEvent(
         run_id=UUID("10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"),
         status=RunStatus.RUNNING,
+        analysis_phase="query_understanding",
         created_at="2026-09-13T03:20:00Z",
         updated_at="2026-09-13T03:20:00.000001Z",
+        context_ref=None,
+        topology_ref=None,
         persistence={"state": "pending", "warning": None},
     )
     without_id = encode_event("run_snapshot", event)
