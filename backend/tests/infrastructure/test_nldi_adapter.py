@@ -82,6 +82,11 @@ def test_segment_and_navigation_are_normalized_to_direct_edges() -> None:
             assert segment.location == GeoPoint(latitude=38.9, longitude=-77.1)
             assert [item.comid for item in upstreams] == ["11111111", "22222222"]
             assert all(item.downstream_comids == ("12345678",) for item in upstreams)
+            assert all(
+                item.distance_to_downstream_km is not None
+                and item.distance_to_downstream_km > 0
+                for item in upstreams
+            )
             assert "33333333" not in {item.comid for item in upstreams}
 
     run(exercise())

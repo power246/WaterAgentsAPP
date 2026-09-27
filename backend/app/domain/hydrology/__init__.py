@@ -40,6 +40,22 @@ from app.domain.hydrology.station_availability_request import (
 )
 from app.domain.hydrology.time_series_kind import TimeSeriesKind
 from app.domain.hydrology.time_series_metadata import TimeSeriesMetadata
+from app.domain.hydrology.branch_outcome import BranchOutcome
+from app.domain.hydrology.branch_outcome_reason import BranchOutcomeReason
+from app.domain.hydrology.branch_outcome_status import BranchOutcomeStatus
+from app.domain.hydrology.comid_layer import ComidLayer
+from app.domain.hydrology.exclusion_reason_code import ExclusionReasonCode
+from app.domain.hydrology.hydrology_edge import HydrologyEdge
+from app.domain.hydrology.hydrology_exclusion_reason import (
+    HydrologyExclusionReason,
+)
+from app.domain.hydrology.hydrology_graph import HydrologyGraph
+from app.domain.hydrology.hydrology_node import HydrologyNode
+from app.domain.hydrology.hydrology_participation import HydrologyParticipation
+from app.domain.hydrology.topology_coverage import TopologyCoverage
+from app.domain.hydrology.topology_limits import TopologyLimits
+from app.domain.hydrology.topology_search_stats import TopologySearchStats
+from app.domain.hydrology.topology_station_ref import TopologyStationRef
 from app.domain.hydrology.usgs_parameter_metadata import UsgsParameterMetadata
 from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
 
@@ -71,6 +87,20 @@ __all__ = [
     "RiverSegment",
     "TimeSeriesKind",
     "TimeSeriesMetadata",
+    "BranchOutcome",
+    "BranchOutcomeReason",
+    "BranchOutcomeStatus",
+    "ComidLayer",
+    "ExclusionReasonCode",
+    "HydrologyEdge",
+    "HydrologyExclusionReason",
+    "HydrologyGraph",
+    "HydrologyNode",
+    "HydrologyParticipation",
+    "TopologyCoverage",
+    "TopologyLimits",
+    "TopologySearchStats",
+    "TopologyStationRef",
     "UsgsParameterMetadata",
     "WaterQualityParameter",
     "normalize_parameter_concept",

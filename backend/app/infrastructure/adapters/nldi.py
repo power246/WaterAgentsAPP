@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import isfinite
+from math import asin, cos, isfinite, radians, sin, sqrt
 from urllib.parse import quote
 
 from app.domain.hydrology import GeoPoint, MonitoringStation, RiverSegment
@@ -143,6 +143,10 @@ class NldiAdapter:
             RiverSegment(
                 comid=candidate_comid,
                 location=self._representative_point(coordinates),
+                distance_to_downstream_km=self._polyline_length_km(
+                    coordinates,
+                    operation,
+                ),
                 downstream_comids=(comid,),
             )
             for candidate_comid, coordinates in sorted(
@@ -363,3 +367,29 @@ class NldiAdapter:
             (round(coordinates[0][0], 7), round(coordinates[0][1], 7)),
             (round(coordinates[-1][0], 7), round(coordinates[-1][1], 7)),
         }
+
+    @staticmethod
+    def _polyline_length_km(
+        coordinates: tuple[tuple[float, float], ...],
+        operation: str,
+    ) -> float:
+        earth_radius_km = 6371.0088
+        total = 0.0
+        for (start_lon, start_lat), (end_lon, end_lat) in zip(
+            coordinates,
+            coordinates[1:],
+        ):
+            start_lat_radians = radians(start_lat)
+            end_lat_radians = radians(end_lat)
+            latitude_delta = end_lat_radians - start_lat_radians
+            longitude_delta = radians(end_lon - start_lon)
+            haversine = (
+                sin(latitude_delta / 2) ** 2
+                + cos(start_lat_radians)
+                * cos(end_lat_radians)
+                * sin(longitude_delta / 2) ** 2
+            )
+            total += 2 * earth_radius_km * asin(sqrt(haversine))
+        if not isfinite(total) or total <= 0:
+            raise invalid_response(PROVIDER, operation)
+        return total
