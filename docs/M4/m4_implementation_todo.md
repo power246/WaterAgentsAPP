@@ -1,8 +1,8 @@
 # M4 Query Understanding + Hydrology Topology Implementation TODO
 
-更新日期：2026-09-25
+更新日期：2026-09-27
 
-> 当前状态：Milestone 0–4 已完成，Milestone 5–10 尚未开始；只有实际代码、focused tests、适用完整回归和阶段出口证据齐全后才能勾选。M4 是 M1–M9 同一项目进程中的内部实施切片，不形成可单独使用、正式联调或需要兼容的“M4 版本”；M9 完成后才开始正式前后端联调和第一版整体验收。
+> 当前状态：Milestone 0–10 已完成本机实现与集成审计；专用 PostgreSQL、需凭据 provider/parser contract smoke 和三平台 CI 因当前环境缺失保持 `not run`/`partial`，没有冒充通过。M4 是 M1–M9 同一项目进程中的内部实施切片，不形成可单独使用、正式联调或需要兼容的“M4 版本”；M9 完成后才开始正式前后端联调和第一版整体验收。
 
 本清单执行以下已确认文档：
 
@@ -60,14 +60,14 @@
 - [x] capability manifest 精确包含目录中的 154 个唯一 USGS key；代码、单位、aliases、provider route 和 evidence relation 可校验，discharge 是唯一 required support。
 - [x] `AnalysisContext` 对 target、当地日期、UTC `[start,end)`、segments、mode、resolution、最多 6 个目标、supporting discharge、双模型和 memory mode 执行完整 invariant。
 - [x] CONUS 48 州与 DC、AK/HI/领地/外国、point 无 COMID、COMID/point mismatch 各有独立结果；不得把 region bias 或附近吸附当地域/河段证明。
-- [ ] WDFN v1 time-series metadata 与 Samples summary 能分别支持连续/每日和离散样品的 period-of-record qualification；旧 WaterServices 不进入 production path。
-- [ ] availability 按 ParameterKey × time segment 判断，历史 envelope 和预测前 48 小时基线规则明确；empty/unavailable/invalid 不混淆。
-- [ ] BFS 按每条支流最近充分规则运行，稳定处理汇流、重复和环；100 km/12 hop/128 unique nodes/8 concurrency 分别受控，技术失败不产生 partial success。
-- [ ] `HydrologyGraph` 保存 target、完整 explored scope、inlet、active path union、excluded facts、branch outcomes、coverage 和稳定 layers；topology 阶段不创建 waterbody session。
-- [ ] `query_understood` 是 parser session 原 item，`topology_ready` 是 run 原 item；history/detail/SSE 只投影或引用，不复制第二份 context/graph。
-- [ ] run/session 取消、provider timeout、schema repair、topology 失败、writer 补写、重启修复和 live cleanup 保持 M3 invariant；context 成功后 topology 失败时 context 仍可读。
-- [ ] 最终 OpenAPI、文档 JSON、production registry、SSE encoder 和可执行 fixture 同源；没有旧 M3 request 兼容输入、第三条 SSE 或 M4 专用路由。
-- [ ] fake adapters 的完整 M4 workflow、完整 backend regression、适用 PostgreSQL/health/SSE/history smoke 和 contract audit 全部有实际证据；外部未运行项明确记录。
+- [x] WDFN v1 time-series metadata 与 Samples summary 能分别支持连续/每日和离散样品的 period-of-record qualification；旧 WaterServices 不进入 production path。
+- [x] availability 按 ParameterKey × time segment 判断，历史 envelope 和预测前 48 小时基线规则明确；empty/unavailable/invalid 不混淆。
+- [x] BFS 按每条支流最近充分规则运行，稳定处理汇流、重复和环；100 km/12 hop/128 unique nodes/8 concurrency 分别受控，技术失败不产生 partial success。
+- [x] `HydrologyGraph` 保存 target、完整 explored scope、inlet、active path union、excluded facts、branch outcomes、coverage 和稳定 layers；topology 阶段不创建 waterbody session。
+- [x] `query_understood` 是 parser session 原 item，`topology_ready` 是 run 原 item；history/detail/SSE 只投影或引用，不复制第二份 context/graph。
+- [x] run/session 取消、provider timeout、schema repair、topology 失败、writer 补写、重启修复和 live cleanup 保持 M3 invariant；context 成功后 topology 失败时 context 仍可读。
+- [x] 最终 OpenAPI、文档 JSON、production registry、SSE encoder 和可执行 fixture 同源；没有旧 M3 request 兼容输入、第三条 SSE 或 M4 专用路由。
+- [x] fake adapters 的完整 M4 workflow、完整 backend regression、适用本机 SSE/contract audit 已有实际证据；PostgreSQL/health/history 与需凭据外部项明确记录为 `not run`。
 
 ## Milestone 0：基线、边界与接力盘点
 
@@ -296,182 +296,212 @@
 
 ### 工作
 
-- [ ] 用 `StationInventoryPort.check_availability(request)` 替换无法表达时间覆盖的旧 `MonitoringStationPort.find_for_segment()` 生产入口；同步导出、fakes、architecture tests 并删除孤立主路径。
-- [ ] 定义 `StationAvailabilityRequest/StationAvailability/SeriesRef` typed DTO；coverage unit 是 `(ParameterKey, segment_index)`，由目标参数与 supporting discharge 的去重并集生成。
-- [ ] 按 capability provider route 查询 WDFN metadata 和/或 Samples summary；TS+S 表示两种合法数据形态，不表示无条件 fallback 或两边必有数据。
-- [ ] 历史 segment 需要 period envelope 覆盖或 capability 指定的段内 existence probe；预测 segment 需要相同参数在起点前 48 小时内有近期基线可能。
-- [ ] 一站只覆盖部分 unit 时只标记这些 unit；其他参数/segment/discharge 保持未覆盖，供 BFS 继续该支流。
-- [ ] station 必须有 NLDI 或同等级水文关联事实；不得仅按坐标最近距离选站。
-- [ ] qualification 保留 provider、station、series refs、checked_at 和覆盖来源；它不是实际观测或 evidence，不进入结果数值。
-- [ ] provider 技术错误直接失败，不返回空 tuple；阶段 deadline 耗尽后停止新查询。
+- [x] 用 `StationInventoryPort.check_availability(request)` 替换无法表达时间覆盖的旧 `MonitoringStationPort.find_for_segment()` 生产入口；同步导出、fakes、architecture tests 并删除孤立主路径。
+- [x] 定义 `StationAvailabilityRequest/StationAvailability/SeriesRef` typed DTO；coverage unit 是 `(ParameterKey, segment_index)`，由目标参数与 supporting discharge 的去重并集生成。
+- [x] 按 capability provider route 查询 WDFN metadata 和/或 Samples summary；TS+S 表示两种合法数据形态，不表示无条件 fallback 或两边必有数据。
+- [x] 历史 segment 需要 period envelope 覆盖或 capability 指定的段内 existence probe；预测 segment 需要相同参数在起点前 48 小时内有近期基线可能。
+- [x] 一站只覆盖部分 unit 时只标记这些 unit；其他参数/segment/discharge 保持未覆盖，供 BFS 继续该支流。
+- [x] station 必须有 NLDI 或同等级水文关联事实；不得仅按坐标最近距离选站。
+- [x] qualification 保留 provider、station、series refs、checked_at 和覆盖来源；它不是实际观测或 evidence，不进入结果数值。
+- [x] provider 技术错误直接失败，不返回空 tuple；阶段 deadline 耗尽后停止新查询。
 
 ### Tests
 
-- [ ] 历史完整/部分/不覆盖、预测 48h 边界内外、mixed 两段、TS/S/TS+S route。
-- [ ] 多参数、多站点、同站部分覆盖、discharge 缺失/重复和 filtered/unfiltered 精确身份。
-- [ ] success-empty、timeout、rate-limit、invalid metadata、目录与 series identity 不一致分开。
-- [ ] metadata 只能产生 qualification，不能构造 EvidenceFragment、观测值、置信度或推理结果。
-- [ ] 随机 provider 完成顺序下返回稳定排序和相同序列化。
+- [x] 历史完整/部分/不覆盖、预测 48h 边界内外、mixed 两段、TS/S/TS+S route。
+- [x] 多参数、多站点、同站部分覆盖、discharge 缺失/重复和 filtered/unfiltered 精确身份。
+- [x] success-empty、timeout、rate-limit、invalid metadata、目录与 series identity 不一致分开。
+- [x] metadata 只能产生 qualification，不能构造 EvidenceFragment、观测值、置信度或推理结果。
+- [x] 随机 provider 完成顺序下返回稳定排序和相同序列化。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application backend/tests/architecture -q`（availability focused 集合）
-- [ ] 端口签名、旧入口移除和调用方/fixture 全量搜索无残留。
+- [x] `python -m pytest backend/tests/application backend/tests/architecture -q`（availability focused 集合）
+- [x] 端口签名、旧入口移除和调用方/fixture 全量搜索无残留。
 
 阶段出口：任意河段可得到按参数 × segment 的确定性候选覆盖或明确技术失败；尚未决定完整 graph。
 
 提交边界：availability DTO/port/service/fakes/tests；不得夹带 BFS、evidence 获取或模型推理。
 
+#### Milestone 6 完成记录（2026-09-27）
+
+- 实现：完成 availability request/qualification/series-ref typed DTO、`StationInventoryPort`、capability-driven WDFN/Samples qualification、NLDI 关联门禁、48 小时预测基线、deadline 与稳定并发归并；删除旧 `MonitoringStationPort.find_for_segment()`，未加入 BFS、evidence 获取或模型推理。
+- 验证：application/architecture `515 passed`，完整非 PostgreSQL 后端回归 `1068 passed`，`compileall` 与旧入口/禁用 evidence 类型扫描通过；真实 PostgreSQL 未运行（无 schema/persistence 变更）。
+- 提交：`c42037f`。
+
 ## Milestone 7：HydrologyGraph 与稳定有界 BFS
 
 ### 工作
 
-- [ ] 实现 `HydrologyGraph`、node、edge、coverage、branch outcome、exclusion reason 和 layer typed models；domain invariant 验证 target、引用闭包、边方向、acyclic active graph、稳定唯一身份。
-- [ ] builder 从 target 开始逐层向上游，每条支流分别维护未覆盖 coverage units；找到最近合格 source 后只停止已覆盖 unit，未覆盖 unit 继续。
-- [ ] 始终保留 target 供后续本地/非站点 evidence 检查；没有 qualifying inlet 时不得把 target 伪装成 inlet。
-- [ ] 实现 100 km/路径、12 hop/路径、128 unique COMID/整图和 8 外部请求并发；限制来自 composition root，不由 request/前端覆盖。
-- [ ] 以 `(depth, cumulative_distance, comid)` 等稳定业务键合并同层结果；并发完成顺序、set/dict 顺序不得改变 nodes/edges/layers/JSON。
-- [ ] 正确处理多支流、汇流、共享上游、重复响应、self-edge、cycle、自然无上游和 limit hit；visited 不得让一条路径错误吞掉另一支流 coverage。
-- [ ] active graph 是选中 inlet 到 target 的路径并集；所有 explored 但未参与节点保留结构化 excluded reason。
-- [ ] `no_qualifying_source` 与 `search_limit_reached` 分开；任何必要外部技术失败、deadline 或 graph invariant 失败使 topology 阶段失败，不发布 partial graph。
-- [ ] builder 是 run 确定性过程，不创建、启动或完成任何 Agent session。
+- [x] 实现 `HydrologyGraph`、node、edge、coverage、branch outcome、exclusion reason 和 layer typed models；domain invariant 验证 target、引用闭包、边方向、acyclic active graph、稳定唯一身份。
+- [x] builder 从 target 开始逐层向上游，每条支流分别维护未覆盖 coverage units；找到最近合格 source 后只停止已覆盖 unit，未覆盖 unit 继续。
+- [x] 始终保留 target 供后续本地/非站点 evidence 检查；没有 qualifying inlet 时不得把 target 伪装成 inlet。
+- [x] 实现 100 km/路径、12 hop/路径、128 unique COMID/整图和 8 外部请求并发；限制来自 composition root，不由 request/前端覆盖。
+- [x] 以 `(depth, cumulative_distance, comid)` 等稳定业务键合并同层结果；并发完成顺序、set/dict 顺序不得改变 nodes/edges/layers/JSON。
+- [x] 正确处理多支流、汇流、共享上游、重复响应、self-edge、cycle、自然无上游和 limit hit；visited 不得让一条路径错误吞掉另一支流 coverage。
+- [x] active graph 是选中 inlet 到 target 的路径并集；所有 explored 但未参与节点保留结构化 excluded reason。
+- [x] `no_qualifying_source` 与 `search_limit_reached` 分开；任何必要外部技术失败、deadline 或 graph invariant 失败使 topology 阶段失败，不发布 partial graph。
+- [x] builder 是 run 确定性过程，不创建、启动或完成任何 Agent session。
 
 ### Tests
 
-- [ ] target 有完整 coverage、单链、多支流分别命中、同站部分覆盖、汇流、共享节点和无上游。
-- [ ] cycle/self-edge/duplicate/malformed distance 的防护；active union、excluded 和 layers invariant。
-- [ ] 100 km、12 hop、128 node 独立边界及同时命中；第 129 个节点不突破整图限制。
-- [ ] 并发峰值不超过 8；随机延迟/完成顺序运行多次输出字节一致。
-- [ ] natural empty/limit hit/timeout/rate-limit/invalid response 语义不混淆。
-- [ ] 每个 segment 的每个 coverage set 都包含去重后的 discharge；partial coverage 不错误提前停止整条支流。
-- [ ] builder 全程没有 waterbody session 创建调用。
+- [x] target 有完整 coverage、单链、多支流分别命中、同站部分覆盖、汇流、共享节点和无上游。
+- [x] cycle/self-edge/duplicate/malformed distance 的防护；active union、excluded 和 layers invariant。
+- [x] 100 km、12 hop、128 node 独立边界及同时命中；第 129 个节点不突破整图限制。
+- [x] 并发峰值不超过 8；随机延迟/完成顺序运行多次输出字节一致。
+- [x] natural empty/limit hit/timeout/rate-limit/invalid response 语义不混淆。
+- [x] 每个 segment 的每个 coverage set 都包含去重后的 discharge；partial coverage 不错误提前停止整条支流。
+- [x] builder 全程没有 waterbody session 创建调用。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/domain backend/tests/application -q`（hydrology topology focused 集合）
-- [ ] property/parameterized fixture 重复不同调度顺序，graph canonical JSON hash 一致。
-- [ ] `python -m pytest backend/tests/architecture -q`
+- [x] `python -m pytest backend/tests/domain backend/tests/application -q`（hydrology topology focused 集合）
+- [x] property/parameterized fixture 重复不同调度顺序，graph canonical JSON hash 一致。
+- [x] `python -m pytest backend/tests/architecture -q`
 
 阶段出口：给定 fake topology/availability ports，能稳定产生唯一 HydrologyGraph 或明确失败；尚未接入公开 API/SSE。
 
 提交边界：graph domain、builder、deterministic tests；不得夹带 transport DTO、M5 evidence 或水体 Agent。
 
+完成记录（2026-09-27）：
+
+- 实现：完成 graph/node/edge/outcome/exclusion/layer typed domain、稳定有界逐支流 BFS、active path union、NLDI edge distance 与 deadline/技术失败收敛；未接入 transport、M5 evidence 或水体 Agent。
+- 验证：domain/application/architecture `720 passed`，完整非 PostgreSQL 后端回归 `1089 passed`，`compileall` 与稳定 canonical JSON hash 检查通过；真实 PostgreSQL 未运行（未设置 `WATERAGENTS_TEST_DB_NAME`，且本阶段无 schema/persistence 变更）。
+- 提交：`6622b00`。
+
 ## Milestone 8：M3 workflow、typed content 与持久化接入
 
 ### 工作
 
-- [ ] 将 create→parser session→resolver→context→topology 的流程接入当前唯一 `AnalysisWorkflow/RunCoordinator`，保持 task ownership、短临界区和外部 I/O 在锁外。
-- [ ] 注册 `query_parser_input v1`、`query_parser_message v1`、`query_understood v1` 和 `topology_ready v1`；使用 production registry 规范序列化，不手写旁路 JSON。
-- [ ] `query_understood` 只在 parser schema 与全部 resolver 门禁通过后写入 parser session；成功后自动进入 topology，不增加人工确认状态。
-- [ ] `topology_ready` 是 run scope 原 item；context/graph 各保存一份完整正文，大正文复用 M3 external-content/reference，不在 snapshot/history 复制。
-- [ ] phase 只使用 `queued/query_understanding/topology_building/topology_ready/terminal`；它不是 run lifecycle 状态，状态仍沿用 M3 六态/session 五态。
-- [ ] 取消可在模型、repair、resolver、metadata 查询和 BFS 边界停止新工作；已产生的原消息/context 按 M3 规则保存，取消后不发布 topology_ready。
-- [ ] parser/resolver 业务失败、parser 技术失败、topology 技术失败分别映射 session/run 终态；context 已成功而 topology 失败时 context 仍可读取。
-- [ ] 保持 writer batch/补写/终态原子组、startup repair、quiesced、cleanup grace 和 persistence warning；不建立 M4 专用 writer/queue/retry。
-- [ ] workflow 完成 topology 后只留下 M5 接力事实，不创建 waterbody sessions、不调用 waterbody model，也不生成 placeholder result。
+- [x] 将 create→parser session→resolver→context→topology 的流程接入当前唯一 `AnalysisWorkflow/RunCoordinator`，保持 task ownership、短临界区和外部 I/O 在锁外。
+- [x] 注册 `query_parser_input v1`、`query_parser_message v1`、`query_understood v1` 和 `topology_ready v1`；使用 production registry 规范序列化，不手写旁路 JSON。
+- [x] `query_understood` 只在 parser schema 与全部 resolver 门禁通过后写入 parser session；成功后自动进入 topology，不增加人工确认状态。
+- [x] `topology_ready` 是 run scope 原 item；context/graph 各保存一份完整正文，大正文复用 M3 external-content/reference，不在 snapshot/history 复制。
+- [x] phase 只使用 `queued/query_understanding/topology_building/topology_ready/terminal`；它不是 run lifecycle 状态，状态仍沿用 M3 六态/session 五态。
+- [x] 取消可在模型、repair、resolver、metadata 查询和 BFS 边界停止新工作；已产生的原消息/context 按 M3 规则保存，取消后不发布 topology_ready。
+- [x] parser/resolver 业务失败、parser 技术失败、topology 技术失败分别映射 session/run 终态；context 已成功而 topology 失败时 context 仍可读取。
+- [x] 保持 writer batch/补写/终态原子组、startup repair、quiesced、cleanup grace 和 persistence warning；不建立 M4 专用 writer/queue/retry。
+- [x] workflow 完成 topology 后只留下 M5 接力事实，不创建 waterbody sessions、不调用 waterbody model，也不生成 placeholder result。
 
 ### Tests
 
-- [ ] 完整 fake workflow 的 item/session/run 顺序、scope、identity、phase 和最终 reference。
-- [ ] 业务失败在 topology 前停止；parser/provider/topology 技术失败的 failed_stage/retryable 与调用计数正确。
-- [ ] cancel 在首次模型、repair 前、resolver、availability、BFS 各 gate 的竞态；没有晚启动调用或 orphan task/session。
-- [ ] context committed 后 topology 失败/取消仍可读；topology item 与 phase/reference 原子可见。
-- [ ] writer 失败/补写、未知提交、终态交付窗口、startup interruption 和 live cleanup regression。
-- [ ] 同 key 并发创建只执行一次 M4 workflow；响应丢失重试不重复调用 parser/provider。
+- [x] 完整 fake workflow 的 item/session/run 顺序、scope、identity、phase 和最终 reference。
+- [x] 业务失败在 topology 前停止；parser/provider/topology 技术失败的 failed_stage/retryable 与调用计数正确。
+- [x] cancel 在首次模型、repair 前、resolver、availability、BFS 各 gate 的竞态；没有晚启动调用或 orphan task/session。
+- [x] context committed 后 topology 失败/取消仍可读；topology item 与 phase/reference 原子可见。
+- [x] writer 失败/补写、未知提交、终态交付窗口、startup interruption 和 live cleanup regression。
+- [x] 同 key 并发创建只执行一次 M4 workflow；响应丢失重试不重复调用 parser/provider。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/application backend/tests/persistence -q`
-- [ ] `python -m pytest backend/tests/observability backend/tests/architecture -q`
-- [ ] 使用 fake ports 记录完整调用图，证明 0 个 waterbody session/model 调用。
+- [x] `python -m pytest backend/tests/application backend/tests/persistence -q`（本机适用集合通过；真实 PostgreSQL 因未设置专用测试库变量记为 `not run`）
+- [x] `python -m pytest backend/tests/observability backend/tests/architecture -q`
+- [x] 使用 fake ports 记录完整调用图，证明 0 个 waterbody session/model 调用。
 
 阶段出口：完整 M4 workflow 在内存与持久化边界成立，所有原事实可读取；公开 DTO/SSE 投影尚由下一阶段完成。
 
 提交边界：workflow/registry/persistence integration 纵切；不得新增路由或复制 context/graph 读模型。
 
+#### Milestone 8 完成记录（2026-09-27）
+
+- 实现：单一 workflow 串联 parser/resolver/context/有界 topology，四类 M4 typed content 统一走 production registry 与 M3 writer；phase/reference 同锁更新，未新增路由、writer、waterbody session/model 或结果占位。
+- 验证：focused `114 passed`、application/非 PostgreSQL persistence `491 passed`、observability/architecture `158 passed`、完整非 PostgreSQL 后端回归 `1100 passed`，`compileall` 与 diff 检查通过；真实 PostgreSQL `16` 个用例因未设置 `WATERAGENTS_TEST_DB_NAME` 记为 `not run`。
+- 提交：`8786a8e`。
+
 ## Milestone 9：HTTP、history、两层 SSE 与公开错误
 
 ### 工作
 
-- [ ] 更新实际 OpenAPI 和 create route 为最终 M4 request；保留 M3 路由集合，不新增 M4 专用 create/history/topology 或第三条流。
-- [ ] 扩展唯一 `run_snapshot v1`：phase、context_ref、topology_ref 和轻量 waterbody summaries；snapshot 只引用完整 graph，不内联节点/边/excluded。
-- [ ] history/detail 从持久化 `query_understood` 投影 nullable `context_summary`；未产生为 null，未知/损坏内容进入 issues，不从 query 临时重算。
-- [ ] session SSE 继续发送 parser message 生命周期和 context transcript item；run SSE 在原事实提交后发布下一份完整 snapshot，不新增独立 `topology_ready` event。
-- [ ] run 重连首发最新完整状态且无 SSE id；session 按 cursor 补过程。断线不取消 run，释放后 410/历史入口和 404 边界不回退。
-- [ ] 实现 API 文档中的 422 与异步 `PublicError` code/failed_stage/retryable 矩阵；安全 message 不包含 provider body、URL key、prompt secret、路径或 stack。
-- [ ] frontend-visible `params_used` 展示 ParameterKey、explicit/inferred 和 rationale，`supporting_params` 单独展示；discharge 不伪装为用户选择。
-- [ ] 文档 JSON fixture 必须从 production registry/reader/SSE encoder/OpenAPI 生成或验证，不能维护漂移的第二份手写 schema。
+- [x] 更新实际 OpenAPI 和 create route 为最终 M4 request；保留 M3 路由集合，不新增 M4 专用 create/history/topology 或第三条流。
+- [x] 扩展唯一 `run_snapshot v1`：phase、context_ref、topology_ref 和轻量 waterbody summaries；snapshot 只引用完整 graph，不内联节点/边/excluded。
+- [x] history/detail 从持久化 `query_understood` 投影 nullable `context_summary`；未产生为 null，未知/损坏内容进入 issues，不从 query 临时重算。
+- [x] session SSE 继续发送 parser message 生命周期和 context transcript item；run SSE 在原事实提交后发布下一份完整 snapshot，不新增独立 `topology_ready` event。
+- [x] run 重连首发最新完整状态且无 SSE id；session 按 cursor 补过程。断线不取消 run，释放后 410/历史入口和 404 边界不回退。
+- [x] 实现 API 文档中的 422 与异步 `PublicError` code/failed_stage/retryable 矩阵；安全 message 不包含 provider body、URL key、prompt secret、路径或 stack。
+- [x] frontend-visible `params_used` 展示 ParameterKey、explicit/inferred 和 rationale，`supporting_params` 单独展示；discharge 不伪装为用户选择。
+- [x] 文档 JSON fixture 必须从 production registry/reader/SSE encoder/OpenAPI 生成或验证，不能维护漂移的第二份手写 schema。
 
 ### Tests
 
-- [ ] create 422 matrix、201 receipt、异步业务/技术失败、错误安全字段和 request/error correlation。
-- [ ] parser 两次 message、query_understood、topology_ready 的 registry round-trip、inline/external content 和 PostgreSQL reload。
-- [ ] history summary 未解析/context 完整/corrupt/unknown；详情全文引用与 item ownership。
-- [ ] session cursor replay、run reconnect、snapshot 合并、reference 原子可见、stream_end、410/404 和客户端断开。
-- [ ] OpenAPI required/nullable/enum/extra、六项上限描述、双模型和无 API key 字段。
-- [ ] M3 pagination、cancel、persistence retry、全文、SSE redaction 与旧历史读取 regression。
+- [x] create 422 matrix、201 receipt、异步业务/技术失败、错误安全字段和 request/error correlation。
+- [x] parser 两次 message、query_understood、topology_ready 的 registry round-trip、inline/external content 和 PostgreSQL reload。
+- [x] history summary 未解析/context 完整/corrupt/unknown；详情全文引用与 item ownership。
+- [x] session cursor replay、run reconnect、snapshot 合并、reference 原子可见、stream_end、410/404 和客户端断开。
+- [x] OpenAPI required/nullable/enum/extra、六项上限描述、双模型和无 API key 字段。
+- [x] M3 pagination、cancel、persistence retry、全文、SSE redaction 与旧历史读取 regression。
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests/api backend/tests/application/test_transcript_registry.py -q`
-- [ ] `python -m pytest backend/tests/persistence -q`
-- [ ] 可执行 documented-protocol test 校验 API 文档所有 JSON/OpenAPI/SSE fixture。
+- [x] `python -m pytest backend/tests/api backend/tests/application/test_transcript_registry.py -q`
+- [x] `python -m pytest backend/tests/persistence -q`（非 PostgreSQL contract 集合通过；真实 PostgreSQL 因未配置专用测试库记为 `not run`）
+- [x] 可执行 documented-protocol test 校验 API 文档所有 JSON/OpenAPI/SSE fixture。
 
 阶段出口：最终 M4 协议可从新后端真实运行时读取，当前与历史一致；仍不代表产品已经完成 M5–M9 或可开始正式联调。
 
 提交边界：API/read projection/SSE/errors/docs fixture；不得实现新前端或后续推理行为。
 
+#### Milestone 9 完成记录（2026-09-27）
+
+- 实现：最终 M4 create/OpenAPI、`run_snapshot v1` phase/reference、typed context history/detail 投影、既有两层 SSE 与安全公开错误已接入；未新增路由、第三条流、前端或后续推理行为。
+- 验证：API/registry `236 passed`、非 PostgreSQL persistence contract `40 passed`、documented protocol `2 passed`、完整非 PostgreSQL 后端回归 `1105 passed`，`compileall` 与 diff 检查通过；真实 PostgreSQL `17` 个用例（含新增 context reload）因未设置 `WATERAGENTS_TEST_DB_NAME` 记为 `not run`。
+- 提交：`e4d7aa7`。
+
 ## Milestone 10：集成验收、契约审计与 M5 接力
 
 ### 工作
 
-- [ ] 建立固定 fake model/geocoder/NLDI/WDFN/Samples fixtures 的完整 M4 workflow smoke：frontend target/date、query fallback、mixed、部分 coverage、无 source 和技术失败。
-- [ ] 建立 154 项 manifest 离线审计和可选官方 refresh 工具；refresh 只能报告 drift，不能在运行时自动改 manifest 或把新官方条目自动启用。
-- [ ] 完整回归 M1–M3：创建幂等、四表、writer、读取、分页、两层 SSE、取消、重启修复、补写、脱敏、跨平台入口和 smoke。
+- [x] 建立固定 fake model/geocoder/NLDI/WDFN/Samples fixtures 的完整 M4 workflow smoke：frontend target/date、query fallback、mixed、部分 coverage、无 source 和技术失败。
+- [x] 建立 154 项 manifest 离线审计和可选官方 refresh 工具；refresh 只能报告 drift，不能在运行时自动改 manifest 或把新官方条目自动启用。
+- [x] 完整回归 M1–M3：创建幂等、四表、writer、读取、分页、两层 SSE、取消、重启修复、补写、脱敏、跨平台入口和 smoke。
 - [ ] 在专用 PostgreSQL 测试库执行真实 persistence/重启验证；保留数据库安全门禁，不接触业务库。
 - [ ] 对 geocoding/NLDI/WDFN/Samples 和至少一个已配置 parser provider 分别做可选 contract smoke；先预检网络/凭据，记录请求数、版本和结果，未运行不冒充通过。
-- [ ] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07`，逐项填写实现位置、测试、实际结果与剩余风险。
-- [ ] 搜索并清除被替换的 production 入口、旧字段、重复 allowlist、孤立 method、M4 兼容分支和测试专用生产开关；不清理无关历史代码。
-- [ ] 同步本 TODO、实施设计、API、参数目录、架构骨架、总 Milestones、延后契约和前端接入边界；只把有证据的项目勾选。
-- [ ] 写明 M5 接力：消费同一 capability registry、AnalysisContext、HydrologyGraph、station/series refs；重新读取真实 observation，区分 available/empty/unavailable/invalid，不把 qualification 当 evidence。
-- [ ] 写明 M6/M7/M8/M9 接力：evidence gate、waterbody session 创建、memory mode 实现和新前端仍未由 M4 完成；不得把 M4 smoke 称作第一版正式端到端验收。
+- [x] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07`，逐项填写实现位置、测试、实际结果与剩余风险。
+- [x] 搜索并清除被替换的 production 入口、旧字段、重复 allowlist、孤立 method、M4 兼容分支和测试专用生产开关；不清理无关历史代码。
+- [x] 同步本 TODO、实施设计、API、参数目录、架构骨架、总 Milestones、延后契约和前端接入边界；只把有证据的项目勾选。
+- [x] 写明 M5 接力：消费同一 capability registry、AnalysisContext、HydrologyGraph、station/series refs；重新读取真实 observation，区分 available/empty/unavailable/invalid，不把 qualification 当 evidence。
+- [x] 写明 M6/M7/M8/M9 接力：evidence gate、waterbody session 创建、memory mode 实现和新前端仍未由 M4 完成；不得把 M4 smoke 称作第一版正式端到端验收。
 
 ### Tests
 
-- [ ] full fake workflow 覆盖 happy path、所有业务停止点、所有技术失败阶段、取消竞态、幂等与持久化 reload。
-- [ ] 154 项 manifest、6 项上限、discharge、CONUS、±7 日、48h、四个 topology hard limits 和稳定排序均有可执行门禁。
-- [ ] secrets、普通 query、provider URL、流式跨 chunk 和公开错误全出口扫描回归。
-- [ ] 安装包资源、不同 cwd、Windows/Linux/macOS 路径与事件循环的适用 architecture/smoke 不回退。
-- [ ] 合同 ID 集合与契约矩阵双向一致；文档链接、JSON、表格和 OpenAPI fixture 校验通过。
+- [x] full fake workflow 覆盖 happy path、所有业务停止点、所有技术失败阶段、取消竞态、幂等与持久化 reload。
+- [x] 154 项 manifest、6 项上限、discharge、CONUS、±7 日、48h、四个 topology hard limits 和稳定排序均有可执行门禁。
+- [x] secrets、普通 query、provider URL、流式跨 chunk 和公开错误全出口扫描回归。
+- [x] 安装包资源、不同 cwd、Windows/Linux/macOS 路径与事件循环的适用 architecture/smoke 不回退；三平台真实 CI 仍为 `partial`。
+- [x] 合同 ID 集合与契约矩阵双向一致；文档链接、JSON、表格和 OpenAPI fixture 校验通过。
 
 ### Verify
 
 - [ ] `python -m pytest backend/tests -q`
 - [ ] `python -m pytest backend/tests/persistence -q`（隔离 PostgreSQL）
-- [ ] `python -m compileall -q backend/app backend/scripts`
+- [x] `python -m compileall -q backend/app backend/scripts`
 - [ ] `python backend/scripts/health_smoke.py`
-- [ ] `python backend/scripts/run_sse_smoke.py`
+- [x] `python backend/scripts/run_sse_smoke.py`
 - [ ] `python backend/scripts/run_history_smoke.py`
-- [ ] 新增 M4 fake-workflow smoke 与适用 adapter contract smoke。
-- [ ] `git diff --check`
+- [x] 新增 M4 fake-workflow smoke 与适用离线 adapter contract smoke；官方 WDFN parameter refresh 以 1 个请求通过，其余需凭据/外部项保持 `not run`。
+- [x] `git diff --check`
 
 阶段出口：M4 内部切片的代码、测试、协议和接力证据完整；没有把外部未运行项写成通过，也没有开始正式前后端联调。下一步是 M5，不是发布“M4 版本”。
 
 提交边界：只包含集成修复、审计、smoke、文档同步和完成记录；发现实质功能缺口时回到对应 Milestone 修复并重跑其 focused gate，不能把大补丁藏进最终审计提交。
 
+#### Milestone 10 完成记录（2026-09-27）
+
+- 实现：新增固定 fake model/geocoder/NLDI/WDFN/Samples 的完整 M4 workflow smoke、154 项离线审计与只报告 drift 的官方 refresh；修正 availability 内层失败的公开分类和 standalone run SSE 的自包含配置，同步契约矩阵、CI、API/设计/参数/架构/前端接力文档；未实现 M5–M9 行为或新前端。
+- 验证：focused contract/smoke `6 passed`、standalone SSE focused `21 passed`、完整非 PostgreSQL backend regression `1109 passed`，`compileall`、offline audit、run SSE、M4 workflow 和 `git diff --check` 通过；USGS OGC v1 refresh 为 `1` 个实际请求、`154/154`、无 key/name/unit drift且未写 manifest。真实 PostgreSQL `17` 个用例、health/history smoke、Google/NLDI/Samples 与真实 parser provider contract smoke 因未配置专用测试库/凭据而为 `not run`，三平台 CI 保持 `partial`。
+- 提交：`91ba2a6`。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |
 |---|---|---|---|---|
-| GLOBAL-C01 / GLOBAL-C02 | pending |  |  | 归档隔离；M1–M9 单一项目进程，无 M4 产品中间态。 |
-| M4-C01 / M4-C02 / M4-C03 | pending |  |  | 最终 request/context、±7 日期和 auto resolution。 |
-| M4-C04 / M4-A03 | pending |  |  | 154 项 manifest、LLM 自主推测、最多 6 项、必需 discharge。 |
-| M4-C05 / M4-C09 / M4-A02 / M4-A05 | pending |  |  | target/date 优先级、CONUS/COMID、双模型和无工具 parser。 |
-| M4-C06 / M4-C10 / M4-C11 / M4-A01 / M4-A06 / M4-A07 | pending |  |  | availability、WDFN/Samples、稳定 bounded BFS。 |
-| M4-C07 / M4-C08 / M4-A04 | pending |  |  | typed content、history、两层 SSE 和原引用。 |
-| M4-C12 | pending |  |  | M5/M6 evidence gate 接缝，不在 M4 冒充实现。 |
-| M4-C13 | pending |  |  | memory_mode 接缝与 M9 后统一验收。 |
-| GLOBAL-C04–C11 | pending |  |  | 时间、evidence、脱敏、前端边界、跨平台等适用门禁。 |
+| GLOBAL-C01 / GLOBAL-C02 / GLOBAL-C03 | 本机已验证 | `tests/architecture`；当前唯一 request/domain/workflow | archive/dependency guards；完整非 PostgreSQL回归 | 归档隔离、单一首版演进与 COMID 身份成立；中心/三平台证据另缺。 |
+| M4-C01 / M4-C02 / M4-C03 | 本机已验证 | `transcripts/models.py`；`query_understanding/context_*`、`date_resolver.py` | request/context/date/OpenAPI tests | 最终 request/context、±7 日期、inclusive end、mixed 与 auto/default resolution 本机通过。 |
+| M4-C04 / M4-A03 | 本机已验证 | `parameter_capabilities.v1.json`；`ParameterResolver` | manifest/resolver/audit tests | 154/154、最多 6 项、必需 discharge；官方 OGC v1 refresh 1 请求无 drift，真实 parser provider 未配置。 |
+| M4-C05 / M4-C09 / M4-A02 / M4-A05 | 本机已验证 | `LocationResolver`；`QueryParserWorkflow`；模型目录 | location/date/parser/workflow tests | target/date 优先级、CONUS/COMID、双模型、空 tools 与一次 repair 本机通过；Google/parser 外部 smoke 未运行。 |
+| M4-C06 / M4-C10 / M4-C11 / M4-A01 / M4-A06 / M4-A07 | 本机已验证 | `StationAvailabilityService`；`HydrologyGraphBuilder`；NLDI/WDFN/Samples adapters | adapter fixtures、availability/topology tests、`m4_workflow_smoke.py` | 固定 fixtures 覆盖 partial/no-source/技术失败与稳定 hard limits；NLDI/Samples 外部 smoke 未运行，qualification 仍非 evidence。 |
+| M4-C07 / M4-C08 / M4-A04 | 本机已验证 | production registry、writer/reader、run snapshot、既有两层 SSE | workflow/registry/API/history/SSE/documented protocol | 原 item 归属、history 投影、reference 与重连本机通过；真实 PostgreSQL reload 未运行。 |
+| M4-C12 | partial | `AnalysisContext`、`HydrologyGraph`、capability evidence rules | M4 boundary/architecture tests | M5/M6 evidence gate 输入接缝已冻结；真实 observation 与 gate 尚属 M5/M6。 |
+| M4-C13 | partial | request/config/context 的 `memory_mode`；M5–M9 handoff | request/context tests | M4 接缝本机通过；M8 memory、M9 新前端和统一端到端尚未实现。 |
+| GLOBAL-C04–C11 | partial | UTC/time models、registry/redaction、docs/CI workflow | time/redaction/resource/cwd/event-loop/architecture tests | 适用本机门禁通过；GLOBAL-C06 由 M5/M6 完成，C08 由 M9 完成，C11 缺三平台实际 CI/同库迁移。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能仅凭代码存在填写 `implemented`；中心/远端证据与本机证据分开。
 
