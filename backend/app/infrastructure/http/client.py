@@ -170,35 +170,6 @@ class ProviderHttpClient:
                 operation=operation,
             ) from error
 
-    async def post_json(
-        self,
-        url: str,
-        body: Mapping[str, object],
-        *,
-        provider: str,
-        operation: str,
-        headers: Mapping[str, str] | None = None,
-        deadline: float | None = None,
-    ) -> object:
-        content = await self._request_bytes(
-            "POST",
-            url,
-            provider=provider,
-            operation=operation,
-            headers=headers,
-            json_body=body,
-            deadline=deadline,
-            retry=False,
-        )
-        try:
-            return json.loads(content)
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise InvalidPortResponseError(
-                "Provider returned invalid JSON.",
-                provider=provider,
-                operation=operation,
-            ) from error
-
     @asynccontextmanager
     async def post_sse(
         self,
@@ -287,7 +258,6 @@ class ProviderHttpClient:
         deadline: float | None = None,
     ) -> bytes:
         return await self._request_bytes(
-            "GET",
             url,
             provider=provider,
             operation=operation,
@@ -326,32 +296,27 @@ class ProviderHttpClient:
 
     async def _request_bytes(
         self,
-        method: str,
         url: str,
         *,
         provider: str,
         operation: str,
         params: Mapping[str, QueryValue] | None = None,
         headers: Mapping[str, str] | None = None,
-        json_body: Mapping[str, object] | None = None,
         deadline: float | None = None,
-        retry: bool = True,
     ) -> bytes:
         client = self._client
         if client is None:
             raise RuntimeError("provider HTTP client is not open")
-        attempts = 2 if retry else 1
+        attempts = 2
         for attempt in range(attempts):
             try:
                 return await self._request_once(
                     client,
-                    method,
                     url,
                     provider=provider,
                     operation=operation,
                     params=params,
                     headers=headers,
-                    json_body=json_body,
                     deadline=deadline,
                 )
             except PortError as error:
@@ -368,25 +333,22 @@ class ProviderHttpClient:
     async def _request_once(
         self,
         client: httpx.AsyncClient,
-        method: str,
         url: str,
         *,
         provider: str,
         operation: str,
         params: Mapping[str, QueryValue] | None,
         headers: Mapping[str, str] | None,
-        json_body: Mapping[str, object] | None,
         deadline: float | None,
     ) -> bytes:
         timeout = self._remaining_timeout(deadline, provider, operation)
         try:
             async with asyncio.timeout(timeout):
                 async with client.stream(
-                    method,
+                    "GET",
                     url,
                     params=params or None,
                     headers=headers,
-                    json=json_body,
                     timeout=timeout,
                 ) as response:
                     self._raise_for_status(

@@ -31,7 +31,6 @@ _IGNORED_EVENT_TYPES = frozenset(
         "response.output_item.done",
         "response.content_part.added",
         "response.content_part.done",
-        "response.output_text.done",
         "response.output_text.annotation.added",
         "response.reasoning_summary_part.added",
         "response.reasoning_summary_part.done",
@@ -74,7 +73,9 @@ class OpenAIResponsesParserAdapter:
             )
         system, user = request.messages
         chunks: list[str] = []
+        done_text: str | None = None
         saw_refusal = False
+        terminal: tuple[dict[str, object], str] | None = None
         async with self._http.post_sse(
             self._endpoint,
             {
@@ -96,12 +97,22 @@ class OpenAIResponsesParserAdapter:
         ) as events:
             async for event in events:
                 root, event_type = self._event_payload(event)
+                if terminal is not None:
+                    raise invalid_response(PROVIDER, "generate")
                 if event_type == "response.output_text.delta":
+                    if done_text is not None:
+                        raise invalid_response(PROVIDER, "generate")
                     delta = root.get("delta")
                     if not isinstance(delta, str) or not delta:
                         raise invalid_response(PROVIDER, "generate")
                     await on_delta(delta)
                     chunks.append(delta)
+                    continue
+                if event_type == "response.output_text.done":
+                    text = root.get("text")
+                    if done_text is not None or not isinstance(text, str):
+                        raise invalid_response(PROVIDER, "generate")
+                    done_text = text
                     continue
                 if event_type in {"response.refusal.delta", "response.refusal.done"}:
                     saw_refusal = True
@@ -114,15 +125,20 @@ class OpenAIResponsesParserAdapter:
                     "response.failed",
                     "response.cancelled",
                 }:
-                    return self._terminal_response(
-                        root,
-                        event_type=event_type,
-                        text="".join(chunks),
-                        saw_refusal=saw_refusal,
-                    )
+                    terminal = (root, event_type)
+                    continue
                 if event_type not in _IGNORED_EVENT_TYPES:
                     raise invalid_response(PROVIDER, "generate")
-        raise invalid_response(PROVIDER, "generate")
+        if terminal is None:
+            raise invalid_response(PROVIDER, "generate")
+        root, event_type = terminal
+        return self._terminal_response(
+            root,
+            event_type=event_type,
+            text="".join(chunks),
+            done_text=done_text,
+            saw_refusal=saw_refusal,
+        )
 
     @staticmethod
     def _event_payload(
@@ -152,6 +168,7 @@ class OpenAIResponsesParserAdapter:
         *,
         event_type: str,
         text: str,
+        done_text: str | None,
         saw_refusal: bool,
     ) -> QueryParserResponse:
         response = require_mapping(
@@ -168,9 +185,17 @@ class OpenAIResponsesParserAdapter:
         if status != expected_status:
             raise invalid_response(PROVIDER, "generate")
         if status == "completed":
-            if saw_refusal or OpenAIResponsesParserAdapter._has_refusal(response):
+            completed_text, terminal_refusal = (
+                OpenAIResponsesParserAdapter._completed_output(response)
+            )
+            if saw_refusal or terminal_refusal:
                 finish_reason = ParserFinishReason.CONTENT_FILTER
-            elif text:
+            elif (
+                text
+                and done_text is not None
+                and completed_text is not None
+                and text == done_text == completed_text
+            ):
                 finish_reason = ParserFinishReason.STOP
             else:
                 raise invalid_response(PROVIDER, "generate")
@@ -191,7 +216,7 @@ class OpenAIResponsesParserAdapter:
         return QueryParserResponse(text=text, finish_reason=finish_reason)
 
     @staticmethod
-    def _has_refusal(response: object) -> bool:
+    def _completed_output(response: object) -> tuple[str | None, bool]:
         root = require_mapping(
             response,
             provider=PROVIDER,
@@ -202,6 +227,8 @@ class OpenAIResponsesParserAdapter:
             provider=PROVIDER,
             operation="generate",
         )
+        texts: list[str] = []
+        saw_refusal = False
         for raw_item in output:
             item = require_mapping(
                 raw_item,
@@ -222,8 +249,13 @@ class OpenAIResponsesParserAdapter:
                     operation="generate",
                 )
                 if part.get("type") == "refusal":
-                    return True
-        return False
+                    saw_refusal = True
+                elif part.get("type") == "output_text":
+                    text = part.get("text")
+                    if not isinstance(text, str):
+                        raise invalid_response(PROVIDER, "generate")
+                    texts.append(text)
+        return ("".join(texts) if texts else None), saw_refusal
 
     @staticmethod
     def _unavailable() -> PortUnavailableError:

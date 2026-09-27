@@ -75,6 +75,22 @@ def terminal_event(status: str, **response_fields: object) -> bytes:
     )
 
 
+def output_text_done(text: object) -> bytes:
+    return sse_event("response.output_text.done", text=text)
+
+
+def completed_terminal(text: object) -> bytes:
+    return terminal_event(
+        "completed",
+        output=[
+            {
+                "type": "message",
+                "content": [{"type": "output_text", "text": text}],
+            }
+        ],
+    )
+
+
 class _StaticStream(httpx.AsyncByteStream):
     def __init__(self, chunks: Iterable[bytes]) -> None:
         self._chunks = tuple(chunks)
@@ -129,7 +145,8 @@ def test_completed_response_streams_deltas_before_terminal_in_order() -> None:
         (
             second[:unicode_split],
             second[unicode_split:],
-            terminal_event("completed"),
+            output_text_done('{"location_mention":"河流"}'),
+            completed_terminal('{"location_mention":"河流"}'),
         ),
     )
 
@@ -189,6 +206,81 @@ def test_completed_response_streams_deltas_before_terminal_in_order() -> None:
 
 
 @pytest.mark.parametrize(
+    ("chunks", "private_text"),
+    [
+        (
+            (
+                sse_event("response.output_text.delta", delta='{"value":"delta"}'),
+                output_text_done('{"value":"done"}'),
+                completed_terminal('{"value":"delta"}'),
+            ),
+            '{"value":"done"}',
+        ),
+        (
+            (
+                sse_event("response.output_text.delta", delta='{"value":"delta"}'),
+                output_text_done('{"value":"delta"}'),
+                completed_terminal('{"value":"completed"}'),
+            ),
+            '{"value":"completed"}',
+        ),
+        (
+            (
+                sse_event("response.output_text.delta", delta='{"value":"delta"}'),
+                completed_terminal('{"value":"delta"}'),
+            ),
+            '{"value":"delta"}',
+        ),
+        (
+            (
+                sse_event("response.output_text.delta", delta='{"value":"delta"}'),
+                output_text_done('{"value":"delta"}'),
+                output_text_done('{"value":"delta"}'),
+                completed_terminal('{"value":"delta"}'),
+            ),
+            '{"value":"delta"}',
+        ),
+        (
+            (
+                sse_event("response.output_text.delta", delta='{"value":"delta"}'),
+                output_text_done('{"value":"delta"}'),
+                completed_terminal('{"value":"delta"}'),
+                completed_terminal('{"value":"delta"}'),
+            ),
+            '{"value":"delta"}',
+        ),
+    ],
+    ids=(
+        "delta-done-mismatch",
+        "done-completed-mismatch",
+        "missing-done",
+        "duplicate-done",
+        "duplicate-terminal",
+    ),
+)
+def test_completed_text_contract_mismatch_is_a_safe_invalid_response(
+    chunks: tuple[bytes, ...],
+    private_text: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, chunks)
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(InvalidPortResponseError) as captured:
+                await OpenAIResponsesParserAdapter(
+                    http,
+                    api_key="secret",
+                    base_url="https://api.openai.test/private",
+                ).generate(parser_request(), _noop)
+        rendered = f"{captured.value!s} {captured.value!r}"
+        assert private_text not in rendered
+        assert "api.openai.test" not in rendered
+
+    run(exercise())
+
+
+@pytest.mark.parametrize(
     ("reason", "expected"),
     [
         ("max_output_tokens", ParserFinishReason.LENGTH),
@@ -234,7 +326,17 @@ def test_refusal_is_a_safe_finish_and_is_not_streamed_as_model_text() -> None:
             (
                 sse_event("response.refusal.delta", delta="private refusal"),
                 sse_event("response.refusal.done", refusal="private refusal"),
-                terminal_event("completed"),
+                terminal_event(
+                    "completed",
+                    output=[
+                        {
+                            "type": "message",
+                            "content": [
+                                {"type": "refusal", "refusal": "private refusal"}
+                            ],
+                        }
+                    ],
+                ),
             ),
         )
 
@@ -334,6 +436,16 @@ def test_error_event_is_typed_unavailable_without_provider_message() -> None:
         (b'event: response.unknown\ndata: {"type":"response.unknown"}\n\n',),
         (b"data: \xff\n\n",),
         (sse_event("response.completed", response={"status": "failed"}),),
+        (
+            sse_event("response.output_text.delta", delta="{}"),
+            sse_event("response.output_text.done", text=1),
+            completed_terminal("{}"),
+        ),
+        (
+            sse_event("response.output_text.delta", delta="{}"),
+            output_text_done("{}"),
+            completed_terminal(1),
+        ),
         (sse_event("response.output_text.delta", delta="{"),),
         (b'event: response.completed\ndata: {"type":"response.completed"}',),
     ],

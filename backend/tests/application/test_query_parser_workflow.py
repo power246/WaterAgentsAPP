@@ -35,7 +35,7 @@ from app.infrastructure.config import (
     load_parameter_capability_registry,
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.ports import PortUnavailableError
+from app.ports import InvalidPortResponseError, PortUnavailableError
 from tests.m4_support import create_request_bytes, create_test_app
 
 
@@ -391,9 +391,15 @@ def test_two_schema_invalid_outputs_fail_without_third_call_or_context() -> None
 
 @pytest.mark.parametrize(
     "failure",
-    [PortUnavailableError("provider unavailable"), BLOCK],
+    [
+        PortUnavailableError("provider unavailable"),
+        InvalidPortResponseError("streamed parser terminal mismatch"),
+        BLOCK,
+    ],
 )
-def test_provider_error_and_timeout_fail_once_without_fallback(failure) -> None:
+def test_technical_parser_failure_never_repairs_resolves_or_publishes_context(
+    failure,
+) -> None:
     async def exercise() -> None:
         parser = FakeParser(failure)
         resolver = FakeContextResolver()
@@ -405,6 +411,9 @@ def test_provider_error_and_timeout_fail_once_without_fallback(failure) -> None:
             assert session.status is AgentSessionStatus.FAILED
             assert len(parser.calls) == 1
             assert resolver.calls == []
+            assert all(
+                item.content.content_type != "query_understood" for item in items
+            )
             assert coordinator._runs[created.run_id].last_error.code == (
                 "parser_model_unavailable"
             )

@@ -497,8 +497,10 @@
 
 #### Milestone 10 production parser streaming 补充记录（2026-09-27）
 
-- 实现：OpenAI Responses parser 改为单次 POST SSE，`stream=true`，只按接收顺序转发并累积 `response.output_text.delta`；completed/incomplete/refusal/failed/cancelled/error 与非法或缺失终态均收敛到既有 typed finish/error 语义，取消、超时和大小上限会关闭响应流。未修改 topology、resolver、availability、数据库 schema 或其他 provider 行为。
-- 验证：parser/HTTP/workflow focused `45 passed`、M4 workflow smoke 通过、完整非 PostgreSQL backend `1148 passed`，`git diff --check` 通过；精确完整命令首次受系统 pytest 临时目录 ACL 阻断，沙箱外原命令重跑通过。专用 PostgreSQL 与真实 OpenAI/provider smoke 因未配置专用测试库/凭据记为 `not run`。
+- 实现：OpenAI Responses parser 使用单次 POST SSE；正常 completed 文本必须由 delta 拼接、`response.output_text.done.text` 与 terminal `response.output` 三方一致，重复/缺失终态与字段错误均作为 invalid provider response。refusal/incomplete/failed/cancelled/error、取消、超时、大小上限和脱敏语义不变；删除无 production caller 的 `post_json`，metadata GET 仍有界重试，streaming POST 仍不重试。未修改 resolver、topology、availability、数据库 schema 或其他 provider 行为。
+- 环境：原 `backend/.venv/Scripts/python.exe` 缺失；在 `backend/` 使用 `py -3.13 -m venv --clear .venv` 和 `.venv/Scripts/python.exe -m pip install -e ".[dev]"` 按仓库 README 重建，解释器为 Python `3.13.2`，`python -m pip check` 报告 `No broken requirements found`，未复制 Python executable。
+- 验证：仓库根执行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/infrastructure/test_provider_http.py backend/tests/application/test_query_parser_workflow.py -q` 为 `52 passed`；`backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q --ignore=backend/tests/persistence/test_postgres_persistence.py` 为 `1158 passed`；`backend/.venv/Scripts/python.exe -B backend/scripts/m4_workflow_smoke.py` 通过且 mixed coverage 为 `partial`；`backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py` 输出 `{"completed":"passed","cancelled":"passed"}`；`git diff --check` 通过。
+- 未运行：未设置 `WATERAGENTS_TEST_DB_NAME`、OpenAI/Google provider 凭据且无 `backend/.env`，专用 PostgreSQL 与真实 provider smoke 为 `not run`；本轮仅是 M4 parser streaming 的本机离线/fixture 回归，不代表 M4 最终验收全部完成。
 
 ## 契约覆盖矩阵（实施时填写）
 
