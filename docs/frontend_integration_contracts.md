@@ -1,6 +1,6 @@
 # 前端接入约定
 
-更新日期：2026-09-17
+更新日期：2026-09-25
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
@@ -373,9 +373,9 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 | Milestone | 前端必须遵守的语义 |
 |---|---|
-| M4 query/context | 在当前 M3 create request 上加入位置/COMID、参数、日期范围、mode、memory mode 和粒度。第一版日期为 date-only，结束日期包含整天，由后端按 session IANA timezone 转 UTC；不要在浏览器端自行转换边界。`time_resolution_source=auto` 只接受后端实际自动选择的结果。参数身份是 `ParameterKey(code_system, code)`，不能只用裸 code。解析和拓扑内容保持原归属，继续使用 M3 两层流，不兼容旧 M2 单流 envelope/sequence。 |
-| M5 evidence | 区分 `available / empty / unavailable / invalid`，不能把无数据与取数失败合并。大 evidence 只在事件中提供 preview/reference；前端不得要求无界 raw payload 进入 SSE。单位、换算和 provenance 由后端确定性逻辑提供，前端不自行猜测单位。 |
-| M6 reasoning/result | 每个计划窗口都有 quantified、directional 或 indeterminate 之一；前端不能丢弃 indeterminate point，也不能根据 confidence 自行改写结果类别。展示值、单位、confidence、evidence refs 和 attribution 时保留后端 identity；`basis` 为 observed/correlated/inferred/hypothesized。真实 completed payload 在当前 M3 envelope 上扩展。 |
+| M4 query/context | 最终 create request 由 query、可选地图 target（COMID/坐标）、可选 date range、`auto/6h/12h/24h`、parser/waterbody 两个模型选择和 memory mode 组成；前端不提供参数表单，也不提交 mode/ParameterKey/key/topology limits。target/date 表单值优先，缺失才使用 query，实质冲突停止。首期日期只允许当地今天前后各 7 天，date-only inclusive end 由后端按固化 IANA timezone 转 UTC；浏览器不自行转换或截短。参数由 LLM 自主推测后经 capability registry 验证，并以 ParameterKey+rationale 展示；第一版正式联调能力范围见 [M4 的 154 项目录](M4/m4_parameter_capability_catalog.md)，单次最多 6 个用户目标，系统必需 discharge 不占上限。parser 过程走 session 流；context 是 session typed item，graph 是 run typed item，run snapshot 只给引用；没有第三条流或独立 topology_ready event。完整协议见 [M4 API](M4/m4_query_understanding_topology_api.md)。 |
+| M5 evidence | 区分 `available / empty / unavailable / invalid`，不能把无数据与取数失败合并。直接证据和 capability 白名单侧面证据分别标识；M4 availability metadata 不是实际 evidence。大 evidence 只在事件中提供 preview/reference；前端不得要求无界 raw payload 进入 SSE。单位、换算和 provenance 由后端确定性逻辑提供，前端不自行猜测单位。 |
+| M6 reasoning/result | 每个计划窗口都有 quantified、directional 或 indeterminate 之一；完全无证据的范围由确定性逻辑生成 `insufficient_evidence` 且不调用水体模型，只有侧面证据时显式降级。前端不能丢弃 indeterminate point，也不能根据 confidence 自行改写结果类别。展示值、单位、confidence、evidence refs 和 attribution 时保留后端 identity；`basis` 为 observed/correlated/inferred/hypothesized。真实 completed payload 在当前 M3 envelope 上扩展。 |
 | M7 workflow | Agent/tool 事件仍以 session 为根关联。cancel 后不得展示晚到 result 或启动新的前端下游动作；`workflow_quiesced` 保持内部审计事实。 |
 | M8 RAG | 历史推理必须显示原 session、原 confidence、schema version、RAG score 和 provenance；当前有效观测优先，前端不得把历史推理伪装成当前 observation。 |
 | M9 settings/admin | 修改默认 timezone 只影响新 session。API key 只能通过 secret endpoint 保存/清除并以 masked status 展示，不能回显或进入普通日志。全局单位变更必须经过用户显式确认。Admin 清理 history/transcript/index/memory/cache 时不得暗示 API key 也被删除。最终 demo 仍是单进程、单 worker。 |
@@ -397,6 +397,11 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 - [ ] 按 D73，断线期间 Agent 从推理中变为完成时，run 重连直接取得最新完整轻量快照；session 按游标补齐过程，完整 GET 仍能读取此前全部可见记录和全文。不要求重播 run 中间状态通知，不将已清理的历史当作实时流恢复。
 
 - [ ] 按 D71 消费完整轻量 run 快照，BFS 范围内被排除和未开始的水体也有对应表示；半透明灰/灰/蓝/绿/红分别映射不参与/未开始/推理中/完成/出错，不以 session 是否存在代替参与判定。未创建 session 不出现空过程流，取消后展示按 D72 留到 M9 设计与验收，不阻塞 M3 后端契约。
+- [ ] M4 表单只收地图 target、日期、粒度、parser model、waterbody model 和 memory mode；没有参数选择器。地图正常提交 COMID+坐标，日期 UI 限制当地今天前后各 7 天，粒度默认 auto；前端限制只改善体验，后端错误仍完整处理。
+- [ ] 201 后显示异步解析进度；从 `query_understood` item 分别展示后端最终用户目标 `params_used`、explicit/inferred、简短 rationale 和系统自动加入的 `supporting_params`，不得把必需 discharge 显示成用户选择，也不从 parser 流式草稿提前确定参数。用户目标最多 6 项；解析出第 7 项时显示后端 `too_many_parameters` 提示并要求用户缩小问题，不能在前端截断。理解明确自动继续；出现冲突/歧义/unsupported/超限则提示用户修改后新建 run，不在原 run 内对话修改。
+- [ ] parser/waterbody model 分别选择并只发送 provider/model identity；API key 不进入普通 create body、日志或历史。双模型、粒度 preference 和 memory mode 直接加入唯一 run configuration，不增加 configuration 版本或旧/新 union。`memory_augmented` 作为最终系统选项由 M8 实现，前端不为内部 M4 单独做 feature gate 或“暂不可用”分支。
+- [ ] M1–M9 期间前端只按同一套最终产品契约协同设计，不接入或兼容“M4 版”等阶段产品；M9 完成后才开始正式前后端联调和第一版整体验收。M9 前后端字段、OpenAPI fixture 和 SSE 消费代码随当前唯一契约一起更新，不保留 milestone-specific 分支。
+- [ ] run snapshot 的 `context_ref/topology_ref` 指向原 item；收到 topology reference 后按需读取完整 graph。`query_understood/topology_ready` 是 content type，不当作新的 SSE event；run 重连仍只取最新完整轻量快照。
 - [ ] 按 D70 分别处理两流正常结束：Agent 结束并发完过程后关闭 session 流；run 业务终态不延迟展示，收敛且全部必需内容保存后关闭 run 流，不等待 60 秒。保存中或耗尽时保留 run 通知，手动补写变化可见，不新增业务终态；用户关闭连接不取消后台执行或保存。
 - [ ] 按 D69，打开当前 run 页面建立 run 通知流，查看水体过程才增加对应 session 流；切换水体保留 run 连接，离开页面关闭两流且不取消分析。整体状态和保存变化主动更新，GET 用于加载/断线核对/历史，不持续轮询，也不将完整 Agent 消息塞入 run 通知。关闭时机按 D70、结束通知按 D76，具体序号、payload 和握手按最终两层协议验收。
 - [ ] 按 D66，在 run 执行中选中已有 session 的水体即可查看其真实上报过程，不等待最终预测、不提供给 Agent 追加消息的输入；保留 run 级停止操作，取消覆盖未查看/未订阅的执行与后续调度。关闭查看连接不取消分析。SSE 连接时机按 D68，具体路径及事件按后续冻结协议验收。
