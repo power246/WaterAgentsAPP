@@ -1,5 +1,6 @@
 # M4 Query Understanding + Hydrology Topology Implementation TODO
 
+
 更新日期：2026-09-28
 
 > 当前状态：Milestone 0–10 已完成本机实现与集成审计；专用 PostgreSQL persistence、完整 backend regression、health/history smoke 已在本机 Docker PostgreSQL 17 的 `wateragents_test` 中通过。需凭据 provider/parser contract smoke 保持 `not run`，最新三平台 CI 保持 `partial`，没有冒充通过。M4 是 M1–M9 同一项目进程中的内部实施切片，不形成可单独使用、正式联调或需要兼容的“M4 版本”；M9 完成后才开始正式前后端联调和第一版整体验收。
@@ -67,7 +68,7 @@
 - [x] `query_understood` 是 parser session 原 item，`topology_ready` 是 run 原 item；history/detail/SSE 只投影或引用，不复制第二份 context/graph。
 - [x] run/session 取消、provider timeout、schema repair、topology 失败、writer 补写、重启修复和 live cleanup 保持 M3 invariant；context 成功后 topology 失败时 context 仍可读。
 - [x] 最终 OpenAPI、文档 JSON、production registry、SSE encoder 和可执行 fixture 同源；没有旧 M3 request 兼容输入、第三条 SSE 或 M4 专用路由。
-- [x] fake adapters 的完整 M4 workflow、完整 backend regression、适用本机 SSE/contract audit、专用 PostgreSQL persistence 与 health/history smoke 已有实际证据；需凭据外部项明确记录为 `not run`。
+- [x] fake adapters 的完整 M4 workflow、完整 backend regression、适用本机 SSE/contract audit 已有实际证据；PostgreSQL/health/history 与需凭据外部项明确记录为 `not run`。
 
 ## Milestone 0：基线、边界与接力盘点
 
