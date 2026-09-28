@@ -184,6 +184,8 @@ def test_history_smoke_restarts_two_independent_uvicorn_processes() -> None:
     assert "WATERAGENTS_DB_NAME" in source
     assert "PYTHONIOENCODING" in source
     assert "trust_env=False" in source
+    assert source.count("settings=SMOKE_SETTINGS") == 4
+    assert 'update={"model_catalog": SMOKE_SETTINGS.model_catalog}' in source
     assert source.count("async with running_application(settings)") == 2
     assert "assert first_process.poll() is not None" in source
     assert "assert second_process.pid != first_pid" in source
