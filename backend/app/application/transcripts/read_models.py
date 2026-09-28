@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Annotated, Literal, TypeAlias
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from app.application.analysis_runs.models import (
     SessionSummary,
 )
 from app.application.analysis_runs.persistence import PersistenceInfo
+from app.application.query_understanding.context_models import ParameterIntentSource
 from app.application.transcripts.models import (
     ParseStatus,
     StoredTranscriptContent,
@@ -20,7 +22,8 @@ from app.application.transcripts.models import (
     TranscriptContentRef,
     TranscriptItem,
 )
-from app.domain.common import JsonValue, NonEmptyString, UtcDatetime
+from app.domain import InferenceMode, TimeResolution
+from app.domain.common import DomainFloat, JsonValue, NonEmptyString, UtcDatetime
 from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
 
@@ -40,6 +43,41 @@ class ReadIssue(DomainModel):
     error: PublicError
 
 
+class ContextSummaryLocation(DomainModel):
+    latitude: DomainFloat = Field(ge=-90, le=90)
+    longitude: DomainFloat = Field(ge=-180, le=180)
+    display_name: NonEmptyString | None = None
+
+
+class ContextSummaryDateRange(DomainModel):
+    start_date: date
+    end_date: date
+
+
+class ContextSummaryParameter(DomainModel):
+    code_system: NonEmptyString
+    code: NonEmptyString
+    canonical_name: NonEmptyString
+
+
+class ContextSummaryTargetParameter(ContextSummaryParameter):
+    source: ParameterIntentSource
+    rationale: NonEmptyString
+
+
+class AnalysisContextSummary(DomainModel):
+    target_comid: NonEmptyString
+    location: ContextSummaryLocation
+    date_range: ContextSummaryDateRange
+    mode: InferenceMode
+    time_resolution: TimeResolution
+    params_used: tuple[ContextSummaryTargetParameter, ...] = Field(
+        min_length=1,
+        max_length=6,
+    )
+    supporting_params: tuple[ContextSummaryParameter, ...]
+
+
 class RunSummary(DomainModel):
     run_id: UUID
     status: RunStatus
@@ -47,6 +85,7 @@ class RunSummary(DomainModel):
     updated_at: UtcDatetime
     query: NonEmptyString
     configuration: AnalysisConfigurationSnapshot | None = None
+    context_summary: AnalysisContextSummary | None
 
 
 class RunHistoryItem(RunSummary):

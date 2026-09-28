@@ -1,14 +1,20 @@
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
-from app.domain.common import DomainModel, NonEmptyString, ensure_unique_tuple
+from app.domain.common import (
+    DomainFloat,
+    DomainModel,
+    NonEmptyString,
+    ensure_unique_tuple,
+)
 from app.domain.hydrology.location import GeoPoint
 
 
 class RiverSegment(DomainModel):
     comid: NonEmptyString
     location: GeoPoint | None
+    distance_to_downstream_km: DomainFloat | None = Field(default=None, gt=0)
     upstream_comids: tuple[NonEmptyString, ...] = ()
     downstream_comids: tuple[NonEmptyString, ...] = ()
 

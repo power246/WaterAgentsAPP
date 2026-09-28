@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from app.application.analysis_runs.models import (
+    AnalysisPhase,
     AnalysisRunSnapshot,
     PublicError,
     RunLifecycleEvent,
@@ -16,6 +17,7 @@ from app.application.analysis_runs.persistence import (
     PersistenceWriteBatch,
 )
 from app.application.transcripts.buffer import TranscriptBuffer
+from app.application.transcripts.models import TranscriptContentRef
 from app.application.transcripts.stream_models import SessionProcessRecord, StreamingMessage
 
 
@@ -34,6 +36,9 @@ class RunRuntime:
     snapshot: AnalysisRunSnapshot
     transcript_buffer: TranscriptBuffer
     query: str = field(repr=False)
+    analysis_phase: AnalysisPhase = AnalysisPhase.QUEUED
+    context_ref: TranscriptContentRef | None = None
+    topology_ref: TranscriptContentRef | None = None
     events: list[RunLifecycleEvent] = field(default_factory=list)
     transcript_items: list[TranscriptItemIdentity] = field(default_factory=list)
     state_mutations: list[StateMutation] = field(default_factory=list)

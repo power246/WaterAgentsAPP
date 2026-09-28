@@ -8,7 +8,21 @@ from typing import get_origin
 
 import pytest
 
-from app.domain import GeoPoint, MonitoringStation, ParameterKey, RiverSegment
+from app.domain import (
+    AdministrativeLocation,
+    GeoPoint,
+    GeocodingCandidate,
+    MonitoringStation,
+    MonitoringLocationMetadata,
+    ParameterCatalogCandidate,
+    ParameterKey,
+    RiverSegment,
+    SamplePeriodOfRecord,
+    StationAvailability,
+    StationAvailabilityRequest,
+    TimeSeriesMetadata,
+    UsgsParameterMetadata,
+)
 from app.ports import (
     CachePort,
     ClockPort,
@@ -19,17 +33,25 @@ from app.ports import (
     InvalidPortResponseError,
     KeyStorePort,
     LLMPort,
-    MonitoringStationPort,
+    ParameterCatalogPort,
+    PortAuthenticationError,
+    PortConfigurationError,
     PortError,
+    PortHttpError,
+    PortRateLimitError,
+    PortResponseLimitError,
     PortTimeoutError,
     PortUnavailableError,
     RAGIndexPort,
+    StationMetadataPort,
+    StationInventoryPort,
     TopologyDataPort,
     TranscriptReadStorePort,
     TranscriptStorePort,
     WaterObservationPort,
     WeatherForecastPort,
     WeatherObservationPort,
+    UnsupportedPortVersionError,
 )
 
 PORTS_ROOT = Path(__file__).resolve().parents[2] / "app" / "ports"
@@ -45,8 +67,10 @@ def test_all_port_contracts_are_public_protocols() -> None:
         GeocodingPort,
         KeyStorePort,
         LLMPort,
-        MonitoringStationPort,
+        ParameterCatalogPort,
         RAGIndexPort,
+        StationMetadataPort,
+        StationInventoryPort,
         TopologyDataPort,
         TranscriptReadStorePort,
         TranscriptStorePort,
@@ -61,11 +85,18 @@ def test_all_port_contracts_are_public_protocols() -> None:
 def test_port_method_sync_and_async_semantics() -> None:
     assert not inspect.iscoroutinefunction(ClockPort.now)
     async_methods = (
-        GeocodingPort.resolve,
-        ComidLookupPort.lookup_comid,
+        GeocodingPort.resolve_text,
+        GeocodingPort.reverse,
+        ComidLookupPort.lookup_position,
         TopologyDataPort.get_segment,
         TopologyDataPort.get_direct_upstreams,
-        MonitoringStationPort.find_for_segment,
+        TopologyDataPort.get_monitoring_sites,
+        ParameterCatalogPort.find_candidates,
+        StationMetadataPort.get_parameter_codes,
+        StationMetadataPort.get_monitoring_locations,
+        StationMetadataPort.get_time_series_metadata,
+        StationMetadataPort.get_sample_periods,
+        StationInventoryPort.check_availability,
         WaterObservationPort.fetch,
         WeatherObservationPort.fetch,
         WeatherForecastPort.fetch,
@@ -97,16 +128,38 @@ def test_port_method_sync_and_async_semantics() -> None:
     ("method", "parameters"),
     [
         (ClockPort.now, ("self",)),
-        (GeocodingPort.resolve, ("self", "location_text")),
-        (ComidLookupPort.lookup_comid, ("self", "point")),
-        (TopologyDataPort.get_segment, ("self", "comid")),
+        (GeocodingPort.resolve_text, ("self", "location_text", "deadline")),
+        (GeocodingPort.reverse, ("self", "point", "deadline")),
+        (ComidLookupPort.lookup_position, ("self", "point", "deadline")),
+        (TopologyDataPort.get_segment, ("self", "comid", "deadline")),
         (
             TopologyDataPort.get_direct_upstreams,
-            ("self", "comid", "max_distance_km"),
+            ("self", "comid", "max_distance_km", "deadline"),
         ),
         (
-            MonitoringStationPort.find_for_segment,
-            ("self", "comid", "parameters"),
+            TopologyDataPort.get_monitoring_sites,
+            ("self", "comid", "deadline"),
+        ),
+        (ParameterCatalogPort.find_candidates, ("self", "concept")),
+        (
+            StationMetadataPort.get_parameter_codes,
+            ("self", "parameters", "deadline"),
+        ),
+        (
+            StationMetadataPort.get_monitoring_locations,
+            ("self", "station_ids", "deadline"),
+        ),
+        (
+            StationMetadataPort.get_time_series_metadata,
+            ("self", "station_ids", "parameters", "deadline"),
+        ),
+        (
+            StationMetadataPort.get_sample_periods,
+            ("self", "station_id", "deadline"),
+        ),
+        (
+            StationInventoryPort.check_availability,
+            ("self", "request", "deadline"),
         ),
         (TranscriptStorePort.get_creation, ("self", "idempotency_key")),
         (TranscriptStorePort.create_run, ("self", "candidate")),
@@ -131,20 +184,36 @@ def test_port_method_signatures(method, parameters: tuple[str, ...]) -> None:
 
 
 def test_stable_ports_use_domain_types() -> None:
-    geocoding = inspect.signature(GeocodingPort.resolve)
-    comid_lookup = inspect.signature(ComidLookupPort.lookup_comid)
+    geocoding = inspect.signature(GeocodingPort.resolve_text)
+    reverse_geocoding = inspect.signature(GeocodingPort.reverse)
+    comid_lookup = inspect.signature(ComidLookupPort.lookup_position)
     topology = inspect.signature(TopologyDataPort.get_segment)
     upstreams = inspect.signature(TopologyDataPort.get_direct_upstreams)
-    stations = inspect.signature(MonitoringStationPort.find_for_segment)
+    associated_sites = inspect.signature(TopologyDataPort.get_monitoring_sites)
+    parameter_catalog = inspect.signature(ParameterCatalogPort.find_candidates)
+    parameter_metadata = inspect.signature(StationMetadataPort.get_parameter_codes)
+    locations = inspect.signature(StationMetadataPort.get_monitoring_locations)
+    series = inspect.signature(StationMetadataPort.get_time_series_metadata)
+    samples = inspect.signature(StationMetadataPort.get_sample_periods)
+    availability = inspect.signature(StationInventoryPort.check_availability)
 
     assert geocoding.parameters["location_text"].annotation is str
-    assert geocoding.return_annotation == GeoPoint | None
+    assert geocoding.return_annotation == tuple[GeocodingCandidate, ...]
+    assert reverse_geocoding.parameters["point"].annotation is GeoPoint
+    assert reverse_geocoding.return_annotation == AdministrativeLocation | None
     assert comid_lookup.parameters["point"].annotation is GeoPoint
     assert comid_lookup.return_annotation == str | None
     assert topology.return_annotation == RiverSegment | None
     assert upstreams.return_annotation == tuple[RiverSegment, ...]
-    assert stations.parameters["parameters"].annotation == tuple[ParameterKey, ...]
-    assert stations.return_annotation == tuple[MonitoringStation, ...]
+    assert associated_sites.return_annotation == tuple[MonitoringStation, ...]
+    assert parameter_catalog.parameters["concept"].annotation is str
+    assert parameter_catalog.return_annotation == tuple[ParameterCatalogCandidate, ...]
+    assert parameter_metadata.return_annotation == tuple[UsgsParameterMetadata, ...]
+    assert locations.return_annotation == tuple[MonitoringLocationMetadata, ...]
+    assert series.return_annotation == tuple[TimeSeriesMetadata, ...]
+    assert samples.return_annotation == tuple[SamplePeriodOfRecord, ...]
+    assert availability.parameters["request"].annotation is StationAvailabilityRequest
+    assert availability.return_annotation == tuple[StationAvailability, ...]
 
 
 def test_deferred_ports_are_generic_without_guessing_dtos() -> None:
@@ -167,7 +236,17 @@ def test_deferred_ports_are_generic_without_guessing_dtos() -> None:
 
 @pytest.mark.parametrize(
     "error_type",
-    [PortUnavailableError, PortTimeoutError, InvalidPortResponseError],
+    [
+        PortUnavailableError,
+        PortTimeoutError,
+        InvalidPortResponseError,
+        PortAuthenticationError,
+        PortConfigurationError,
+        PortHttpError,
+        PortRateLimitError,
+        PortResponseLimitError,
+        UnsupportedPortVersionError,
+    ],
 )
 def test_port_errors_share_a_stable_base(error_type: type[PortError]) -> None:
     error = error_type("provider failed")
@@ -198,7 +277,13 @@ def test_successful_empty_results_are_distinct_from_unavailability() -> None:
 
 def test_not_found_contracts_use_none_or_empty_tuple() -> None:
     class EmptyGeocoder:
-        async def resolve(self, location_text: str) -> GeoPoint | None:
+        async def resolve_text(
+            self,
+            location_text: str,
+        ) -> tuple[GeocodingCandidate, ...]:
+            return ()
+
+        async def reverse(self, point: GeoPoint) -> AdministrativeLocation | None:
             return None
 
     class EmptyTopology:
@@ -212,13 +297,21 @@ def test_not_found_contracts_use_none_or_empty_tuple() -> None:
         ) -> tuple[RiverSegment, ...]:
             return ()
 
+        async def get_monitoring_sites(
+            self,
+            comid: str,
+        ) -> tuple[MonitoringStation, ...]:
+            return ()
+
     async def exercise() -> None:
         geocoder: GeocodingPort = EmptyGeocoder()
         topology: TopologyDataPort = EmptyTopology()
 
-        assert await geocoder.resolve("unknown") is None
+        assert await geocoder.resolve_text("unknown") == ()
+        assert await geocoder.reverse(GeoPoint(latitude=1.0, longitude=1.0)) is None
         assert await topology.get_segment("0001") is None
         assert await topology.get_direct_upstreams("0001", 10) == ()
+        assert await topology.get_monitoring_sites("0001") == ()
 
     asyncio.run(exercise())
 
@@ -238,7 +331,9 @@ def test_query_protocols_document_empty_and_unavailable_as_distinct() -> None:
         GeocodingPort,
         ComidLookupPort,
         TopologyDataPort,
-        MonitoringStationPort,
+        StationMetadataPort,
+        StationInventoryPort,
+        ParameterCatalogPort,
         WaterObservationPort,
         WeatherObservationPort,
         WeatherForecastPort,

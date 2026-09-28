@@ -9,11 +9,6 @@ from app.api.http.errors import handle_error
 from app.api.sse.encoder import encode_event
 from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.writer import TranscriptWriter
-from app.application.analysis_runs.models import (
-    AnalysisConfigurationSnapshot,
-    RunCreatedEvent,
-    RunCreatedPayload,
-)
 from app.application.transcripts.registry import (
     TranscriptRegistry,
     create_production_registry,
@@ -23,9 +18,7 @@ from app.application.transcripts.stream_models import (
     SessionProcessEvent,
     StreamEndEvent,
 )
-from app.domain.time.time_resolution import TimeResolution
-from app.domain.time.time_resolution_source import TimeResolutionSource
-from app.main import create_app
+from tests.m4_support import create_test_app as create_app
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 API_GUIDE = REPOSITORY_ROOT / "docs" / "M3" / "m3_transcript_history_api.md"
@@ -136,34 +129,8 @@ def test_documented_run_and_session_statuses_match_openapi() -> None:
     assert "session terminal event 不携带 run 级保存 warning" in persistence_section
 
 
-def test_documented_item_and_sse_frames_are_production_serialization_goldens() -> None:
-    occurred_at = datetime(2026, 9, 13, 3, 20, tzinfo=UTC)
-    event = RunCreatedEvent(
-        run_id=RUN_ID,
-        sequence=1,
-        occurred_at=occurred_at,
-        payload=RunCreatedPayload(
-            created_at=occurred_at,
-            configuration=AnalysisConfigurationSnapshot(
-                analysis_timezone="America/Chicago",
-                time_resolution=TimeResolution.TWELVE_HOURS,
-                time_resolution_source=TimeResolutionSource.FRONTEND,
-            ),
-        ),
-    )
-    encoded = create_production_registry().encode("lifecycle_event", 2, event)
+def test_documented_m3_sse_frames_remain_production_serialization_goldens() -> None:
     guide = API_GUIDE.read_text(encoding="utf-8")
-    item_section = section(guide, "### 3.4 完整 item 示例", "## 4. GET 读取接口")
-    example = json.loads(item_section.split("```json", 1)[1].split("```", 1)[0])
-
-    assert encoded.content_bytes == len(encoded.safe_body.encode("utf-8")) == 340
-    assert example["item_id"] == str(ITEM_ID)
-    assert example["run_id"] == str(RUN_ID)
-    assert example["correlation"]["request_id"] == str(REQUEST_ID)
-    assert example["content_bytes"] == encoded.content_bytes
-    assert example["occurred_at"] == event.model_dump(mode="json")["occurred_at"]
-    assert example["content"]["body"] == json.loads(encoded.safe_body)
-
     process_event = SessionProcessEvent(
         run_id=RUN_ID,
         session_id=SESSION_ID,

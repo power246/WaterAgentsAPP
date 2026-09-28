@@ -23,6 +23,11 @@ from app.application.transcripts.registry import (
 )
 from app.domain.attribution import AnalysisDetail, AnalysisStep
 from scripts.transcript_fixtures import fixture_message_registration
+from tests.m4_support import (
+    PARSER_MODEL,
+    WATERBODY_MODEL,
+    create_request,
+)
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
 OTHER_RUN_ID = UUID("10000000-0000-0000-0000-000000000002")
@@ -33,8 +38,11 @@ ERROR_ID = UUID("40000000-0000-0000-0000-000000000001")
 NOW = datetime(2026, 9, 13, tzinfo=UTC)
 CONFIGURATION = {
     "analysis_timezone": "Asia/Shanghai",
-    "time_resolution": "12h",
-    "time_resolution_source": "frontend",
+    "time_resolution_preference": "12h",
+    "time_resolution_preference_source": "frontend",
+    "parser_model": PARSER_MODEL.model_dump(mode="json"),
+    "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
+    "memory_mode": "stateless",
 }
 
 
@@ -66,6 +74,10 @@ def test_production_registry_has_only_real_writable_types() -> None:
         ("lifecycle_event", 2),
         ("error", 1),
         ("runtime_fact", 1),
+        ("query_parser_input", 1),
+        ("query_parser_message", 1),
+        ("query_understood", 1),
+        ("topology_ready", 1),
     )
     assert ("fixture_message", 1) not in registry.registered_keys
     with pytest.raises(UnsupportedTranscriptContentError):
@@ -74,20 +86,23 @@ def test_production_registry_has_only_real_writable_types() -> None:
 
 def test_analysis_request_round_trip_preserves_resolution_presence() -> None:
     registry = create_production_registry()
-    omitted = registry.encode("analysis_request", 1, {"query": " 太湖水位 "})
+    omitted = registry.encode("analysis_request", 1, create_request(" 太湖水位 "))
     explicit = registry.encode(
-        "analysis_request", 1, {"query": "太湖水位", "time_resolution": "6h"}
+        "analysis_request", 1, create_request("太湖水位", time_resolution="6h")
     )
 
-    assert json.loads(omitted.safe_body) == {"query": "太湖水位"}
-    assert json.loads(explicit.safe_body) == {
-        "query": "太湖水位",
-        "time_resolution": "6h",
-    }
+    assert json.loads(omitted.safe_body) == create_request("太湖水位")
+    assert json.loads(explicit.safe_body) == create_request(
+        "太湖水位", time_resolution="6h"
+    )
     parsed = registry.parse(_stored(ITEM_ID, body=omitted.safe_body), omitted.safe_body)
     assert parsed.parse_status is ParseStatus.OK
-    assert parsed.body.model_fields_set == {"query"}
-    assert parsed.model_dump(mode="json", exclude_unset=True)["body"] == {"query": "太湖水位"}
+    assert parsed.body.model_fields_set == {
+        "query", "parser_model", "waterbody_model", "memory_mode"
+    }
+    assert parsed.model_dump(mode="json", exclude_unset=True)["body"] == create_request(
+        "太湖水位"
+    )
 
 
 @pytest.mark.parametrize(
@@ -235,7 +250,9 @@ def test_runtime_fact_union_has_exact_fields_references_and_visibility() -> None
 
 def test_unknown_and_corrupt_history_are_distinct_and_keep_neighbors() -> None:
     registry = create_production_registry()
-    good_body = registry.encode("analysis_request", 1, {"query": "lake"}).safe_body
+    good_body = registry.encode(
+        "analysis_request", 1, create_request("lake")
+    ).safe_body
     fixed_error = iter((UUID(int=1), UUID(int=2))).__next__
     results = registry.parse_many(
         (
@@ -259,7 +276,9 @@ def test_unknown_and_corrupt_history_are_distinct_and_keep_neighbors() -> None:
 
 def test_read_detects_body_byte_count_corruption() -> None:
     registry = create_production_registry()
-    body = registry.encode("analysis_request", 1, {"query": "lake"}).safe_body
+    body = registry.encode(
+        "analysis_request", 1, create_request("lake")
+    ).safe_body
     item = _stored(ITEM_ID, body=body).model_copy(update={
         "inline_body": None,
         "preview_head": "head",

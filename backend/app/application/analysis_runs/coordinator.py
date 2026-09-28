@@ -4,12 +4,12 @@ import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import isfinite
 from typing import Coroutine, TypeVar
 from uuid import UUID, uuid4
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from app.application.analysis_runs.creation import (
     CreationCommitUnconfirmedError,
@@ -26,6 +26,7 @@ from app.application.analysis_runs.creation import (
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
+    AnalysisPhase,
     AnalysisConfigurationSnapshot,
     AnalysisRunSnapshot,
     CorrelationContext,
@@ -66,7 +67,6 @@ from app.application.analysis_runs.writer import TranscriptWriter
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
     CancellationToken,
-    DefaultFakeWorkflow,
     WorkflowContext,
     WorkflowFailed,
     WorkflowStopped,
@@ -110,9 +110,14 @@ from app.application.transcripts.stream_models import (
 )
 from app.application.transcripts.streaming import StreamingCredentialFilter
 from app.domain.common import NonEmptyString, normalize_utc_datetime
-from app.domain.time.time_resolution import DEFAULT_TIME_RESOLUTION
-from app.domain.time.time_resolution_source import TimeResolutionSource
+from app.domain.model_catalog import ModelRole
+from app.domain.stable_validation_error import stable_validation_error
+from app.domain.time.time_resolution_preference_source import (
+    TimeResolutionPreferenceSource,
+)
+from app.domain.time.timezone import get_iana_timezone
 from app.ports.clock import ClockPort
+from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
@@ -237,11 +242,12 @@ class RunCoordinator:
             PersistenceWriteBatch,
             BatchVerification,
         ],
+        model_catalog: ModelCatalogPort,
         analysis_timezone: str = "America/Chicago",
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
-        workflow: AnalysisWorkflow | None = None,
+        workflow: AnalysisWorkflow,
         shutdown_grace_period: float = 1.0,
         shutdown_save_grace_period: float = 5.0,
         keepalive_interval: float = 15.0,
@@ -281,6 +287,7 @@ class RunCoordinator:
             raise ValueError("live_state_grace_period must be finite and non-negative")
         self._clock = clock
         self._transcript_store = transcript_store
+        self._model_catalog = model_catalog
         self._analysis_timezone = analysis_timezone
         self._id_factory = id_factory
         self._record_id_factory = record_id_factory
@@ -294,7 +301,7 @@ class RunCoordinator:
         self._creation_by_run: dict[UUID, _CreationOwner] = {}
         self._creation_tasks: set[asyncio.Task[AnalysisRunSnapshot]] = set()
         self._runs_lock = asyncio.Lock()
-        self._workflow = workflow if workflow is not None else DefaultFakeWorkflow()
+        self._workflow = workflow
         self._shutdown_grace_period = shutdown_grace_period
         self._shutdown_save_grace_period = shutdown_save_grace_period
         self._shutdown_lock = asyncio.Lock()
@@ -416,9 +423,17 @@ class RunCoordinator:
             return body, None
         query = _QUERY.validate_python(body)
         checked = AnalysisConfigurationSnapshot.model_validate(configuration)
-        payload: dict[str, str] = {"query": query}
-        if checked.time_resolution_source is TimeResolutionSource.FRONTEND:
-            payload["time_resolution"] = checked.time_resolution.value
+        payload: dict[str, object] = {
+            "query": query,
+            "parser_model": checked.parser_model.model_dump(mode="json"),
+            "waterbody_model": checked.waterbody_model.model_dump(mode="json"),
+            "memory_mode": checked.memory_mode.value,
+        }
+        if (
+            checked.time_resolution_preference_source
+            is TimeResolutionPreferenceSource.FRONTEND
+        ):
+            payload["time_resolution"] = checked.time_resolution_preference.value
         return (
             json.dumps(
                 payload,
@@ -476,19 +491,66 @@ class RunCoordinator:
         except UnicodeDecodeError as error:
             raise InvalidSubmissionEncodingError() from error
         request = AnalysisRequestV1.model_validate_json(raw_body)
-        configuration = configuration_override or AnalysisConfigurationSnapshot(
-            analysis_timezone=self._analysis_timezone,
-            time_resolution=request.time_resolution or DEFAULT_TIME_RESOLUTION,
-            time_resolution_source=(
-                TimeResolutionSource.FRONTEND
-                if "time_resolution" in request.model_fields_set
-                else TimeResolutionSource.DEFAULT
-            ),
+        timestamp = self._clock.now()
+        catalog = self._model_catalog.snapshot()
+        validation_errors: list[dict[str, object]] = []
+        if request.date_range is not None:
+            local_today = timestamp.astimezone(
+                get_iana_timezone(self._analysis_timezone)
+            ).date()
+            earliest = local_today - timedelta(days=7)
+            latest = local_today + timedelta(days=7)
+            if (
+                request.date_range.start_date < earliest
+                or request.date_range.end_date > latest
+            ):
+                validation_errors.append(
+                    {
+                        "type": "value_error",
+                        "ctx": {
+                            "error": stable_validation_error(
+                                "date_range_out_of_bounds",
+                                "date_range must be within {earliest} and {latest}",
+                                {
+                                    "earliest": earliest.isoformat(),
+                                    "latest": latest.isoformat(),
+                                },
+                            )
+                        },
+                        "loc": ("date_range",),
+                        "input": request.date_range.model_dump(mode="json"),
+                    }
+                )
+        for field_name, role in (
+            ("parser_model", ModelRole.QUERY_PARSER),
+            ("waterbody_model", ModelRole.WATERBODY),
+        ):
+            selection = getattr(request, field_name)
+            if not catalog.supports(selection, role):
+                validation_errors.append(
+                    {
+                        "type": "value_error",
+                        "ctx": {
+                            "error": stable_validation_error(
+                                "model_selection_unsupported",
+                                "model is not selectable for role {role}",
+                                {"role": role.value},
+                            )
+                        },
+                        "loc": (field_name,),
+                        "input": selection.model_dump(mode="json"),
+                    }
+                )
+        if validation_errors:
+            raise ValidationError.from_exception_data(
+                "AnalysisRequestV1", validation_errors
+            )
+        configuration = configuration_override or request.to_configuration_snapshot(
+            self._analysis_timezone
         )
         run_id = self._new_id()
         if run_id in self._runs:
             raise ValueError("The generated run ID already exists.")
-        timestamp = self._clock.now()
         snapshot = AnalysisRunSnapshot(
             run_id=run_id,
             status=RunStatus.PENDING,
@@ -977,7 +1039,18 @@ class RunCoordinator:
             await runtime.workflow_start.wait()
             token.checkpoint()
             running = await self.mark_running(runtime.snapshot.run_id)
-            await self._workflow.run(WorkflowContext(running, runtime.query, token))
+            safe_request = AnalysisRequestV1.model_validate_json(
+                runtime.transcript_buffer.items[0].content.safe_body
+            )
+            await self._workflow.run(
+                WorkflowContext(
+                    running,
+                    runtime.query,
+                    token,
+                    safe_request,
+                    self,
+                )
+            )
             token.checkpoint()
             async with runtime.condition:
                 if self._workflow_has_unfinished_outputs_locked(runtime):
@@ -1016,12 +1089,21 @@ class RunCoordinator:
                 exception=exception,
             )
             return
+        failure = exception if isinstance(exception, WorkflowFailed) else None
         error = PublicError(
             error_id=self._new_id(),
-            code="workflow_failed",
-            message="The analysis workflow failed.",
-            failed_stage="analysis_workflow",
-            retryable=False,
+            code=failure.code if failure is not None else "workflow_failed",
+            message=(
+                failure.public_message
+                if failure is not None
+                else "The analysis workflow failed."
+            ),
+            failed_stage=(
+                failure.failed_stage
+                if failure is not None
+                else "analysis_workflow"
+            ),
+            retryable=failure.retryable if failure is not None else False,
         )
         try:
             snapshot = await self.fail_run(runtime.snapshot.run_id, error)
@@ -1407,6 +1489,12 @@ class RunCoordinator:
             )
             if identity is None:
                 raise ValueError("transcript item identity is not reserved in this run")
+            self._validate_m4_content_scope_locked(
+                runtime,
+                identity,
+                content_type,
+                content_schema_version,
+            )
             reserved_references = tuple(
                 TranscriptContentRef(
                     run_id=candidate.snapshot.run_id,
@@ -1437,6 +1525,16 @@ class RunCoordinator:
                 finalized,
                 self._clock.now(),
             )
+            content_ref = TranscriptContentRef(
+                run_id=runtime.snapshot.run_id,
+                item_id=identity.item_id,
+            )
+            if (content_type, content_schema_version) == ("query_understood", 1):
+                runtime.context_ref = content_ref
+                runtime.analysis_phase = AnalysisPhase.TOPOLOGY_BUILDING
+            elif (content_type, content_schema_version) == ("topology_ready", 1):
+                runtime.topology_ref = content_ref
+                runtime.analysis_phase = AnalysisPhase.TOPOLOGY_READY
             self._transcript_writer.enqueue_locked(
                 runtime,
                 item_ids=(identity.item_id,),
@@ -1475,6 +1573,14 @@ class RunCoordinator:
                     RunStatus.RUNNING,
                 )
             session_runtime = self._lookup_agent_session_locked(runtime, session_key)
+            if (
+                (content_type, content_schema_version)
+                == ("query_parser_message", 1)
+                and session_runtime.summary.agent_role is not AgentRole.QUERY_PARSER
+            ):
+                raise ValueError(
+                    "query_parser_message must belong to the query_parser session"
+                )
             if session_runtime.summary.status not in _SESSION_TRANSITIONS:
                 raise InvalidAgentSessionTransitionError(
                     session_runtime.summary,
@@ -2044,6 +2150,9 @@ class RunCoordinator:
         )
         return snapshot_from_state(
             runtime.snapshot,
+            runtime.analysis_phase,
+            runtime.context_ref,
+            runtime.topology_ref,
             sessions,
             waterbodies,
             self._transcript_writer.info_locked(runtime),
@@ -2205,6 +2314,10 @@ class RunCoordinator:
                     event,
                 )
             runtime.snapshot = snapshot
+            if resolved is RunStatus.RUNNING:
+                runtime.analysis_phase = AnalysisPhase.QUERY_UNDERSTANDING
+            elif resolved not in _RUN_TRANSITIONS:
+                runtime.analysis_phase = AnalysisPhase.TERMINAL
             if event is not None:
                 runtime.events.append(event)
                 runtime.last_error = (
@@ -2523,6 +2636,33 @@ class RunCoordinator:
         runtime.next_transcript_sequence += 1
         runtime.transcript_items.append(item)
         return item
+
+    @staticmethod
+    def _validate_m4_content_scope_locked(
+        runtime: RunRuntime,
+        identity: TranscriptItemIdentity,
+        content_type: str,
+        content_schema_version: int,
+    ) -> None:
+        key = content_type, content_schema_version
+        if key in {("query_parser_input", 1), ("query_understood", 1)}:
+            if identity.session_id is None:
+                raise ValueError(f"{content_type} must belong to a parser session")
+            session = RunCoordinator._lookup_agent_session_locked(
+                runtime,
+                identity.session_id,
+            )
+            if session.summary.agent_role is not AgentRole.QUERY_PARSER:
+                raise ValueError(f"{content_type} must belong to a parser session")
+        if key == ("query_understood", 1) and runtime.context_ref is not None:
+            raise ValueError("query_understood must be unique within a run")
+        if key == ("topology_ready", 1):
+            if identity.session_id is not None:
+                raise ValueError("topology_ready must be run-owned")
+            if runtime.context_ref is None:
+                raise ValueError("topology_ready requires query_understood")
+            if runtime.topology_ref is not None:
+                raise ValueError("topology_ready must be unique within a run")
 
     @staticmethod
     def _lookup_agent_session_locked(

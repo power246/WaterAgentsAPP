@@ -15,7 +15,13 @@ from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFail
 from app.application.correlation import request_id_context
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.main import create_app
+from tests.m4_support import (
+    PARSER_MODEL,
+    WATERBODY_MODEL,
+    create_request,
+    create_request_bytes,
+    create_test_app as create_app,
+)
 
 BASE = "/api/analysis/runs"
 SECRET = "private-token-and-query-do-not-expose"
@@ -32,6 +38,7 @@ SUPPORTED_ERRORS = {
     (409, "idempotency_key_conflict"),
     (409, "run_already_terminal"),
     (422, "validation_error"),
+    (422, "request_validation_failed"),
     (422, "invalid_history_cursor"),
     (500, "internal_error"),
     (503, "service_unavailable"),
@@ -152,14 +159,14 @@ async def call_stream(application, path, *, send_hook=None, disconnect=None, spe
     return messages
 
 
-@pytest.mark.parametrize("resolution", [None, "6h", "12h", "24h"])
+@pytest.mark.parametrize("resolution", [None, "auto", "6h", "12h", "24h"])
 @pytest.mark.parametrize("zone", ["America/Chicago", "Asia/Shanghai"])
 def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> None:
     async def exercise() -> None:
         workflow = GatedWorkflow()
         settings = AppSettings(analysis_timezone=zone)
         async with http_application(workflow=workflow, settings=settings, id_factory=SequentialIds()) as (app, client):
-            body = {"query": "  private query  "}
+            body = create_request("  private query  ")
             if resolution is not None:
                 body["time_resolution"] = resolution
             response = await client.post(BASE, json=body)
@@ -169,8 +176,14 @@ def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> No
                 "run_id": str(UUID(int=2)), "status": "pending",
                 "created_at": TIMESTAMP, "updated_at": TIMESTAMP,
                 "configuration": {
-                    "analysis_timezone": zone, "time_resolution": resolution or "12h",
-                    "time_resolution_source": "frontend" if resolution else "default",
+                    "analysis_timezone": zone,
+                    "time_resolution_preference": resolution or "12h",
+                    "time_resolution_preference_source": (
+                        "frontend" if resolution is not None else "default"
+                    ),
+                    "parser_model": PARSER_MODEL.model_dump(mode="json"),
+                    "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
+                    "memory_mode": "stateless",
                 },
             }
             assert response.json() == expected
@@ -204,7 +217,7 @@ def test_application_forwards_the_record_identity_factory() -> None:
             workflow=workflow,
             record_id_factory=record_ids,
         ) as (app, client):
-            response = await client.post(BASE, json={"query": "query"})
+            response = await client.post(BASE, json=create_request("query"))
             run_id = UUID(response.json()["run_id"])
             _, release, _ = await workflow.started.get()
             runtime = app.state.run_coordinator._runs[run_id]
@@ -226,10 +239,13 @@ def test_application_forwards_the_record_identity_factory() -> None:
     run(exercise)
 
 
-def test_default_workflow_completes_and_requests_without_a_key_are_independent() -> None:
+def test_explicit_test_workflow_completes_and_unkeyed_requests_are_independent() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
-            responses = [await client.post(BASE, json={"query": "query"}) for _ in range(2)]
+            responses = [
+                await client.post(BASE, json=create_request("query"))
+                for _ in range(2)
+            ]
             ids = [response.json()["run_id"] for response in responses]
             assert len(set(ids)) == 2
             assert all(response.json()["status"] == "pending" for response in responses)
@@ -257,7 +273,7 @@ def test_same_key_and_exact_body_return_original_receipt_with_new_request_id() -
     async def exercise() -> None:
         workflow = GatedWorkflow()
         key = str(uuid4())
-        raw_body = b'{"query":"lake","time_resolution":"6h"}'
+        raw_body = create_request_bytes("lake", time_resolution="6h")
         headers = {"Content-Type": "application/json", "Idempotency-Key": key}
         async with http_application(workflow=workflow) as (app, client):
             first = await client.post(BASE, content=raw_body, headers=headers)
@@ -276,11 +292,18 @@ def test_same_key_and_exact_body_return_original_receipt_with_new_request_id() -
 @pytest.mark.parametrize(
     "changed_body",
     [
-        b'{ "query":"lake","time_resolution":"6h"}',
-        b'{"time_resolution":"6h","query":"lake"}',
-        b'{"query":"l\\u0061ke","time_resolution":"6h"}',
-        b'{"query":"river","time_resolution":"6h"}',
-        b'{"query":"lake"}',
+        b" " + create_request_bytes("lake", time_resolution="6h"),
+        json.dumps(
+            dict(reversed(tuple(create_request("lake", time_resolution="6h").items()))),
+            separators=(",", ":"),
+        ).encode(),
+        json.dumps(
+            create_request("lake", time_resolution="6h"),
+            ensure_ascii=True,
+            indent=1,
+        ).encode(),
+        create_request_bytes("river", time_resolution="6h"),
+        create_request_bytes("lake"),
     ],
 )
 def test_same_key_rejects_every_raw_body_change(changed_body: bytes) -> None:
@@ -290,7 +313,7 @@ def test_same_key_rejects_every_raw_body_change(changed_body: bytes) -> None:
         async with http_application() as (app, client):
             first = await client.post(
                 BASE,
-                content=b'{"query":"lake","time_resolution":"6h"}',
+                content=create_request_bytes("lake", time_resolution="6h"),
                 headers=headers,
             )
             assert first.status_code == 201
@@ -312,7 +335,7 @@ def test_idempotency_key_must_be_uuid_v4(key: str) -> None:
         async with http_application() as (app, client):
             response = await client.post(
                 BASE,
-                json={"query": "lake"},
+                json=create_request("lake"),
                 headers={"Idempotency-Key": key},
             )
             envelope = assert_error(response, 422, "validation_error")
@@ -324,7 +347,7 @@ def test_idempotency_key_must_be_uuid_v4(key: str) -> None:
 
 def test_different_keys_and_missing_keys_do_not_deduplicate_equal_bodies() -> None:
     async def exercise() -> None:
-        raw_body = b'{"query":"lake"}'
+        raw_body = create_request_bytes("lake")
         async with http_application() as (app, client):
             requests = [
                 await client.post(
@@ -361,7 +384,7 @@ def test_receipt_survives_terminal_state_live_removal_restart_and_new_defaults()
         store = InMemoryTranscriptStore()
         workflow = GatedWorkflow()
         key = str(uuid4())
-        raw_body = b'{"query":"lake"}'
+        raw_body = create_request_bytes("lake")
         headers = {"Content-Type": "application/json", "Idempotency-Key": key}
         first_settings = AppSettings(analysis_timezone="America/Chicago")
         async with http_application(
@@ -397,11 +420,19 @@ def test_receipt_survives_terminal_state_live_removal_restart_and_new_defaults()
 
 
 @pytest.mark.parametrize("body", [
-    {}, {"query": ""}, {"query": "  \n "}, {"query": None}, {"query": 123},
-    {"query": [SECRET]}, {"query": {SECRET: SECRET}},
-    {"query": SECRET, "time_resolution": None}, {"query": SECRET, "time_resolution": "auto"},
-    {"query": SECRET, "time_resolution": SECRET}, {"query": SECRET, "fake_outcome": "failed"},
-    {"query": SECRET, SECRET: SECRET}, [SECRET], None,
+    {},
+    {**create_request(), "query": ""},
+    {**create_request(), "query": "  \n "},
+    {**create_request(), "query": None},
+    {**create_request(), "query": 123},
+    {**create_request(), "query": [SECRET]},
+    {**create_request(), "query": {SECRET: SECRET}},
+    create_request(SECRET, time_resolution=None),
+    create_request(SECRET, time_resolution=SECRET),
+    create_request(SECRET, fake_outcome="failed"),
+    create_request(SECRET, **{SECRET: SECRET}),
+    [SECRET],
+    None,
 ])
 def test_validation_uses_safe_envelope_and_creates_no_run(body, caplog, application_logs) -> None:
     caplog.set_level(logging.INFO)
@@ -409,7 +440,7 @@ def test_validation_uses_safe_envelope_and_creates_no_run(body, caplog, applicat
     async def exercise() -> None:
         async with http_application() as (app, client):
             response = await client.post(BASE, content=json.dumps(body), headers={"Content-Type": "application/json"})
-            envelope = assert_error(response, 422, "validation_error")
+            envelope = assert_error(response, 422, "request_validation_failed")
             assert envelope.run is None
             assert envelope.validation
             assert envelope.error.failed_stage is None
@@ -426,11 +457,11 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
     async def exercise() -> None:
         async with http_application() as (_, client):
             malformed = await client.post(BASE, content='{"query":"' + SECRET, headers={"Content-Type": "application/json"})
-            envelope = assert_error(malformed, 422, "validation_error")
+            envelope = assert_error(malformed, 422, "request_validation_failed")
             assert envelope.validation[0].type == "json_invalid"
             assert envelope.validation[0].message == "The request body must contain valid JSON."
             wrong_type = await client.post(BASE, content=SECRET, headers={"Content-Type": "text/plain"})
-            assert_error(wrong_type, 422, "validation_error")
+            assert_error(wrong_type, 422, "request_validation_failed")
             invalid_encoding = await client.post(BASE, content=b"\xff", headers={"Content-Type": "application/json"})
             envelope = assert_error(invalid_encoding, 400, "invalid_request")
             assert envelope.validation == ()
@@ -441,10 +472,118 @@ def test_malformed_json_and_wrong_content_type_have_safe_validation() -> None:
 def test_nul_query_is_a_stable_validation_error_before_persistence() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
-            response = await client.post(BASE, json={"query": "lake\x00level"})
-            envelope = assert_error(response, 422, "validation_error")
+            response = await client.post(BASE, json=create_request("lake\x00level"))
+            envelope = assert_error(response, 422, "request_validation_failed")
             assert envelope.validation[0].field == ("body", "query")
             assert envelope.validation[0].type == "value_error"
+            assert app.state.run_coordinator._runs == {}
+
+    run(exercise)
+
+
+@pytest.mark.parametrize(
+    ("body", "violation_type"),
+    [
+        (create_request(target=None), "target_value_required"),
+        (create_request(target={}), "target_value_required"),
+        (create_request(target={"comid": "0"}), "invalid_comid"),
+        (create_request(target={"comid": "001"}), "invalid_comid"),
+        (create_request(target={"comid": 123}), "invalid_comid"),
+        (
+            create_request(
+                target={"coordinates": {"latitude": 91.0, "longitude": 0.0}}
+            ),
+            "invalid_coordinates",
+        ),
+        (
+            create_request(date_range={"start_date": "2026-09-07"}),
+            "date_range_incomplete",
+        ),
+        (
+            create_request(
+                date_range={
+                    "start_date": "2026-09-08",
+                    "end_date": "2026-09-07",
+                }
+            ),
+            "date_range_reversed",
+        ),
+        (create_request(time_resolution=None), "invalid_time_resolution"),
+        (
+            {key: value for key, value in create_request().items() if key != "parser_model"},
+            "model_selection_required",
+        ),
+        (create_request(memory_mode="unknown"), "invalid_memory_mode"),
+        (create_request(api_key=SECRET), "extra_forbidden"),
+    ],
+)
+def test_m4_create_contract_returns_stable_violations(
+    body: object,
+    violation_type: str,
+) -> None:
+    async def exercise() -> None:
+        async with http_application() as (app, client):
+            response = await client.post(BASE, json=body)
+            envelope = assert_error(
+                response, 422, "request_validation_failed"
+            )
+            assert violation_type in {
+                violation.type for violation in envelope.validation
+            }
+            assert app.state.run_coordinator._runs == {}
+
+    run(exercise)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"comid": "123"},
+        {"coordinates": {"latitude": 30.0, "longitude": -97.0}},
+        {
+            "comid": "123",
+            "coordinates": {"latitude": 30.0, "longitude": -97.0},
+        },
+    ],
+)
+def test_m4_create_accepts_each_documented_target_shape(target: dict) -> None:
+    async def exercise() -> None:
+        async with http_application() as (_, client):
+            response = await client.post(BASE, json=create_request(target=target))
+            assert response.status_code == 201
+
+    run(exercise)
+
+
+def test_m4_create_uses_dynamic_date_window_and_model_roles() -> None:
+    async def exercise() -> None:
+        async with http_application() as (app, client):
+            out_of_bounds = await client.post(
+                BASE,
+                json=create_request(
+                    date_range={
+                        "start_date": "2026-08-30",
+                        "end_date": "2026-09-07",
+                    }
+                ),
+            )
+            assert_error(
+                out_of_bounds, 422, "request_validation_failed"
+            )
+            assert out_of_bounds.json()["validation"][0]["type"] == (
+                "date_range_out_of_bounds"
+            )
+
+            wrong_role = await client.post(
+                BASE,
+                json=create_request(
+                    parser_model=WATERBODY_MODEL.model_dump(mode="json")
+                ),
+            )
+            assert_error(wrong_role, 422, "request_validation_failed")
+            assert wrong_role.json()["validation"][0]["type"] == (
+                "model_selection_unsupported"
+            )
             assert app.state.run_coordinator._runs == {}
 
     run(exercise)
@@ -457,7 +596,7 @@ def test_cancel_is_immediate_idempotent_and_replays_one_terminal(running, caplog
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
-            created = await client.post(BASE, json={"query": SECRET})
+            created = await client.post(BASE, json=create_request(SECRET))
             run_id = created.json()["run_id"]
             runtime = app.state.run_coordinator._runs[UUID(run_id)]
             release = None
@@ -505,7 +644,7 @@ def test_terminal_cancel_conflict_returns_current_snapshot_and_new_error_id(fail
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
-            created = await client.post(BASE, json={"query": SECRET})
+            created = await client.post(BASE, json=create_request(SECRET))
             run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             if failure:
@@ -549,7 +688,7 @@ def test_run_lookup_errors_have_uniform_uuid_and_not_found_responses(endpoint, m
 def test_run_stream_ignores_last_event_id(cursor) -> None:
     async def exercise() -> None:
         async with http_application() as (_, client):
-            created = await client.post(BASE, json={"query": "query"})
+            created = await client.post(BASE, json=create_request("query"))
             run_id = created.json()["run_id"]
             response = await client.get(f"{BASE}/{run_id}/events", headers={"Last-Event-ID": cursor})
             assert response.status_code == 200
@@ -587,7 +726,11 @@ def test_unexpected_failure_is_safe_and_correlates_to_logs(monkeypatch, caplog, 
                 raise RuntimeError(SECRET + " /Users/private/source.py")
 
             monkeypatch.setattr(app.state.run_coordinator, "create_run", fail)
-            response = await client.post(BASE, json={"query": SECRET}, headers={"Authorization": SECRET, "Cookie": SECRET})
+            response = await client.post(
+                BASE,
+                json=create_request(SECRET),
+                headers={"Authorization": SECRET, "Cookie": SECRET},
+            )
             envelope = assert_error(response, 500, "internal_error")
             assert envelope.run is None and envelope.validation == ()
             records = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_failed"]
@@ -611,7 +754,7 @@ def test_http_exception_detail_is_not_public_and_allow_is_preserved(monkeypatch)
                 raise HTTPException(405, detail={"secret": SECRET}, headers={"Allow": "POST"})
 
             monkeypatch.setattr(app.state.run_coordinator, "create_run", fail)
-            response = await client.post(BASE, json={"query": SECRET})
+            response = await client.post(BASE, json=create_request(SECRET))
             assert_error(response, 405, "method_not_allowed")
             assert response.headers["allow"] == "POST"
 
@@ -622,7 +765,7 @@ def test_closing_coordinator_returns_retryable_service_unavailable() -> None:
     async def exercise() -> None:
         async with http_application() as (app, client):
             await app.state.run_coordinator.shutdown()
-            response = await client.post(BASE, json={"query": "query"})
+            response = await client.post(BASE, json=create_request("query"))
             envelope = assert_error(response, 503, "service_unavailable")
             assert envelope.error.retryable is True
             assert app.state.run_coordinator._runs == {}
@@ -638,7 +781,11 @@ def test_request_ids_are_server_owned_isolated_and_inherited_by_workflows(caplog
         async with http_application(workflow=workflow) as (_, client):
             spoofed = str(uuid4())
             responses = await asyncio.gather(*(
-                client.post(BASE, json={"query": f"query {index}"}, headers={"X-Request-ID": spoofed})
+                client.post(
+                    BASE,
+                    json=create_request(f"query {index}"),
+                    headers={"X-Request-ID": spoofed},
+                )
                 for index in range(2)
             ))
             contexts = [await workflow.started.get() for _ in range(2)]
@@ -672,7 +819,7 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
-            created = await client.post(BASE, json={"query": SECRET})
+            created = await client.post(BASE, json=create_request(SECRET))
             run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             workflow.error = RuntimeError(SECRET)
@@ -714,7 +861,7 @@ def test_stream_disconnect_or_write_failure_does_not_cancel_workflow(disconnect_
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
-            created = await client.post(BASE, json={"query": SECRET})
+            created = await client.post(BASE, json=create_request(SECRET))
             run_id = created.json()["run_id"]
             context, release, _ = await workflow.started.get()
             first_event = asyncio.Event()
@@ -805,7 +952,37 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     assert set(events["responses"]["200"]["content"]) == {"text/event-stream"}
     assert "204" not in events["responses"]
     assert all(parameter["name"] != "Last-Event-ID" for parameter in events["parameters"])
-    assert set(schema["components"]["schemas"]["CreateAnalysisRunRequest"]["properties"]) == {"query", "time_resolution"}
+    create_schema = schema["components"]["schemas"]["CreateAnalysisRunRequest"]
+    assert set(create_schema["properties"]) == {
+        "query",
+        "target",
+        "date_range",
+        "time_resolution",
+        "parser_model",
+        "waterbody_model",
+        "memory_mode",
+    }
+    assert create_schema["required"] == [
+        "query",
+        "parser_model",
+        "waterbody_model",
+        "memory_mode",
+    ]
+    assert "anyOf" not in create_schema["properties"]["time_resolution"]
+    assert "default" not in create_schema["properties"]["target"]
+    assert "default" not in create_schema["properties"]["date_range"]
+    target_schema = schema["components"]["schemas"]["AnalysisTargetV1"]
+    assert all(
+        "anyOf" not in target_schema["properties"][field_name]
+        and "default" not in target_schema["properties"][field_name]
+        for field_name in ("comid", "coordinates")
+    )
+    assert schema["components"]["schemas"]["AnalysisDateRangeV1"][
+        "required"
+    ] == ["start_date", "end_date"]
+    assert not {"api_key", "credential", "endpoint"}.intersection(
+        create_schema["properties"]
+    )
     assert "HTTPValidationError" not in schema["components"]["schemas"]
     session_events = paths[BASE + "/{run_id}/sessions/{session_id}/events"]["get"]
     last_event_id = next(
@@ -828,7 +1005,7 @@ def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, 
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow, keepalive_interval=0.000001) as (app, client):
-            created = await client.post(BASE, json={"query": "query"})
+            created = await client.post(BASE, json=create_request("query"))
             run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             comment_received = asyncio.Event()
@@ -873,7 +1050,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
     async def exercise() -> None:
         workflow = GatedWorkflow()
         async with http_application(workflow=workflow) as (app, client):
-            created = await client.post(BASE, json={"query": "query"})
+            created = await client.post(BASE, json=create_request("query"))
             run_id = created.json()["run_id"]
             _, release, _ = await workflow.started.get()
             original_encode = response_module.encode_event
@@ -936,7 +1113,7 @@ def test_http_logging_failure_does_not_change_responses_or_leak_context() -> Non
         logger.setLevel(logging.INFO)
         try:
             async with http_application() as (_, client):
-                created = await client.post(BASE, json={"query": "query"})
+                created = await client.post(BASE, json=create_request("query"))
                 assert created.status_code == 201
                 response = await client.get("/missing")
                 assert_error(response, 404, "not_found")

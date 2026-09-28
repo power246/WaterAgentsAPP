@@ -201,8 +201,12 @@ class InMemoryTranscriptStore:
             run_items = [
                 item for item in run_items
                 if item.item_id == candidate.created_item_id
+                or item.content_type == "query_understood"
             ]
         item_ids = {item.item_id for item in run_items}
+        session_ids = {
+            item.session_id for item in run_items if item.session_id is not None
+        }
         terminal_items = [
             item
             for item in run_items
@@ -228,14 +232,18 @@ class InMemoryTranscriptStore:
                 (
                     session
                     for session in self._sessions.values()
-                    if any(
-                        item.session_id == session.session_id
-                        and item.run_id == run_id
-                        for item in self._items.values()
+                    if session.session_id in session_ids
+                    or (
+                        not summary_only
+                        and any(
+                            item.session_id == session.session_id
+                            and item.run_id == run_id
+                            for item in self._items.values()
+                        )
                     )
                 ),
                 key=lambda session: (session.created_at, session.session_id),
-            )) if not summary_only else (),
+            )),
             items=tuple(run_items),
             contents=tuple(
                 content

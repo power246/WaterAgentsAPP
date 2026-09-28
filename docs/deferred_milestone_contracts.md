@@ -264,7 +264,7 @@ Contract changes:
 - **M4-C08 — History query 扩展**：在 M3 history DTO 上增加 nullable `context_summary`，包含真实 target/location、date range、mode、实际 resolution 和 params；只从持久化的版本化 AnalysisContext 投影，不从 query 文本临时重算。损坏/未知内容进入 issues，不用 null 冒充未解析。
 - **M4-C09 — 输入优先级与模型权限**：前端只提供地图 target（COMID/坐标）、date range、resolution、两个模型选择和 memory mode；不提供参数表单。target/date 有值时高于 query，缺失时才用自然语言；实质冲突、缺失、歧义或越界均在 topology 前失败。前端分别选择 parser/waterbody provider+model，后端按角色模型目录校验并固化，不接收/回显 key；parser 只有 schema invalid 时最多修复一次，不注册也不授权外部工具，不静默 failover。
 - **M4-C10 — Availability**：NLDI 只提供河网/站点关联；USGS WDFN OGC API v1 或 capability 指定的同等级 metadata 判断“参数 × time segment”候选资格，旧 WaterServices 不进入新基线。历史要求 metadata envelope 覆盖请求段，预测要求起点前 48h 内存在近期基线可能；actual evidence 仍由 M5 重新验证。empty 与 unavailable/invalid 必须分开。
-- **M4-C11 — Bounded deterministic BFS**：每条支流按 coverage unit 找最近合格 inlet；已覆盖单元停止、未覆盖继续。默认硬限制为 100 km/路径、12 hop/路径、128 unique nodes/整图、8 并发；按 `(depth,distance,comid)` 稳定合并。自然无源与达到上限分别记录，技术失败不能降级成无数据。
+- **M4-C11 — Bounded deterministic BFS**：每条支流按 coverage unit 找最近合格 inlet；已覆盖单元停止、未覆盖继续。默认硬限制为 100 km/路径、12 hop/路径、128 unique nodes/整图、8 并发；按 `(depth,distance,comid)` 稳定合并。自然无源与达到上限分别记录；child 在入图前受限时用 `blocked_upstream_comid` 保留每条支流身份，不能因 parent outcome 相同而去重合并；技术失败不能降级成无数据。
 - **M4-C12 — Evidence gate 接缝**：M4 只产出 context、graph 与 availability qualification。M5/M6 必须按“目标参数 × 时间段”判断直接/白名单侧面/完全无证据，并对同一单元额外要求必需 discharge 的直接或白名单侧面证据；任一必需部分完全无证据都跳过对应模型并产生 deterministic indeterminate。`partial_topology`/`insufficient_evidence` 是覆盖与结果语义，不新增 run 状态。
 - **M4-C13 — Milestone 集成边界**：`memory_mode` 在 request/config/context 中稳定传递，由 M8 实现；M4 不增加临时 unsupported 响应、UI feature flag 或假行为。M4 有内部契约测试，但不形成独立产品版本；M9 完成后才开始正式前后端联调和第一版统一端到端验收。
 
@@ -499,6 +499,14 @@ cancelled
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、M2 保留基线、`M3-C01`–`M3-C20`、`M3-A01`–`M3-A12` | [M3 契约覆盖矩阵](M3/m3_implementation_todo.md#契约覆盖矩阵)、[GLOBAL / MR 门禁审计](M3/m3_implementation_todo.md#global--mr-门禁审计)、[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API/runbook](M3/m3_transcript_history_api.md)与[前端交接](frontend_integration_contracts.md)。[Milestone 11–16](M3/m3_implementation_todo.md#milestone-11认证凭据与公开-metadata-脱敏) 保留既有证据；[Milestone 17–19](M3/m3_implementation_todo.md#milestone-17windows-正式入口与事件循环-factory) 已完成本机实现与最终复审。 | 补齐 Ubuntu/macOS/Windows 完整测试、两项 smoke 及同一已保存 PostgreSQL 的跨系统核对后，才可在最终承接表登记 `implemented`。 |
+
+### M4 待验收索引
+
+M4 Milestone 0–10 已完成本机实现与契约审计；这里只索引本机证据，不把缺少的隔离 PostgreSQL、需凭据 provider/parser smoke 或三平台 CI 冒充中心最终承接。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07` | [M4 契约覆盖矩阵](M4/m4_implementation_todo.md#契约覆盖矩阵)、[实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[API/前端接入](M4/m4_query_understanding_topology_api.md)和[154 项 capability 目录](M4/m4_parameter_capability_catalog.md)。固定 fake workflow、离线 manifest 审计、1 请求官方 refresh、完整非 PostgreSQL backend regression 与 standalone run SSE smoke 已在 Windows 本机通过。 | 在专用 PostgreSQL 测试库运行完整 persistence/health/history/restart，并补齐 Google 与已配置 parser provider contract smoke 及 Ubuntu/macOS/Windows 同一提交 CI 后，再评估中心最终承接。 |
 
 未新增、拆分、替换或取消 contract；Milestone 11–16 是既有 M3/Global/MR 约束的审查修复分解。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 

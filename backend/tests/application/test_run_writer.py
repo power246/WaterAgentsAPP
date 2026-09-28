@@ -20,6 +20,12 @@ from app.application.analysis_runs.persistence import (
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from tests.m4_support import (
+    MODEL_CATALOG,
+    NoOpWorkflow,
+    create_request,
+    create_request_bytes,
+)
 
 
 class StepClock:
@@ -214,6 +220,7 @@ def coordinator_for(
 ) -> RunCoordinator:
     return RunCoordinator(
         StepClock(),
+        model_catalog=MODEL_CATALOG,
         transcript_store=store,
         workflow=workflow,
         shutdown_grace_period=0,
@@ -254,7 +261,9 @@ def test_persistence_attempt_timeout_must_be_finite_and_positive(timeout) -> Non
     with pytest.raises(ValueError, match="finite and positive"):
         RunCoordinator(
             StepClock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=InMemoryTranscriptStore(),
+            workflow=NoOpWorkflow(),
             persistence_attempt_timeout=timeout,
         )
 
@@ -265,8 +274,8 @@ def test_different_runs_write_in_parallel_but_each_run_has_one_writer() -> None:
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            first = await coordinator.create_run(b'{"query":"first"}')
-            second = await coordinator.create_run(b'{"query":"second"}')
+            first = await coordinator.create_run(create_request_bytes("first"))
+            second = await coordinator.create_run(create_request_bytes("second"))
             await workflow.calls.get()
             await workflow.calls.get()
             first_batch = await store.started.get()
@@ -296,7 +305,7 @@ def test_same_run_never_overlaps_writes_and_respects_batch_item_target() -> None
             persistence_batch_items=2,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await store.started.get()
             for index in range(3):
@@ -306,7 +315,7 @@ def test_same_run_never_overlaps_writes_and_respects_batch_item_target() -> None
                     identity.item_id,
                     "analysis_request",
                     1,
-                    {"query": f"fact {index}"},
+                    create_request(f"fact {index}"),
                 )
             await asyncio.sleep(0)
             assert len(store.attempts) == 1
@@ -335,7 +344,7 @@ def test_one_run_freezes_failed_batch_before_new_groups_and_never_writes_empty()
             persistence_sleep=sleeper,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await sleeper.blocked.wait()
             session = await coordinator.prepare_agent_session(
@@ -370,7 +379,7 @@ def test_higher_sequence_can_persist_while_draft_keeps_state_pending() -> None:
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             draft = await coordinator.reserve_transcript_item(created.run_id)
@@ -390,7 +399,7 @@ def test_higher_sequence_can_persist_while_draft_keeps_state_pending() -> None:
                 draft.item_id,
                 "analysis_request",
                 1,
-                {"query": "later finalized"},
+                create_request("later finalized"),
             )
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
         finally:
@@ -406,7 +415,7 @@ def test_reference_waiting_does_not_block_independent_ready_facts() -> None:
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             target = await coordinator.reserve_transcript_item(created.run_id)
@@ -429,7 +438,7 @@ def test_reference_waiting_does_not_block_independent_ready_facts() -> None:
                 independent.item_id,
                 "analysis_request",
                 1,
-                {"query": "independent"},
+                create_request("independent"),
             )
             await wait_until(lambda: independent.item_id in store._items)
             assert dependent.item_id not in store._items
@@ -442,7 +451,7 @@ def test_reference_waiting_does_not_block_independent_ready_facts() -> None:
                 target.item_id,
                 "analysis_request",
                 1,
-                {"query": "target"},
+                create_request("target"),
             )
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             assert target.item_id in store._items
@@ -474,7 +483,7 @@ def test_terminal_suppresses_referenced_draft_without_stranding_dependent(
             transcript_registry=registry,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             session = None
@@ -575,7 +584,7 @@ def test_terminal_suppresses_referenced_draft_without_stranding_dependent(
                 target.item_id,
                 "analysis_request",
                 1,
-                {"query": "late finalize must stay suppressed"},
+                create_request("late finalize must stay suppressed"),
             ) is target
             assert store._items[target.item_id].inline_body == original_body
         finally:
@@ -591,8 +600,8 @@ def test_finalize_rejects_unknown_and_cross_run_references_without_drafts() -> N
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            first = await coordinator.create_run(b'{"query":"first"}')
-            second = await coordinator.create_run(b'{"query":"second"}')
+            first = await coordinator.create_run(create_request_bytes("first"))
+            second = await coordinator.create_run(create_request_bytes("second"))
             await workflow.calls.get()
             await workflow.calls.get()
             await wait_for_state(coordinator, first.run_id, PersistenceState.UP_TO_DATE)
@@ -633,7 +642,7 @@ def test_finalize_rejects_unknown_and_cross_run_references_without_drafts() -> N
                 foreign_target.item_id,
                 "analysis_request",
                 1,
-                {"query": "target"},
+                create_request("target"),
             )
             await wait_for_state(coordinator, first.run_id, PersistenceState.UP_TO_DATE)
         finally:
@@ -649,7 +658,7 @@ def test_unknown_commit_is_verified_without_rewriting_the_frozen_batch() -> None
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             assert store.write_attempts == 1
@@ -668,7 +677,7 @@ def test_pending_session_creation_unknown_commit_is_verified_in_memory() -> None
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
 
@@ -697,7 +706,7 @@ def test_unexpected_writer_failure_is_nonretryable_and_writer_can_recover(
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             runtime = coordinator._runs[created.run_id]
@@ -723,7 +732,7 @@ def test_unexpected_writer_failure_is_nonretryable_and_writer_can_recover(
                 item.item_id,
                 "analysis_request",
                 1,
-                {"query": "recoverable fact"},
+                create_request("recoverable fact"),
             )
             await wait_for_state(
                 coordinator,
@@ -761,7 +770,7 @@ def test_persistence_failure_logs_use_warning_error_id_and_actual_attempts(
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             store.failures = None
@@ -814,7 +823,7 @@ def test_attempt_timeout_finishes_old_call_before_backoff_and_shares_budget() ->
             persistence_sleep=sleeper,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await sleeper.blocked.wait()
             assert store.cancelled_write.is_set()
@@ -848,7 +857,7 @@ def test_retry_budget_delays_exhaustion_and_manual_recovery_are_stable() -> None
             persistence_sleep=sleeper,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(
                 coordinator,
@@ -872,7 +881,7 @@ def test_retry_budget_delays_exhaustion_and_manual_recovery_are_stable() -> None
                 draft.item_id,
                 "analysis_request",
                 1,
-                {"query": "new fact"},
+                create_request("new fact"),
             )
             await asyncio.sleep(0)
             assert store.verify_attempts == attempts
@@ -915,7 +924,7 @@ def test_completion_uses_third_retry_delivery_window(recover: bool) -> None:
             completion_delivery_grace=0.05,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await sleeper.blocked.wait()
             if recover:
@@ -948,7 +957,7 @@ def test_completion_does_not_restart_an_expired_delivery_window() -> None:
             completion_delivery_grace=0.01,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await sleeper.blocked.wait()
             await asyncio.sleep(0.02)
@@ -976,7 +985,7 @@ def test_cancel_wins_during_completion_delivery_window() -> None:
             completion_delivery_grace=1,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await sleeper.blocked.wait()
             completion = asyncio.create_task(coordinator.complete_run(created.run_id))
@@ -1003,7 +1012,7 @@ def test_terminal_write_failure_never_reselects_business_terminal() -> None:
             persistence_sleep=sleeper,
         )
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             completed = await coordinator.complete_run(created.run_id)
@@ -1029,7 +1038,7 @@ def test_recovery_fact_failure_does_not_recursively_add_recovery_facts() -> None
         workflow = HoldingWorkflow()
         coordinator = coordinator_for(store, workflow)
         try:
-            created = await coordinator.create_run(b'{"query":"lake"}')
+            created = await coordinator.create_run(create_request_bytes())
             await workflow.calls.get()
             await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
             facts = [

@@ -11,7 +11,7 @@ def _requirement_name(requirement: str) -> str:
     return re.split(r"[<>=!~\[]", requirement, maxsplit=1)[0].lower()
 
 
-def test_m2_project_metadata_adds_only_the_database_dependency_set() -> None:
+def test_project_metadata_separates_runtime_and_development_dependencies() -> None:
     with (BACKEND_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         pyproject = tomllib.load(pyproject_file)
 
@@ -26,6 +26,7 @@ def test_m2_project_metadata_adds_only_the_database_dependency_set() -> None:
     assert production == {
         "alembic",
         "fastapi",
+        "httpx",
         "psycopg",
         "pydantic",
         "pydantic-settings",
@@ -33,10 +34,35 @@ def test_m2_project_metadata_adds_only_the_database_dependency_set() -> None:
         "tzdata",
         "uvicorn",
     }
-    assert development == {"httpx", "pytest"}
+    assert development == {"pytest"}
     assert project["scripts"]["wateragents-db"] == (
         "app.infrastructure.persistence.cli:main"
     )
+
+
+def test_lockfile_records_httpx_as_a_runtime_dependency() -> None:
+    with (BACKEND_ROOT / "uv.lock").open("rb") as lock_file:
+        lock = tomllib.load(lock_file)
+
+    project = next(
+        package
+        for package in lock["package"]
+        if package["name"] == "wateragents-backend"
+    )
+    runtime = {dependency["name"] for dependency in project["dependencies"]}
+    development = {
+        dependency["name"]
+        for dependency in project["optional-dependencies"]["dev"]
+    }
+    httpx_requirement = next(
+        requirement
+        for requirement in project["metadata"]["requires-dist"]
+        if requirement["name"] == "httpx"
+    )
+
+    assert "httpx" in runtime
+    assert "httpx" not in development
+    assert "marker" not in httpx_requirement
 
 
 def test_application_source_avoids_platform_specific_runtime_assumptions() -> None:

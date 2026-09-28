@@ -12,8 +12,12 @@ from pydantic import (
 from app.domain.common import NonEmptyString, UtcDatetime
 from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
-from app.domain.time.time_resolution import TimeResolution
-from app.domain.time.time_resolution_source import TimeResolutionSource
+from app.domain.memory import MemoryMode
+from app.domain.model_catalog import ModelSelection
+from app.domain.time.time_resolution_preference import TimeResolutionPreference
+from app.domain.time.time_resolution_preference_source import (
+    TimeResolutionPreferenceSource,
+)
 from app.domain.time.timezone import get_iana_timezone
 
 PositiveSequence: TypeAlias = Annotated[int, Field(strict=True, gt=0)]
@@ -32,6 +36,14 @@ class RunStatus(DomainEnum):
     COMPLETED_WITH_PERSISTENCE_ERROR = "completed_with_persistence_error"
 
 
+class AnalysisPhase(DomainEnum):
+    QUEUED = "queued"
+    QUERY_UNDERSTANDING = "query_understanding"
+    TOPOLOGY_BUILDING = "topology_building"
+    TOPOLOGY_READY = "topology_ready"
+    TERMINAL = "terminal"
+
+
 class AgentSessionStatus(DomainEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -47,14 +59,28 @@ class AgentRole(DomainEnum):
 
 class AnalysisConfigurationSnapshot(DomainModel):
     analysis_timezone: NonEmptyString
-    time_resolution: TimeResolution
-    time_resolution_source: TimeResolutionSource
+    time_resolution_preference: TimeResolutionPreference
+    time_resolution_preference_source: TimeResolutionPreferenceSource
+    parser_model: ModelSelection
+    waterbody_model: ModelSelection
+    memory_mode: MemoryMode
 
     @field_validator("analysis_timezone")
     @classmethod
     def validate_timezone(cls, value: str) -> str:
         get_iana_timezone(value)
         return value
+
+    @model_validator(mode="after")
+    def validate_resolution_preference_source(self) -> "AnalysisConfigurationSnapshot":
+        if (
+            self.time_resolution_preference_source
+            is TimeResolutionPreferenceSource.DEFAULT
+            and self.time_resolution_preference
+            is not TimeResolutionPreference.TWELVE_HOURS
+        ):
+            raise ValueError("default time resolution preference must be 12h")
+        return self
 
 
 class AnalysisRunSnapshot(DomainModel):

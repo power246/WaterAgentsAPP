@@ -17,11 +17,16 @@ from app.application.analysis_runs.models import RunStatus
 from app.application.analysis_runs.workflow import WorkflowContext, WorkflowFailed
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.main import create_app
-
-CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
-    "America/Chicago"
+from tests.m4_support import (
+    MODEL_CATALOG,
+    NoOpWorkflow,
+    create_request,
+    create_test_app as create_app,
 )
+
+CONFIGURATION = CreateAnalysisRunRequest.model_validate(
+    create_request("query")
+).to_configuration_snapshot("America/Chicago")
 SECRET = "Authorization: Bearer private-token; query=private-location"
 
 
@@ -522,6 +527,7 @@ def test_done_callback_consumes_unexpected_wrapper_failure_and_marks_quiesced(ca
         coordinator = RunCoordinator(
             FixedClock(),
             transcript_store=InMemoryTranscriptStore(),
+            model_catalog=MODEL_CATALOG,
             workflow=GatedWorkflow(),
             id_factory=lambda: next(identifiers),
         )
@@ -554,6 +560,8 @@ def test_shutdown_grace_period_rejects_unbounded_or_negative_values(grace) -> No
         RunCoordinator(
             FixedClock(),
             transcript_store=InMemoryTranscriptStore(),
+            model_catalog=MODEL_CATALOG,
+            workflow=NoOpWorkflow(),
             shutdown_grace_period=grace,
         )
 

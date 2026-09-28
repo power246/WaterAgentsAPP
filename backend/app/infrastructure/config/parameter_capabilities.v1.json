@@ -1,0 +1,5462 @@
+{
+  "schema_version": 1,
+  "catalog_key_set_sha256": "3f9a0146b474c6c637adf837774b0680c389025cb60771fae55f11ab13d2c8bb",
+  "evidence_rule_ids": [
+    "same_parameter_upstream",
+    "same_location_adjacent_time",
+    "turbidity_precipitation_discharge_directional",
+    "discharge_gage_height_estimate",
+    "discharge_basin_estimate"
+  ],
+  "capabilities": [
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00004"
+      },
+      "canonical_name": "Stream width",
+      "canonical_unit": "ft",
+      "official_name": "Stream width",
+      "official_unit": "ft",
+      "official_group": "PHY",
+      "medium": null,
+      "sample_fraction": null,
+      "aliases_zh": [
+        "河道宽度"
+      ],
+      "aliases_en": [
+        "channel width"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00004_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00010"
+      },
+      "canonical_name": "Temperature, water",
+      "canonical_unit": "deg C",
+      "official_name": "Temperature, water",
+      "official_unit": "deg C",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "水温"
+      ],
+      "aliases_en": [
+        "Temperature",
+        "water temperature",
+        "water temp"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00010_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00045"
+      },
+      "canonical_name": "Precipitation",
+      "canonical_unit": "in",
+      "official_name": "Precipitation",
+      "official_unit": "in",
+      "official_group": "PHY",
+      "medium": null,
+      "sample_fraction": null,
+      "aliases_zh": [
+        "降水量"
+      ],
+      "aliases_en": [
+        "rainfall"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series"
+      ],
+      "observation_providers": [
+        "wdfn_time_series"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00045_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00055"
+      },
+      "canonical_name": "Stream velocity",
+      "canonical_unit": "ft/sec",
+      "official_name": "Stream velocity",
+      "official_unit": "ft/sec",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "河流流速"
+      ],
+      "aliases_en": [
+        "flow velocity"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00055_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00060"
+      },
+      "canonical_name": "Discharge",
+      "canonical_unit": "ft3/s",
+      "official_name": "Discharge",
+      "official_unit": "ft3/s",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "流量"
+      ],
+      "aliases_en": [
+        "streamflow",
+        "river flow"
+      ],
+      "roles": [
+        "target",
+        "required_support"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time",
+        "discharge_gage_height_estimate",
+        "discharge_basin_estimate"
+      ],
+      "fixture_identity": "usgs_parameter_00060_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00061"
+      },
+      "canonical_name": "Discharge, instantaneous",
+      "canonical_unit": "ft3/s",
+      "official_name": "Discharge, instant.",
+      "official_unit": "ft3/s",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "瞬时流量"
+      ],
+      "aliases_en": [
+        "Discharge",
+        "Discharge, instant.",
+        "instantaneous streamflow"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series"
+      ],
+      "observation_providers": [
+        "wdfn_time_series"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00061_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00065"
+      },
+      "canonical_name": "Gage height",
+      "canonical_unit": "ft",
+      "official_name": "Gage height",
+      "official_unit": "ft",
+      "official_group": "PHY",
+      "medium": null,
+      "sample_fraction": null,
+      "aliases_zh": [
+        "水位"
+      ],
+      "aliases_en": [
+        "river stage"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series"
+      ],
+      "observation_providers": [
+        "wdfn_time_series"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00065_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00074"
+      },
+      "canonical_name": "Light transmission",
+      "canonical_unit": "%",
+      "official_name": "Light transmission",
+      "official_unit": "%",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "透光率"
+      ],
+      "aliases_en": [
+        "optical transmission"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00074_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00078"
+      },
+      "canonical_name": "Transparency, Secchi",
+      "canonical_unit": "m",
+      "official_name": "Transparency, Secchi",
+      "official_unit": "m",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "塞氏盘透明度"
+      ],
+      "aliases_en": [
+        "Transparency",
+        "secchi depth"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00078_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00080"
+      },
+      "canonical_name": "Color",
+      "canonical_unit": "PCU",
+      "official_name": "Color",
+      "official_unit": "PCU",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "水色"
+      ],
+      "aliases_en": [
+        "water colour"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00080_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00081"
+      },
+      "canonical_name": "Apparent color",
+      "canonical_unit": "PCU",
+      "official_name": "Apparent color",
+      "official_unit": "PCU",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "表观色度"
+      ],
+      "aliases_en": [
+        "apparent water color"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00081_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00090"
+      },
+      "canonical_name": "Redox potential",
+      "canonical_unit": "mV",
+      "official_name": "Redox potential",
+      "official_unit": "mV",
+      "official_group": "PHY",
+      "medium": null,
+      "sample_fraction": null,
+      "aliases_zh": [
+        "氧化还原电位"
+      ],
+      "aliases_en": [
+        "orp"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00090_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00095"
+      },
+      "canonical_name": "Specific conductance at 25C",
+      "canonical_unit": "uS/cm @25C",
+      "official_name": "Specific cond at 25C",
+      "official_unit": "uS/cm @25C",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "比电导率"
+      ],
+      "aliases_en": [
+        "Specific cond at 25C",
+        "conductivity",
+        "specific conductivity"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00095_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00310"
+      },
+      "canonical_name": "BOD, 5 day, 20 deg",
+      "canonical_unit": "mg/l",
+      "official_name": "BOD, 5 day, 20 deg",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "五日生化需氧量"
+      ],
+      "aliases_en": [
+        "BOD"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00310_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00340"
+      },
+      "canonical_name": "COD, high level, unfiltered",
+      "canonical_unit": "mg/l",
+      "official_name": "COD, high level, wu",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "高浓度化学需氧量"
+      ],
+      "aliases_en": [
+        "COD",
+        "COD, high level, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00340_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00400"
+      },
+      "canonical_name": "pH",
+      "canonical_unit": "standard units",
+      "official_name": "pH",
+      "official_unit": "std units",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "现场酸碱度"
+      ],
+      "aliases_en": [
+        "field ph",
+        "acidity"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00400_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00403"
+      },
+      "canonical_name": "pH, unfiltered, laboratory",
+      "canonical_unit": "standard units",
+      "official_name": "pH, wu, lab",
+      "official_unit": "std units",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "实验室酸碱度"
+      ],
+      "aliases_en": [
+        "pH",
+        "pH, wu, lab",
+        "laboratory ph"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00403_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00480"
+      },
+      "canonical_name": "Salinity",
+      "canonical_unit": "ppth",
+      "official_name": "Salinity",
+      "official_unit": "ppth",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "盐度"
+      ],
+      "aliases_en": [
+        "salt concentration"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00480_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00500"
+      },
+      "canonical_name": "Total solids dried at 105C",
+      "canonical_unit": "mg/l",
+      "official_name": "Total solids dried @ 105C",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "总固体"
+      ],
+      "aliases_en": [
+        "Total solids dried @ 105C",
+        "total solids"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00500_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00515"
+      },
+      "canonical_name": "Dissolved solids at 105C",
+      "canonical_unit": "mg/l",
+      "official_name": "Diss. solids @ 105C",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "一百零五度溶解性固体"
+      ],
+      "aliases_en": [
+        "Diss. solids @ 105C",
+        "dissolved solids"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00515_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00530"
+      },
+      "canonical_name": "Suspended solids",
+      "canonical_unit": "mg/l",
+      "official_name": "Suspended solids",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Non-filterable",
+      "aliases_zh": [
+        "悬浮固体"
+      ],
+      "aliases_en": [
+        "total suspended solids"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00530_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00535"
+      },
+      "canonical_name": "Loss on ignition of suspended solids",
+      "canonical_unit": "mg/l",
+      "official_name": "LOI of susp. solids",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Non-filterable",
+      "aliases_zh": [
+        "悬浮固体灼烧损失"
+      ],
+      "aliases_en": [
+        "LOI of susp. solids"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00535_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00900"
+      },
+      "canonical_name": "Hardness, water",
+      "canonical_unit": "mg/l CaCO3",
+      "official_name": "Hardness, water",
+      "official_unit": "mg/l CaCO3",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "水硬度"
+      ],
+      "aliases_en": [
+        "Hardness",
+        "water hardness"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00900_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "53048"
+      },
+      "canonical_name": "Transparency, Secchi tube",
+      "canonical_unit": "cm",
+      "official_name": "Transparency, Secchi tube",
+      "official_unit": "cm",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "塞氏管透明度"
+      ],
+      "aliases_en": [
+        "Transparency",
+        "secchi tube depth"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_53048_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "61028"
+      },
+      "canonical_name": "Turbidity, field",
+      "canonical_unit": "NTU",
+      "official_name": "Turbidity, wu,field",
+      "official_unit": "NTU",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "现场浊度"
+      ],
+      "aliases_en": [
+        "Turbidity",
+        "Turbidity, wu,field",
+        "ntu turbidity"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time",
+        "turbidity_precipitation_discharge_directional"
+      ],
+      "fixture_identity": "usgs_parameter_61028_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "63680"
+      },
+      "canonical_name": "Turbidity, Formazin Nephelometric",
+      "canonical_unit": "FNU",
+      "official_name": "Turbidity, Form Neph",
+      "official_unit": "FNU",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "福尔马肼浊度"
+      ],
+      "aliases_en": [
+        "Turbidity",
+        "Turbidity, Form Neph",
+        "fnu turbidity"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time",
+        "turbidity_precipitation_discharge_directional"
+      ],
+      "fixture_identity": "usgs_parameter_63680_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "70300"
+      },
+      "canonical_name": "Dissolved solids dried at 180C",
+      "canonical_unit": "mg/l",
+      "official_name": "Diss solids dry@180C",
+      "official_unit": "mg/l",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "一百八十度溶解性固体"
+      ],
+      "aliases_en": [
+        "Diss solids dry@180C",
+        "total dissolved solids"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_70300_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "90860"
+      },
+      "canonical_name": "Salinity at 25C",
+      "canonical_unit": "PSU",
+      "official_name": "Salinity, at 25C",
+      "official_unit": "PSU",
+      "official_group": "PHY",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "二十五摄氏度盐度"
+      ],
+      "aliases_en": [
+        "Salinity, at 25C",
+        "practical salinity"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_90860_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00300"
+      },
+      "canonical_name": "Dissolved oxygen",
+      "canonical_unit": "mg/l",
+      "official_name": "Dissolved oxygen",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "溶解氧"
+      ],
+      "aliases_en": [
+        "do",
+        "oxygen concentration"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00300_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00301"
+      },
+      "canonical_name": "Dissolved oxygen, percent saturation",
+      "canonical_unit": "% saturation",
+      "official_name": "Diss oxygen,%saturtn",
+      "official_unit": "% saturatn",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "溶解氧饱和度"
+      ],
+      "aliases_en": [
+        "Dissolved oxygen",
+        "Diss oxygen,%saturtn",
+        "do saturation"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00301_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00410"
+      },
+      "canonical_name": "Acid neutralizing capacity, field",
+      "canonical_unit": "mg/l CaCO3",
+      "official_name": "ANC, wu,fxdEP,fld",
+      "official_unit": "mg/l CaCO3",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "现场酸中和能力"
+      ],
+      "aliases_en": [
+        "Acid neutralizing capacity",
+        "ANC, wu,fxdEP,fld"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00410_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00440"
+      },
+      "canonical_name": "Bicarbonate, field",
+      "canonical_unit": "mg/l",
+      "official_name": "Bicarbonate, wu,fx,f",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "现场碳酸氢盐"
+      ],
+      "aliases_en": [
+        "Bicarbonate",
+        "Bicarbonate, wu,fx,f"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00440_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00445"
+      },
+      "canonical_name": "Carbonate, field",
+      "canonical_unit": "mg/l",
+      "official_name": "Carbonate, wu,fixedEP,field",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "现场碳酸盐"
+      ],
+      "aliases_en": [
+        "Carbonate",
+        "Carbonate, wu,fixedEP,field"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00445_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00940"
+      },
+      "canonical_name": "Chloride, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Chloride, wf",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤氯化物"
+      ],
+      "aliases_en": [
+        "Chloride",
+        "Chloride, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00940_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00945"
+      },
+      "canonical_name": "Sulfate, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Sulfate, wf",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤硫酸盐"
+      ],
+      "aliases_en": [
+        "Sulfate",
+        "Sulfate, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00945_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00950"
+      },
+      "canonical_name": "Fluoride, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Fluoride, wf",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤氟化物"
+      ],
+      "aliases_en": [
+        "Fluoride",
+        "Fluoride, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00950_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00955"
+      },
+      "canonical_name": "Silica, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Silica, wf",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤二氧化硅"
+      ],
+      "aliases_en": [
+        "Silica",
+        "Silica, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00955_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "71870"
+      },
+      "canonical_name": "Bromide, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Bromide, wf",
+      "official_unit": "mg/l",
+      "official_group": "INN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤溴化物"
+      ],
+      "aliases_en": [
+        "Bromide",
+        "Bromide, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_71870_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00600"
+      },
+      "canonical_name": "Total nitrogen, unfiltered",
+      "canonical_unit": "mg/l",
+      "official_name": "Total nitrogen, wu",
+      "official_unit": "mg/l",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤总氮"
+      ],
+      "aliases_en": [
+        "Total nitrogen",
+        "Total nitrogen, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00600_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00602"
+      },
+      "canonical_name": "Total nitrogen, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Total nitrogen, wf",
+      "official_unit": "mg/l",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤总氮"
+      ],
+      "aliases_en": [
+        "Total nitrogen",
+        "Total nitrogen, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00602_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00605"
+      },
+      "canonical_name": "Organic nitrogen, unfiltered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Organic nitrogen, wu",
+      "official_unit": "mg/l",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤有机氮"
+      ],
+      "aliases_en": [
+        "Organic nitrogen",
+        "Organic nitrogen, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00605_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00607"
+      },
+      "canonical_name": "Organic nitrogen, filtered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Organic nitrogen, wf",
+      "official_unit": "mg/l",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤有机氮"
+      ],
+      "aliases_en": [
+        "Organic nitrogen",
+        "Organic nitrogen, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00607_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00608"
+      },
+      "canonical_name": "Ammonia, filtered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Ammonia, wf",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤氨氮"
+      ],
+      "aliases_en": [
+        "Ammonia",
+        "Ammonia, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00608_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00610"
+      },
+      "canonical_name": "Ammonia, unfiltered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Ammonia, wu",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤氨氮"
+      ],
+      "aliases_en": [
+        "Ammonia",
+        "Ammonia, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00610_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00613"
+      },
+      "canonical_name": "Nitrite, filtered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Nitrite, wf",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤亚硝酸盐"
+      ],
+      "aliases_en": [
+        "Nitrite",
+        "Nitrite, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00613_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00615"
+      },
+      "canonical_name": "Nitrite, unfiltered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Nitrite, wu",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤亚硝酸盐"
+      ],
+      "aliases_en": [
+        "Nitrite",
+        "Nitrite, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00615_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00618"
+      },
+      "canonical_name": "Nitrate, filtered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Nitrate, wf",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤硝酸盐"
+      ],
+      "aliases_en": [
+        "Nitrate",
+        "Nitrate, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00618_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00620"
+      },
+      "canonical_name": "Nitrate, unfiltered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Nitrate, wu",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤硝酸盐"
+      ],
+      "aliases_en": [
+        "Nitrate",
+        "Nitrate, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00620_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00623"
+      },
+      "canonical_name": "Ammonia plus organic nitrogen, filtered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Ammonia + organic-N, wf",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤氨加有机氮"
+      ],
+      "aliases_en": [
+        "Ammonia plus organic nitrogen",
+        "Ammonia + organic-N, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00623_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00625"
+      },
+      "canonical_name": "Ammonia plus organic nitrogen, unfiltered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "Ammonia + organic-N, wu",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤氨加有机氮"
+      ],
+      "aliases_en": [
+        "Ammonia plus organic nitrogen",
+        "Ammonia + organic-N, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00625_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00630"
+      },
+      "canonical_name": "Nitrate plus nitrite, unfiltered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "NO3+NO2, wu",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤硝酸盐加亚硝酸盐"
+      ],
+      "aliases_en": [
+        "Nitrate plus nitrite",
+        "NO3+NO2, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00630_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00631"
+      },
+      "canonical_name": "Nitrate plus nitrite, filtered",
+      "canonical_unit": "mg/l as N",
+      "official_name": "NO3+NO2, wf",
+      "official_unit": "mg/l as N",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤硝酸盐加亚硝酸盐"
+      ],
+      "aliases_en": [
+        "Nitrate plus nitrite",
+        "NO3+NO2, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00631_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00650"
+      },
+      "canonical_name": "Phosphate, unfiltered",
+      "canonical_unit": "mg/l",
+      "official_name": "Phosphate, wu",
+      "official_unit": "mg/l",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤磷酸盐"
+      ],
+      "aliases_en": [
+        "Phosphate",
+        "Phosphate, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00650_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00653"
+      },
+      "canonical_name": "Phosphate, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Phosphate, wf",
+      "official_unit": "mg/l",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤磷酸盐"
+      ],
+      "aliases_en": [
+        "Phosphate",
+        "Phosphate, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00653_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00660"
+      },
+      "canonical_name": "Orthophosphate, filtered as PO4",
+      "canonical_unit": "mg/l as PO4",
+      "official_name": "Orthophosphate, wf",
+      "official_unit": "mg/l asPO4",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "以磷酸根计过滤正磷酸盐"
+      ],
+      "aliases_en": [
+        "Orthophosphate",
+        "Orthophosphate, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00660_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00665"
+      },
+      "canonical_name": "Phosphorus, unfiltered",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Phosphorus, wu",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤总磷"
+      ],
+      "aliases_en": [
+        "Phosphorus",
+        "Phosphorus, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00665_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00666"
+      },
+      "canonical_name": "Phosphorus, filtered",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Phosphorus, wf",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤总磷"
+      ],
+      "aliases_en": [
+        "Phosphorus",
+        "Phosphorus, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00666_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00667"
+      },
+      "canonical_name": "Phosphorus, suspended sediment",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Phosphorus, ss,total",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Suspended",
+      "aliases_zh": [
+        "悬浮沉积物磷"
+      ],
+      "aliases_en": [
+        "Phosphorus",
+        "Phosphorus, ss,total"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00667_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00669"
+      },
+      "canonical_name": "Hydrolyzable phosphorus, unfiltered",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Hydrolyzable phosphorus, wu",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤可水解磷"
+      ],
+      "aliases_en": [
+        "Hydrolyzable phosphorus",
+        "Hydrolyzable phosphorus, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00669_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00670"
+      },
+      "canonical_name": "Organic phosphorus, unfiltered",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Organic phosphorus, wu",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤有机磷"
+      ],
+      "aliases_en": [
+        "Organic phosphorus",
+        "Organic phosphorus, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00670_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00671"
+      },
+      "canonical_name": "Orthophosphate, filtered as P",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Orthophosphate, wf",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "以磷计过滤正磷酸盐"
+      ],
+      "aliases_en": [
+        "Orthophosphate",
+        "Orthophosphate, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00671_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00672"
+      },
+      "canonical_name": "Hydrolyzable phosphorus, filtered",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Hydrolyzable phosphorus, wf",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤可水解磷"
+      ],
+      "aliases_en": [
+        "Hydrolyzable phosphorus",
+        "Hydrolyzable phosphorus, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00672_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00673"
+      },
+      "canonical_name": "Organic phosphorus, filtered",
+      "canonical_unit": "mg/l as P",
+      "official_name": "Organic phosphorus, wf",
+      "official_unit": "mg/l as P",
+      "official_group": "NUT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤有机磷"
+      ],
+      "aliases_en": [
+        "Organic phosphorus",
+        "Organic phosphorus, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00673_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00915"
+      },
+      "canonical_name": "Calcium, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Calcium, wf",
+      "official_unit": "mg/l",
+      "official_group": "INM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钙"
+      ],
+      "aliases_en": [
+        "Calcium",
+        "Calcium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00915_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00916"
+      },
+      "canonical_name": "Calcium, unfiltered, recoverable",
+      "canonical_unit": "mg/l",
+      "official_name": "Calcium, wu,recov",
+      "official_unit": "mg/l",
+      "official_group": "INM",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤可回收钙"
+      ],
+      "aliases_en": [
+        "Calcium",
+        "Calcium, wu,recov"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00916_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00925"
+      },
+      "canonical_name": "Magnesium, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Magnesium, wf",
+      "official_unit": "mg/l",
+      "official_group": "INM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤镁"
+      ],
+      "aliases_en": [
+        "Magnesium",
+        "Magnesium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00925_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00930"
+      },
+      "canonical_name": "Sodium, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Sodium, wf",
+      "official_unit": "mg/l",
+      "official_group": "INM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钠"
+      ],
+      "aliases_en": [
+        "Sodium",
+        "Sodium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00930_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00931"
+      },
+      "canonical_name": "Sodium adsorption ratio",
+      "canonical_unit": "number",
+      "official_name": "SAR, water",
+      "official_unit": "None",
+      "official_group": "INM",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "钠吸附比"
+      ],
+      "aliases_en": [
+        "SAR, water",
+        "sar"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00931_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00935"
+      },
+      "canonical_name": "Potassium, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Potassium, wf",
+      "official_unit": "mg/l",
+      "official_group": "INM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钾"
+      ],
+      "aliases_en": [
+        "Potassium",
+        "Potassium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00935_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01000"
+      },
+      "canonical_name": "Arsenic, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Arsenic, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤砷"
+      ],
+      "aliases_en": [
+        "Arsenic",
+        "Arsenic, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01000_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01002"
+      },
+      "canonical_name": "Arsenic, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Arsenic, wu",
+      "official_unit": "ug/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤砷"
+      ],
+      "aliases_en": [
+        "Arsenic",
+        "Arsenic, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01002_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01020"
+      },
+      "canonical_name": "Boron, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Boron, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤硼"
+      ],
+      "aliases_en": [
+        "Boron",
+        "Boron, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01020_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01095"
+      },
+      "canonical_name": "Antimony, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Antimony, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤锑"
+      ],
+      "aliases_en": [
+        "Antimony",
+        "Antimony, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01095_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01097"
+      },
+      "canonical_name": "Antimony, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Antimony, wu",
+      "official_unit": "ug/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤锑"
+      ],
+      "aliases_en": [
+        "Antimony",
+        "Antimony, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01097_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01145"
+      },
+      "canonical_name": "Selenium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Selenium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤硒"
+      ],
+      "aliases_en": [
+        "Selenium",
+        "Selenium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01145_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "71865"
+      },
+      "canonical_name": "Iodide, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Iodide, wf",
+      "official_unit": "mg/l",
+      "official_group": "IMN",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤碘化物"
+      ],
+      "aliases_en": [
+        "Iodide",
+        "Iodide, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_71865_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01005"
+      },
+      "canonical_name": "Barium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Barium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钡"
+      ],
+      "aliases_en": [
+        "Barium",
+        "Barium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01005_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01010"
+      },
+      "canonical_name": "Beryllium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Beryllium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铍"
+      ],
+      "aliases_en": [
+        "Beryllium",
+        "Beryllium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01010_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01025"
+      },
+      "canonical_name": "Cadmium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Cadmium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤镉"
+      ],
+      "aliases_en": [
+        "Cadmium",
+        "Cadmium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01025_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01030"
+      },
+      "canonical_name": "Chromium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Chromium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铬"
+      ],
+      "aliases_en": [
+        "Chromium",
+        "Chromium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01030_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01032"
+      },
+      "canonical_name": "Chromium(VI), filtered",
+      "canonical_unit": "ug/l as Cr",
+      "official_name": "Chromium(VI), wf",
+      "official_unit": "ug/l as Cr",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤六价铬"
+      ],
+      "aliases_en": [
+        "Chromium(VI)",
+        "Chromium(VI), wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01032_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01035"
+      },
+      "canonical_name": "Cobalt, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Cobalt, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钴"
+      ],
+      "aliases_en": [
+        "Cobalt",
+        "Cobalt, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01035_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01040"
+      },
+      "canonical_name": "Copper, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Copper, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铜"
+      ],
+      "aliases_en": [
+        "Copper",
+        "Copper, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01040_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01046"
+      },
+      "canonical_name": "Iron, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Iron, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铁"
+      ],
+      "aliases_en": [
+        "Iron",
+        "Iron, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01046_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01049"
+      },
+      "canonical_name": "Lead, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Lead, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铅"
+      ],
+      "aliases_en": [
+        "Lead",
+        "Lead, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01049_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01056"
+      },
+      "canonical_name": "Manganese, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Manganese, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤锰"
+      ],
+      "aliases_en": [
+        "Manganese",
+        "Manganese, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01056_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01057"
+      },
+      "canonical_name": "Thallium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Thallium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铊"
+      ],
+      "aliases_en": [
+        "Thallium",
+        "Thallium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01057_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01060"
+      },
+      "canonical_name": "Molybdenum, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Molybdenum, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钼"
+      ],
+      "aliases_en": [
+        "Molybdenum",
+        "Molybdenum, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01060_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01065"
+      },
+      "canonical_name": "Nickel, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Nickel, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤镍"
+      ],
+      "aliases_en": [
+        "Nickel",
+        "Nickel, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01065_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01075"
+      },
+      "canonical_name": "Silver, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Silver, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤银"
+      ],
+      "aliases_en": [
+        "Silver",
+        "Silver, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01075_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01080"
+      },
+      "canonical_name": "Strontium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Strontium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤锶"
+      ],
+      "aliases_en": [
+        "Strontium",
+        "Strontium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01080_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01085"
+      },
+      "canonical_name": "Vanadium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Vanadium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钒"
+      ],
+      "aliases_en": [
+        "Vanadium",
+        "Vanadium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01085_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01090"
+      },
+      "canonical_name": "Zinc, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Zinc, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤锌"
+      ],
+      "aliases_en": [
+        "Zinc",
+        "Zinc, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01090_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01100"
+      },
+      "canonical_name": "Tin, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Tin, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤锡"
+      ],
+      "aliases_en": [
+        "Tin",
+        "Tin, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01100_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01106"
+      },
+      "canonical_name": "Aluminum, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Aluminum, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤铝"
+      ],
+      "aliases_en": [
+        "Aluminum",
+        "Aluminum, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01106_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01130"
+      },
+      "canonical_name": "Lithium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Lithium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤锂"
+      ],
+      "aliases_en": [
+        "Lithium",
+        "Lithium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01130_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "01150"
+      },
+      "canonical_name": "Titanium, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Titanium, wf",
+      "official_unit": "ug/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤钛"
+      ],
+      "aliases_en": [
+        "Titanium",
+        "Titanium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_01150_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "50287"
+      },
+      "canonical_name": "Mercury, filtered",
+      "canonical_unit": "ng/l",
+      "official_name": "Mercury, wf",
+      "official_unit": "ng/l",
+      "official_group": "IMM",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤汞"
+      ],
+      "aliases_en": [
+        "Mercury",
+        "Mercury, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_50287_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "31501"
+      },
+      "canonical_name": "Total coliforms, M-Endo MF",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "Total coliforms, M-EndoMF,imm",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "膜过滤总大肠菌群"
+      ],
+      "aliases_en": [
+        "Total coliforms",
+        "Total coliforms, M-EndoMF,imm",
+        "total coliform"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_31501_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "31625"
+      },
+      "canonical_name": "Fecal coliforms, M-FC MF",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "Fecal coliforms, M-FC MF,0.7u",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "膜过滤粪大肠菌群"
+      ],
+      "aliases_en": [
+        "Fecal coliforms",
+        "Fecal coliforms, M-FC MF,0.7u",
+        "fecal coliform"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_31625_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "31633"
+      },
+      "canonical_name": "Escherichia coli, m-TEC MF",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "Escherichia coli, m-TEC MF",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "膜过滤大肠杆菌"
+      ],
+      "aliases_en": [
+        "Escherichia coli",
+        "e coli"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_31633_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "31649"
+      },
+      "canonical_name": "Enterococci, m-E MF",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "Enterococci, m-E MF method",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "膜过滤肠球菌"
+      ],
+      "aliases_en": [
+        "Enterococci",
+        "Enterococci, m-E MF method",
+        "enterococcus"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_31649_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "50468"
+      },
+      "canonical_name": "E. coli, defined substrate test",
+      "canonical_unit": "MPN/100 ml",
+      "official_name": "E coli, DSTM, water",
+      "official_unit": "MPN/100 ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "底物法大肠杆菌"
+      ],
+      "aliases_en": [
+        "E. coli",
+        "E coli, DSTM, water",
+        "e coli"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_50468_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "50569"
+      },
+      "canonical_name": "Total coliforms, defined substrate test",
+      "canonical_unit": "MPN/100 ml",
+      "official_name": "Total coliforms, DSTM, water",
+      "official_unit": "MPN/100 ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "底物法总大肠菌群"
+      ],
+      "aliases_en": [
+        "Total coliforms",
+        "Total coliforms, DSTM, water",
+        "total coliform"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_50569_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "61214"
+      },
+      "canonical_name": "Fecal streptococci",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "Fecal streptococci, water",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "粪链球菌"
+      ],
+      "aliases_en": [
+        "Fecal streptococci, water",
+        "fecal streptococcus"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_61214_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "61229"
+      },
+      "canonical_name": "Giardia",
+      "canonical_unit": "cysts/100L",
+      "official_name": "Giardia, water,&lt;0.30u",
+      "official_unit": "cysts/100L",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "贾第鞭毛虫"
+      ],
+      "aliases_en": [
+        "Giardia, water,<0.30u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_61229_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "61230"
+      },
+      "canonical_name": "Cryptosporidium",
+      "canonical_unit": "oocysts/100L",
+      "official_name": "Cryptosporidium, water,&lt;0.30u",
+      "official_unit": "ocyst/100L",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "隐孢子虫"
+      ],
+      "aliases_en": [
+        "Cryptosporidium, water,<0.30u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_61230_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "90900"
+      },
+      "canonical_name": "Total coliforms, MI MF",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "Total coliforms, MI, water",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "膜法总大肠菌群"
+      ],
+      "aliases_en": [
+        "Total coliforms",
+        "Total coliforms, MI, water",
+        "total coliform"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_90900_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "90901"
+      },
+      "canonical_name": "E. coli, MI MF",
+      "canonical_unit": "cfu/100ml",
+      "official_name": "E. coli, MI, water",
+      "official_unit": "cfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "膜法大肠杆菌"
+      ],
+      "aliases_en": [
+        "E. coli",
+        "E. coli, MI, water",
+        "e coli"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_90901_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "90903"
+      },
+      "canonical_name": "Coliphage, E. coli CN13 host",
+      "canonical_unit": "pfu/100ml",
+      "official_name": "Coliphage, E coli, CN13 host",
+      "official_unit": "pfu/100ml",
+      "official_group": "MBI",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "大肠杆菌噬菌体"
+      ],
+      "aliases_en": [
+        "Coliphage",
+        "Coliphage, E coli, CN13 host"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_90903_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "32209"
+      },
+      "canonical_name": "Chlorophyll a, fluorometric, corrected",
+      "canonical_unit": "ug/l",
+      "official_name": "Chlorophyll a, fm,c",
+      "official_unit": "ug/l",
+      "official_group": "BIO",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "校正荧光叶绿素甲"
+      ],
+      "aliases_en": [
+        "Chlorophyll a",
+        "Chlorophyll a, fm,c"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_32209_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "32213"
+      },
+      "canonical_name": "Pheophytin a, fluorometric",
+      "canonical_unit": "ug/l",
+      "official_name": "Pheophytin a, fluorometric",
+      "official_unit": "ug/l",
+      "official_group": "BIO",
+      "medium": "Water",
+      "sample_fraction": null,
+      "aliases_zh": [
+        "荧光脱镁叶绿素甲"
+      ],
+      "aliases_en": [
+        "Pheophytin a"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_32213_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "32329"
+      },
+      "canonical_name": "Phycocyanin, sensor regression",
+      "canonical_unit": "ug/l",
+      "official_name": "Phycocyanin, regress",
+      "official_unit": "ug/l",
+      "official_group": "BIO",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "传感器回归藻蓝蛋白"
+      ],
+      "aliases_en": [
+        "Phycocyanin",
+        "Phycocyanin, regress"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_32329_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "50223"
+      },
+      "canonical_name": "Phycocyanin, fluorometric",
+      "canonical_unit": "ug/l",
+      "official_name": "Phycocyanin, fm",
+      "official_unit": "ug/l",
+      "official_group": "BIO",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "荧光藻蓝蛋白"
+      ],
+      "aliases_en": [
+        "Phycocyanin",
+        "Phycocyanin, fm"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_50223_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "50227"
+      },
+      "canonical_name": "Phytoplankton",
+      "canonical_unit": "cells/L",
+      "official_name": "Phytoplankton, wu",
+      "official_unit": "cells/L",
+      "official_group": "BIO",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "浮游植物"
+      ],
+      "aliases_en": [
+        "Phytoplankton, wu",
+        "algal plankton"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_50227_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "60050"
+      },
+      "canonical_name": "Phytoplankton, total",
+      "canonical_unit": "#/ml",
+      "official_name": "Phytoplankton, total",
+      "official_unit": "#/ml",
+      "official_group": "BIO",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "浮游植物总量"
+      ],
+      "aliases_en": [
+        "Phytoplankton",
+        "phytoplankton abundance"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_60050_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "70943"
+      },
+      "canonical_name": "Benthic invertebrates, total",
+      "canonical_unit": "#/m2",
+      "official_name": "Benthic invertebrates, tot",
+      "official_unit": "#/m2",
+      "official_group": "BIO",
+      "medium": null,
+      "sample_fraction": null,
+      "aliases_zh": [
+        "底栖无脊椎动物总量"
+      ],
+      "aliases_en": [
+        "Benthic invertebrates",
+        "Benthic invertebrates, tot",
+        "benthic macroinvertebrates"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_70943_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "70945"
+      },
+      "canonical_name": "Periphyton, total",
+      "canonical_unit": "cells/mm2",
+      "official_name": "Periphyton, total",
+      "official_unit": "cells/mm2",
+      "official_group": "BIO",
+      "medium": null,
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "附着生物总量"
+      ],
+      "aliases_en": [
+        "Periphyton",
+        "periphyton abundance"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_70945_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "70946"
+      },
+      "canonical_name": "Zooplankton, total",
+      "canonical_unit": "#/m3",
+      "official_name": "Zooplankton, total",
+      "official_unit": "#/m3",
+      "official_group": "BIO",
+      "medium": null,
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "浮游动物总量"
+      ],
+      "aliases_en": [
+        "Zooplankton",
+        "zooplankton abundance"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_70946_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "04035"
+      },
+      "canonical_name": "Simazine, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Simazine, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤西玛津"
+      ],
+      "aliases_en": [
+        "Simazine",
+        "Simazine, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_04035_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "04095"
+      },
+      "canonical_name": "Fonofos, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Fonofos, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤丰索磷"
+      ],
+      "aliases_en": [
+        "Fonofos",
+        "Fonofos, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_04095_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "34655"
+      },
+      "canonical_name": "p,p'-DDT, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "p,p'-DDT, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤滴滴涕"
+      ],
+      "aliases_en": [
+        "p",
+        "p,p'-DDT, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_34655_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "38442"
+      },
+      "canonical_name": "Dicamba, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Dicamba, w,gf&lt;.7u",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤麦草畏"
+      ],
+      "aliases_en": [
+        "Dicamba",
+        "Dicamba, w,gf<.7u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_38442_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "38933"
+      },
+      "canonical_name": "Chlorpyrifos, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Chlorpyrifos, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤毒死蜱"
+      ],
+      "aliases_en": [
+        "Chlorpyrifos",
+        "Chlorpyrifos, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_38933_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39341"
+      },
+      "canonical_name": "Lindane, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Lindane, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤林丹"
+      ],
+      "aliases_en": [
+        "Lindane",
+        "Lindane, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39341_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39381"
+      },
+      "canonical_name": "Dieldrin, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Dieldrin, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤狄氏剂"
+      ],
+      "aliases_en": [
+        "Dieldrin",
+        "Dieldrin, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39381_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39415"
+      },
+      "canonical_name": "Metolachlor, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Metolachlor, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤异丙甲草胺"
+      ],
+      "aliases_en": [
+        "Metolachlor",
+        "Metolachlor, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39415_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39572"
+      },
+      "canonical_name": "Diazinon, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Diazinon, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤二嗪农"
+      ],
+      "aliases_en": [
+        "Diazinon",
+        "Diazinon, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39572_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39632"
+      },
+      "canonical_name": "Atrazine, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Atrazine, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤莠去津"
+      ],
+      "aliases_en": [
+        "Atrazine",
+        "Atrazine, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39632_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39818"
+      },
+      "canonical_name": "Imidacloprid, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Imidacloprid, wu",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤吡虫啉"
+      ],
+      "aliases_en": [
+        "Imidacloprid",
+        "Imidacloprid, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39818_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39941"
+      },
+      "canonical_name": "Glyphosate, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Glyphosate, wu",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤草甘膦"
+      ],
+      "aliases_en": [
+        "Glyphosate",
+        "Glyphosate, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39941_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "46342"
+      },
+      "canonical_name": "Alachlor, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Alachlor, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤甲草胺"
+      ],
+      "aliases_en": [
+        "Alachlor",
+        "Alachlor, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_46342_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "49260"
+      },
+      "canonical_name": "Acetochlor, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Acetochlor, wf",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤乙草胺"
+      ],
+      "aliases_en": [
+        "Acetochlor",
+        "Acetochlor, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_49260_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "49291"
+      },
+      "canonical_name": "Picloram, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Picloram, w,gf&lt;.7u",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤毒莠定"
+      ],
+      "aliases_en": [
+        "Picloram",
+        "Picloram, w,gf<.7u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_49291_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "49309"
+      },
+      "canonical_name": "Carbofuran, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Carbofuran, w,gf&lt;.7u",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤克百威"
+      ],
+      "aliases_en": [
+        "Carbofuran",
+        "Carbofuran, w,gf<.7u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_49309_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "49310"
+      },
+      "canonical_name": "Carbaryl, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Carbaryl, w,gf&lt;.7u",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤甲萘威"
+      ],
+      "aliases_en": [
+        "Carbaryl",
+        "Carbaryl, w,gf<.7u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_49310_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "82660"
+      },
+      "canonical_name": "2,6-Diethylaniline, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "2,6-Diethylaniline, w,gf&lt;.7u",
+      "official_unit": "ug/l",
+      "official_group": "OPE",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤二乙基苯胺"
+      ],
+      "aliases_en": [
+        "2",
+        "2,6-Diethylaniline, w,gf<.7u"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_82660_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00680"
+      },
+      "canonical_name": "Organic carbon, unfiltered",
+      "canonical_unit": "mg/l",
+      "official_name": "Organic carbon, wu",
+      "official_unit": "mg/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Total",
+      "aliases_zh": [
+        "未过滤有机碳"
+      ],
+      "aliases_en": [
+        "Organic carbon",
+        "Organic carbon, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00680_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "00681"
+      },
+      "canonical_name": "Organic carbon, filtered",
+      "canonical_unit": "mg/l",
+      "official_name": "Organic carbon, wf",
+      "official_unit": "mg/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤有机碳"
+      ],
+      "aliases_en": [
+        "Organic carbon",
+        "Organic carbon, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_00681_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "34010"
+      },
+      "canonical_name": "Toluene, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Toluene, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤甲苯"
+      ],
+      "aliases_en": [
+        "Toluene",
+        "Toluene, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_34010_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "34030"
+      },
+      "canonical_name": "Benzene, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Benzene, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤苯"
+      ],
+      "aliases_en": [
+        "Benzene",
+        "Benzene, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_34030_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "34371"
+      },
+      "canonical_name": "Ethylbenzene, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Ethylbenzene, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤乙苯"
+      ],
+      "aliases_en": [
+        "Ethylbenzene",
+        "Ethylbenzene, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_34371_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "34423"
+      },
+      "canonical_name": "Dichloromethane, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Dichloromethane, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤二氯甲烷"
+      ],
+      "aliases_en": [
+        "Dichloromethane",
+        "Dichloromethane, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_34423_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "34475"
+      },
+      "canonical_name": "Tetrachloroethene, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Tetrachloroethene, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤四氯乙烯"
+      ],
+      "aliases_en": [
+        "Tetrachloroethene",
+        "Tetrachloroethene, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_34475_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39175"
+      },
+      "canonical_name": "Vinyl chloride, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Vinyl chloride, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤氯乙烯"
+      ],
+      "aliases_en": [
+        "Vinyl chloride",
+        "Vinyl chloride, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39175_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "39180"
+      },
+      "canonical_name": "Trichloroethene, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "Trichloroethene, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤三氯乙烯"
+      ],
+      "aliases_en": [
+        "Trichloroethene",
+        "Trichloroethene, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_39180_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "78032"
+      },
+      "canonical_name": "Methyl tert-butyl ether, unfiltered",
+      "canonical_unit": "ug/l",
+      "official_name": "MTBE, wu",
+      "official_unit": "ug/l",
+      "official_group": "OOT",
+      "medium": "Water",
+      "sample_fraction": "Recoverable",
+      "aliases_zh": [
+        "未过滤甲基叔丁基醚"
+      ],
+      "aliases_en": [
+        "Methyl tert-butyl ether",
+        "MTBE, wu"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_78032_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "22703"
+      },
+      "canonical_name": "Uranium, natural, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Uranium, wf",
+      "official_unit": "ug/l",
+      "official_group": "RAD",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤天然铀"
+      ],
+      "aliases_en": [
+        "Uranium",
+        "Uranium, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_22703_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "80020"
+      },
+      "canonical_name": "Uranium, extraction fluorometric, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Uranium, wf, extract fluoro",
+      "official_unit": "ug/l",
+      "official_group": "RAD",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "萃取荧光法过滤铀"
+      ],
+      "aliases_en": [
+        "Uranium",
+        "Uranium, wf, extract fluoro"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_80020_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "80030"
+      },
+      "canonical_name": "Gross alpha, natural uranium curve, filtered",
+      "canonical_unit": "ug/l",
+      "official_name": "Gross alpha, wf, U-nat",
+      "official_unit": "ug/l",
+      "official_group": "RAD",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "天然铀曲线过滤总阿尔法"
+      ],
+      "aliases_en": [
+        "Gross alpha",
+        "Gross alpha, wf, U-nat"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_80030_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "80050"
+      },
+      "canonical_name": "Gross beta, Sr-90/Y-90 curve, filtered",
+      "canonical_unit": "pCi/L",
+      "official_name": "Gross beta, wf, Sr/Y-90",
+      "official_unit": "pCi/L",
+      "official_group": "RAD",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "锶九十钇九十曲线过滤总贝塔"
+      ],
+      "aliases_en": [
+        "Gross beta",
+        "Gross beta, wf, Sr/Y-90"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_80050_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "81366"
+      },
+      "canonical_name": "Radium-228, filtered",
+      "canonical_unit": "pCi/L",
+      "official_name": "Ra-228, wf",
+      "official_unit": "pCi/L",
+      "official_group": "RAD",
+      "medium": "Water",
+      "sample_fraction": "Dissolved",
+      "aliases_zh": [
+        "过滤镭二二八"
+      ],
+      "aliases_en": [
+        "Radium-228",
+        "Ra-228, wf"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_81366_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "80154"
+      },
+      "canonical_name": "Suspended sediment concentration",
+      "canonical_unit": "mg/l",
+      "official_name": "Suspnd sedmnt conc",
+      "official_unit": "mg/l",
+      "official_group": "SED",
+      "medium": "Water",
+      "sample_fraction": "Suspended",
+      "aliases_zh": [
+        "悬浮沉积物浓度"
+      ],
+      "aliases_en": [
+        "Suspnd sedmnt conc",
+        "ssc"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_80154_v1",
+      "resolution_enabled": true
+    },
+    {
+      "key": {
+        "code_system": "usgs",
+        "code": "80155"
+      },
+      "canonical_name": "Suspended sediment discharge",
+      "canonical_unit": "tons/day",
+      "official_name": "Suspnd sedmnt disch",
+      "official_unit": "tons/day",
+      "official_group": "SED",
+      "medium": "Water",
+      "sample_fraction": "Suspended",
+      "aliases_zh": [
+        "悬浮沉积物输移量"
+      ],
+      "aliases_en": [
+        "Suspnd sedmnt disch",
+        "sediment load"
+      ],
+      "roles": [
+        "target"
+      ],
+      "availability_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "observation_providers": [
+        "wdfn_time_series",
+        "usgs_samples"
+      ],
+      "allowed_indirect_evidence_rules": [
+        "same_parameter_upstream",
+        "same_location_adjacent_time"
+      ],
+      "fixture_identity": "usgs_parameter_80155_v1",
+      "resolution_enabled": true
+    }
+  ]
+}

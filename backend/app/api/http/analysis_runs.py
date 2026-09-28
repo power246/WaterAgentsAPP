@@ -255,7 +255,12 @@ async def get_transcript_content(
         **error_responses(404, 410),
         200: {
             "description": "Run snapshot SSE stream with comment keepalive.",
-            "content": {"text/event-stream": {"schema": {"type": "string"}}},
+            "content": {"text/event-stream": {"schema": {
+                "type": "string",
+                "x-event-data-schema": {
+                    "$ref": "#/components/schemas/RunSnapshotEvent"
+                },
+            }}},
             "headers": REQUEST_ID_HEADERS,
         },
     },

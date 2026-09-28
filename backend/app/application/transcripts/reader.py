@@ -8,8 +8,13 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
-from app.application.analysis_runs.models import RunCreatedEvent, SessionSummary
+from app.application.analysis_runs.models import (
+    AgentRole,
+    RunCreatedEvent,
+    SessionSummary,
+)
 from app.application.analysis_runs.persistence import PersistenceInfo
+from app.application.query_understanding.context_models import AnalysisContext
 from app.application.transcripts.buffer import locate_content
 from app.application.transcripts.models import (
     ContentVisibility,
@@ -20,6 +25,11 @@ from app.application.transcripts.models import (
     TranscriptItem,
 )
 from app.application.transcripts.read_models import (
+    AnalysisContextSummary,
+    ContextSummaryDateRange,
+    ContextSummaryLocation,
+    ContextSummaryParameter,
+    ContextSummaryTargetParameter,
     HistoryCursorPosition,
     InlineTranscriptContent,
     LiveRunRead,
@@ -176,6 +186,18 @@ class TranscriptReader:
             parsed,
             view,
         )
+        context_items = tuple(
+            item
+            for item in visible
+            if item.item.content_type == "query_understood"
+            and item.item.item_id not in {
+                candidate.item.item_id for candidate in (*run_items, *referenced)
+            }
+        )
+        referenced = tuple(sorted(
+            (*referenced, *context_items),
+            key=lambda item: item.item.transcript_sequence,
+        ))
         summary, summary_issues = self._run_summary(selected.stored, parsed)
         returned = (*run_items, *referenced)
         issues = self._issues(returned, (*summary_issues, *reference_issues))
@@ -425,27 +447,29 @@ class TranscriptReader:
             None,
         )
         configuration = None
-        issues: tuple[ReadIssue, ...] = ()
+        issues: list[ReadIssue] = []
         if created is not None and isinstance(created.body, RunCreatedEvent):
             configuration = created.body.payload.configuration
         elif created is not None and created.parse_error is not None:
-            issues = (ReadIssue(
+            issues.append(ReadIssue(
                 item_id=created.item.item_id,
                 error=created.parse_error,
-            ),)
+            ))
         else:
             item_id = (
                 created.item.item_id
                 if created is not None
                 else stored.run.created_item_id
             )
-            issues = (ReadIssue(
+            issues.append(ReadIssue(
                 item_id=item_id,
                 error=self._read_error(
                     "transcript_content_corrupt",
                     "The run configuration record is invalid.",
                 ),
-            ),)
+            ))
+        context_summary, context_issues = self._context_summary(stored, parsed)
+        issues.extend(context_issues)
         return RunSummary(
             run_id=stored.run.run_id,
             status=stored.run.status,
@@ -453,7 +477,101 @@ class TranscriptReader:
             updated_at=stored.run.updated_at,
             query=stored.run.query,
             configuration=configuration,
-        ), issues
+            context_summary=context_summary,
+        ), tuple(issues)
+
+    def _context_summary(
+        self,
+        stored: StoredRunRead,
+        parsed: tuple[ReadTranscriptItem, ...],
+    ) -> tuple[AnalysisContextSummary | None, tuple[ReadIssue, ...]]:
+        candidates = tuple(
+            item
+            for item in parsed
+            if item.item.content_type == "query_understood"
+        )
+        if not candidates:
+            return None, ()
+        if len(candidates) != 1:
+            return None, tuple(
+                ReadIssue(
+                    item_id=item.item.item_id,
+                    error=self._read_error(
+                        "transcript_content_corrupt",
+                        "The run contains conflicting query-understanding records.",
+                    ),
+                )
+                for item in candidates
+            )
+
+        candidate = candidates[0]
+        session = next(
+            (
+                item
+                for item in stored.sessions
+                if item.session_id == candidate.item.session_id
+            ),
+            None,
+        )
+        if (
+            candidate.item.session_id is None
+            or session is None
+            or session.agent_role is not AgentRole.QUERY_PARSER
+        ):
+            return None, (ReadIssue(
+                item_id=candidate.item.item_id,
+                error=self._read_error(
+                    "transcript_content_corrupt",
+                    "The query-understanding record has invalid ownership.",
+                ),
+            ),)
+        if candidate.parse_error is not None:
+            return None, (ReadIssue(
+                item_id=candidate.item.item_id,
+                error=candidate.parse_error,
+            ),)
+        if not isinstance(candidate.body, AnalysisContext):
+            return None, (ReadIssue(
+                item_id=candidate.item.item_id,
+                error=self._read_error(
+                    "transcript_content_corrupt",
+                    "The query-understanding record is invalid.",
+                ),
+            ),)
+
+        context = candidate.body
+        return AnalysisContextSummary(
+            target_comid=context.target.comid,
+            location=ContextSummaryLocation(
+                latitude=context.target.point.latitude,
+                longitude=context.target.point.longitude,
+                display_name=context.target.display_name,
+            ),
+            date_range=ContextSummaryDateRange(
+                start_date=context.requested_date_range.start_date,
+                end_date=context.requested_date_range.end_date,
+            ),
+            mode=context.mode,
+            time_resolution=context.time_resolution,
+            params_used=tuple(
+                ContextSummaryTargetParameter(
+                    code_system=item.key.code_system,
+                    code=item.key.code,
+                    canonical_name=item.canonical_name,
+                    source=item.source,
+                    rationale=item.rationale,
+                )
+                for item in context.params_used
+            ),
+            supporting_params=tuple(
+                ContextSummaryParameter(
+                    code_system=item.key.code_system,
+                    code=item.key.code,
+                    canonical_name=item.canonical_name,
+                )
+                for item in context.supporting_params
+            ),
+        ), ()
 
     def _parse_items(self, stored: StoredRunRead) -> tuple[ReadTranscriptItem, ...]:
         parsed: list[ReadTranscriptItem] = []
