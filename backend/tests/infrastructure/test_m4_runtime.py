@@ -1,0 +1,172 @@
+import asyncio
+import subprocess
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+from uuid import uuid4
+
+import pytest
+
+from app.application.analysis_runs.query_topology_workflow import (
+    QueryTopologyWorkflow,
+)
+from app.application.query_understanding import QueryParserWorkflow
+from app.domain import ModelCapability, ModelRole
+from app.infrastructure.adapters import OpenAIResponsesParserAdapter
+from app.infrastructure.config import (
+    AppSettings,
+    SettingsConfigurationError,
+    load_parameter_capability_registry,
+)
+from app.infrastructure.runtime import build_m4_runtime
+from app.main import create_app
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    (
+        "app.application.analysis_runs.workflow",
+        "app.infrastructure.runtime.event_loop",
+        "app.infrastructure.runtime.m4",
+    ),
+)
+def test_runtime_modules_import_in_fresh_interpreter(module_name: str) -> None:
+    completed = subprocess.run(
+        [sys.executable, "-c", f"import {module_name}"],
+        cwd=BACKEND_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
+class FixedClock:
+    def now(self) -> datetime:
+        return datetime(2026, 9, 27, tzinfo=UTC)
+
+
+def catalog(provider: str = "openai") -> tuple[ModelCapability, ...]:
+    return (
+        ModelCapability(
+            provider=provider,
+            model="parser-v1",
+            roles=(ModelRole.QUERY_PARSER,),
+        ),
+        ModelCapability(
+            provider="openai",
+            model="waterbody-v1",
+            roles=(ModelRole.WATERBODY,),
+        ),
+    )
+
+
+def settings(**overrides: object) -> AppSettings:
+    values: dict[str, object] = {
+        "model_catalog": catalog(),
+        "openai_api_key": "openai-secret",
+        "google_geocoding_api_key": "google-secret",
+        "topology_max_distance_km": 77.0,
+        "topology_max_hops": 9,
+        "topology_max_nodes": 55,
+        "topology_max_concurrency": 3,
+        "query_parser_timeout_seconds": 12.0,
+        "geocoding_timeout_seconds": 7.0,
+        "metadata_timeout_seconds": 8.0,
+    }
+    values.update(overrides)
+    return AppSettings(_env_file=None, **values)
+
+
+def run(coroutine):
+    return asyncio.run(coroutine)
+
+
+@pytest.mark.parametrize(
+    ("configured", "message"),
+    [
+        (AppSettings(_env_file=None), "query_parser"),
+        (
+            settings(model_catalog=(catalog()[0],)),
+            "waterbody",
+        ),
+        (settings(openai_api_key=None), "openai_api_key"),
+        (settings(google_geocoding_api_key=None), "google_geocoding_api_key"),
+        (settings(model_catalog=catalog("unsupported")), "unsupported"),
+    ],
+)
+def test_production_runtime_rejects_incomplete_or_unsupported_configuration(
+    configured: AppSettings,
+    message: str,
+) -> None:
+    async def exercise() -> None:
+        with pytest.raises(SettingsConfigurationError, match=message):
+            async with build_m4_runtime(
+                configured,
+                clock=FixedClock(),
+                parameter_capabilities=load_parameter_capability_registry(),
+                error_id_factory=uuid4,
+            ):
+                raise AssertionError("invalid runtime was entered")
+
+    run(exercise())
+
+
+def test_runtime_factory_wires_real_m4_components_and_configured_limits() -> None:
+    async def exercise() -> None:
+        async with build_m4_runtime(
+            settings(),
+            clock=FixedClock(),
+            parameter_capabilities=load_parameter_capability_registry(),
+            error_id_factory=uuid4,
+        ) as runtime:
+            assert isinstance(runtime.workflow, QueryTopologyWorkflow)
+            query = runtime.workflow._query_understanding
+            topology = runtime.workflow._topology_builder
+            assert isinstance(query, QueryParserWorkflow)
+            assert isinstance(query._parser, OpenAIResponsesParserAdapter)
+            assert query._timeout_seconds == 12.0
+            assert query._parser._http._timeout_seconds == 12.0
+            resolver = query._context_resolver
+            location = resolver._location_resolver
+            assert location._geocoding._http._timeout_seconds == 7.0
+            assert location._comid_lookup._http._timeout_seconds == 8.0
+            assert resolver._parameter_resolver._catalog._http._timeout_seconds == 8.0
+            assert topology._limits.max_distance_km == 77.0
+            assert topology._limits.max_hops == 9
+            assert topology._limits.max_nodes == 55
+            assert topology._max_concurrency == 3
+            assert topology._stage_timeout_seconds == 120.0
+
+    run(exercise())
+
+
+def test_default_app_startup_fails_closed_before_database_initialization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_calls = 0
+
+    def reject_database_startup(*args, **kwargs):
+        nonlocal database_calls
+        del args, kwargs
+        database_calls += 1
+        raise AssertionError("database must not start before runtime validation")
+
+    monkeypatch.setattr(
+        "app.main.create_database_engine",
+        reject_database_startup,
+    )
+    application = create_app(AppSettings(_env_file=None))
+
+    async def exercise() -> None:
+        with pytest.raises(SettingsConfigurationError, match="query_parser"):
+            async with application.router.lifespan_context(application):
+                raise AssertionError("misconfigured app started")
+
+    run(exercise())
+    assert database_calls == 0

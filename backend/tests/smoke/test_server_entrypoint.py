@@ -14,7 +14,7 @@ import app.main as application_module
 from app.application.analysis_runs.models import RunStatus
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime import event_loop
-from app.main import create_app
+from tests.m4_support import create_request, create_test_app as create_app
 from scripts.run_sse_smoke import BASE, GatedWorkflow, SmokeServer, read_event
 
 
@@ -127,7 +127,9 @@ def test_entrypoint_shutdown_finishes_with_an_open_sse_subscription(
             transcript_store=InMemoryTranscriptStore(),
         )
         async with running_entrypoint(application) as (server, task, client):
-            created = await client.post(BASE, json={"query": "shutdown regression"})
+            created = await client.post(
+                BASE, json=create_request("shutdown regression")
+            )
             assert created.status_code == 201
             run_id = created.json()["run_id"]
             await workflow.started.wait()
@@ -235,7 +237,9 @@ def test_stream_failure_is_safe_in_full_server_output_and_can_replay(
                 return events
 
             monkeypatch.setattr(coordinator, "subscribe_run", observe_subscription)
-            created = await client.post(BASE, json={"query": "stream failure regression"})
+            created = await client.post(
+                BASE, json=create_request("stream failure regression")
+            )
             assert created.status_code == 201
             run_id = created.json()["run_id"]
             await workflow.started.wait()

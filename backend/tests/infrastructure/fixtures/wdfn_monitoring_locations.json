@@ -1,0 +1,16 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "USGS-01646500",
+      "properties": {
+        "id": "USGS-01646500",
+        "agency_code": "USGS",
+        "monitoring_location_name": "Potomac River near Washington"
+      },
+      "geometry": {"type": "Point", "coordinates": [-77.03, 38.93]}
+    }
+  ],
+  "links": []
+}

@@ -19,6 +19,7 @@ from app.application.analysis_runs.models import (
     RunLifecycleEvent,
     RunStatus,
 )
+from tests.m4_support import PARSER_MODEL, WATERBODY_MODEL
 
 RUN_ID = "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"
 ERROR_ID = "0463cd90-6d0f-47e9-9656-b4aa86352c61"
@@ -26,8 +27,11 @@ LOCAL_TIME = "2026-09-08T08:20:00-05:00"
 UTC_TIME = "2026-09-08T13:20:00Z"
 CONFIGURATION = {
     "analysis_timezone": "America/Chicago",
-    "time_resolution": "12h",
-    "time_resolution_source": "default",
+    "time_resolution_preference": "12h",
+    "time_resolution_preference_source": "default",
+    "parser_model": PARSER_MODEL.model_dump(mode="json"),
+    "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
+    "memory_mode": "stateless",
 }
 ERROR = {
     "error_id": ERROR_ID,

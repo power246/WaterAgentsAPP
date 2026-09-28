@@ -1,0 +1,35 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "identifier": "USGS-01646500",
+        "name": "Potomac River near Washington",
+        "source": "nwissite",
+        "comid": 12345678
+      },
+      "geometry": {"type": "Point", "coordinates": [-77.03, 38.93]}
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "identifier": "USGS-01646500",
+        "name": "Potomac River near Washington",
+        "source": "nwissite",
+        "comid": 12345678
+      },
+      "geometry": {"type": "Point", "coordinates": [-77.03, 38.93]}
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "identifier": "USGS-OTHER",
+        "name": "Different reach",
+        "source": "nwissite",
+        "comid": 99999999
+      },
+      "geometry": {"type": "Point", "coordinates": [-76.0, 37.0]}
+    }
+  ]
+}

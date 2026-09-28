@@ -26,16 +26,16 @@ from app.application.transcripts.stream_models import (
 )
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.main import create_app
 from scripts.transcript_fixtures import (
     FixtureMessageV1,
     fixture_message_registration,
 )
+from tests.m4_support import create_request, create_test_app as create_app
 
 
-CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
-    "America/Chicago"
-)
+CONFIGURATION = CreateAnalysisRunRequest.model_validate(
+    create_request("query")
+).to_configuration_snapshot("America/Chicago")
 
 
 class TickingClock:

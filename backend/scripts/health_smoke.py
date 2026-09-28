@@ -39,6 +39,25 @@ def run_health_smoke(settings) -> None:
     process_environment["WATERAGENTS_PORT"] = str(port)
     process_environment["WATERAGENTS_LOG_LEVEL"] = "INFO"
     process_environment["WATERAGENTS_DB_NAME"] = settings.db_name
+    process_environment["WATERAGENTS_MODEL_CATALOG"] = json.dumps(
+        [
+            {
+                "provider": "openai",
+                "model": "health-smoke-parser",
+                "roles": ["query_parser"],
+            },
+            {
+                "provider": "openai",
+                "model": "health-smoke-waterbody",
+                "roles": ["waterbody"],
+            },
+        ],
+        separators=(",", ":"),
+    )
+    process_environment["WATERAGENTS_OPENAI_API_KEY"] = "health-smoke-not-sent"
+    process_environment["WATERAGENTS_GOOGLE_GEOCODING_API_KEY"] = (
+        "health-smoke-not-sent"
+    )
     process = subprocess.Popen(
         [
             sys.executable,

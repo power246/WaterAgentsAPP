@@ -781,7 +781,7 @@ Milestone 3–5 完成记录中的 JSON formatter、duration_ms 和通用 redact
 #### 实现与验收
 
 - `backend/scripts/session_sse_smoke.py`：运行既有 `create_app` 与 `uvicorn.Server.serve`，持有绑定端口 0 的 loopback socket 并直接交给 server。Startup 用 event 通知，结束设置 `should_exit` 并等待 server/lifespan 清理；不安装 signal handler，不调用 shell 或 subprocess。Client、socket 和 server task 均有显式生命周期，网络读取和整次 smoke 有超时边界。
-- Completed 场景使用默认 workflow，断言 201/pending、timezone/resolution/source snapshot、canonical request ID、created/completed 的一致 session ID 和 sequence，以及 terminal EOF。再以 Last-Event-ID=1 精确回放终态，以 Last-Event-ID=2 得到空 body 的 204。
+- Completed 场景通过 factory 显式注入完成 workflow，断言 201/pending、timezone/resolution/source snapshot、canonical request ID、created/completed 的一致 session ID 和 sequence，以及 terminal EOF。再以 Last-Event-ID=1 精确回放终态，以 Last-Event-ID=2 得到空 body 的 204；正式入口不依赖默认 fake workflow。
 - Cancelled 场景注入 gate workflow，实际收到 created 和 keepalive 后断开并从 sequence 1 重连，确认 disconnect 未设置取消信号。Gate 关闭时调用正式 cancel route，验证 API 返回时 workflow 尚未退出、取消信号已可见、只有一次 cancelled event；重复 cancel 返回相同 snapshot。释放 gate 后再验证 terminal replay/204。Reader 跳过传输 keepalive，避免 cancel response 返回前已缓冲的 comment 导致假失败；不以 sleep 决定 workflow 时序。
 - `backend/tests/smoke/test_session_sse_smoke.py` 新增 4 项真实 socket 测试：正常退出、客户端失败和调用 task 被取消时，活动 workflow 被收敛，socket 不再接收请求，无遗留 async task；lifespan startup 失败转换为可报告的启动错误，不让 Uvicorn 的 SystemExit 中止测试进程。
 - `.github/workflows/backend-m1.yml` 保留原入口，显示名为 `Backend M1-M2`，三平台 Python 3.11 的 editable install/全量 tests/health smoke 继续保留，并新增 session/SSE smoke。两项 smoke 的步骤都注入不可用 HTTP/HTTPS/ALL proxy 和空 NO_PROXY；客户端使用 `trust_env=False`。Architecture gate 校验 CI 命令、动态 socket、单 worker、无 shell/signal/sleep 和关闭控制。

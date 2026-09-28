@@ -19,6 +19,7 @@ from app.application.analysis_runs.models import (
     RunStatus,
 )
 from app.infrastructure.config import AppSettings
+from tests.m4_support import PARSER_MODEL, WATERBODY_MODEL, create_request
 
 RUN_ID = "10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"
 REQUEST_ID = "82ca317a-b20e-45da-9621-8c35a626cbba"
@@ -36,11 +37,11 @@ ERROR = {
 
 
 @pytest.mark.parametrize("input_mode", ["python", "json"])
-@pytest.mark.parametrize("resolution", [None, "6h", "12h", "24h"])
+@pytest.mark.parametrize("resolution", [None, "auto", "6h", "12h", "24h"])
 def test_request_preserves_explicit_resolution_through_configuration_and_json(
     input_mode: str, resolution: str | None
 ) -> None:
-    data = {"query": "  Analyze water quality\nnear Austin  "}
+    data = create_request("  Analyze water quality\nnear Austin  ")
     if resolution is not None:
         data["time_resolution"] = resolution
     request = (
@@ -53,8 +54,13 @@ def test_request_preserves_explicit_resolution_through_configuration_and_json(
     assert request.query == "Analyze water quality\nnear Austin"
     assert configuration.model_dump(mode="json") == {
         "analysis_timezone": "Asia/Shanghai",
-        "time_resolution": resolution or "12h",
-        "time_resolution_source": "default" if resolution is None else "frontend",
+        "time_resolution_preference": resolution or "12h",
+        "time_resolution_preference_source": (
+            "default" if resolution is None else "frontend"
+        ),
+        "parser_model": PARSER_MODEL.model_dump(mode="json"),
+        "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
+        "memory_mode": "stateless",
     }
     assert ("time_resolution" in request.model_fields_set) is (resolution is not None)
     restored = CreateAnalysisRunRequest.model_validate_json(
@@ -69,7 +75,9 @@ def test_request_preserves_explicit_resolution_through_configuration_and_json(
 
 def test_configuration_does_not_follow_later_settings_changes() -> None:
     settings = AppSettings(analysis_timezone="America/Chicago")
-    request = CreateAnalysisRunRequest(query="Analyze water quality")
+    request = CreateAnalysisRunRequest.model_validate(
+        create_request("Analyze water quality")
+    )
     snapshot = request.to_configuration_snapshot(settings.analysis_timezone)
 
     settings.analysis_timezone = "Asia/Shanghai"
@@ -84,20 +92,28 @@ def test_configuration_does_not_follow_later_settings_changes() -> None:
 
 @pytest.mark.parametrize("query", ["", " \n\t ", None, 12, True, [], {}])
 def test_create_rejects_empty_and_non_string_query(query) -> None:
+    body = create_request()
+    body["query"] = query
     with pytest.raises(ValidationError):
-        CreateAnalysisRunRequest.model_validate_json(json.dumps({"query": query}))
+        CreateAnalysisRunRequest.model_validate_json(json.dumps(body))
 
 
 def test_create_requires_query() -> None:
+    body = create_request()
+    del body["query"]
     with pytest.raises(ValidationError, match="missing"):
-        CreateAnalysisRunRequest.model_validate_json("{}")
+        CreateAnalysisRunRequest.model_validate_json(json.dumps(body))
 
 
-@pytest.mark.parametrize("resolution", [None, "auto", "1h", "12H", " 12h ", 12, True])
-def test_create_rejects_explicit_null_auto_and_invalid_resolution(resolution) -> None:
+@pytest.mark.parametrize("resolution", [None, "1h", "12H", " 12h ", 12, True])
+def test_create_rejects_explicit_null_and_invalid_resolution(resolution) -> None:
     with pytest.raises(ValidationError) as error:
         CreateAnalysisRunRequest.model_validate_json(
-            json.dumps({"query": "Analyze water quality", "time_resolution": resolution})
+            json.dumps(
+                create_request(
+                    "Analyze water quality", time_resolution=resolution
+                )
+            )
         )
     assert error.value.errors()[0]["loc"] == ("time_resolution",)
 
@@ -106,13 +122,17 @@ def test_create_rejects_explicit_null_auto_and_invalid_resolution(resolution) ->
 def test_create_rejects_fields_outside_m2(field: str) -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
         CreateAnalysisRunRequest.model_validate_json(
-            json.dumps({"query": "Analyze water quality", field: "unexpected"})
+            json.dumps(
+                create_request("Analyze water quality", **{field: "unexpected"})
+            )
         )
 
 
 @pytest.mark.parametrize("status", list(RunStatus))
 def test_success_response_reuses_public_snapshot_without_query(status: RunStatus) -> None:
-    request = CreateAnalysisRunRequest(query="private query", time_resolution="6h")
+    request = CreateAnalysisRunRequest.model_validate(
+        create_request("private query", time_resolution="6h")
+    )
     snapshot = AnalysisRunSnapshot(
         run_id=UUID(RUN_ID),
         status=status,
@@ -129,8 +149,11 @@ def test_success_response_reuses_public_snapshot_without_query(status: RunStatus
         "updated_at": UTC_TIME,
         "configuration": {
             "analysis_timezone": "America/Chicago",
-            "time_resolution": "6h",
-            "time_resolution_source": "frontend",
+            "time_resolution_preference": "6h",
+            "time_resolution_preference_source": "frontend",
+            "parser_model": PARSER_MODEL.model_dump(mode="json"),
+            "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
+            "memory_mode": "stateless",
         },
     }
     assert "private query" not in response.model_dump_json()
@@ -229,9 +252,13 @@ def test_sse_failure_serializes_only_public_error_fields() -> None:
 def test_request_json_schema_expresses_optional_non_nullable_resolution() -> None:
     schema = CreateAnalysisRunRequest.model_json_schema()
 
-    assert schema["required"] == ["query"]
+    assert schema["required"] == [
+        "query", "parser_model", "waterbody_model", "memory_mode"
+    ]
     assert schema["additionalProperties"] is False
     assert schema["properties"]["query"]["minLength"] == 1
     assert schema["properties"]["time_resolution"]["default"] == "12h"
-    assert schema["$defs"]["TimeResolution"]["enum"] == ["6h", "12h", "24h"]
+    assert schema["$defs"]["TimeResolutionPreference"]["enum"] == [
+        "auto", "6h", "12h", "24h"
+    ]
     assert "anyOf" not in schema["properties"]["time_resolution"]

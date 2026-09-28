@@ -1,8 +1,9 @@
 # M4 Query Understanding + Hydrology Topology Implementation TODO
 
-更新日期：2026-09-27
 
-> 当前状态：Milestone 0–10 已完成本机实现与集成审计；专用 PostgreSQL、需凭据 provider/parser contract smoke 和三平台 CI 因当前环境缺失保持 `not run`/`partial`，没有冒充通过。M4 是 M1–M9 同一项目进程中的内部实施切片，不形成可单独使用、正式联调或需要兼容的“M4 版本”；M9 完成后才开始正式前后端联调和第一版整体验收。
+更新日期：2026-09-28
+
+> 当前状态：Milestone 0–10 已完成本机实现与集成审计；专用 PostgreSQL persistence、完整 backend regression、health/history smoke 已在本机 Docker PostgreSQL 17 的 `wateragents_test` 中通过。需凭据 provider/parser contract smoke 保持 `not run`，最新三平台 CI 保持 `partial`，没有冒充通过。M4 是 M1–M9 同一项目进程中的内部实施切片，不形成可单独使用、正式联调或需要兼容的“M4 版本”；M9 完成后才开始正式前后端联调和第一版整体验收。
 
 本清单执行以下已确认文档：
 
@@ -452,7 +453,7 @@
 - [x] 建立固定 fake model/geocoder/NLDI/WDFN/Samples fixtures 的完整 M4 workflow smoke：frontend target/date、query fallback、mixed、部分 coverage、无 source 和技术失败。
 - [x] 建立 154 项 manifest 离线审计和可选官方 refresh 工具；refresh 只能报告 drift，不能在运行时自动改 manifest 或把新官方条目自动启用。
 - [x] 完整回归 M1–M3：创建幂等、四表、writer、读取、分页、两层 SSE、取消、重启修复、补写、脱敏、跨平台入口和 smoke。
-- [ ] 在专用 PostgreSQL 测试库执行真实 persistence/重启验证；保留数据库安全门禁，不接触业务库。
+- [x] 在专用 PostgreSQL 测试库执行真实 persistence/重启验证；保留数据库安全门禁，不接触业务库。
 - [ ] 对 geocoding/NLDI/WDFN/Samples 和至少一个已配置 parser provider 分别做可选 contract smoke；先预检网络/凭据，记录请求数、版本和结果，未运行不冒充通过。
 - [x] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07`，逐项填写实现位置、测试、实际结果与剩余风险。
 - [x] 搜索并清除被替换的 production 入口、旧字段、重复 allowlist、孤立 method、M4 兼容分支和测试专用生产开关；不清理无关历史代码。
@@ -470,12 +471,12 @@
 
 ### Verify
 
-- [ ] `python -m pytest backend/tests -q`
-- [ ] `python -m pytest backend/tests/persistence -q`（隔离 PostgreSQL）
+- [x] `python -m pytest backend/tests -q`（专用 PostgreSQL，`1197 passed`）
+- [x] `python -m pytest backend/tests/persistence -q`（隔离 PostgreSQL，`57 passed`）
 - [x] `python -m compileall -q backend/app backend/scripts`
-- [ ] `python backend/scripts/health_smoke.py`
+- [x] `python backend/scripts/health_smoke.py`（`{"status":"healthy"}`）
 - [x] `python backend/scripts/run_sse_smoke.py`
-- [ ] `python backend/scripts/run_history_smoke.py`
+- [x] `python backend/scripts/run_history_smoke.py`（history、独立进程重启与启动修复均通过）
 - [x] 新增 M4 fake-workflow smoke 与适用离线 adapter contract smoke；官方 WDFN parameter refresh 以 1 个请求通过，其余需凭据/外部项保持 `not run`。
 - [x] `git diff --check`
 
@@ -509,6 +510,13 @@
 - 孤儿扫描：代码/测试无 `post_json` 和旧 `_output_text`/`_completed_output`；重命名后的 `_terminal_output` 由 `_terminal_response` 生产路径调用，adapter 只有一处 `response.output` 容器校验，无重复边界或过时 incomplete fixture。本轮未新增 class/export，未删除无关历史代码；保留 origin/main 已有的 test-only surface 和 M5 接力契约 `WaterObservationPort`。
 - 未运行：`WATERAGENTS_TEST_DB_NAME`、OpenAI/Google provider 凭据均未设置且无 `backend/.env`，专用 PostgreSQL 与真实 provider smoke 为 `not run`；本轮结果不代表 M4 最终验收全部完成。
 
+#### Milestone 10 PostgreSQL 与 smoke 验证补充记录（2026-09-28）
+
+- 实现：`run_history_smoke.py` 的父进程请求与两个独立子进程统一复用自包含 `SMOKE_SETTINGS` 模型目录，修复未配置外部 parser 时 history smoke 在请求构造阶段失败的问题；新增跨平台 smoke 架构门禁，未修改 resolver、topology、availability、数据库 schema 或 provider 行为。
+- 环境：复用仓库 `backend/.venv` 的 Python `3.13.2`；按照 `docs/docker_postgresql_quickstart.md` 启动本机 Docker PostgreSQL 17，仅通过进程环境设置 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，业务库 `wateragents` 未作为测试目标。Docker Desktop 的损坏 runtime 目录已保留为可回滚副本，未删除数据库 volume。
+- 验证：`backend/tests/architecture/test_cross_platform_ci.py` 为 `10 passed`；专用 PostgreSQL persistence 为 `57 passed`；包含 PostgreSQL 的完整 backend regression 为 `1197 passed`；`compileall`、M4 workflow smoke、standalone SSE、health smoke、history/独立进程重启/启动修复 smoke 与 `git diff --check` 均通过。
+- 未运行：OpenAI/Google/NLDI/WDFN/Samples 等需专用凭据或受控外部配置的真实 provider contract smoke 仍为 `not run`，最新提交的 Linux/macOS/Windows 三平台 CI 仍为 `partial`；因此不宣称 M4 最终整体验收全部完成。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |
@@ -518,10 +526,10 @@
 | M4-C04 / M4-A03 | 本机已验证 | `parameter_capabilities.v1.json`；`ParameterResolver` | manifest/resolver/audit tests | 154/154、最多 6 项、必需 discharge；官方 OGC v1 refresh 1 请求无 drift，真实 parser provider 未配置。 |
 | M4-C05 / M4-C09 / M4-A02 / M4-A05 | 本机已验证 | `LocationResolver`；`QueryParserWorkflow`；模型目录 | location/date/parser/workflow tests | target/date 优先级、CONUS/COMID、双模型、空 tools 与一次 repair 本机通过；Google/parser 外部 smoke 未运行。 |
 | M4-C06 / M4-C10 / M4-C11 / M4-A01 / M4-A06 / M4-A07 | 本机已验证 | `StationAvailabilityService`；`HydrologyGraphBuilder`；NLDI/WDFN/Samples adapters | adapter fixtures、availability/topology tests、`m4_workflow_smoke.py` | 固定 fixtures 覆盖 partial/no-source/技术失败与稳定 hard limits；NLDI/Samples 外部 smoke 未运行，qualification 仍非 evidence。 |
-| M4-C07 / M4-C08 / M4-A04 | 本机已验证 | production registry、writer/reader、run snapshot、既有两层 SSE | workflow/registry/API/history/SSE/documented protocol | 原 item 归属、history 投影、reference 与重连本机通过；真实 PostgreSQL reload 未运行。 |
+| M4-C07 / M4-C08 / M4-A04 | 本机已验证 | production registry、writer/reader、run snapshot、既有两层 SSE | workflow/registry/API/history/SSE/documented protocol | 原 item 归属、history 投影、reference、重连与专用 PostgreSQL reload/restart smoke 本机通过。 |
 | M4-C12 | partial | `AnalysisContext`、`HydrologyGraph`、capability evidence rules | M4 boundary/architecture tests | M5/M6 evidence gate 输入接缝已冻结；真实 observation 与 gate 尚属 M5/M6。 |
 | M4-C13 | partial | request/config/context 的 `memory_mode`；M5–M9 handoff | request/context tests | M4 接缝本机通过；M8 memory、M9 新前端和统一端到端尚未实现。 |
-| GLOBAL-C04–C11 | partial | UTC/time models、registry/redaction、docs/CI workflow | time/redaction/resource/cwd/event-loop/architecture tests | 适用本机门禁通过；GLOBAL-C06 由 M5/M6 完成，C08 由 M9 完成，C11 缺三平台实际 CI/同库迁移。 |
+| GLOBAL-C04–C11 | partial | UTC/time models、registry/redaction、docs/CI workflow | time/redaction/resource/cwd/event-loop/architecture tests | 本机 PostgreSQL、health/history 与适用门禁通过；GLOBAL-C06 由 M5/M6 完成，C08 由 M9 完成，C11 仍缺最新三平台实际 CI。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能仅凭代码存在填写 `implemented`；中心/远端证据与本机证据分开。
 

@@ -33,15 +33,20 @@ from app.application.transcripts.stream_models import (
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.config import AppSettings
-from app.main import create_app
+from tests.m4_support import (
+    MODEL_CATALOG,
+    NoOpWorkflow,
+    create_request,
+    create_test_app as create_app,
+)
 from scripts.transcript_fixtures import (
     FixtureMessageV1,
     fixture_message_registration,
 )
 
-CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
-    "America/Chicago"
-)
+CONFIGURATION = CreateAnalysisRunRequest.model_validate(
+    create_request("query")
+).to_configuration_snapshot("America/Chicago")
 
 
 class TickingClock:
@@ -130,8 +135,11 @@ def test_encoder_uses_optional_integer_id_and_one_json_data_line() -> None:
     event = RunSnapshotEvent(
         run_id=UUID("10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c"),
         status=RunStatus.RUNNING,
+        analysis_phase="query_understanding",
         created_at="2026-09-13T03:20:00Z",
         updated_at="2026-09-13T03:20:00.000001Z",
+        context_ref=None,
+        topology_ref=None,
         persistence={"state": "pending", "warning": None},
     )
     without_id = encode_event("run_snapshot", event)
@@ -1040,6 +1048,8 @@ def test_keepalive_interval_must_be_finite_and_positive(interval) -> None:
     with pytest.raises(ValueError, match="finite and positive"):
         RunCoordinator(
             TickingClock(),
+            model_catalog=MODEL_CATALOG,
             transcript_store=InMemoryTranscriptStore(),
+            workflow=NoOpWorkflow(),
             keepalive_interval=interval,
         )

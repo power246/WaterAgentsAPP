@@ -236,19 +236,43 @@ class PostgresTranscriptStore:
                 run_rows = tuple(
                     (await connection.execute(statement)).mappings()
                 )
+                run_ids = tuple(row["run_id"] for row in run_rows)
                 created_ids = tuple(row["created_item_id"] for row in run_rows)
                 item_rows = ()
                 content_rows = ()
+                session_rows = ()
                 if created_ids:
                     item_rows = tuple(
                         (
                             await connection.execute(
-                                select(transcript_items).where(
-                                    transcript_items.c.item_id.in_(created_ids)
-                                )
+                                select(transcript_items)
+                                .where(or_(
+                                    transcript_items.c.item_id.in_(created_ids),
+                                    and_(
+                                        transcript_items.c.run_id.in_(run_ids),
+                                        transcript_items.c.content_type
+                                        == "query_understood",
+                                    ),
+                                ))
+                                .order_by(transcript_items.c.transcript_sequence)
                             )
                         ).mappings()
                     )
+                    session_ids = tuple(
+                        row["session_id"]
+                        for row in item_rows
+                        if row["session_id"] is not None
+                    )
+                    if session_ids:
+                        session_rows = tuple(
+                            (
+                                await connection.execute(
+                                    select(analysis_sessions).where(
+                                        analysis_sessions.c.session_id.in_(session_ids)
+                                    )
+                                )
+                            ).mappings()
+                        )
                     external_ids = tuple(
                         row["item_id"]
                         for row in item_rows
@@ -274,13 +298,37 @@ class PostgresTranscriptStore:
             row["item_id"]: StoredTranscriptContent.model_validate(dict(row))
             for row in content_rows
         }
+        sessions = {
+            row["session_id"]: SessionSummary(
+                session_id=row["session_id"],
+                agent_role=AgentRole(row["agent_role"]),
+                target_comid=row["target_comid"],
+                status=AgentSessionStatus(row["status"]),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in session_rows
+        }
         return StoredRunHistoryPage(runs=tuple(
             StoredRunRead(
                 run=self._stored_run_header(row),
-                items=(items[row["created_item_id"]],)
-                if row["created_item_id"] in items else (),
-                contents=(contents[row["created_item_id"]],)
-                if row["created_item_id"] in contents else (),
+                sessions=tuple(
+                    session
+                    for session_id, session in sessions.items()
+                    if any(
+                        item.run_id == row["run_id"]
+                        and item.session_id == session_id
+                        for item in items.values()
+                    )
+                ),
+                items=tuple(
+                    item for item in items.values() if item.run_id == row["run_id"]
+                ),
+                contents=tuple(
+                    content
+                    for item_id, content in contents.items()
+                    if item_id in items and items[item_id].run_id == row["run_id"]
+                ),
             )
             for row in run_rows
         ))

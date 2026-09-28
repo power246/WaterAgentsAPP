@@ -21,10 +21,11 @@ from app.application.analysis_runs.models import (
 )
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from tests.m4_support import MODEL_CATALOG, create_request
 
-CONFIGURATION = CreateAnalysisRunRequest(query="query").to_configuration_snapshot(
-    "America/Chicago"
-)
+CONFIGURATION = CreateAnalysisRunRequest.model_validate(
+    create_request("query")
+).to_configuration_snapshot("America/Chicago")
 ERROR = PublicError(
     error_id=UUID("0463cd90-6d0f-47e9-9656-b4aa86352c61"),
     code="agent_failed",
@@ -69,6 +70,7 @@ async def make_running_coordinator():
     coordinator = RunCoordinator(
         clock,
         transcript_store=InMemoryTranscriptStore(),
+        model_catalog=MODEL_CATALOG,
         workflow=workflow,
         record_id_factory=SequentialIds(),
     )

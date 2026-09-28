@@ -1,3 +1,4 @@
+from datetime import date
 from enum import Enum
 from typing import Annotated, Literal, TypeAlias
 from uuid import UUID
@@ -8,9 +9,11 @@ from pydantic import (
     SerializeAsAny,
     StrictBool,
     StrictFloat,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from app.application.analysis_runs.models import (
     AnalysisConfigurationSnapshot,
@@ -20,7 +23,17 @@ from app.application.analysis_runs.models import (
 )
 from app.domain.common import NonEmptyString, UtcDatetime, ensure_unique_tuple
 from app.domain.domain_model import DomainModel
-from app.domain.time.time_resolution import TimeResolution
+from app.domain.hydrology.location import GeoPoint
+from app.domain.memory import MemoryMode
+from app.domain.model_catalog import ModelSelection
+from app.domain.stable_validation_error import stable_validation_error
+from app.domain.time.time_resolution_preference import (
+    DEFAULT_TIME_RESOLUTION_PREFERENCE,
+    TimeResolutionPreference,
+)
+from app.domain.time.time_resolution_preference_source import (
+    TimeResolutionPreferenceSource,
+)
 
 DEFAULT_INLINE_CONTENT_BYTES = 64 * 1024
 DEFAULT_PREVIEW_BYTES = 1024
@@ -40,18 +53,113 @@ AnalysisQuery: TypeAlias = Annotated[
 
 class AnalysisRequestV1(DomainModel):
     query: AnalysisQuery
-    time_resolution: TimeResolution | None = None
+    target: "AnalysisTargetV1 | SkipJsonSchema[None]" = None
+    date_range: "AnalysisDateRangeV1 | SkipJsonSchema[None]" = None
+    time_resolution: TimeResolutionPreference = DEFAULT_TIME_RESOLUTION_PREFERENCE
+    parser_model: ModelSelection
+    waterbody_model: ModelSelection
+    memory_mode: MemoryMode
+
+    @field_validator("target", "date_range", "time_resolution", mode="before")
+    @classmethod
+    def reject_explicit_nulls(cls, value: object, info: ValidationInfo) -> object:
+        if value is None:
+            field_name = info.field_name
+            error_type = {
+                "target": "target_value_required",
+                "date_range": "date_range_incomplete",
+                "time_resolution": "invalid_time_resolution",
+            }[field_name]
+            raise stable_validation_error(
+                error_type,
+                f"{field_name} must be omitted rather than null",
+            )
+        return value
+
+    def to_configuration_snapshot(
+        self, analysis_timezone: str
+    ) -> AnalysisConfigurationSnapshot:
+        source = (
+            TimeResolutionPreferenceSource.FRONTEND
+            if "time_resolution" in self.model_fields_set
+            else TimeResolutionPreferenceSource.DEFAULT
+        )
+        return AnalysisConfigurationSnapshot(
+            analysis_timezone=analysis_timezone,
+            time_resolution_preference=self.time_resolution,
+            time_resolution_preference_source=source,
+            parser_model=self.parser_model,
+            waterbody_model=self.waterbody_model,
+            memory_mode=self.memory_mode,
+        )
+
+
+class AnalysisTargetV1(DomainModel):
+    comid: str | SkipJsonSchema[None] = None
+    coordinates: GeoPoint | SkipJsonSchema[None] = None
 
     @model_validator(mode="before")
     @classmethod
-    def reject_explicit_null_resolution(cls, value: object) -> object:
-        if (
-            isinstance(value, dict)
-            and "time_resolution" in value
-            and value["time_resolution"] is None
-        ):
-            raise ValueError("time_resolution must be omitted rather than null")
+    def reject_null_members(cls, value: object) -> object:
+        if isinstance(value, dict):
+            if "comid" in value and value["comid"] is None:
+                raise stable_validation_error("invalid_comid", "comid must not be null")
+            if "coordinates" in value and value["coordinates"] is None:
+                raise stable_validation_error(
+                    "invalid_coordinates", "coordinates must not be null"
+                )
         return value
+
+    @field_validator("comid", mode="before")
+    @classmethod
+    def validate_comid(cls, value: object) -> object:
+        if not isinstance(value, str) or not value.isdecimal():
+            raise stable_validation_error(
+                "invalid_comid", "comid must be a positive decimal string"
+            )
+        if value.startswith("0"):
+            raise stable_validation_error(
+                "invalid_comid", "comid must be a positive decimal string"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def require_value(self) -> "AnalysisTargetV1":
+        if self.comid is None and self.coordinates is None:
+            raise stable_validation_error(
+                "target_value_required",
+                "target must include comid or coordinates",
+            )
+        return self
+
+
+class AnalysisDateRangeV1(DomainModel):
+    start_date: date
+    end_date: date
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_complete_range(cls, value: object) -> object:
+        if not isinstance(value, dict) or any(
+            field_name not in value or value[field_name] is None
+            for field_name in ("start_date", "end_date")
+        ):
+            raise stable_validation_error(
+                "date_range_incomplete",
+                "start_date and end_date must be provided together",
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_range(self) -> "AnalysisDateRangeV1":
+        if self.start_date > self.end_date:
+            raise stable_validation_error(
+                "date_range_reversed", "start_date must not follow end_date"
+            )
+        return self
+
+
+AnalysisRequestV1.model_rebuild()
 
 
 class LegacySessionStatus(str, Enum):

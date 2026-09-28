@@ -1,0 +1,16 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "id": "00060",
+      "properties": {
+        "id": "00060",
+        "parameter_name": "Discharge",
+        "unit_of_measure": "ft3/s"
+      },
+      "geometry": null
+    }
+  ],
+  "links": []
+}

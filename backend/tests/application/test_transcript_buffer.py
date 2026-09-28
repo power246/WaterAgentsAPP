@@ -14,6 +14,7 @@ from app.application.transcripts.buffer import (
 from app.application.transcripts.models import TranscriptContentRef, TranscriptMetadata
 from app.application.transcripts.registry import create_production_registry
 from scripts.transcript_fixtures import fixture_message_registration
+from tests.m4_support import create_request
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
 ITEM_ID = UUID("30000000-0000-0000-0000-000000000001")
@@ -65,16 +66,20 @@ def test_preview_limits_are_customizable_and_unicode_safe() -> None:
 def test_identical_text_remains_two_immutable_facts_with_distinct_ids() -> None:
     registry = create_production_registry()
     buffer = TranscriptBuffer(registry)
-    first = buffer.append(_identity(ITEM_ID, 1), "analysis_request", 1, {"query": "lake"})
+    first = buffer.append(
+        _identity(ITEM_ID, 1), "analysis_request", 1, create_request("lake")
+    )
     second = buffer.append(
-        _identity(UUID(int=22), 2), "analysis_request", 1, {"query": "lake"}
+        _identity(UUID(int=22), 2), "analysis_request", 1, create_request("lake")
     )
 
     assert first.item_id != second.item_id
     assert first.content.safe_body == second.content.safe_body
     assert len(buffer.items) == 2
     with pytest.raises(ValueError, match="identity"):
-        buffer.append(_identity(ITEM_ID, 3), "analysis_request", 1, {"query": "lake"})
+        buffer.append(
+            _identity(ITEM_ID, 3), "analysis_request", 1, create_request("lake")
+        )
 
 
 def test_external_body_is_stored_once_and_full_content_ref_uses_run_and_item() -> None:
@@ -84,7 +89,7 @@ def test_external_body_is_stored_once_and_full_content_ref_uses_run_and_item() -
         _identity(ITEM_ID, 1),
         "analysis_request",
         1,
-        {"query": "水" * 20},
+        create_request("水" * 20),
     )
     batch = buffer.to_storage_batch(inline_content_bytes=10, preview_bytes=7)
 
@@ -105,7 +110,7 @@ def test_redaction_happens_before_live_and_is_rechecked_for_storage() -> None:
         _identity(ITEM_ID, 1),
         "analysis_request",
         1,
-        {"query": f"inspect {secret}"},
+        create_request(f"inspect {secret}"),
         private_values=(secret,),
     )
 
@@ -127,7 +132,7 @@ def test_large_non_sensitive_text_round_trips_unchanged() -> None:
 def test_auth_words_without_a_credential_are_preserved(value: str) -> None:
     registry = create_production_registry()
 
-    content = registry.encode("analysis_request", 1, {"query": value})
+    content = registry.encode("analysis_request", 1, create_request(value))
 
     assert json.loads(content.safe_body)["query"] == value
 
@@ -186,12 +191,12 @@ def test_registered_json_redacts_alphabetic_auth_credentials(
     content = create_production_registry().encode(
         "analysis_request",
         1,
-        {"query": f"provider returned {credential}\nnext line"},
+        create_request(f"provider returned {credential}\nnext line"),
     )
 
-    assert json.loads(content.safe_body) == {
-        "query": "provider returned [REDACTED]\nnext line",
-    }
+    assert json.loads(content.safe_body) == create_request(
+        "provider returned [REDACTED]\nnext line"
+    )
 
 
 def test_tags_are_redacted_deduplicated_and_rechecked_for_storage() -> None:
@@ -203,7 +208,7 @@ def test_tags_are_redacted_deduplicated_and_rechecked_for_storage() -> None:
         _identity(ITEM_ID, 1),
         "analysis_request",
         1,
-        {"query": "safe query"},
+        create_request("safe query"),
         private_values=(first_secret, second_secret, ""),
         metadata=TranscriptMetadata(
             tags=(
@@ -285,7 +290,7 @@ def test_same_batch_reference_is_valid_and_target_body_is_not_copied() -> None:
         _identity(target_id, 1, session_id=UUID(int=201)),
         "analysis_request",
         1,
-        {"query": "水" * 20},
+        create_request("水" * 20),
     )
     buffer.append(
         _identity(ITEM_ID, 2, session_id=UUID(int=202)),

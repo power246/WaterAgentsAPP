@@ -45,6 +45,7 @@ from app.application.transcripts.reader import (
     TranscriptSessionNotFoundError,
 )
 from app.domain.common import normalize_utc_datetime
+from app.domain.stable_validation_error import StableValidationValueError
 
 _VALIDATION_MESSAGES = {
     "missing": "This field is required.",
@@ -58,10 +59,21 @@ _VALIDATION_MESSAGES = {
     "model_attributes_type": "Expected a JSON object.",
     "model_type": "Expected a JSON object.",
     "value_error": "The value is invalid.",
+    "target_value_required": "Target must include COMID or coordinates.",
+    "invalid_comid": "COMID must be a positive decimal string.",
+    "invalid_coordinates": "Coordinates must be finite and within range.",
+    "date_range_incomplete": "Start and end dates must be provided together.",
+    "date_range_reversed": "The start date must not follow the end date.",
+    "date_range_out_of_bounds": "The date range is outside the allowed window.",
+    "invalid_time_resolution": "Select a supported time resolution.",
+    "model_selection_required": "A model selection is required.",
+    "model_selection_unsupported": "The model is not selectable for this role.",
+    "invalid_memory_mode": "Select a supported memory mode.",
 }
 _SAFE_FIELDS = set(CreateAnalysisRunRequest.model_fields) | {
     "body", "path", "query", "header", "run_id", "session_id", "item_id",
-    "last-event-id", "view", "limit", "cursor",
+    "last-event-id", "view", "limit", "cursor", "comid", "coordinates",
+    "latitude", "longitude", "start_date", "end_date", "provider", "model",
 }
 
 
@@ -144,12 +156,48 @@ def validation_violations(error: RequestValidationError) -> tuple[ValidationViol
             part if type(part) is int or part in _SAFE_FIELDS else "unknown_field"
             for part in item["loc"]
         )
-        error_type = item["type"] if item["type"] in _VALIDATION_MESSAGES else "invalid_value"
+        context_error = item.get("ctx", {}).get("error")
+        raw_type = (
+            context_error.error_type
+            if isinstance(context_error, StableValidationValueError)
+            else item["type"]
+        )
+        error_type = _create_validation_type(field, raw_type)
         message = _VALIDATION_MESSAGES.get(error_type, "The value is invalid.")
         if error_type == "string_too_short" and field == ("body", "query"):
             message = "The query must not be empty."
         violations.append(ValidationViolation(field=field, type=error_type, message=message))
     return tuple(violations)
+
+
+def _create_validation_type(field: tuple[str | int, ...], raw_type: str) -> str:
+    if raw_type in {
+        "target_value_required",
+        "invalid_comid",
+        "invalid_coordinates",
+        "date_range_incomplete",
+        "date_range_reversed",
+        "date_range_out_of_bounds",
+        "invalid_time_resolution",
+        "model_selection_required",
+        "model_selection_unsupported",
+        "invalid_memory_mode",
+        "extra_forbidden",
+    }:
+        return raw_type
+    is_body_field = len(field) > 1 and field[0] == "body"
+    if is_body_field and field[1] in {"parser_model", "waterbody_model"}:
+        return "model_selection_required"
+    if is_body_field and field[1] == "memory_mode":
+        return "invalid_memory_mode"
+    if is_body_field and field[1] == "time_resolution":
+        return "invalid_time_resolution"
+    if is_body_field and field[1] == "target":
+        if "comid" in field:
+            return "invalid_comid"
+        if "coordinates" in field:
+            return "invalid_coordinates"
+    return raw_type if raw_type in _VALIDATION_MESSAGES else "invalid_value"
 
 
 async def handle_error(request: Request, exception: Exception) -> JSONResponse:
@@ -161,8 +209,13 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
     headers = {}
     history_url = None
     if isinstance(exception, RequestValidationError):
-        status, code, message = 422, "validation_error", "The request is invalid."
         validation = validation_violations(exception)
+        is_body_error = any(
+            violation.field and violation.field[0] == "body"
+            for violation in validation
+        )
+        code = "request_validation_failed" if is_body_error else "validation_error"
+        status, message = 422, "The request is invalid."
     elif isinstance(exception, UnknownQueryParametersError):
         status, code, message = 422, "validation_error", "The request is invalid."
         validation = tuple(

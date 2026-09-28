@@ -10,7 +10,7 @@ from app.application.transcripts.models import GenerationStatus
 from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.main import create_app
+from tests.m4_support import create_request, create_test_app as create_app
 from scripts.run_sse_smoke import (
     BASE,
     GatedWorkflow,
@@ -47,7 +47,9 @@ def test_server_cleanup_closes_socket_and_workflow_on_client_exit(
             async with running_server(app) as client:
                 address = str(client.base_url)
                 assert (await client.get("/health")).json() == {"status": "healthy"}
-                response = await client.post("/api/analysis/runs", json={"query": "cleanup smoke"})
+                response = await client.post(
+                    "/api/analysis/runs", json=create_request("cleanup smoke")
+                )
                 assert response.status_code == 201
                 await workflow.started.wait()
                 entered.set()
@@ -122,7 +124,9 @@ def test_long_transcript_stream_allows_another_run_and_reaches_stream_end(
         )
         try:
             async with running_server(app) as client:
-                first = await client.post(BASE, json={"query": "long transcript smoke"})
+                first = await client.post(
+                    BASE, json=create_request("long transcript smoke")
+                )
                 assert first.status_code == 201
                 await workflow.started.wait()
                 coordinator = app.state.run_coordinator
@@ -162,7 +166,7 @@ def test_long_transcript_stream_allows_another_run_and_reaches_stream_end(
                 async def create_and_cancel_other_run():
                     created = await client.post(
                         BASE,
-                        json={"query": "concurrent run smoke"},
+                        json=create_request("concurrent run smoke"),
                     )
                     assert created.status_code == 201
                     cancelled = await client.post(

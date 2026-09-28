@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -10,6 +11,8 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from app.domain.model_catalog import ModelCapability
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ENV_FILE = BACKEND_ROOT / ".env"
@@ -41,6 +44,63 @@ class AppSettings(BaseSettings):
     host: str = Field(default="127.0.0.1", min_length=1)
     port: int = Field(default=8000, ge=1, le=65535)
     analysis_timezone: str = "America/Chicago"
+    model_catalog: tuple[ModelCapability, ...] = ()
+    topology_max_distance_km: float = Field(
+        default=100,
+        gt=0,
+        le=1000,
+        allow_inf_nan=False,
+    )
+    topology_max_hops: int = Field(default=12, ge=1, le=100)
+    topology_max_nodes: int = Field(default=128, ge=1, le=10000)
+    topology_max_concurrency: int = Field(default=8, ge=1, le=64)
+    prediction_baseline_hours: int = Field(default=48, ge=1, le=168)
+    max_target_parameters: int = Field(default=6, ge=1, le=6)
+    query_parser_timeout_seconds: float = Field(
+        default=45,
+        gt=0,
+        le=300,
+        allow_inf_nan=False,
+    )
+    geocoding_timeout_seconds: float = Field(
+        default=10,
+        gt=0,
+        le=120,
+        allow_inf_nan=False,
+    )
+    metadata_timeout_seconds: float = Field(
+        default=15,
+        gt=0,
+        le=120,
+        allow_inf_nan=False,
+    )
+    provider_http_max_response_bytes: int = Field(
+        default=4_194_304,
+        ge=1024,
+        le=67_108_864,
+    )
+    provider_http_page_size: int = Field(default=1000, ge=1, le=50_000)
+    provider_http_max_pages: int = Field(default=10, ge=1, le=100)
+    provider_http_max_records: int = Field(default=10_000, ge=1, le=50_000)
+    provider_http_retry_delay_seconds: float = Field(
+        default=0.25,
+        ge=0,
+        le=10,
+        allow_inf_nan=False,
+    )
+    google_geocoding_api_key: SecretStr | None = None
+    usgs_api_key: SecretStr | None = None
+    openai_api_key: SecretStr | None = None
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        min_length=1,
+    )
+    topology_stage_timeout_seconds: float = Field(
+        default=120,
+        gt=0,
+        le=900,
+        allow_inf_nan=False,
+    )
     db_host: str = Field(default="127.0.0.1", min_length=1)
     db_port: int = Field(default=5432, ge=1, le=65535)
     db_name: str = Field(default="wateragents", min_length=1)
@@ -81,11 +141,50 @@ class AppSettings(BaseSettings):
         allow_inf_nan=False,
     )
 
-    @field_validator("db_password", mode="before")
+    @field_validator(
+        "db_password",
+        "google_geocoding_api_key",
+        "usgs_api_key",
+        "openai_api_key",
+        mode="before",
+    )
     @classmethod
-    def preserve_database_password(cls, value: object) -> object:
+    def preserve_secret(cls, value: object) -> object:
         if isinstance(value, str):
             return SecretStr(value)
+        return value
+
+    @field_validator(
+        "topology_max_hops",
+        "topology_max_nodes",
+        "topology_max_concurrency",
+        "prediction_baseline_hours",
+        "max_target_parameters",
+        "provider_http_max_response_bytes",
+        "provider_http_page_size",
+        "provider_http_max_pages",
+        "provider_http_max_records",
+        mode="before",
+    )
+    @classmethod
+    def reject_non_integer_m4_limits(cls, value: object) -> object:
+        if isinstance(value, (bool, float)):
+            raise ValueError("M4 integer limits require an integer value")
+        return value
+
+    @field_validator(
+        "topology_max_distance_km",
+        "query_parser_timeout_seconds",
+        "geocoding_timeout_seconds",
+        "metadata_timeout_seconds",
+        "provider_http_retry_delay_seconds",
+        "topology_stage_timeout_seconds",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_m4_numbers(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("M4 numeric settings must not be boolean")
         return value
 
     @field_validator("db_sslmode", mode="before")
@@ -102,6 +201,23 @@ class AppSettings(BaseSettings):
             value = value.strip()
             return value or None
         return value
+
+    @field_validator("openai_base_url")
+    @classmethod
+    def normalize_openai_base_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme not in {"https", "http"}
+            or not parsed.netloc
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("openai_base_url must be an HTTP(S) URL")
+        return normalized
 
     @field_validator("log_level", mode="before")
     @classmethod
@@ -126,6 +242,10 @@ class AppSettings(BaseSettings):
         if self.transcript_preview_bytes >= self.transcript_inline_max_bytes:
             raise ValueError(
                 "transcript_preview_bytes must be smaller than transcript_inline_max_bytes"
+            )
+        if self.provider_http_page_size > self.provider_http_max_records:
+            raise ValueError(
+                "provider_http_page_size must not exceed provider_http_max_records"
             )
         return self
 
