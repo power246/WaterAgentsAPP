@@ -1,8 +1,8 @@
 # M4 参数能力目录
 
-更新日期：2026-09-25
+更新日期：2026-09-27
 
-> 状态：第一版集成交付目标，尚未实现。本文列出 M1–M9 完成后进入正式前后端联调前必须接通的 154 个参数能力；它不是当前代码已实现能力的声明，也不是把 USGS 全目录直接当作 allowlist。
+> 状态：M4 已实现唯一 checked-in 154 项 capability manifest、确定性解析和 WDFN/Samples availability route；2026-09-27 的可选官方 OGC v1 refresh 以 1 个请求返回 154/154、无 key/name/unit drift。M5 仍须读取并验证真实 observation，M4 qualification 不是 evidence，也不代表任意地点/日期都有数据。
 
 本文承接：
 

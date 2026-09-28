@@ -1,8 +1,8 @@
 # M4 Query Understanding + Hydrology Topology 设计决策记录
 
-更新日期：2026-09-25
+更新日期：2026-09-27
 
-> 状态：设计已对齐，尚未实现。本文记录方向与实现模式；精确类型、API 示例与实施顺序见同目录实施设计、API 文档和 Implementation TODO。
+> 状态：Milestone 0–10 已完成本机实现与集成审计；M4 仅交付 query/context/topology 内部切片，真实 observation/evidence、reasoning、调度、memory 和新前端仍分别由 M5–M9 承接。精确类型、API 示例与实际证据见同目录实施设计、API 文档和 Implementation TODO。
 
 本文承接：
 
