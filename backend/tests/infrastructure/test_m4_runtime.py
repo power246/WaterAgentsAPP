@@ -1,5 +1,8 @@
 import asyncio
+import subprocess
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -17,6 +20,30 @@ from app.infrastructure.config import (
 )
 from app.infrastructure.runtime import build_m4_runtime
 from app.main import create_app
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    (
+        "app.application.analysis_runs.workflow",
+        "app.infrastructure.runtime.event_loop",
+        "app.infrastructure.runtime.m4",
+    ),
+)
+def test_runtime_modules_import_in_fresh_interpreter(module_name: str) -> None:
+    completed = subprocess.run(
+        [sys.executable, "-c", f"import {module_name}"],
+        cwd=BACKEND_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 class FixedClock:

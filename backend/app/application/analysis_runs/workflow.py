@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from app.application.analysis_runs.models import (
@@ -11,7 +11,9 @@ from app.application.analysis_runs.models import (
     SessionSummary,
     TranscriptItemIdentity,
 )
-from app.application.transcripts.models import AnalysisRequestV1
+
+if TYPE_CHECKING:
+    from app.application.transcripts.models import AnalysisRequestV1
 
 
 class WorkflowStopped(Exception):
@@ -138,7 +140,7 @@ class WorkflowContext:
     run: AnalysisRunSnapshot
     query: str = field(repr=False)
     cancellation: CancellationToken
-    request: AnalysisRequestV1 = field(repr=False)
+    request: "AnalysisRequestV1" = field(repr=False)
     operations: WorkflowOperations = field(repr=False)
 
 
