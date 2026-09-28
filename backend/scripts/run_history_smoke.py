@@ -26,7 +26,7 @@ try:
     from scripts.m4_request import smoke_request
 except ModuleNotFoundError:  # Direct `python scripts/run_history_smoke.py` execution.
     from m4_request import smoke_request
-from run_sse_smoke import read_event, stream_headers
+from run_sse_smoke import SMOKE_SETTINGS, read_event, stream_headers
 from test_database import temporary_migrated_schema
 from transcript_fixtures import FixtureMessageV1, fixture_message_registration
 
@@ -240,7 +240,11 @@ async def create_saved_runs(client: httpx.AsyncClient) -> dict[str, object]:
     key = uuid4()
     created = await client.post(
         BASE,
-        json=smoke_request(COMPLETED_QUERY, time_resolution="6h"),
+        json=smoke_request(
+            COMPLETED_QUERY,
+            time_resolution="6h",
+            settings=SMOKE_SETTINGS,
+        ),
         headers={"Idempotency-Key": str(key)},
     )
     assert created.status_code == 201, created.text
@@ -290,7 +294,10 @@ async def create_saved_runs(client: httpx.AsyncClient) -> dict[str, object]:
         assert response.json()["source"] == "postgresql"
     assert LARGE_TEXT in content_response.json()["text"]
 
-    cancelled = await client.post(BASE, json=smoke_request(CANCELLED_QUERY))
+    cancelled = await client.post(
+        BASE,
+        json=smoke_request(CANCELLED_QUERY, settings=SMOKE_SETTINGS),
+    )
     assert cancelled.status_code == 201, cancelled.text
     cancelled_id = UUID(cancelled.json()["run_id"])
     await wait_for_detail(
@@ -309,7 +316,10 @@ async def create_saved_runs(client: httpx.AsyncClient) -> dict[str, object]:
     cancel_events = await cancel_events_task
     assert cancel_events[-1][0] == "stream_end"
 
-    interrupted = await client.post(BASE, json=smoke_request(INTERRUPTED_QUERY))
+    interrupted = await client.post(
+        BASE,
+        json=smoke_request(INTERRUPTED_QUERY, settings=SMOKE_SETTINGS),
+    )
     assert interrupted.status_code == 201, interrupted.text
     interrupted_id = UUID(interrupted.json()["run_id"])
     interrupted_detail = await wait_for_detail(
@@ -412,7 +422,11 @@ async def verify_restart(
 
     repeated = await client.post(
         BASE,
-        json=smoke_request(COMPLETED_QUERY, time_resolution="6h"),
+        json=smoke_request(
+            COMPLETED_QUERY,
+            time_resolution="6h",
+            settings=SMOKE_SETTINGS,
+        ),
         headers={"Idempotency-Key": state["key"]},
     )
     assert repeated.status_code == 201, repeated.text
@@ -422,6 +436,9 @@ async def verify_restart(
 
 
 async def run_smoke(settings: AppSettings) -> None:
+    settings = settings.model_copy(
+        update={"model_catalog": SMOKE_SETTINGS.model_catalog}
+    )
     async with asyncio.timeout(90):
         async with running_application(settings) as (first_process, first_client):
             first_pid = first_process.pid
