@@ -1,6 +1,6 @@
 # M5 Evidence Tools + EvidenceBundle Implementation TODO
 
-更新日期：2026-09-30
+更新日期：2026-10-01
 
 > 当前状态：Milestone 0–5 已完成，Milestone 6–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
 
@@ -313,11 +313,12 @@
 
 提交边界：ports、scope/plan/completeness models、settings/error mapping 和 tests；不得夹带真实 adapters、transcript writer 或 HTTP test app。
 
-完成记录（2026-09-30）：
+完成记录（2026-10-01）：
 
 - 实现：以五个强类型 provider-neutral port 原子替换 M4 的 observation/weather/facility 占位泛型；新增由已保存 run/session/context/topology facts 封装的 sealed `EvidenceSessionScope`、DST-aware 当地自然日 envelope、scope/provider request 授权、water observation plan、canonical request/budget accounting、三种官方 completion contract、provider-neutral batch/page/count/completed-range 模型、逐窗口 collection completeness 与固定安全错误映射。Settings 一次解析且只允许部署收紧全部 M5 limits；未加入真实 provider adapter、统一 executor、transcript writer 或 HTTP test app。
 - 验证：清单 focused 为 `32 passed`，两项 architecture gate 为 `63 passed`，Evidence/Settings 扩圈回归为 `169 passed`；Docker Engine `29.8.1` 与项目 PostgreSQL 17 容器 healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1399 passed`。health 返回 `{"status":"healthy"}`，run-history 的 history、独立进程重启与启动修复均通过；`compileall` 与 `git diff --check` 通过。
 - 修复与风险：架构 gate 首轮唯一失败是新 port docstring 未显式写出 unavailable 语义，已同步契约文字后通过；沙箱内 pytest 临时目录 ACL 拒绝访问，最终 gates 均在沙箱外独立 `--basetemp` 复核。真实 USGS/NWS/EPA provider、Linux/macOS CI 为 `not run`；本项只是 M1–M9 原子任务中的实现切片，正式整体验收仍在 Milestone 9 完成后开始。
+- 提交：本地实现提交 `73f8f71`（`feat(m5): complete milestone 5 provider contracts`）；未 push。
 
 ## Milestone 6：USGS observation 与 discharge adapters
 
