@@ -2,7 +2,7 @@
 
 更新日期：2026-09-30
 
-> 当前状态：Milestone 0–3 已完成，Milestone 4–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
+> 当前状态：Milestone 0–5 已完成，Milestone 6–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
 
 本清单执行以下已确认文档：
 
@@ -285,33 +285,39 @@
 
 ### 工作
 
-- [ ] 定义 `WaterObservationPort`、`WeatherEvidencePort`、`FacilityEvidencePort`、`UpstreamResultPort`、`TranscriptEvidencePort`，只使用 stdlib/domain DTO 和类型化 port errors。
-- [ ] 定义不可伪造的 `EvidenceSessionScope`，只从已保存 context/topology/session facts 装配 agent COMID、窗口、参数、station/series refs、geometry refs、memory mode 和 cancel token。
-- [ ] 实现 scope authorizer 和 provider plan builder：拒绝任意 COMID/station/geometry/URL、非当前水体站点、未登记 parameter/channel 和超出 ±1 当地日的时间。
-- [ ] 实现 DST-aware local-calendar-day query envelope，转换为 UTC `[start,end)`；扩展记录不生成额外 result windows。
-- [ ] 定义 provider-neutral page/chunk response、request/page/record/byte counts、completed ranges、affected windows 和 completion proof。
-- [ ] collection completeness 与 observation coverage 分离；只有官方 next-chain/完整 CSV/single-response contract 正常结束才能证明 complete。
-- [ ] 建立统一 error mapping：empty、unavailable、invalid、auth、rate limit、timeout、response too large、incomplete、scope、unit、aggregation、geometry、producer unavailable。
-- [ ] 在 settings 中一次解析默认 limits：20 s/request、2 attempts、90 s/waterbody、12 collection calls、24 transforms、10 pages、10,000 records、8 MiB/request、inspection 50/200、preview 32 records/16 KiB、facility 32 centers。
-- [ ] 非法/未知/越界配置启动失败；Agent 不能提高 limit 或用同义拆分绕过 canonical accounting。
+- [x] 定义 `WaterObservationPort`、`WeatherEvidencePort`、`FacilityEvidencePort`、`UpstreamResultPort`、`TranscriptEvidencePort`，只使用 stdlib/domain DTO 和类型化 port errors。
+- [x] 定义不可伪造的 `EvidenceSessionScope`，只从已保存 context/topology/session facts 装配 agent COMID、窗口、参数、station/series refs、geometry refs、memory mode 和 cancel token。
+- [x] 实现 scope authorizer 和 provider plan builder：拒绝任意 COMID/station/geometry/URL、非当前水体站点、未登记 parameter/channel 和超出 ±1 当地日的时间。
+- [x] 实现 DST-aware local-calendar-day query envelope，转换为 UTC `[start,end)`；扩展记录不生成额外 result windows。
+- [x] 定义 provider-neutral page/chunk response、request/page/record/byte counts、completed ranges、affected windows 和 completion proof。
+- [x] collection completeness 与 observation coverage 分离；只有官方 next-chain/完整 CSV/single-response contract 正常结束才能证明 complete。
+- [x] 建立统一 error mapping：empty、unavailable、invalid、auth、rate limit、timeout、response too large、incomplete、scope、unit、aggregation、geometry、producer unavailable。
+- [x] 在 settings 中一次解析默认 limits：20 s/request、2 attempts、90 s/waterbody、12 collection calls、24 transforms、10 pages、10,000 records、8 MiB/request、inspection 50/200、preview 32 records/16 KiB、facility 32 centers。
+- [x] 非法/未知/越界配置启动失败；Agent 不能提高 limit 或用同义拆分绕过 canonical accounting。
 
 ### Tests
 
-- [ ] scope 只能来自真实 run/session/context/topology，跨 run/session/COMID/station/geometry/window 请求均拒绝。
-- [ ] DST spring/fall、当地日期 ±1 日、UTC 边界和不新增窗口可由 fake clock/timezone 重现。
-- [ ] normal complete、successful empty、auth/rate limit/timeout/invalid、page failure 和 cancel 的 port/error 语义不同。
-- [ ] 失败页只阻断无法证明完整的窗口；独立 complete 窗口继续，已解析 record refs 保留。
-- [ ] settings 默认值、收紧值、非法值、部署上限与 Agent schema 不泄露 server limits/secret 的边界完整。
+- [x] scope 只能来自真实 run/session/context/topology，跨 run/session/COMID/station/geometry/window 请求均拒绝。
+- [x] DST spring/fall、当地日期 ±1 日、UTC 边界和不新增窗口可由 fake clock/timezone 重现。
+- [x] normal complete、successful empty、auth/rate limit/timeout/invalid、page failure 和 cancel 的 port/error 语义不同。
+- [x] 失败页只阻断无法证明完整的窗口；独立 complete 窗口继续，已解析 record refs 保留。
+- [x] settings 默认值、收紧值、非法值、部署上限与 Agent schema 不泄露 server limits/secret 的边界完整。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/ports backend/tests/application/evidence_tools/test_scope.py backend/tests/application/evidence_tools/test_collection_manifest.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_port_imports.py backend/tests/architecture/test_application_dependencies.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/ports backend/tests/application/evidence_tools/test_scope.py backend/tests/application/evidence_tools/test_collection_manifest.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_port_imports.py backend/tests/architecture/test_application_dependencies.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app`
 
 阶段出口：fake ports 已能表达合法 scope、provider plan、完整性和全部技术结果；尚未实现真实 provider 或统一 tool executor。
 
 提交边界：ports、scope/plan/completeness models、settings/error mapping 和 tests；不得夹带真实 adapters、transcript writer 或 HTTP test app。
+
+完成记录（2026-09-30）：
+
+- 实现：以五个强类型 provider-neutral port 原子替换 M4 的 observation/weather/facility 占位泛型；新增由已保存 run/session/context/topology facts 封装的 sealed `EvidenceSessionScope`、DST-aware 当地自然日 envelope、scope/provider request 授权、water observation plan、canonical request/budget accounting、三种官方 completion contract、provider-neutral batch/page/count/completed-range 模型、逐窗口 collection completeness 与固定安全错误映射。Settings 一次解析且只允许部署收紧全部 M5 limits；未加入真实 provider adapter、统一 executor、transcript writer 或 HTTP test app。
+- 验证：清单 focused 为 `32 passed`，两项 architecture gate 为 `63 passed`，Evidence/Settings 扩圈回归为 `169 passed`；Docker Engine `29.8.1` 与项目 PostgreSQL 17 容器 healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1399 passed`。health 返回 `{"status":"healthy"}`，run-history 的 history、独立进程重启与启动修复均通过；`compileall` 与 `git diff --check` 通过。
+- 修复与风险：架构 gate 首轮唯一失败是新 port docstring 未显式写出 unavailable 语义，已同步契约文字后通过；沙箱内 pytest 临时目录 ACL 拒绝访问，最终 gates 均在沙箱外独立 `--basetemp` 复核。真实 USGS/NWS/EPA provider、Linux/macOS CI 为 `not run`；本项只是 M1–M9 原子任务中的实现切片，正式整体验收仍在 Milestone 9 完成后开始。
 
 ## Milestone 6：USGS observation 与 discharge adapters
 

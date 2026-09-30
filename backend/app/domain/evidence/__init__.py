@@ -2,6 +2,9 @@ from app.domain.evidence.aggregate_payload import AggregatePayload
 from app.domain.evidence.collection_completion_proof import (
     CollectionCompletionProof,
 )
+from app.domain.evidence.collection_completion_contract import (
+    CollectionCompletionContract,
+)
 from app.domain.evidence.collection_counts import CollectionCounts
 from app.domain.evidence.collection_fact_payload import CollectionFactPayload
 from app.domain.evidence.collection_manifest import CollectionManifest
@@ -39,6 +42,7 @@ from app.domain.evidence.evidence_tool_options import EvidenceToolOptions
 from app.domain.evidence.evidence_tool_request import EvidenceToolRequest
 from app.domain.evidence.evidence_tool_result import EvidenceToolResult
 from app.domain.evidence.facility_record import FacilityRecord
+from app.domain.evidence.facility_evidence_request import FacilityEvidenceRequest
 from app.domain.evidence.historical_inference_payload import (
     HistoricalInferencePayload,
 )
@@ -46,6 +50,7 @@ from app.domain.evidence.historical_transcript_record import HistoricalTranscrip
 from app.domain.evidence.item_reference import ItemReference
 from app.domain.evidence.provenance import Provenance
 from app.domain.evidence.provider_quality import ProviderQuality
+from app.domain.evidence.provider_collection_batch import ProviderCollectionBatch
 from app.domain.evidence.quality_summary import QualitySummary
 from app.domain.evidence.reference_scope import ReferenceScope
 from app.domain.evidence.safe_evidence_error import SafeEvidenceError
@@ -62,13 +67,18 @@ from app.domain.evidence.source_record import SourceRecord
 from app.domain.evidence.source_record_reference import SourceRecordReference
 from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
 from app.domain.evidence.upstream_result_record import UpstreamResultRecord
+from app.domain.evidence.upstream_result_request import UpstreamResultRequest
 from app.domain.evidence.water_observation_record import WaterObservationRecord
+from app.domain.evidence.water_observation_request import WaterObservationRequest
 from app.domain.evidence.weather_forecast_record import WeatherForecastRecord
 from app.domain.evidence.weather_observation_record import WeatherObservationRecord
+from app.domain.evidence.weather_evidence_request import WeatherEvidenceRequest
 from app.domain.evidence.window_completeness import WindowCompleteness
+from app.domain.evidence.transcript_evidence_request import TranscriptEvidenceRequest
 
 __all__ = [
     "AggregatePayload",
+    "CollectionCompletionContract",
     "CollectionCompletionProof",
     "CollectionCounts",
     "CollectionFactPayload",
@@ -102,12 +112,14 @@ __all__ = [
     "EvidenceToolOptions",
     "EvidenceToolRequest",
     "EvidenceToolResult",
+    "FacilityEvidenceRequest",
     "FacilityRecord",
     "HistoricalInferencePayload",
     "HistoricalTranscriptRecord",
     "ItemReference",
     "Provenance",
     "ProviderQuality",
+    "ProviderCollectionBatch",
     "QualitySummary",
     "ReferenceScope",
     "SafeEvidenceError",
@@ -115,9 +127,13 @@ __all__ = [
     "SourceRecordReference",
     "UpstreamResultPayload",
     "UpstreamResultRecord",
+    "UpstreamResultRequest",
     "WaterObservationRecord",
+    "WaterObservationRequest",
+    "WeatherEvidenceRequest",
     "WeatherForecastRecord",
     "WeatherObservationRecord",
+    "TranscriptEvidenceRequest",
     "WindowCompleteness",
     "canonical_model_bytes",
     "load_collection_manifest_json",

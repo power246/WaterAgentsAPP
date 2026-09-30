@@ -65,6 +65,11 @@ class CollectionManifest(DomainModel):
         ):
             if previous.end > current.start:
                 raise ValueError("completed_ranges must be ordered and non-overlapping")
+        if any(
+            item.start < self.request_range.start or item.end > self.request_range.end
+            for item in self.completed_ranges
+        ):
+            raise ValueError("completed_ranges must stay within request_range")
         windows_complete = all(item.complete for item in self.window_completeness)
         if self.completion_proof.complete != windows_complete:
             raise ValueError("completion proof must match window completeness")
