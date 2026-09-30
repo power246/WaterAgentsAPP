@@ -279,6 +279,7 @@
 - 实现：新增 WGS84 LineString geometry、geodesic 派生值、支持跨日期变更线的 bbox、25–250 m/256 点确定性简化；NLDI、segment/node/graph 和当前唯一 `topology_ready v1` 已原子贯通，完整 geometry 仅在 graph map 保存一次。新增由已保存 graph 派生的 facility descriptor/plan、`[1,20] mile` 精确半径、provider round-up、32-center 完整 corridor、预算前置错误、full-line 距离过滤与 identity dedup；未加入 facility HTTP、tool executor 或 frontend。
 - 验证：清单 focused 为 `28 passed`，smoke + architecture 为 `100 passed`，geometry/corridor/API 扩展 focused 为 `62 passed`；Docker PostgreSQL healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1363 passed`，health 与 run-history smoke 均通过。受版本控制的 `topology_ready_v1_geometry.json` 已完成读取、导出、再读取，并校验完整 geometry 单份保存和 node 引用闭包；`compileall` 与 `git diff --check` 通过。
 - 修复与风险：首轮完整 backend 的唯一失败来自 M4 文档中的旧 `topology_ready v1` JSON 未包含原子新增字段，已同步更新现行文档 fixture 后全绿。真实 NLDI/ECHO provider、Linux/macOS CI 为 `not run`；本项只是 M1–M9 原子任务中的实现切片，正式整体验收仍在 Milestone 9 完成后开始。
+- 提交：本地实现提交 `fcd2653`（`feat(m5): complete milestone 4 geometry`）；未 push。
 
 ## Milestone 5：provider-neutral ports 与 collection completeness
 
