@@ -239,7 +239,7 @@
 - 实现：新增纯 application policy 包，完成精确 unit alias/Decimal 换算、provider quality、五类 coverage、八种稳定聚合、direct/allowed-indirect/contextual resolver 与固定 RAG candidate policy；manifest 为 154 项 capability 的 211 个 channel policy 补齐 accepted methods，并显式登记 valid quality tokens 与 partial-coverage aggregation policy。当前 canonical manifest SHA-256 为 `657ca1d3c59780090e1ebf8af3d5b0cdea919f2241e49c871d1d306cf4842d66`。
 - 验证：M3 policy + evidence focused 为 `148 passed`，manifest audit focused 为 `3 passed`，domain/application 回归为 `774 passed`，architecture 为 `98 passed`；使用 Docker PostgreSQL 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1332 passed`。离线 audit 为 `154/154`、211 channel policies、引用闭包 `valid`；`compileall`、禁用名称扫描和 `git diff --check` 通过。
 - 修复与风险：首轮 focused 为 `174 passed, 1 failed`，失败来自 interval `TimeRange` 无排序运算，已改为显式 `(start, end)` 排序并增加非重叠/重叠回归。真实 provider、Linux/macOS CI 为 `not run`；Milestone 4–13 尚未开始，网络 adapter、executor、runtime、HTTP 与 transcript 写入均未夹带。
-- 提交：待本完成记录随本地提交落盘后回填；不 push。
+- 提交：本地实现提交 `a71a210`（`feat(m5): complete milestone 3 evidence policy`）；未 push。
 
 ## Milestone 4：LineString geometry 与 corridor planner
 
