@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-09-25
+更新日期：2026-09-29
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -14,6 +14,10 @@
 - [总 Milestones](backend_refactor_milestones.md)
 - [M2 详细设计](M2/m2_analysis_session_sse_design.md)
 - [M2 Implementation TODO](M2/m2_analysis_session_sse_implementation_todo.md)
+- [M5 设计决策](M5/m5_evidence_tools_design.md)
+- [M5 实施设计](M5/m5_evidence_tools_implementation_design.md)
+- [M5 Policy Catalog](M5/m5_evidence_policy_catalog.md)
+- [M5 API / 读取契约](M5/m5_evidence_tools_api.md)
 
 ## 1. 使用方式与权威性
 
@@ -284,35 +288,48 @@ Contract changes:
 
 ### 必须实现
 
-- **M5-C01 — Source DTO**：为 observation、weather、forecast、flow、facility 和 upstream result 等数据源分别定义标准化 Request/Record DTO。
-- **M5-C02 — 构造权**：adapter 只返回 source record；Evidence Tool 负责构造 `EvidenceFragment`、quality、policy、RAG eligibility 和 provenance。
-- **M5-C03 — Collection status**：区分 `available / empty / unavailable / invalid`，不得把“查无数据”与“本次取数失败”合并。
-- **M5-C04 — 无效与可疑值**：可疑观测保留原值并降权；明确无效观测可保留为 evidence，但不能作为 observed quantified result。
-- **M5-C05 — Evidence identity**：evidence ID 只要求 session 内唯一；跨 session 源记录通过 provenance 识别。
-- **M5-C06 — Bundle 闭包**：EvidenceBundle 按 COMID、ParameterKey 和时间窗口组织，并保持 evidence reference 闭包。
-- **M5-C07 — Tool registry/aggregation**：提供 mandatory/optional evidence tool registry 和确定性 aggregation tool，至少支持 `mean / median / min / max / sum / p90 / latest`。
-- **M5-C08 — Unit 系统**：维护 `ParameterKey -> canonical_unit`，保留源单位、转换结果和换算 provenance；量纲校验和换算只能调用确定性库/API，未知换算不得由 Agent 猜测。
-- **M5-C09 — Event 容量**：新增 evidence event 继续使用 LifecycleEvent；大 tool/evidence payload 使用 preview + reference，不把无界 raw data 放入 SSE replay buffer。
-- **M5-C10 — 延后 producer**：M5 可以定型 upstream-result/RAG evidence tool 的 request/result 槽位和 unavailable 语义，但真实 upstream producer 由 M7 接入，真实 transcript-RAG producer 由 M8 接入；不得在 M5 production path 中用隐藏 fake 冒充已实现能力。
-- **M5-C11 — Sufficiency input**：按 M4 的 `ParameterCapability` 和“参数 × 时间段”组织直接证据、允许的侧面证据与完全缺失；侧面证据关系必须来自 capability registry，保留关系类型和不足标记，不能由 Agent 临时声明。provider unavailable/invalid 不得被归类为 no evidence。
+- **M5-C01 — 当前唯一 V1 typed model**：为 observation、discharge、weather、forecast、facility、upstream result 和 historical transcript 定义标准化 SourceRecord 判别联合；把既有 `EvidenceFragment.value_or_summary: JsonValue` 原子替换为 typed payload，并用 `EvidenceCell` 和 reference-only `EvidenceBundle` 组织证据。M1–M9 是原子更新，不新增 V2、read union、migration branch 或 milestone feature gate。
+- **M5-C02 — 构造权与单份事实**：adapter 只返回 source record；Evidence Tool 负责 collection status、quality、unit、applicability、aggregation、RAG candidate 和 provenance。完整标准化 source records 只写一次，fragment/tool result/bundle 只引用，provider envelope 不作为另一份事实保存。
+- **M5-C03 — Execution/collection 分层**：tool execution 使用 `completed / failed / cancelled`；collection 使用 `available / empty / unavailable / invalid`。成功查询无记录才是 empty；认证、超时、rate limit、协议损坏或分页未完成是技术失败，不得伪装成 no evidence。
+- **M5-C04 — 质量与 coverage**：valid 可用；suspicious 保留原值并可参与 capability 允许的聚合，derived fragment 传播 flags 和 valid/suspicious/invalid input counts；invalid 只保留审计。coverage 的 complete/partial/insufficient/unknown 与质量分开，不自动插值、补值、异常替换或预测。
+- **M5-C05 — 本水体 scope**：每个 Agent 只主动查询当前 `agent_comid` 的 station/geometry/附近 evidence；server 从保存的 context/topology/station refs 解析实际 provider plan，Agent 不能传任意 COMID、station、geometry 或 URL。直接上游数据只能由 M7 的 upstream result 传递，下游 Agent 不直接查询上游站点。provider 时间扩展最多为目标范围前后各一个当地日，且不产生额外结果窗口。
+- **M5-C06 — Geometry**：M5 在当前唯一 V1 中把 NLDI LineString 原子接入 RiverSegment/HydrologyNode/HydrologyGraph/`topology_ready v1`，保存完整 geometry 一次，并提供 length、bbox、representative point 与有界 simplified polyline。Agent 可以在 server `[1,20] mile` 限制内选择 facility radius；server 必须覆盖整段河道 corridor，point-only provider 使用确定性采样圆、去重与最终 line distance 过滤。
+- **M5-C07 — Tool roster**：Agent-facing tools 固定为 `collect_water_observations`、`collect_weather_evidence`、`collect_facility_evidence`、`get_upstream_results`、`search_transcript_evidence`、`convert_evidence_unit`、`aggregate_evidence` 和 `inspect_evidence_records`。provider routing 不对 Agent 暴露；所有工具共享 registry、executor、scope、budget、dedup、writer 和错误映射。
+- **M5-C08 — Station-backed/stationless 起点**：有合格本地 station refs 时，在首次水体推理前确定性执行本地 observation/discharge preflight；成功查询后全部适用窗口均无 usable direct evidence 时保留真实 session/tool/bundle 并停止该分支，水体模型调用数为 0；部分 evidence 允许继续。无站水体不执行注定为空的本地 observation query，只消费 upstream results 并按需调用 optional tools。
+- **M5-C09 — Discharge 始终必需**：`usgs:00060` 是每个实际执行水体、每个最终窗口的 required-support 参数；有站先查直接 discharge，无站或本地缺失时使用直接上游结果或 registry 允许的 `discharge_gage_height_estimate`/`discharge_basin_estimate`。每个目标 cell 必须有同窗 direct/allowed-indirect discharge cell；仍缺失时目标结果只能 indeterminate，不能把未知流量当 0。
+- **M5-C10 — 天气按需**：weather observation/forecast 始终 optional，不因 prediction mode 自动 mandatory。Agent 只有在任务、证据缺口或已登记 relation 需要时调用；若选择的 relation 依赖天气，则前置证据不完整时该 relation 不成立。
+- **M5-C11 — Unit/aggregation registry**：以全局 UnitDefinition、共享 policy profile 和 154 项 capability 引用替代 per-observation 规则表。换算使用确定性 Decimal 算法并保留原值/单位/公式/version；aggregation 至少支持 `mean / median / min / max / sum / p90 / latest`，累计计数器使用内部差分算法。Agent 只能选 capability 允许的方法；错误组合必须拒绝，不能“接受并记录”。
+- **M5-C12 — Series 与 observed 资格**：按 provider/channel/station/ParameterKey/medium/fraction/method/statistic/value semantics 分离 series，默认禁止跨 series 聚合。M5 不自动判定跨 series 冲突；system prompt 要求 Agent 检查差异、引用相关记录并解释或保持不确定。只有一对一具体 local direct record（允许可逆单位展示转换）具有最终 `observed` 资格；所有多记录 aggregate、跨 series 选择、上游/天气/设施/历史推理均为 inferred 候选。
+- **M5-C13 — Applicability 与门禁输入**：evidence 分为 `direct_measurement / allowed_indirect / contextual_only`。只有前两者能成为 M6 gate 输入；relation 必须来自 capability registry，Agent 不能临时声明。设施邻近和历史 RAG 默认 contextual；M4 availability metadata 不是 actual evidence。
+- **M5-C14 — Provider 基线**：第一版每类只使用一个 official source，不静默 fallback：USGS OGC v1 continuous/daily、USGS Samples、USGS discharge、NWS weather、EPA ECHO CWA facility。adapter 按时间段/provider batch 取数，再分配到最终 windows；API key 只通过安全 header/config，Agent 看不到 provider secret 或 base URL。
+- **M5-C15 — Technical completeness**：分页/分片中途失败时保留已解析并持久化的 records；只有独立证明完整的窗口可继续使用，受失败影响窗口为 unavailable/`incomplete_source`，不能用 partial coverage 掩盖。retry 有界，旧失败事实不可变；取消单独使用 cancelled。
+- **M5-C16 — Transcript/容量**：注册 `evidence_tool_call v1`、`evidence_source_records v1`、`evidence_fragment v1`、`evidence_tool_result v1`、`evidence_bundle v1`。继续用 M3 `transcript_item` 与两层 SSE，不新增 evidence SSE event；大内容用 preview/reference，Agent 用有界摘要和分页 inspection，不接收无界 record arrays。
+- **M5-C17 — Run-local dedup**：只对同 run、同 scope、同 canonical request 提供 exact-request single-flight/success reuse；不同 run 不复用，failed/cancelled 不进入成功 cache。每个调用仍保留 call/result 审计，复用者引用原 operation。
+- **M5-C18 — Production/test 边界**：production public API/OpenAPI 不提供直接 tool invocation。允许 application-level executor 和独立 test composition/HTTP router 复用真实执行链；test router 不被 production import/注册、不由 runtime flag 开启，前端不接入，也不能接受任意 URL/secret 或绕过 scope/transcript。
+- **M5-C19 — RAG candidate**：raw records、tool call/result/error、inspection、empty/unavailable/invalid facts和 bundle 均不直接索引；valid/suspicious、已脱敏且引用闭包完整的 fragment 可成为 candidate。cancelled/incomplete/session/run/persistence 未确认内容不可索引；M8 只消费安全投影。历史命中不能满足当前 target/discharge gate或覆盖当前观测。
+- **M5-C20 — 延后 producer**：M5 定型 upstream-result/RAG tool 的 request/result 槽位与 producer unavailable 语义；真实 upstream producer 由 M7 接入，真实 transcript-RAG producer 由 M8 接入，M5 production path 不用 hidden fake 冒充完成。
 
 ### 验收重点
 
-- **M5-A01**：每个 evidence tool 通过 fake adapter 返回结构完整、可追溯的 EvidenceFragment。
-- **M5-A02**：聚合和单位换算完全由确定性代码执行，原值、单位和 provenance 不丢失。
-- **M5-A03**：tool call/result 可写入 transcript，公开 event 不泄露 secret 或无界 payload。
-- **M5-A04**：同一 bundle 中直接、白名单侧面、empty、unavailable/invalid 可确定性区分，并可为 M6 gate 按参数 × 时间段读取；M4 availability qualification 不被冒充为实际 evidence。
+- **M5-A01**：每个 tool 通过 fake adapter 返回结构完整、可追溯、reference-closed 的 typed content；unknown/corrupt content 进入 issue，不靠 JsonValue 猜结构。
+- **M5-A02**：154 项 manifest 逐项通过 unit/channel/value-semantics/quality/coverage/aggregation/relation 审计；pH sum、累计降水再次求和、流量读数 sum、跨 series 合并等错误组合有拒绝测试。换算和聚合完全由确定性代码执行，原值、单位、输入 refs 和 provenance 不丢失；suspicious 聚合传播质量事实。
+- **M5-A03**：station-backed 全空、部分 evidence、provider failure 与 stationless upstream/optional 四条主路径均有 fixture；逐 ParameterKey × window 的 target/discharge cell 稳定区分 supported/unsupported/blocked，模型调用前门禁输入闭包成立。
+- **M5-A04**：tool/source/fragment/result/bundle 可写入、读取、补写并经 session SSE 交付；公开内容不泄露 secret、raw provider envelope 或无界 payload。production OpenAPI 没有 tool route，独立 test app 可复用同一 executor。
+- **M5-A05**：LineString 保存一次且 validator、简化、长/弯曲河段 corridor、Agent 半径上下界、point-query 采样圆、去重和最终 line distance 有稳定空间 fixture；所有查询仍只针对当前水体。
+- **M5-A06**：run-local single-flight、provider next-page/CSV complete proof、中途失败窗口隔离、retry、cancel 与 budget 有并发正反例；失败不变成 empty，取消后不补 bundle 或触发模型。
+- **M5-A07**：RAG candidate policy 对 raw/error/empty/cancelled/persistence-unconfirmed 为 false，对合格 fragment 保留 quality/applicability/provenance；M7/M8 producer 未接入时明确 unavailable/not registered，不使用 fake 通过。
+- **M5-A08**：M4 availability qualification 不被冒充 actual evidence；M1–M4 regression、架构依赖检查和当前唯一 V1 schema/OpenAPI fixture 同步通过。详细方案见 [M5 文档集](M5/m5_evidence_tools_design.md)。
 
 ## 8. M6：Single-Agent Reasoning
 
 ### 必须实现
 
 - **M6-C01 — LLM 契约**：定型 LLM request、raw/structured response DTO、EvidencePolicy、SufficiencyPolicy 和 structured output parser。
-- **M6-C02 — Tool policy**：Agent 必须调用 mandatory evidence tools，并可根据任务自行判断是否调用 optional tools。
+- **M6-C02 — Tool policy**：station-backed 水体的本地 observation/discharge preflight 由确定性 policy 在模型前执行；stationless 水体不注册该本地调用。Agent 根据任务、上游结果和 evidence 缺口决定是否调用 weather/facility/inspection/aggregation 等 optional tools，不能查询其他水体的 station/geometry。
 - **M6-C03 — 窗口完整性**：每个计划时间窗都必须生成结果，不得因证据缺失而省略 point。
 - **M6-C04 — 三态输出**：证据充分时输出 quantified；只能判断方向时输出 directional；完全缺证据时输出带 reason code/evidence refs 的 indeterminate。
 - **M6-C05 — Confidence**：Domain 只硬校验 `[0,1]`；评分、聚合和最终判断规则属于 reasoning 层，并保留 Agent 自主判断。
-- **M6-C06 — 冲突观测**：同窗多个有效站点冲突时引用全部相关观测并解释；加权/折中/综合值为 inferred，只有原样采用的有效读数为 observed。
+- **M6-C06 — 多 series 差异**：M5/backend 不自动判定或标记“冲突观测”。system prompt 要求 Agent 检查 station/time/method/quality 等差异，引用所有影响判断的 series 并解释选择、保持不确定或输出 indeterminate；加权/折中/综合和任何多记录 aggregate 均为 inferred，只有一对一原样采用当前水体具体直接记录（可逆单位展示转换除外）为 observed。
 - **M6-C07 — 单位职责**：Agent 可选择目标单位，但实际换算必须调用确定性 unit tool。
 - **M6-C08 — Attribution**：attribution factor 引用 evidence，并标记 `basis: observed | correlated | inferred | hypothesized`。
 - **M6-C09 — 当前证据优先**：当前 session 的有效观测优先于历史推理。
@@ -323,13 +340,13 @@ Contract changes:
 - **M6-C12 — Correlation**：按 M3 D50–D52，以 run_id 关联整次分析的 SSE、日志与 transcript，适用的 Agent 记录使用独立 session_id；session_id 统一标识 Agent 上下文与本次完整执行，不另生成同义 agent_id。agent_role 表达职责，stage name 表达阶段，真实模型/工具等调用生成 operation_id UUID；开始/结束及直接关联 hook 保留操作身份，模型原 tool_call_id 保留在类型 payload 中。COMID、角色、Agent 名称和工具名称不代替执行身份。
 - **M6-C13 — History result 扩展**：在 M3 history/detail DTO 上增加真实 final result summary 和 final confidence；值必须来自持久化 result，不在 history 查询时重新推理。
 - **M6-C14 — 综合水质指标**：承接 M3 D21，用户所称“总体预测值”是跨多个参数的综合水质指标。定型所用指标、计算口径、单位/尺度、所需参数与缺失参数处理，提供有可追溯依据的结果；不能用 overall_confidence 或未经定义的分时段均值替代。对应水体的分时段预测、综合指标及推理概述/总结须能关联到真实 AnalysisDetail/transcript。
-- **M6-C15 — 模型调用前门禁**：在每个水体模型调用前按“参数 × 时间段”执行确定性 sufficiency gate。有直接证据或 capability 明确允许的侧面证据才进入 LLM；只有侧面证据时必须保留不足事实并限制结果/置信度。完全无证据的单元不调用 LLM，直接生成 reason=`insufficient_evidence` 的 indeterminate；全部单元无证据时整个水体乃至 run 都不得为了生成措辞而调用水体模型。该门禁不把 provider unavailable 当 empty。
+- **M6-C15 — 模型调用前门禁**：在每个水体模型调用前按“目标 ParameterKey × 时间段”读取 M5 cell，并同时检查同窗 required-support discharge cell。目标与 discharge 都有 direct 或 capability allowed-indirect evidence 才能进入 LLM；只有侧面证据时保留不足事实并限制结果/置信度。任一缺失则该单元确定性生成 reason=`insufficient_evidence` 的 indeterminate；全部单元不足时整个水体乃至 run 不为措辞调用水体模型。provider unavailable/invalid/technical incomplete 是 blocker/技术失败，不当作 empty；天气 contextual evidence不能单独解锁。
 
 ### 验收重点
 
 - **M6-A01**：fake EvidenceBundle 跑出完整 InferenceResult，三种状态都有正反例。
 - **M6-A02**：每个窗口有 source、confidence 和 evidence refs，结果与归因引用闭包成立。
-- **M6-A03**：冲突观测、无证据和未知单位不会被静默猜测或丢弃。
+- **M6-A03**：多 series 明显差异、无证据和未知单位不会被静默猜测或丢弃；后端不依赖自动冲突 detector，Agent 是否解释、保持不确定或 indeterminate 可由 prompt/validator fixture 证明。
 - **M6-A04**：completed event、日志和 transcript 中的 result identity/版本一致。
 - **M6-A05**：综合水质指标按 M6-C14 定型的规则产出，已知输入可验证，缺失参数时按明确规则表达可用性，指标与置信度不混淆；持久化后能读取原结果和推理依据。
 - **M6-A06**：通过模型调用计数证明全无证据为 0 次、部分无证据只调用通过门禁的范围；确定性 indeterminate 覆盖所有计划窗口，允许侧面证据的结果明确降级且引用关系闭包成立。
@@ -339,7 +356,7 @@ Contract changes:
 ### 必须实现
 
 - **M7-C01 — DAG 调度**：按 D50/`HydrologyGraph` DAG 从推理源头向目标水体推进；每个水体 Agent 等待所有上游推理完成后只触发一次，从接收输入、获取证据到输出结果形成一个独立 session，全部归属于本次 run。按 D59，满足执行条件并准备开始该 loop 时才创建 session，DAG 确定时不预建全部会话；未执行节点由 run 过程表示，已创建会话失败或取消仍保留。上游结果沿 DAG 传递，禁止无约束 Agent 互聊；上游失败或不足时的调度语义在 M7 定型。
-- **M7-C02 — 上游证据**：下游接收 upstream result、confidence、evidence summary 和 uncertainty，并将其作为 current-session evidence。
+- **M7-C02 — 上游证据**：下游只接收直接上游依赖的 result、confidence、evidence summary、uncertainty、逐窗口 discharge 状态及 evidence closure refs，并将其作为 current-session evidence；不授权下游直接查询上游 station。上游正常全 indeterminate、failed、cancelled 都是已收敛 dependency outcome，汇流节点等待全部直接依赖后再决定是否继续。
 - **M7-C03 — 模式传播**：支持 `gap_filling / prediction / mixed` 的拓扑传播。
 - **M7-C04 — Cancel 边界**：在每个真实阶段边界检查 cancellation token；cancel 后不得启动新 agent/tool，也不得传播晚到结果。
   - 流式正文按 D84 以服务端受理 run cancel 为界固定原消息；实际回调中的晚到新增内容交给原 transcript 审计路径，不继续拼接原消息或传给下游，已完成消息和 session 终态保持。
@@ -356,7 +373,7 @@ Contract changes:
 
 - **M7-A01**：fake topology 稳定执行至少 3 个节点，Agent start/completed 事件顺序符合拓扑。
   - 按 D59 验证 DAG 确定时未预建全部水体 session；汇流节点等待全部上游完成、准备执行时才创建自己的 session，实际执行一次且保持原身份。执行准备前被停止的节点不补造空会话，已经创建后失败或取消的 session 仍保留状态与已有过程。
-- **M7-A02**：下游 EvidenceBundle 可见上游证据，但不覆盖下游当前有效观测。
+- **M7-A02**：下游 EvidenceBundle 可见直接上游证据、分支缺口与逐窗口 discharge 状态，但不覆盖下游当前有效观测；upstream indeterminate 不被猜成 0，也不冒充 allowed-indirect evidence。
 - **M7-A03**：在各关键阶段触发 cancel 后没有新下游调用或前端 result，且最终出现 workflow_quiesced。
   - 按 D66/D67 验证一次 run cancel 覆盖未查看或未订阅的 Agent，后端先阻止后续调度再通知已有未终态 session；run 自身过程和尚未创建 session 的下游节点不再继续推进。验证取消先被接受时，并发准备的新 Agent 也不能启动；前端不需要遍历 session 取消，首版无独立 Agent cancel HTTP 路由。受理取消与实际收敛区分，取消不丢弃已有过程或停止必要的保存补写。
 - **M7-A04**：已完成 Agent 的结果和 transcript item 保留，晚到结果只在 cancelled transcript 可审计。
@@ -367,11 +384,11 @@ Contract changes:
 
 ### 必须实现
 
-- **M8-C01 — Projection**：从 `rag_eligible=true` 的 transcript item 生成 RAG projection/index。承接 M3 D30，字段默认 false，消费业务生产方明确给出的资格标记；保存成功本身不产生 RAG 资格，非 eligible 记录仍可正常查询历史。
+- **M8-C01 — Projection**：从 `rag_eligible=true` 的 transcript item 生成 RAG projection/index。承接 M3 D30 和 M5 candidate policy，字段默认 false；M8 还必须校验 run/session completed、persistence confirmed、脱敏与 projection schema。raw source records、tool call/result/error、inspection、empty/unavailable/invalid facts、bundle、cancelled/incomplete 内容不索引；非 eligible 记录仍可正常查询历史。
 - **M8-C02 — Memory mode**：支持 stateless 和 memory_augmented；按 D50/D58，stateless 不使用跨 run 历史记忆，但保留当前 run 内上游 session 的结果。memory_augmented 可通过明确历史来源结构关联其他 run 的证据，不能把它伪装为当前 session 产生的过程。
 - **M8-C03 — 固定检索策略**：至少支持 COMID + parameter + time window、nearby COMID + parameter、parameter + season、semantic query 和 topology neighborhood + parameter。
 - **M8-C04 — Historical provenance**：按 D58，historical inference 进入当前 transcript/evidence 时使用明确的历史来源结构，保留原 run/item、适用 session、原 confidence、content schema version、RAG score 和 matched_by。原内容可按 D57 的 run_id + item_id 读取；普通 transcript_item_refs 不跨 run，不复制同义原过程以规避校验，具体历史来源 DTO 在本阶段定型。
-- **M8-C05 — 当前观测优先**：历史 inference 不得覆盖当前有效观测；低置信度历史结果可以使用，但必须保留原置信度并降权。
+- **M8-C05 — 当前观测优先**：历史 inference 不得覆盖当前有效观测；低置信度历史结果可以使用，但必须保留原置信度并降权。检索命中保持 `historical_inference/contextual_only`，不能满足本次 target/discharge gate，也不能因 RAG score 提升 applicability、quality 或原 confidence。
 
 ### 验收重点
 

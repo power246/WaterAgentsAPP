@@ -1,6 +1,6 @@
 # M4 Query Understanding + Hydrology Topology 实施设计
 
-更新日期：2026-09-27
+更新日期：2026-09-29
 
 > 状态：Milestone 0–10 已完成本机实现与集成审计。固定 fake workflow、154 项离线审计、运行时协议和 M1–M3 非 PostgreSQL 回归已有本机证据；隔离 PostgreSQL、需凭据 provider/parser smoke 与三平台 CI 仍按实际环境保持 `not run`/`partial`。实际复选项和证据记录见 [M4 Implementation TODO](m4_implementation_todo.md)。
 
@@ -413,9 +413,9 @@ BranchOutcome
 9. 任一硬上限阻止 child 继续时，逐 child 记录 `search_limit_reached` 和 `blocked_upstream_comid`；
 10. 搜索完成后回溯 qualified paths，生成 active union 和稳定 execution layers。
 
-因此 `coverage=none` 不等于最终 `insufficient_evidence`：M5 仍对 target 收集天气、discharge、设施或 capability 允许的其他来源。每个待推理单元既要有目标参数的直接或允许侧面证据，也要有 discharge 的直接或允许侧面证据；任一必需部分完全无证据时，M6 gate 都以 0 次水体模型调用产生该单元的 `indeterminate`。若两者都有合格证据，也只会调度 gate 允许的 target/range。
+因此 `coverage=none` 不等于最终 `insufficient_evidence`：M5 对 stationless target 不制造本地 observation 空查询，而是消费直接上游结果，并由 Agent 根据任务和缺口按需调用天气、设施或 capability 允许的其他来源。discharge 则始终是每个窗口的必需支持参数，必须由直接上游结果或已登记估算关系取得。每个待推理单元既要有目标参数的直接或允许侧面证据，也要有 discharge 的直接或允许侧面证据；任一必需部分完全无证据时，M6 gate 都以 0 次水体模型调用产生该单元的 `indeterminate`。若两者都有合格证据，也只会调度 gate 允许的 target/range。
 
-NLDI navigation 请求必须显式限制 distance；能省略 geometry 时使用 `excludeGeometry=true`。port 的语义必须是“直接上游邻居”，adapter 不得把一次 navigation 返回的所有祖先误当 direct edge。该行为用固定河网 fixture 和 adapter contract test 证明。
+NLDI navigation 请求必须显式限制 distance；M4 topology port 的语义必须是“直接上游邻居”，adapter 不得把一次 navigation 返回的所有祖先误当 direct edge。M5 在当前唯一 V1 中扩展该 port/model 并保留每个水体的 LineString geometry，供整段 corridor 查询使用；这是 M5 的原子实现责任，不新建 M4/M5 版本或兼容分支。上述行为分别用固定河网 fixture、geometry fixture 和 adapter contract test 证明。
 
 ## 11. Typed content、持久化与读取
 
