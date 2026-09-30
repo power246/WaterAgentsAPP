@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from math import isfinite
 from typing import Annotated, Hashable, TypeAlias, TypeVar
 
@@ -20,6 +21,29 @@ DomainFloat: TypeAlias = StrictFloat
 NonEmptyString: TypeAlias = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=1),
+]
+
+
+def normalize_canonical_decimal(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int, Decimal)):
+        raise ValueError("decimal value must be a string, integer, or Decimal")
+    try:
+        decimal_value = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("decimal value must be finite") from exc
+    if not decimal_value.is_finite():
+        raise ValueError("decimal value must be finite")
+    if decimal_value == 0:
+        return "0"
+    normalized = format(decimal_value.normalize(), "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized
+
+
+CanonicalDecimal: TypeAlias = Annotated[
+    str,
+    BeforeValidator(normalize_canonical_decimal),
 ]
 
 

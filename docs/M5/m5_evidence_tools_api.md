@@ -2,7 +2,7 @@
 
 更新日期：2026-09-29
 
-> 状态：设计已冻结。M5 不增加 production tool invocation endpoint；本文定义现有 run/session/transcript 路由如何读取 M5 typed content，以及只供自动化测试的独立调用面。分阶段实施、验证命令和完成记录见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)，当前全部未开始。
+> 状态：设计已冻结。M5 不增加 production tool invocation endpoint；本文定义现有 run/session/transcript 路由如何读取 M5 typed content，以及只供自动化测试的独立调用面。分阶段实施、验证命令、完成记录和当前进度见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 ## 1. Production 路由不变
 
@@ -59,9 +59,9 @@ M5 typed content 仍装在 M3 的 transcript item 中：
 {
   "schema_version": 1,
   "tool_call_id": "call_01J8ZX98X10NV7XB5HCTQ5R6VA",
+  "session_id": "019d1c65-0828-72cb-8b33-f1fc76628002",
   "tool_name": "collect_water_observations",
   "purpose": "local_station_preflight",
-  "agent_comid": "12345678",
   "window_ids": ["w000", "w001"],
   "parameter_keys": [
     {"code_system": "usgs", "code": "00300"},
@@ -107,10 +107,10 @@ M5 typed content 仍装在 M3 的 transcript item 中：
       "retrieved_at": "2026-09-29T02:12:41.000Z",
       "observed_time": "2026-09-29T00:00:00Z",
       "location": {
+        "point": {"latitude": 38.9497778, "longitude": -77.1276389},
         "comid": "12345678",
         "station_id": "USGS-01646500",
-        "latitude": 38.9497778,
-        "longitude": -77.1276389
+        "distance_to_target_km": 0.0
       },
       "parameter": {"code_system": "usgs", "code": "00300"},
       "value": "8.2",
@@ -148,11 +148,10 @@ JSON numbers representing measured values are serialized as normalized decimal s
   "collection_status": "available",
   "target_comid": "12345678",
   "location": {
+    "point": {"latitude": 38.9497778, "longitude": -77.1276389},
     "comid": "12345678",
     "station_id": "USGS-01646500",
-    "latitude": 38.9497778,
-    "longitude": -77.1276389,
-    "distance_to_target_km": "0.0"
+    "distance_to_target_km": 0.0
   },
   "time_range": {
     "start": "2026-09-29T00:00:00Z",
@@ -205,7 +204,7 @@ JSON numbers representing measured values are serialized as normalized decimal s
   "source": "deterministic_aggregation",
   "collection_status": "available",
   "target_comid": "12345678",
-  "location": {"comid": "12345678", "station_id": "USGS-01646500"},
+  "location": {"point": null, "comid": "12345678", "station_id": "USGS-01646500", "distance_to_target_km": null},
   "time_range": {
     "start": "2026-09-29T00:00:00Z",
     "end": "2026-09-29T06:00:00Z"
@@ -263,7 +262,7 @@ aggregate 仍是 direct-measurement applicability，因为输入是本地直接�
   "source": "usgs_waterdata",
   "collection_status": "empty",
   "target_comid": "12345678",
-  "location": {"comid": "12345678", "station_id": "USGS-01646500"},
+  "location": {"point": null, "comid": "12345678", "station_id": "USGS-01646500", "distance_to_target_km": null},
   "time_range": {
     "start": "2026-09-29T06:00:00Z",
     "end": "2026-09-29T12:00:00Z"
@@ -335,8 +334,10 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
   "agent_comid": "12345678",
   "context_ref": {"item_id": "019d1c64-ff01-74a1-a073-ff66ff342010"},
   "topology_ref": {"item_id": "019d1c65-010f-7528-b823-8e3c1c46d011"},
+  "time_range": {"start": "2026-09-29T00:00:00Z", "end": "2026-09-29T06:00:00Z"},
   "analysis_timezone": "America/New_York",
   "time_resolution": "6h",
+  "time_resolution_source": "frontend",
   "requested_parameters": [{"code_system": "usgs", "code": "00300"}],
   "supporting_parameters": [{"code_system": "usgs", "code": "00060"}],
   "window_refs": ["w000"],
@@ -369,7 +370,7 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
     {"item_id": "019d1c65-1b03-7994-8654-810497c14007", "evidence_id": "ev_01J8ZXDGDJ6S1BEHCMCN9ZE92A"}
   ],
   "source_record_item_refs": ["019d1c65-17ab-78d0-a807-972e81864005"],
-  "tool_result_refs": ["019d1c65-1d05-7520-a145-f6666cc6d008"],
+  "tool_result_refs": [{"item_id": "019d1c65-1d05-7520-a145-f6666cc6d008"}],
   "quality_summary": {"valid": 1, "suspicious": 1, "invalid": 0},
   "collection_summary": {"available": 2, "empty": 0, "unavailable": 0, "invalid": 0},
   "created_at": "2026-09-29T02:12:45.000Z"

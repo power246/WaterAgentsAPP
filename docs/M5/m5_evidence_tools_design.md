@@ -2,7 +2,7 @@
 
 更新日期：2026-09-29
 
-> 状态：设计方向与实施模式已完成对齐。本文记录已确认的业务与架构决策；精确类型、provider、policy、API 和验收接缝已整理到同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。TODO 当前全部未开始，不表示 M5 已实现。
+> 状态：设计方向与实施模式已完成对齐。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收接缝和当前进度见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 本文承接：
 
@@ -117,7 +117,7 @@ provider wire response
 
 - provider wire model 与 SDK/HTTP 字段留在对应 infrastructure adapter 内，不进入 port、domain、transcript 或 reasoning；
 - observation、weather、forecast、facility、upstream result 和 historical inference 分别使用强类型 Request/Record DTO，port 不返回裸 `dict`、`Any` 或 provider SDK 对象；
-- 当前 `EvidenceFragment.value_or_summary` 的宽松 `JsonValue` 直接收紧为带稳定 `payload_type` discriminator 的强类型 evidence payload union，不并存旧 payload 读取分支；
+- `EvidenceFragment.payload` 是带稳定 `payload_type` discriminator 的强类型 evidence payload union，不存在宽松 JSON payload 或并行读取分支；
 - 每个 `EvidenceFragment` 保存为唯一 typed transcript item；`EvidenceBundle.fragment_refs` 保存去重后的原 item references，不在 bundle 中复制 fragment payload；
 - 窗口级 `EvidenceCell` 使用“agent COMID × 目标 ParameterKey × 最终 TimeWindow”身份，并分别引用 direct evidence、capability 允许的 indirect evidence、必需 discharge evidence 和 collection/quality blockers；
 - indirect reference 必须同时保存 capability registry 中的 relation identity，不能只保存一个无语义 evidence ID；

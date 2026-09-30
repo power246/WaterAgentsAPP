@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import json
+import sys
 from collections.abc import Sequence
 
 import httpx
@@ -25,8 +26,28 @@ def audit_parameter_capabilities() -> dict[str, object]:
     )
     return {
         "capability_count": len(registry.capabilities),
+        "capability_coverage": f"{len(registry.capabilities)}/154",
         "catalog_key_set_sha256": EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256,
+        "manifest_digest_sha256": registry.manifest_digest,
         "group_counts": dict(registry.group_counts),
+        "unit_definition_count": len(registry.unit_definitions),
+        "quality_profile_count": len(registry.quality_profiles),
+        "aggregation_profile_count": len(registry.aggregation_profiles),
+        "coverage_profile_count": len(registry.coverage_profiles),
+        "evidence_relation_count": len(registry.evidence_relations),
+        "channel_policy_count": sum(
+            len(capability.channel_policies)
+            for capability in registry.capabilities
+        ),
+        "policy_complete_count": sum(
+            bool(
+                capability.accepted_source_units
+                and capability.channel_policies
+                and capability.default_aggregation_by_resolution
+            )
+            for capability in registry.capabilities
+        ),
+        "policy_reference_status": "valid",
         "required_support_count": len(required_support_keys),
         "required_support_keys": required_support_keys,
         "resolution_enabled_count": sum(
@@ -35,6 +56,23 @@ def audit_parameter_capabilities() -> dict[str, object]:
         ),
         "unique_key_count": len(set(keys)),
     }
+
+
+def canonical_audit_report_bytes(report: dict[str, object]) -> bytes:
+    return (
+        json.dumps(
+            report,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def audit_parameter_capabilities_bytes() -> bytes:
+    return canonical_audit_report_bytes(audit_parameter_capabilities())
 
 
 async def compare_official_parameter_catalog(
@@ -151,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         result["official_refresh"] = asyncio.run(
             refresh_official_catalog(args.timeout_seconds)
         )
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    sys.stdout.buffer.write(canonical_audit_report_bytes(result))
 
 
 if __name__ == "__main__":

@@ -64,6 +64,25 @@ def test_m1_contains_no_deferred_domain_types() -> None:
     assert not violations, "\n".join(violations)
 
 
+def test_m5_evidence_domain_has_no_legacy_or_versioned_parallel_contract() -> None:
+    forbidden_tokens = (
+        "value_" + "or_summary",
+        "EvidenceFragment" + "V2",
+        "EvidenceBundle" + "V2",
+        "CONFLICTING_" + "OBSERVATIONS",
+    )
+    violations: list[str] = []
+
+    for root in (APP_ROOT, BACKEND_ROOT / "tests"):
+        for source_path in sorted(root.rglob("*.py")):
+            source = source_path.read_text(encoding="utf-8")
+            for token in forbidden_tokens:
+                if token in source:
+                    violations.append(f"{source_path}: {token}")
+
+    assert not violations, "\n".join(violations)
+
+
 def test_domain_implementation_imports_leaf_modules_not_package_barrels() -> None:
     violations: list[str] = []
 

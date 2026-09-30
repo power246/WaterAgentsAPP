@@ -1,8 +1,8 @@
 # M5 Evidence Policy Catalog
 
-更新日期：2026-09-29
+更新日期：2026-09-30
 
-> 状态：设计已冻结。本文定义后续实现必须落入同一 capability manifest 的单位、质量、聚合、coverage 与 evidence relation policy；不为每条观测值维护单独规则表。分阶段施工与证据门禁见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)，当前全部未开始。
+> 状态：设计已冻结，Milestone 2 的 manifest schema、不可变 registry、规范 digest 与离线 audit 已实现；数值转换、质量判定、coverage 计算和聚合执行仍属于 Milestone 3。本文定义后续实现必须落入同一 capability manifest 的单位、质量、聚合、coverage 与 evidence relation policy；不为每条观测值维护单独规则表。分阶段施工、证据门禁和当前进度见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 ## 1. 为什么不是“每个数值一张表”
 
@@ -22,6 +22,7 @@
 unit_definitions[]
 quality_profiles[]
 aggregation_profiles[]
+coverage_profiles[]
 evidence_relations[]
 capabilities[]
 ```
@@ -47,8 +48,12 @@ series_identity_fields[]
 accepted_statistics[]
 aggregation_profile_id
 coverage_profile_id
+quality_profile_id
 medium/fraction constraints
+direct_observation
 ```
+
+`default_aggregation_by_resolution` 以 provider/channel/resolution 为键登记默认方法，避免 continuous、daily 与 discrete channel 共用一个错误默认值。quality、aggregation、coverage profile 均允许可选 `extends_profile_id`，loader 对未知 parent 和循环引用 fail closed；当前初始 profiles 均为完整定义，不依赖继承补字段。`evidence_relations[]` 保存 relation ID、same-parameter 语义或固定 input/output ParameterKey，所有固定输入输出必须属于同一 154 项 catalog。
 
 manifest loader 必须验证：
 
@@ -60,6 +65,8 @@ manifest loader 必须验证：
 - required-support `usgs:00060` 具有 direct channel 和 discharge relation；
 - 每项至少有一个 observation channel，不允许只登记名称；
 - 规范序列化后的 manifest digest 可重现。
+
+当前离线 audit 从唯一 manifest 生成 canonical JSON，报告 `154/154`、唯一 key、required support、unit/profile/relation/channel 数量、引用闭包状态和完整 manifest SHA-256。可选 official refresh 只报告 drift，不修改 manifest。
 
 ## 3. 单位定义与换算
 
@@ -252,7 +259,7 @@ aggregation 允许 partial coverage 时，derived fragment 必须标记 `partial
 - provider 明确给出 detection-limit/censoring 语义但数值仍可按 capability 使用；
 - capability 登记的物理 plausibility soft bound 外值。
 
-hard bound 只用于不可能值并必须在 capability/profile 明确登记；不能用统计 outlier 算法自动删除记录。M5 不跨 series 判冲突，也不产生 `conflicting_observations`；既有 `DataQualityFlag.CONFLICTING_OBSERVATIONS` 在 M5 原子更新当前 V1 时删除，不保留兼容枚举或特殊处理。Agent system prompt 负责检查显著差异、引用相关 series 并解释或保持不确定。
+hard bound 只用于不可能值并必须在 capability/profile 明确登记；不能用统计 outlier 算法自动删除记录。M5 不跨 series 判冲突，也不产生单独的 conflict quality flag；当前唯一 V1 不包含该兼容枚举或特殊处理。Agent system prompt 负责检查显著差异、引用相关 series 并解释或保持不确定。
 
 ### 7.4 Provider mapping
 

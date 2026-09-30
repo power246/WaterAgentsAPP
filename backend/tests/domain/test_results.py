@@ -13,9 +13,12 @@ from app.domain import (
     AttributionFactor,
     AttributionMagnitude,
     AttributionSummary,
+    CollectionFactPayload,
     CollectionStatus,
-    EvidenceBundle,
+    CoverageStatus,
+    EvidenceApplicability,
     EvidenceChain,
+    EvidenceCoverage,
     EvidenceFragment,
     EvidenceLocation,
     EvidenceReference,
@@ -911,13 +914,33 @@ def make_unavailable_fragment(
         time_range=time_range,
         parameter_refs=(ParameterKey(code_system="usgs", code="00010"),),
         data_type="water_temperature",
-        value_or_summary={"reason": status.value},
-        confidence_hint=None,
+        applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
+        series_identity="sha256:temperature-series",
+        quality_class=None,
+        quality_flags=(),
+        coverage=EvidenceCoverage(
+            status=CoverageStatus.INSUFFICIENT,
+            observed_count=0,
+            expected_count=None,
+            ratio=None,
+            largest_gap_seconds=None,
+        ),
+        payload=CollectionFactPayload(
+            status=status,
+            reason=f"collection_{status.value}",
+            affected_window_ids=("w000", "w001"),
+            record_refs=(),
+        ),
+        source_record_refs=(),
+        derivation=None,
         provenance=Provenance(
-            provider="usgs",
-            retrieved_at=datetime(2026, 2, 2, tzinfo=timezone.utc),
-            source_uri=None,
-            source_record_ids=(),
+            operation_id=f"operation-{status.value}",
+            registry_digest="sha256:registry",
+            request_identity="sha256:request",
+            page_identity=None,
+            chunk_identity=None,
+            provider_series_id="temperature-series",
+            provider_record_id=None,
             source_timezone=None,
             source_utc_offset=None,
         ),
@@ -936,15 +959,6 @@ def test_complete_no_evidence_result_keeps_every_window_indeterminate() -> None:
         CollectionStatus.UNAVAILABLE,
         requested,
     )
-    bundle = EvidenceBundle(
-        bundle_id="bundle-1",
-        agent_comid="001234",
-        time_range=requested,
-        analysis_timezone=ANALYSIS_TIMEZONE,
-        time_resolution_source=TimeResolutionSource.DEFAULT,
-        requested_parameters=(ParameterKey(code_system="usgs", code="00010"),),
-        fragments=(empty, unavailable),
-    )
     series = make_series(
         requested,
         evidence_refs=(("evidence-empty",), ("evidence-unavailable",)),
@@ -958,7 +972,7 @@ def test_complete_no_evidence_result_keeps_every_window_indeterminate() -> None:
 
     status_by_id = {
         fragment.evidence_id: fragment.collection_status
-        for fragment in bundle.fragments
+        for fragment in (empty, unavailable)
     }
     assert all(
         point.outcome_status is OutcomeStatus.INDETERMINATE

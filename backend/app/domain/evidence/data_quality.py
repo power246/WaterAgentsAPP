@@ -11,4 +11,3 @@ class DataQualityFlag(DomainEnum):
     STALE = "stale"
     PROVIDER_FLAGGED = "provider_flagged"
     UNIT_UNRESOLVED = "unit_unresolved"
-    CONFLICTING_OBSERVATIONS = "conflicting_observations"

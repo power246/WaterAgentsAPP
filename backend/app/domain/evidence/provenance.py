@@ -1,15 +1,13 @@
-from collections.abc import Mapping
-
-from pydantic import Field
-
-from app.domain.common import DomainModel, JsonValue, NonEmptyString, UtcDatetime
+from app.domain.common import DomainModel, NonEmptyString
 
 
 class Provenance(DomainModel):
-    provider: NonEmptyString
-    retrieved_at: UtcDatetime
-    source_uri: NonEmptyString | None
-    source_record_ids: tuple[NonEmptyString, ...] = ()
-    source_timezone: NonEmptyString | None
-    source_utc_offset: NonEmptyString | None
-    metadata: Mapping[str, JsonValue] = Field(default_factory=dict)
+    operation_id: NonEmptyString | None = None
+    registry_digest: NonEmptyString | None = None
+    request_identity: NonEmptyString | None = None
+    page_identity: NonEmptyString | None = None
+    chunk_identity: NonEmptyString | None = None
+    provider_series_id: NonEmptyString | None = None
+    provider_record_id: NonEmptyString | None = None
+    source_timezone: NonEmptyString | None = None
+    source_utc_offset: NonEmptyString | None = None

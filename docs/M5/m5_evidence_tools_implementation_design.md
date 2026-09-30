@@ -2,7 +2,7 @@
 
 更新日期：2026-09-29
 
-> 状态：设计已冻结，供后续实现使用。本文不表示 M5 已实现或已验收；实施步骤、验证门禁和完成记录见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)，当前全部未开始。
+> 状态：设计已冻结，供后续实现使用。本文不表示 M5 已整体实现或验收；实施步骤、验证门禁和当前进度见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 本文把 [M5 设计决策](m5_evidence_tools_design.md) 落到模块、类型、provider、执行链、持久化与测试接缝。确定性单位、质量、聚合和 applicability 规则见 [M5 Policy Catalog](m5_evidence_policy_catalog.md)，公开读取与 typed content 示例见 [M5 API 文档](m5_evidence_tools_api.md)。
 
@@ -189,11 +189,11 @@ provider envelope 不进入 DTO。原始响应只在 adapter contract fixture �
 
 ### 4.2 EvidencePayload
 
-删除 `EvidenceFragment.value_or_summary: JsonValue`，改为 `payload` 判别联合：
+`EvidenceFragment.payload` 是当前唯一 V1 的判别联合：
 
 ```text
 DirectRecordPayload(record_ref, displayed_value, displayed_unit)
-AggregatePayload(value, unit, method, input_record_refs, coverage)
+AggregatePayload(value, unit, method, input_record_refs, input quality counts)
 ConversionPayload(value, unit, input_evidence_ref, conversion_id)
 ContextPayload(summary_fields, record_refs)
 CollectionFactPayload(status, reason, affected_window_ids, record_refs)
@@ -249,7 +249,7 @@ topology_ref
 window_refs[]
 requested_parameters[]
 supporting_parameters[]
-cell_manifest[]
+cells[]
 fragment_refs[]
 source_record_item_refs[]
 tool_result_refs[]
@@ -258,7 +258,7 @@ collection_summary
 created_at
 ```
 
-bundle validator 校验引用去重、scope 一致、每个 parameter/window/role 恰有一个 cell、fragment/reference closure 完整，以及每个目标 cell 都能找到同窗 discharge cell。
+bundle validator 校验引用去重、每个 parameter/window/role 恰有一个 cell、fragment/reference closure 完整，以及每个目标 cell 都能找到同窗 discharge cell；item 由统一 reader 解析后，再用 `ReferenceScope` 校验同 run/current session（context/topology 可为同 run 的 run-global item）。
 
 ## 5. Tool registry 与执行契约
 

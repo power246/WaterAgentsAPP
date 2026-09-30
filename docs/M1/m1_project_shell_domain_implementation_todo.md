@@ -275,23 +275,21 @@ python -m pytest backend/tests/domain/test_time.py backend/tests/domain/test_tim
 ### Enums 与 supporting objects
 
 - [x] 实现 `CollectionStatus`：`available / empty / unavailable / invalid`。
-- [x] 实现 `DataQualityFlag`：`missing`、`partial_coverage`、`possible_freezing`、`anomalous`、`estimated`、`historical_inference`、`stale`、`provider_flagged`、`unit_unresolved`、`conflicting_observations`。
+- [x] 实现 `DataQualityFlag`：`missing`、`partial_coverage`、`possible_freezing`、`anomalous`、`estimated`、`historical_inference`、`stale`、`provider_flagged`、`unit_unresolved`；当前系统不自动生成跨 series 冲突 flag。
 - [x] 实现 `EvidenceLocation(point, comid, station_id, distance_to_target_km)`。
 - [x] EvidenceLocation 至少包含 point/comid/station_id 之一，距离不能为负。
-- [x] 实现 `Provenance(provider, retrieved_at, source_uri, source_record_ids, source_timezone, source_utc_offset, metadata)`。
-- [x] provenance timestamp 统一 UTC；源 timezone/offset 可以保留。
+- [x] 实现强类型 `Provenance` identity 字段；provider/channel/source URI/retrieved time 位于 SourceRecord 公共 envelope，源 timezone/offset 可以保留。
 
 ### Evidence models
 
 - [x] 实现 `EvidenceFragment` 全部 envelope 字段。
 - [x] parameter refs 使用 ParameterKey，不使用裸 code。
-- [x] value/summary 只接受 JsonValue。
-- [x] confidence hint 只校验 `[0,1]`。
+- [x] payload 使用七分支强类型 discriminator，不接受宽松 JSON 主契约。
+- [x] applicability/relation/series/coverage/quality/source refs/derivation 组合由模型 invariant 校验。
 - [x] rag eligible 默认 false。
-- [x] empty/unavailable/invalid 可以携带结构化原因或 null payload。
-- [x] 实现 `EvidenceBundle`，固化 COMID、time range、analysis timezone、resolution/source 和 requested parameters。
-- [x] EvidenceBundle 允许没有 available evidence，但 requested parameters 至少一个且唯一。
-- [x] 同一 bundle 的 evidence ID 不得重复；fragment 允许来自上游 COMID。
+- [x] empty/unavailable/invalid 使用 typed collection fact，不能伪装 quantified evidence。
+- [x] 实现 reference-only `EvidenceBundle` 与逐 ParameterKey × window × role 的 `EvidenceCell`。
+- [x] EvidenceBundle 要求 requested/supporting parameters、window/cell 和 fragment reference closure 完整且唯一。
 - [x] 实现 `EvidenceReference(evidence_id, role, summary)` 和 `EvidenceChain(references)`。
 - [x] EvidenceChain 非空且 evidence ID 唯一，只保存引用和摘要，不嵌入 fragment。
 
@@ -299,13 +297,13 @@ python -m pytest backend/tests/domain/test_time.py backend/tests/domain/test_tim
 
 - [x] 四种 collection status 均可 round-trip。
 - [x] empty 与 unavailable 在序列化后保持不同语义。
-- [x] 重复 evidence ID、重复 ParameterKey、非法位置/距离/confidence 被拒绝。
-- [x] evidence ID 不承担跨 session 稳定性；source record IDs 完整保留。
-- [x] 修改原始 payload 或 dump 后 payload 不改变已创建模型。
+- [x] 重复 evidence/cell/reference、非法位置/时间/单位/identity 和状态组合被拒绝。
+- [x] provider record ID 原样保留；无 stable ID 时由规范字段生成稳定 hash，page/channel provenance 不丢失。
+- [x] canonical decimal/time、严格序列化及 unknown/corrupt content 错误有覆盖。
 
 验证点：
 
-- [x] Evidence Domain 没有真实 adapter、HTTP client、tool registry 或 source-specific payload class。
+- [x] Evidence Domain 没有真实 adapter、HTTP client、executor、runtime 或 transcript registry。
 - [x] Adapter 构造 EvidenceFragment 的行为没有出现在 M1。
 
 ### Milestone 4 完成记录（2026-09-07）

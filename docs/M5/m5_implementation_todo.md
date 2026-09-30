@@ -1,8 +1,8 @@
 # M5 Evidence Tools + EvidenceBundle Implementation TODO
 
-更新日期：2026-09-29
+更新日期：2026-09-30
 
-> 当前状态：仅完成设计与实施规划，Milestone 0–13 全部未开始。本文中的 checkbox、验证命令、contract 状态和提交位置均是后续 coding agent 的执行清单，不是已经完成的证据。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
+> 当前状态：Milestone 0–2 已完成，Milestone 3–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
 
 本清单执行以下已确认文档：
 
@@ -76,92 +76,130 @@
 
 ### 工作
 
-- [ ] 记录 branch、HEAD、`origin/main`、merge-base、工作区已有改动、Python/依赖版本和可用测试入口；确认不覆盖用户改动。
-- [ ] 只盘点当前新后端接缝：evidence domain、M4 capability registry、HydrologyGraph/NLDI adapter、M3 writer/reader/registry/SSE、settings、composition root、ports 和现有 fakes。
-- [ ] 形成 M5 影响表，至少覆盖 domain、manifest/config、application policy、ports、provider adapters、runtime、transcript registry、persistence/API projection、test composition、scripts 和 docs；每类事实只指定一个 source of truth。
-- [ ] 记录当前 M1–M4 full regression、architecture、PostgreSQL 和 smoke 基线；环境缺失时写 `not run`，不修改测试绕过基础设施。
-- [ ] 增加或确认 architecture guard：production/test 不依赖归档；domain/ports 不导入 infrastructure/FastAPI/SQLAlchemy；production import graph 不含 test router/composition。
-- [ ] 扫描当前 `EvidenceFragment`、`EvidenceBundle`、`DataQualityFlag`、`JsonValue/value_or_summary` 和 capability manifest 的所有 production/test/docs 消费者，形成原子更新清单。
-- [ ] 确认 M5 不新增业务表。若 typed content 或大正文需要 schema 变更，先证明现有通用存储不能承载；默认只扩展内容模型、registry 和 fixture。
+- [x] 记录 branch、HEAD、`origin/main`、merge-base、工作区已有改动、Python/依赖版本和可用测试入口；确认不覆盖用户改动。
+- [x] 只盘点当前新后端接缝：evidence domain、M4 capability registry、HydrologyGraph/NLDI adapter、M3 writer/reader/registry/SSE、settings、composition root、ports 和现有 fakes。
+- [x] 形成 M5 影响表，至少覆盖 domain、manifest/config、application policy、ports、provider adapters、runtime、transcript registry、persistence/API projection、test composition、scripts 和 docs；每类事实只指定一个 source of truth。
+- [x] 记录当前 M1–M4 full regression、architecture、PostgreSQL 和 smoke 基线；环境缺失时写 `not run`，不修改测试绕过基础设施。
+- [x] 增加或确认 architecture guard：production/test 不依赖归档；domain/ports 不导入 infrastructure/FastAPI/SQLAlchemy；production import graph 不含 test router/composition。
+- [x] 扫描当前 `EvidenceFragment`、`EvidenceBundle`、`DataQualityFlag`、`JsonValue/value_or_summary` 和 capability manifest 的所有 production/test/docs 消费者，形成原子更新清单。
+- [x] 确认 M5 不新增业务表。若 typed content 或大正文需要 schema 变更，先证明现有通用存储不能承载；默认只扩展内容模型、registry 和 fixture。
 
 ### Tests
 
-- [ ] 当前 `backend/tests` 基线无未解释失败；PostgreSQL 用例仅使用 `wateragents_test` 安全门禁。
-- [ ] architecture tests 锁定 layer dependency、port purity、archive isolation、单一 writer/reader、两层 SSE 和 production/test import isolation。
-- [ ] current OpenAPI、typed registry、M4 manifest audit 和 M4 workflow smoke 的基线结果被记录。
+- [x] 当前 `backend/tests` 基线无未解释失败；PostgreSQL 用例仅使用 `wateragents_test` 安全门禁。
+- [x] architecture tests 锁定 layer dependency、port purity、archive isolation、单一 writer/reader、两层 SSE 和 production/test import isolation。
+- [x] current OpenAPI、typed registry、M4 manifest audit 和 M4 workflow smoke 的基线结果被记录。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（无法运行的 PostgreSQL/外部项明确拆出并记录）
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（无法运行的 PostgreSQL/外部项明确拆出并记录）
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：真实扩展接缝、原子更新面和基线证据可复现；归档完全不在实现输入中；本阶段不新增 M5 业务行为。
 
 提交边界：只允许 architecture guard、必要的基线测试修正、影响表和本清单完成记录；不得提前修改 evidence model、manifest 或 provider。
 
+#### Milestone 0 影响表与原子更新清单
+
+| 影响面 | 当前唯一 source of truth | M5 后续原子更新面 |
+|---|---|---|
+| Evidence domain | `app/domain/evidence/` 与 `app/domain/__init__.py` | 同步替换 `EvidenceFragment`、`EvidenceBundle`、`DataQualityFlag`、exports、domain/result tests；不保留 `value_or_summary` 或旧 bundle 读取分支。 |
+| Capability manifest/config | `app/infrastructure/config/parameter_capabilities.v1.json`，由 `parameter_capabilities.py` 装载为 `ParameterCapabilityRegistry` | 在同一 manifest/model 中扩展 unit/channel/quality/coverage/aggregation/relation policy；保持 154 key 集合与 digest 基线。 |
+| Topology/geometry | `app/domain/hydrology/`、`application/hydrology_topology/` 与 `infrastructure/adapters/nldi.py` | 原子更新 `RiverSegment`、`HydrologyNode`、`HydrologyGraph`、`topology_ready v1`、NLDI fixtures/consumers；完整 LineString 只保存一次。 |
+| Application policy/tools | 当前尚无 M5 实现；既有流程入口为 `application/analysis_runs/` | 新增唯一 evidence policy/tool executor、collection/bundle/inspection 链；不建立第二套 workflow、writer 或事实库。 |
+| Ports/provider adapters | `app/ports/` 的 Protocol 与 `app/infrastructure/adapters/` | ports 只使用 domain DTO；USGS/NWS/EPA adapters 只解析官方协议并返回 SourceRecord/completion facts，失败不改写为 empty。 |
+| Runtime/settings | `infrastructure/config/settings.py`、`infrastructure/runtime/` 与 `app/main.py` | production composition 只装配内部 M5 能力，不注册 tool/test route；预算默认值只在 Settings 定义一次。 |
+| Transcript/read/write/SSE | `application/transcripts/registry.py`、`application/analysis_runs/writer.py`、`application/transcripts/reader.py` 与现有 run/session SSE | 五类 M5 typed content 复用单一 registry/writer/reader、全文引用和两层 SSE，不增加第三条流。 |
+| Persistence/API projection | 四表 `infrastructure/persistence/schema.py` 与现有 transcript/API projection | 通用 `content_type + schema_version + inline/reference body` 已能承载 M5；Milestone 0 确认不新增业务表或 migration。 |
+| Test composition/fakes | `backend/tests` 当前 fixtures/fakes；production app 为 `app.main:create_app` | 独立 M5 test composition 复用真实 executor；`test_production_test_isolation.py` 阻止 production 导入 test-only module，并锁定单一 reader/writer 与两条 SSE。 |
+| Scripts/docs | `backend/scripts/`、`docs/M1`–`docs/M5` 与项目级当前契约 | 离线 audit/fixture smoke 为默认门禁；真实 provider/PostgreSQL 仅 opt-in 并记录 `not run`；完成证据只回写本 TODO。 |
+
+现有消费者扫描覆盖 production、tests 与 `docs/M1`–`docs/M5`：`EvidenceFragment`/`EvidenceBundle` 主要由 domain exports、evidence/result tests 和边界文档消费；`DataQualityFlag` 还被 `TimeWindowResult` 消费；`JsonValue` 是通用 transcript/persistence JSON 类型，M5 只移除 evidence payload 对它的依赖；capability manifest 由 loader/registry、resolver/runtime、OpenAPI、audit 与 fixtures 共同消费。后续 Milestone 必须一次同步上述消费者，不能留下旧字段兼容分支。
+
+#### Milestone 0 完成记录（2026-09-30）
+
+- 实现：从 `origin/main` 的 `628518e` 创建 `codex/m5-evidence-tools-m0`，初始 tracked worktree/index 均无改动；盘点当前 backend 接缝并新增 production/test import isolation、单一 transcript writer/reader 和两层 SSE 架构守卫。Python `3.12.14`、pip `26.2.1`、FastAPI `0.141.1`、Pydantic `2.13.5`、SQLAlchemy `2.0.54`、pytest `9.1.1`；未修改 evidence model、manifest、provider、数据库 schema 或 production runtime。
+- 验证：首次原始 full command 为 `1150 passed, 2 failed, 45 errors`，失败均来自默认 pytest 临时目录 ACL 或当时未设置 `WATERAGENTS_TEST_DB_NAME`；沙箱外非 PostgreSQL回归为 `1185 passed`、architecture 为 `97 passed`、OpenAPI/typed-registry/manifest focused 为 `28 passed`。复查发现 Docker Desktop 的 `run/dockerInference` reparse point 损坏；确认进程/服务停止后将原 `run` 保留为 `run.codex-stale-20260930-m5-m0` 并重建空运行目录，未触碰 volume。随后通过项目 dotenv 与进程级 `wateragents_test` 验证 persistence `57 passed`、含 PostgreSQL 的完整 backend `1202 passed`、health `healthy`、history/restart/startup-repair 全部通过；`compileall`、154 项离线 audit、M4 workflow smoke、run SSE smoke 与 `git diff --check` 通过。真实 provider 和最新三平台 CI 为 `not run`。
+- 风险：Milestone 3–13 尚未开始；Milestone 1–2 已原子替换 evidence domain 并扩展唯一 capability manifest，NLDI LineString 仍只提取代表点，policy executor、五类 M5 typed content 与 provider execution 均未实现。
+- 提交：未提交（当前工作区）。
+
 ## Milestone 1：当前唯一 V1 evidence domain
 
 ### 工作
 
-- [ ] 定义 `WaterObservationRecord`、`DischargeObservationRecord`、`WeatherObservationRecord`、`WeatherForecastRecord`、`FacilityRecord`、`UpstreamResultRecord`、`HistoricalTranscriptRecord` 的判别联合和共享 provenance/location/time 字段。
-- [ ] 对无 provider stable ID 的记录使用规范字段 hash 生成稳定 identity；禁止仅按时间和值猜重复，保留 page/channel provenance。
-- [ ] 用 `DirectRecordPayload`、`AggregatePayload`、`ConversionPayload`、`ContextPayload`、`CollectionFactPayload`、`UpstreamResultPayload`、`HistoricalInferencePayload` 原子替换 `value_or_summary: JsonValue`。
-- [ ] 扩展唯一 `EvidenceFragment`：typed payload、applicability、relation、series identity、coverage、quality class/flags、source refs 和 derivation；删除当前 V1 中被替换字段与 `CONFLICTING_OBSERVATIONS`。
-- [ ] 实现 `EvidenceCell` 的 parameter/window/role、三类 fragment refs、collection facts 和 supported/unsupported/blocked 语义。
-- [ ] 实现 reference-only `EvidenceBundle`、`CollectionManifest` 和 tool request/result/safe error models；tool execution 与 collection status 使用两组独立 enum。
-- [ ] 为全部模型实现严格 invariant、稳定序列化、reference extraction、canonical decimal/time 表示和未知/损坏内容错误，不以 raw dict 作为跨层主契约。
-- [ ] 同步当前 production/test/docs 消费者，删除旧字段、旧 enum 和旧 fixture；不保留 V1/V2 union 或 fallback deserializer。
+- [x] 定义 `WaterObservationRecord`、`DischargeObservationRecord`、`WeatherObservationRecord`、`WeatherForecastRecord`、`FacilityRecord`、`UpstreamResultRecord`、`HistoricalTranscriptRecord` 的判别联合和共享 provenance/location/time 字段。
+- [x] 对无 provider stable ID 的记录使用规范字段 hash 生成稳定 identity；禁止仅按时间和值猜重复，保留 page/channel provenance。
+- [x] 用 `DirectRecordPayload`、`AggregatePayload`、`ConversionPayload`、`ContextPayload`、`CollectionFactPayload`、`UpstreamResultPayload`、`HistoricalInferencePayload` 原子替换 `value_or_summary: JsonValue`。
+- [x] 扩展唯一 `EvidenceFragment`：typed payload、applicability、relation、series identity、coverage、quality class/flags、source refs 和 derivation；删除当前 V1 中被替换字段与 `CONFLICTING_OBSERVATIONS`。
+- [x] 实现 `EvidenceCell` 的 parameter/window/role、三类 fragment refs、collection facts 和 supported/unsupported/blocked 语义。
+- [x] 实现 reference-only `EvidenceBundle`、`CollectionManifest` 和 tool request/result/safe error models；tool execution 与 collection status 使用两组独立 enum。
+- [x] 为全部模型实现严格 invariant、稳定序列化、reference extraction、canonical decimal/time 表示和未知/损坏内容错误，不以 raw dict 作为跨层主契约。
+- [x] 同步当前 production/test/docs 消费者，删除旧字段、旧 enum 和旧 fixture；不保留 V1/V2 union 或 fallback deserializer。
 
 ### Tests
 
-- [ ] 每个 SourceRecord 分支有最小正例、未知 discriminator、缺字段、额外字段、非法时间/location/unit/identity 反例。
-- [ ] fragment payload 与 applicability/relation/quality/coverage 组合 invariant 完整；collection fact 不伪装 quantified evidence。
-- [ ] bundle 校验每个 parameter × window × role 恰有一个 cell、引用去重/scope 一致、closure 完整，并要求每个 target cell 存在同窗 discharge cell。
-- [ ] execution `completed/failed/cancelled` 与 collection `available/empty/unavailable/invalid/null` 的合法组合有矩阵测试。
-- [ ] 不存在 `EvidenceFragmentV2`、旧字段 read union、`CONFLICTING_OBSERVATIONS` 或 milestone feature flag。
+- [x] 每个 SourceRecord 分支有最小正例、未知 discriminator、缺字段、额外字段、非法时间/location/unit/identity 反例。
+- [x] fragment payload 与 applicability/relation/quality/coverage 组合 invariant 完整；collection fact 不伪装 quantified evidence。
+- [x] bundle 校验每个 parameter × window × role 恰有一个 cell、引用去重/scope 一致、closure 完整，并要求每个 target cell 存在同窗 discharge cell。
+- [x] execution `completed/failed/cancelled` 与 collection `available/empty/unavailable/invalid/null` 的合法组合有矩阵测试。
+- [x] 不存在 `EvidenceFragmentV2`、旧字段 read union、`CONFLICTING_OBSERVATIONS` 或 milestone feature flag。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serialization.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `rg -n "value_or_summary|EvidenceFragmentV2|EvidenceBundleV2|CONFLICTING_OBSERVATIONS" backend/app backend/tests`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_evidence.py backend/tests/domain/test_serialization.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `rg -n "value_or_summary|EvidenceFragmentV2|EvidenceBundleV2|CONFLICTING_OBSERVATIONS" backend/app backend/tests`
 
 阶段出口：所有后续 M5 组件只能消费当前唯一的 typed V1 models；尚未扩展 manifest、调用 provider 或写 transcript。
 
 提交边界：只包含 domain model、serialization/reference contracts、原子调用方迁移和 focused tests；不得夹带 adapter、executor、runtime 或 HTTP。
 
+#### Milestone 1 完成记录（2026-09-30）
+
+- 实现：在当前唯一 V1 中加入七类 `SourceRecord` 与稳定 identity、七类 typed payload、严格 `EvidenceFragment`、`EvidenceCell`、reference-only `EvidenceBundle`、`CollectionManifest`、tool request/result/safe error、规范 decimal/time 序列化和稳定内容错误；同步 domain exports、当前 result 消费者及 M1/M3/M5 契约文档。未新增 V2/read fallback，也未实现 manifest policy、provider adapter、executor、runtime、HTTP 或 transcript registry。
+- 验证：Python `3.12.14`；focused evidence/serialization 为 `119 passed`，architecture 为 `98 passed`，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 与 Docker PostgreSQL 的完整 backend 为 `1268 passed`；legacy 名称扫描无 production/test 命中，`compileall`、文档 fence/JSON audit 与 `git diff --check` 通过。真实 provider 与 Windows/Linux/macOS 三平台 CI 为 `not run`。
+- 修复与风险：稳定 identity 初测暴露浮点坐标缺少规范表示，已改为有限值规范化并增加回归；受限 pytest 临时目录 ACL 通过显式独立 `--basetemp` 在沙箱外复核。Milestone 3–13 尚未开始，policy executor、真实 provider、geometry、执行与持久化链仍按后续阶段实现。
+- 提交：未提交；当前 HEAD/`origin/main` 为 `628518e`，改动保留在 `codex/m5-evidence-tools-m0` 工作区。
+
 ## Milestone 2：154 项 manifest 与 policy registry
 
 ### 工作
 
-- [ ] 在当前 `ParameterCapabilityManifest(schema_version=1)` 原子加入 unit definitions、quality/aggregation/coverage profiles、evidence relations 和 capability/channel policy refs；保持 154 个 ParameterKey 集合和 M4 catalog identity 不变。
-- [ ] 定义全局 `UnitDefinition` registry：dimension、alias、linear/affine/identity-only、十进制 scale/offset、precision；pH 使用 identity-only 语义。
-- [ ] 定义共享 value-semantics、quality、coverage 和 aggregation profiles；参数只引用命名 profile，极少 override 必须显式且有 fixture。
-- [ ] 为每个 capability/channel 登记 provider、channel、series identity fields、accepted source units/statistics、value semantics、默认/允许聚合、quality/coverage profile 和 indirect relations。
-- [ ] 保证 `usgs:00060` 仍是唯一自动 required support，拥有 direct discharge channel 和允许关系；每项至少有一个 actual observation channel。
-- [ ] 扩展不可变 registry loader：所有引用存在且无环、unit dimension 兼容、value semantics 支持声明的方法、relation 输入已登记、alias 无非法歧义。
-- [ ] 规范序列化 manifest 并产生可重现 digest；package installation、不同 cwd 和 Windows/Linux/macOS 路径不改变加载或 digest。
-- [ ] 扩展离线 audit 和只报告 drift 的 optional refresh；运行时不得自动接受官方新增字段/参数或修改 manifest。
+- [x] 在当前 `ParameterCapabilityManifest(schema_version=1)` 原子加入 unit definitions、quality/aggregation/coverage profiles、evidence relations 和 capability/channel policy refs；保持 154 个 ParameterKey 集合和 M4 catalog identity 不变。
+- [x] 定义全局 `UnitDefinition` registry：dimension、alias、linear/affine/identity-only、十进制 scale/offset、precision；pH 使用 identity-only 语义。
+- [x] 定义共享 value-semantics、quality、coverage 和 aggregation profiles；参数只引用命名 profile，极少 override 必须显式且有 fixture。
+- [x] 为每个 capability/channel 登记 provider、channel、series identity fields、accepted source units/statistics、value semantics、默认/允许聚合、quality/coverage profile 和 indirect relations。
+- [x] 保证 `usgs:00060` 仍是唯一自动 required support，拥有 direct discharge channel 和允许关系；每项至少有一个 actual observation channel。
+- [x] 扩展不可变 registry loader：所有引用存在且无环、unit dimension 兼容、value semantics 支持声明的方法、relation 输入已登记、alias 无非法歧义。
+- [x] 规范序列化 manifest 并产生可重现 digest；package installation、不同 cwd 和 Windows/Linux/macOS 路径不改变加载或 digest。
+- [x] 扩展离线 audit 和只报告 drift 的 optional refresh；运行时不得自动接受官方新增字段/参数或修改 manifest。
 
 ### Tests
 
-- [ ] 154 项 key/hash 与 M4 manifest 双向一致；required support 恰好一项且为 `usgs:00060`。
-- [ ] 每项 canonical/accepted unit、channel、value semantics、quality/coverage/aggregation profile、default method 和 relation refs 完整。
-- [ ] 未知/循环 profile、dimension mismatch、缺 channel、非法 method/value semantics、重复 alias、未知 relation 和不稳定 digest 启动失败。
-- [ ] pH、discharge、interval/cumulative precipitation、daily statistic、concentration、count density 各有正反配置 fixture。
-- [ ] 生成 audit report 在重复运行、不同 cwd 和支持平台上字节稳定。
+- [x] 154 项 key/hash 与 M4 manifest 双向一致；required support 恰好一项且为 `usgs:00060`。
+- [x] 每项 canonical/accepted unit、channel、value semantics、quality/coverage/aggregation profile、default method 和 relation refs 完整。
+- [x] 未知/循环 profile、dimension mismatch、缺 channel、非法 method/value semantics、重复 alias、未知 relation 和不稳定 digest 启动失败。
+- [x] pH、discharge、interval/cumulative precipitation、daily statistic、concentration、count density 各有正反配置 fixture。
+- [x] 生成 audit report 在重复运行、不同 cwd 和支持平台上字节稳定。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_parameter_capabilities.py backend/tests/infrastructure/test_parameter_capability_audit.py -q`
-- [ ] 运行扩展后的离线 manifest audit，输出 `154/154`、唯一 key、required support、profile/relation 引用和稳定 digest。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_parameter_capabilities.py backend/tests/infrastructure/test_parameter_capability_audit.py -q`
+- [x] 运行扩展后的离线 manifest audit，输出 `154/154`、唯一 key、required support、profile/relation 引用和稳定 digest。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
 
 阶段出口：所有 M5 policy 都能从唯一 manifest/registry 查询，154 项没有模板空壳或第二份 Markdown allowlist；尚未执行数值转换或 provider collection。
 
 提交边界：manifest schema/data、loader/registry、audit 和 tests；不得夹带 policy executor、provider、workflow 或 API。
+
+#### Milestone 2 完成记录（2026-09-30）
+
+- 实现：原子扩展 `parameter_capabilities.v1.json` 和当前不可变 registry，154 项 capability 全部引用 45 个 unit definitions、2 个 quality profiles、10 个 aggregation profiles、5 个 coverage profiles、5 个 evidence relations 与 211 个 provider/channel policies；`usgs:00060` 仍是唯一 required support。manifest canonical SHA-256 为 `52b840a0908c73c2b1059d363f95beb402686167822f56010befb788274733f7`，optional official refresh 保持只报告 drift。
+- 验证：focused manifest/audit 为 `30 passed`，domain 与 M4 parameter/context/station 回归为 `319 passed`，architecture 为 `98 passed`，使用 Docker PostgreSQL `wateragents_test` 的完整 backend 为 `1282 passed`；离线 audit 输出 `154/154`、154 unique/complete、引用状态 `valid`，checksum mismatch 启动失败，zip package 从不同 cwd 读取同一 resource 后得到相同 digest；`compileall`、文档 audit 与 `git diff --check` 通过。
+- 修复与风险：首次 domain 回归为 `318 passed, 1 failed`，原因是内部 `counter_delta_sum` 误扩展既有 result `AggregationMethod`；已拆为 M5 专用 `EvidenceAggregationMethod` 并恢复旧枚举稳定值。首次 wheel 命令因路径歧义误解析同名 PyPI 包，显式本地路径后又发现环境缺少 `setuptools.build_meta`，因此 wheel build 为 `not run`；改用标准库 zip package 完成资源隔离验证。Linux/macOS、真实 official refresh 和真实 provider 为 `not run`；数值转换/聚合执行仍属于 Milestone 3。
+- 提交：未提交；当前 HEAD/`origin/main` 为 `628518e`，改动保留在 `codex/m5-evidence-tools-m0` 工作区。
 
 ## Milestone 3：确定性 evidence policy 引擎
 

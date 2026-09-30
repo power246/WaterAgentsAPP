@@ -3,6 +3,10 @@ from typing import Self
 from pydantic import StrictBool, model_validator
 
 from app.domain.common import DomainModel, NonEmptyString, ensure_unique_tuple
+from app.domain.hydrology.channel_aggregation_default import (
+    ChannelAggregationDefault,
+)
+from app.domain.hydrology.channel_policy import ChannelPolicy
 from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
 from app.domain.hydrology.parameter_concept_normalization import (
     normalize_parameter_concept,
@@ -16,6 +20,11 @@ class ParameterCapability(DomainModel):
     key: ParameterKey
     canonical_name: NonEmptyString
     canonical_unit: NonEmptyString
+    accepted_source_units: tuple[NonEmptyString, ...]
+    unit_policy_id: NonEmptyString
+    quality_profile_id: NonEmptyString
+    channel_policies: tuple[ChannelPolicy, ...]
+    default_aggregation_by_resolution: tuple[ChannelAggregationDefault, ...]
     official_name: NonEmptyString
     official_unit: NonEmptyString
     official_group: NonEmptyString
@@ -37,6 +46,9 @@ class ParameterCapability(DomainModel):
         ):
             raise ValueError("parameter capability key must be usgs:<five digits>")
         for field_name in (
+            "accepted_source_units",
+            "channel_policies",
+            "default_aggregation_by_resolution",
             "aliases_zh",
             "aliases_en",
             "roles",
@@ -48,6 +60,18 @@ class ParameterCapability(DomainModel):
             if not values:
                 raise ValueError(f"{field_name} must not be empty")
             ensure_unique_tuple(values, field_name=field_name)
+        channel_keys = tuple(
+            (policy.provider, policy.channel) for policy in self.channel_policies
+        )
+        ensure_unique_tuple(channel_keys, field_name="channel_policies")
+        default_keys = tuple(
+            (default.provider, default.channel, default.resolution)
+            for default in self.default_aggregation_by_resolution
+        )
+        ensure_unique_tuple(
+            default_keys,
+            field_name="default_aggregation_by_resolution",
+        )
         if ParameterRole.TARGET not in self.roles:
             raise ValueError("every capability must support the target role")
         canonical = normalize_parameter_concept(self.canonical_name)

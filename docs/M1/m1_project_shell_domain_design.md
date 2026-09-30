@@ -406,10 +406,9 @@ historical_inference
 stale
 provider_flagged
 unit_unresolved
-conflicting_observations
 ```
 
-未知 provider 原始 flag 保存在 provenance metadata，M5 决定是否提升为领域 flag。
+未知 provider 原始 flag 保存在标准化 SourceRecord 的 provider quality/provenance 字段；只有 capability policy 登记的规则可以提升为领域 flag。当前系统不自动生成跨 series 冲突 flag。
 
 #### `EvidenceLocation`
 
@@ -425,16 +424,18 @@ distance_to_target_km: float | None
 #### `Provenance`
 
 ```text
-provider: str
-retrieved_at: UTC datetime
-source_uri: str | None
-source_record_ids: tuple[str, ...] = ()
+operation_id / registry_digest
+request_identity / page_identity / chunk_identity
+provider_series_id / provider_record_id
 source_timezone: str | None
 source_utc_offset: str | None
-metadata: Mapping[str, JsonValue] = empty mapping via default_factory
 ```
 
-source URI 使用普通非空字符串，因为来源也可能是数据库记录或 session item。
+provider、channel、公开 source URI、retrieved_at、观测/有效时间和 location 位于强类型 `SourceRecord` 公共 envelope；provenance 只保存规范 request/page/series/record identity，不接收 raw provider envelope 或任意 metadata dict。无 provider stable ID 时，当前唯一 V1 用全部规范字段生成 `sha256:` identity。
+
+#### `SourceRecord`
+
+当前唯一 V1 是按 `record_type` 判别的七分支联合：`water_observation`、`discharge_observation`、`weather_observation`、`weather_forecast`、`facility`、`upstream_result`、`historical_transcript`。所有分支 strict/frozen，额外字段、未知 discriminator、naive time、非法 location/unit/identity 均拒绝；测量值使用规范十进制字符串。
 
 #### `EvidenceFragment`
 
@@ -442,24 +443,28 @@ source URI 使用普通非空字符串，因为来源也可能是数据库记录
 evidence_id: str
 source: str
 collection_status: CollectionStatus
-target_comid: str | None
+target_comid: str
 location: EvidenceLocation
 time_range: TimeRange
-parameter_refs: tuple[ParameterKey, ...] = ()
+parameter_refs: tuple[ParameterKey, ...]
 data_type: str
-value_or_summary: JsonValue
+payload: typed EvidencePayload
+applicability: direct_measurement | allowed_indirect | contextual_only
+relation_id: EvidenceRuleId | None
+series_identity: str | None
+coverage: EvidenceCoverage
+quality_class: valid | suspicious | invalid | None
 quality_flags: tuple[DataQualityFlag, ...] = ()
-confidence_hint: float | None
+source_record_refs: tuple[SourceRecordReference, ...] = ()
+derivation: EvidenceDerivation | None
 provenance: Provenance
 rag_eligible: bool = false
 ```
 
 说明：
 
-- M1 冻结 envelope，M5 再为 observation/weather/flow/upstream result 等定义强类型 payload。
-- source 是逻辑来源；provenance.provider 是实际系统。
-- collection status 为 empty/unavailable/invalid 时 payload 可以是结构化原因或 null。
-- confidence_hint 不是最终 confidence。
+- payload 是 `direct_record / aggregate / conversion / context / collection_fact / upstream_result / historical_inference` 判别联合，不存在宽松 JSON payload 或兼容读取。
+- collection fact 必须是 contextual、`quality_class=null` 且不可解锁门禁；direct/aggregate/conversion 等 quantified evidence 必须通过引用闭包和 applicability invariant。
 - rag_eligible 默认 false。
 - Evidence Tool 构造该对象；adapter 不负责 evidence policy。
 
@@ -468,20 +473,26 @@ rag_eligible: bool = false
 ```text
 bundle_id: str
 agent_comid: str
+context_ref / topology_ref
 time_range: TimeRange
 analysis_timezone: str
 time_resolution: TimeResolution = 12h
 time_resolution_source: TimeResolutionSource
 requested_parameters: tuple[ParameterKey, ...]
-fragments: tuple[EvidenceFragment, ...] = ()
+supporting_parameters: tuple[ParameterKey, ...]
+window_refs: tuple[str, ...]
+cells: tuple[EvidenceCell, ...]
+fragment_refs: tuple[EvidenceFragmentReference, ...]
+source_record_item_refs / tool_result_refs
+quality_summary / collection_summary / created_at
 ```
 
 校验：
 
-- requested parameters 至少一个且唯一。
-- evidence ID 唯一。
-- fragment 可以来自上游 COMID。
-- bundle 可以没有 available evidence；empty/unavailable fragment 用于解释结构化空判断。
+- requested/supporting parameters 与 windows 非空且唯一。
+- 每个 parameter × window × role 恰有一个 cell，每个目标窗口存在 required-support discharge cell。
+- cell 的 fragment/fact ID 与 bundle reference 集合形成完整、无孤儿的闭包；reader 解析 item 后以 `ReferenceScope` 校验同 run/current session，bundle 不内嵌 fragment/source 正文。
+- unsupported 与 blocked 保留显式 reason；blocked 可以引用已确认的 partial facts，但不能被当作门禁完成。
 
 #### `EvidenceReference` 与 `EvidenceChain`
 

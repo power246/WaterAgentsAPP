@@ -3,11 +3,24 @@ from app.domain.hydrology.availability_coverage_source import (
     AvailabilityCoverageSource,
 )
 from app.domain.hydrology.availability_time_range import AvailabilityTimeRange
+from app.domain.hydrology.aggregation_profile import AggregationProfile
+from app.domain.hydrology.channel_aggregation_default import (
+    ChannelAggregationDefault,
+)
+from app.domain.hydrology.channel_policy import ChannelPolicy
+from app.domain.hydrology.coverage_policy_kind import CoveragePolicyKind
+from app.domain.hydrology.coverage_profile import CoverageProfile
 from app.domain.hydrology.coverage_unit import CoverageUnit
 from app.domain.hydrology.geocoding_candidate import GeocodingCandidate
 from app.domain.hydrology.location import GeoPoint
 from app.domain.hydrology.monitoring_station import MonitoringStation
 from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
+from app.domain.hydrology.evidence_aggregation_method import (
+    EvidenceAggregationMethod,
+)
+from app.domain.hydrology.evidence_relation_definition import (
+    EvidenceRelationDefinition,
+)
 from app.domain.hydrology.parameter_capability import ParameterCapability
 from app.domain.hydrology.parameter_capability_configuration_error import (
     ParameterCapabilityConfigurationError,
@@ -28,6 +41,7 @@ from app.domain.hydrology.parameter_concept_normalization import (
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.hydrology.parameter_provider import ParameterProvider
 from app.domain.hydrology.parameter_role import ParameterRole
+from app.domain.hydrology.quality_profile import QualityProfile
 from app.domain.hydrology.monitoring_location_metadata import (
     MonitoringLocationMetadata,
 )
@@ -57,12 +71,21 @@ from app.domain.hydrology.topology_limits import TopologyLimits
 from app.domain.hydrology.topology_search_stats import TopologySearchStats
 from app.domain.hydrology.topology_station_ref import TopologyStationRef
 from app.domain.hydrology.usgs_parameter_metadata import UsgsParameterMetadata
+from app.domain.hydrology.unit_definition import UnitDefinition
+from app.domain.hydrology.unit_kind import UnitKind
+from app.domain.hydrology.unit_normalization import normalize_unit_identity
+from app.domain.hydrology.value_semantics import ValueSemantics
 from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
 
 __all__ = [
+    "AggregationProfile",
     "AdministrativeLocation",
     "AvailabilityCoverageSource",
     "AvailabilityTimeRange",
+    "ChannelAggregationDefault",
+    "ChannelPolicy",
+    "CoveragePolicyKind",
+    "CoverageProfile",
     "CoverageUnit",
     "GeocodingCandidate",
     "GeoPoint",
@@ -72,6 +95,8 @@ __all__ = [
     "EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256",
     "EXPECTED_PARAMETER_GROUP_COUNTS",
     "EvidenceRuleId",
+    "EvidenceAggregationMethod",
+    "EvidenceRelationDefinition",
     "ParameterCapability",
     "ParameterCapabilityConfigurationError",
     "ParameterCapabilityManifest",
@@ -80,6 +105,7 @@ __all__ = [
     "ParameterKey",
     "ParameterProvider",
     "ParameterRole",
+    "QualityProfile",
     "SamplePeriodOfRecord",
     "SeriesRef",
     "StationAvailability",
@@ -102,6 +128,10 @@ __all__ = [
     "TopologySearchStats",
     "TopologyStationRef",
     "UsgsParameterMetadata",
+    "UnitDefinition",
+    "UnitKind",
+    "ValueSemantics",
     "WaterQualityParameter",
     "normalize_parameter_concept",
+    "normalize_unit_identity",
 ]
