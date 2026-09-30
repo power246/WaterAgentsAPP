@@ -307,6 +307,17 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
         "latitude": 38.8719,
         "longitude": -77.0479
       },
+      "geometry_ref": "geometry:12345678",
+      "geometry_summary": {
+        "geometry_type": "linestring",
+        "length_km": "1.731420888",
+        "bbox": [-77.0579, 38.8719, -77.0379, 38.8719],
+        "simplified_coordinates": [
+          [-77.0579, 38.8719],
+          [-77.0379, 38.8719]
+        ],
+        "simplification_tolerance_m": "25"
+      },
       "depth": 0,
       "cumulative_distance_km": 0.0,
       "is_target": true,
@@ -338,6 +349,30 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
       "excluded_reasons": []
     }
   ],
+  "geometries": {
+    "geometry:12345678": {
+      "geometry_ref": "geometry:12345678",
+      "geometry_type": "linestring",
+      "full_coordinates": [
+        [-77.0579, 38.8719],
+        [-77.0479, 38.8719],
+        [-77.0379, 38.8719]
+      ],
+      "simplified_coordinates": [
+        [-77.0579, 38.8719],
+        [-77.0379, 38.8719]
+      ],
+      "representative_point": {
+        "latitude": 38.8719,
+        "longitude": -77.0479
+      },
+      "bbox": [-77.0579, 38.8719, -77.0379, 38.8719],
+      "length_km": "1.731420888",
+      "source": "nldi",
+      "source_comid": "12345678",
+      "simplification_tolerance_m": "25"
+    }
+  },
   "edges": [],
   "branch_outcomes": [
     {

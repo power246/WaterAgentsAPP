@@ -245,34 +245,40 @@
 
 ### 工作
 
-- [ ] 新增当前 V1 `WaterbodyGeometry`，包含 full/simplified coordinates、representative point、bbox、geodesic length、source COMID 和 simplification tolerance。
-- [ ] 原子扩展 `RiverSegment`、`HydrologyNode`、`HydrologyGraph`、NLDI adapter 和 `topology_ready v1`；完整 geometry 在原 typed content 的 map 中保存一次，node 只保存 ref 与有界摘要。
-- [ ] 校验 WGS84 lon/lat、至少两个不同有限点、LineString-only；拒绝 empty、全重复、MultiLineString 和不支持 geometry。
-- [ ] 确定性计算 geodesic length、bbox、representative point；Douglas-Peucker 从 25 m 开始，最多 256 点且 tolerance 不超过 250 m，不能满足时明确失败。
-- [ ] 所有实际空间判定使用 full LineString；simplified polyline 只用于 Agent 摘要和 point-query planning。
-- [ ] 实现 `[1,20] mile` Agent facility radius 校验、provider 支持半径向上取整、完整 corridor geodesic sampling 和最多 32 centers 的可行性计算。
-- [ ] facility tool descriptor 向 Agent 提供当前水体 length/bbox/有界 simplified polyline、半径上下限和各候选半径的预计 provider request 数；Agent 据此选择半径，但不能提交中心点或替换 geometry。
-- [ ] 所选半径超过 center budget 时在请求前返回 `facility_radius_too_small_for_budget` 与确定性 minimum feasible radius；不得截断河段或退化到 representative point。
-- [ ] 实现 facility point 到 full LineString 最短距离、按 Agent 精确半径最终过滤和 facility/permit identity 去重。
-- [ ] geometry 缺失不阻止已授权 station observation；facility tool 返回 `waterbody_geometry_unavailable`。
+- [x] 新增当前 V1 `WaterbodyGeometry`，包含 full/simplified coordinates、representative point、bbox、geodesic length、source COMID 和 simplification tolerance。
+- [x] 原子扩展 `RiverSegment`、`HydrologyNode`、`HydrologyGraph`、NLDI adapter 和 `topology_ready v1`；完整 geometry 在原 typed content 的 map 中保存一次，node 只保存 ref 与有界摘要。
+- [x] 校验 WGS84 lon/lat、至少两个不同有限点、LineString-only；拒绝 empty、全重复、MultiLineString 和不支持 geometry。
+- [x] 确定性计算 geodesic length、bbox、representative point；Douglas-Peucker 从 25 m 开始，最多 256 点且 tolerance 不超过 250 m，不能满足时明确失败。
+- [x] 所有实际空间判定使用 full LineString；simplified polyline 只用于 Agent 摘要和 point-query planning。
+- [x] 实现 `[1,20] mile` Agent facility radius 校验、provider 支持半径向上取整、完整 corridor geodesic sampling 和最多 32 centers 的可行性计算。
+- [x] facility tool descriptor 向 Agent 提供当前水体 length/bbox/有界 simplified polyline、半径上下限和各候选半径的预计 provider request 数；Agent 据此选择半径，但不能提交中心点或替换 geometry。
+- [x] 所选半径超过 center budget 时在请求前返回 `facility_radius_too_small_for_budget` 与确定性 minimum feasible radius；不得截断河段或退化到 representative point。
+- [x] 实现 facility point 到 full LineString 最短距离、按 Agent 精确半径最终过滤和 facility/permit identity 去重。
+- [x] geometry 缺失不阻止已授权 station observation；facility tool 返回 `waterbody_geometry_unavailable`。
 
 ### Tests
 
-- [ ] 短线、长线、弯曲线、跨经线、高纬度、重复点、非法坐标、空线和 MultiLineString fixture。
-- [ ] full geometry 只保存一次，所有 node ref/summary 可解析，M4 topology 排序和稳定序列化不回退。
-- [ ] 简化满足点数/tolerance/确定性边界且不被用于最终距离判定。
-- [ ] radius 1/20/越界、provider radius round-up、32 center 临界值、minimum feasible radius 和无截断覆盖可重现。
-- [ ] 多圆重复 facility 去重、边界内外 exact line distance、缺坐标和缺 geometry 行为正确。
+- [x] 短线、长线、弯曲线、跨经线、高纬度、重复点、非法坐标、空线和 MultiLineString fixture。
+- [x] full geometry 只保存一次，所有 node ref/summary 可解析，M4 topology 排序和稳定序列化不回退。
+- [x] 简化满足点数/tolerance/确定性边界且不被用于最终距离判定。
+- [x] radius 1/20/越界、provider radius round-up、32 center 临界值、minimum feasible radius 和无截断覆盖可重现。
+- [x] 多圆重复 facility 去重、边界内外 exact line distance、缺坐标和缺 geometry 行为正确。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_hydrology_topology_models.py backend/tests/application/hydrology_topology backend/tests/infrastructure/test_nldi_adapter.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m4_workflow_smoke.py backend/tests/architecture -q`
-- [ ] 导出/读取 `topology_ready v1` fixture，核对 full geometry 单份保存和 summary refs。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_hydrology_topology_models.py backend/tests/application/hydrology_topology backend/tests/infrastructure/test_nldi_adapter.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m4_workflow_smoke.py backend/tests/architecture -q`
+- [x] 导出/读取 `topology_ready v1` fixture，核对 full geometry 单份保存和 summary refs。
 
 阶段出口：当前唯一 topology V1 已提供可验证的水体形状与有界 Agent 摘要，corridor plan 可离线确定；尚未调用 ECHO 或其他 evidence provider。
 
 提交边界：geometry domain、NLDI parsing、topology V1 原子迁移、corridor planner 和 tests；不得夹带 facility HTTP、tool executor 或 frontend。
+
+完成记录（2026-09-30）：
+
+- 实现：新增 WGS84 LineString geometry、geodesic 派生值、支持跨日期变更线的 bbox、25–250 m/256 点确定性简化；NLDI、segment/node/graph 和当前唯一 `topology_ready v1` 已原子贯通，完整 geometry 仅在 graph map 保存一次。新增由已保存 graph 派生的 facility descriptor/plan、`[1,20] mile` 精确半径、provider round-up、32-center 完整 corridor、预算前置错误、full-line 距离过滤与 identity dedup；未加入 facility HTTP、tool executor 或 frontend。
+- 验证：清单 focused 为 `28 passed`，smoke + architecture 为 `100 passed`，geometry/corridor/API 扩展 focused 为 `62 passed`；Docker PostgreSQL healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1363 passed`，health 与 run-history smoke 均通过。受版本控制的 `topology_ready_v1_geometry.json` 已完成读取、导出、再读取，并校验完整 geometry 单份保存和 node 引用闭包；`compileall` 与 `git diff --check` 通过。
+- 修复与风险：首轮完整 backend 的唯一失败来自 M4 文档中的旧 `topology_ready v1` JSON 未包含原子新增字段，已同步更新现行文档 fixture 后全绿。真实 NLDI/ECHO provider、Linux/macOS CI 为 `not run`；本项只是 M1–M9 原子任务中的实现切片，正式整体验收仍在 Milestone 9 完成后开始。
 
 ## Milestone 5：provider-neutral ports 与 collection completeness
 

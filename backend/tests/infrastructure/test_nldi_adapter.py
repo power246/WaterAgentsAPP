@@ -79,7 +79,10 @@ def test_segment_and_navigation_are_normalized_to_direct_edges() -> None:
             upstreams = await adapter.get_direct_upstreams("12345678", 12.5)
             assert segment is not None
             assert segment.comid == "12345678"
-            assert segment.location == GeoPoint(latitude=38.9, longitude=-77.1)
+            assert segment.geometry is not None
+            assert segment.geometry_ref == "geometry:12345678"
+            assert segment.geometry_summary == segment.geometry.summary()
+            assert segment.location == segment.geometry.representative_point
             assert [item.comid for item in upstreams] == ["11111111", "22222222"]
             assert all(item.downstream_comids == ("12345678",) for item in upstreams)
             assert all(
@@ -180,6 +183,42 @@ def test_segment_with_mismatched_provider_comid_is_invalid() -> None:
     async def exercise() -> None:
         async with provider_client(
             lambda request: httpx.Response(200, json=drifted, request=request)
+        ) as http:
+            with pytest.raises(InvalidPortResponseError):
+                await NldiAdapter(http, base_url=BASE).get_segment("12345678")
+
+    run(exercise())
+
+
+@pytest.mark.parametrize(
+    "geometry",
+    (
+        {"type": "LineString", "coordinates": []},
+        {
+            "type": "LineString",
+            "coordinates": [[-77.0, 39.0], [-77.0, 39.0]],
+        },
+        {
+            "type": "LineString",
+            "coordinates": [[-181.0, 39.0], [-77.0, 39.0]],
+        },
+        {
+            "type": "MultiLineString",
+            "coordinates": [[[-77.0, 39.0], [-76.0, 39.0]]],
+        },
+        {"type": "Point", "coordinates": [-77.0, 39.0]},
+        None,
+    ),
+)
+def test_segment_rejects_empty_repeated_invalid_and_unsupported_geometry(
+    geometry,
+) -> None:
+    payload = fixture("nldi_position.json")
+    payload["features"][0]["geometry"] = geometry
+
+    async def exercise() -> None:
+        async with provider_client(
+            lambda request: httpx.Response(200, json=payload, request=request)
         ) as http:
             with pytest.raises(InvalidPortResponseError):
                 await NldiAdapter(http, base_url=BASE).get_segment("12345678")

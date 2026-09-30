@@ -20,11 +20,14 @@ from app.domain.hydrology.hydrology_exclusion_reason import (
 from app.domain.hydrology.hydrology_participation import HydrologyParticipation
 from app.domain.hydrology.location import GeoPoint
 from app.domain.hydrology.topology_station_ref import TopologyStationRef
+from app.domain.hydrology.waterbody_geometry import WaterbodyGeometrySummary
 
 
 class HydrologyNode(DomainModel):
     comid: NonEmptyString
     point: GeoPoint | None
+    geometry_ref: NonEmptyString | None = None
+    geometry_summary: WaterbodyGeometrySummary | None = None
     depth: int = Field(strict=True, ge=0)
     cumulative_distance_km: DomainFloat = Field(ge=0)
     is_target: bool
@@ -41,6 +44,8 @@ class HydrologyNode(DomainModel):
 
     @model_validator(mode="after")
     def validate_details(self) -> Self:
+        if (self.geometry_ref is None) != (self.geometry_summary is None):
+            raise ValueError("node geometry ref and summary must be provided together")
         ensure_unique_tuple(self.qualified_units, field_name="qualified_units")
         if self.qualified_units != tuple(
             sorted(self.qualified_units, key=coverage_key)

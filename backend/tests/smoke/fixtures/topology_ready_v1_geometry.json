@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "target_comid": "123",
+  "coverage": "complete",
+  "nodes": [
+    {
+      "comid": "123",
+      "point": {
+        "latitude": 38.899973457483,
+        "longitude": -77.1000265912
+      },
+      "geometry_ref": "geometry:123",
+      "geometry_summary": {
+        "geometry_type": "linestring",
+        "length_km": "28.180103254",
+        "bbox": [-77.2, 38.8, -77.0, 39.0],
+        "simplified_coordinates": [[-77.2, 38.8], [-77.0, 39.0]],
+        "simplification_tolerance_m": "25"
+      },
+      "depth": 0,
+      "cumulative_distance_km": 0.0,
+      "is_target": true,
+      "is_inlet": true,
+      "participation": "active",
+      "qualified_units": [
+        {
+          "parameter": {"code_system": "usgs", "code": "00060"},
+          "segment_index": 0
+        }
+      ],
+      "station_refs": [
+        {
+          "provider": "wdfn_time_series",
+          "station_id": "USGS-123",
+          "series_refs": ["series-123"]
+        }
+      ],
+      "excluded_reasons": []
+    }
+  ],
+  "geometries": {
+    "geometry:123": {
+      "geometry_ref": "geometry:123",
+      "geometry_type": "linestring",
+      "full_coordinates": [
+        [-77.2, 38.8],
+        [-77.1, 38.9],
+        [-77.0, 39.0]
+      ],
+      "simplified_coordinates": [[-77.2, 38.8], [-77.0, 39.0]],
+      "representative_point": {
+        "latitude": 38.899973457483,
+        "longitude": -77.1000265912
+      },
+      "bbox": [-77.2, 38.8, -77.0, 39.0],
+      "length_km": "28.180103254",
+      "source": "nldi",
+      "source_comid": "123",
+      "simplification_tolerance_m": "25"
+    }
+  },
+  "edges": [],
+  "branch_outcomes": [
+    {
+      "branch_root_comid": "123",
+      "coverage_unit": {
+        "parameter": {"code_system": "usgs", "code": "00060"},
+        "segment_index": 0
+      },
+      "outcome": "qualified",
+      "stop_comid": "123",
+      "path_to_target": ["123"],
+      "reason": "target_station_qualified",
+      "blocked_upstream_comid": null
+    }
+  ],
+  "execution_layers": [["123"]],
+  "limits": {
+    "max_distance_km": 100.0,
+    "max_hops": 12,
+    "max_nodes": 128
+  },
+  "stats": {
+    "discovered_nodes": 1,
+    "queried_nodes": 1,
+    "max_depth": 0,
+    "max_distance_km": 0.0,
+    "qualified_inlets": 1,
+    "excluded_nodes": 0
+  }
+}

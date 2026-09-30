@@ -32,6 +32,7 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    WaterbodyGeometry,
 )
 from app.ports import (
     InvalidPortResponseError,
@@ -58,6 +59,7 @@ class _PathState:
 @dataclass
 class _NodeRecord:
     point: GeoPoint | None
+    geometry: WaterbodyGeometry | None
     depth: int
     cumulative_distance_km: float
 
@@ -134,9 +136,33 @@ class HydrologyGraphBuilder:
             prediction_baseline_hours=self._prediction_baseline_hours,
         )
         target_comid = context.target.comid
+        target_segment = await self._external_call(
+            lambda: self._topology.get_segment(
+                target_comid,
+                deadline=effective_deadline,
+            ),
+            semaphore=semaphore,
+            deadline=effective_deadline,
+            operation="get_segment",
+        )
+        if target_segment is not None and target_segment.comid != target_comid:
+            raise InvalidPortResponseError(
+                "Target segment response referenced a different COMID.",
+                provider=PROVIDER,
+                operation="get_segment",
+            )
         nodes: dict[str, _NodeRecord] = {
             target_comid: _NodeRecord(
-                point=context.target.point,
+                point=(
+                    target_segment.location
+                    if target_segment is not None
+                    else context.target.point
+                ),
+                geometry=(
+                    target_segment.geometry
+                    if target_segment is not None
+                    else None
+                ),
                 depth=0,
                 cumulative_distance_km=0.0,
             )
@@ -515,6 +541,7 @@ class HydrologyGraphBuilder:
         if previous is None:
             nodes[comid] = _NodeRecord(
                 point=expansion.segment.location,
+                geometry=expansion.segment.geometry,
                 depth=expansion.depth,
                 cumulative_distance_km=expansion.cumulative_distance_km,
             )
@@ -522,6 +549,10 @@ class HydrologyGraphBuilder:
         if previous.point != expansion.segment.location:
             raise TopologyInvariantError(
                 "topology returned inconsistent metadata for a shared COMID"
+            )
+        if previous.geometry != expansion.segment.geometry:
+            raise TopologyInvariantError(
+                "topology returned inconsistent geometry for a shared COMID"
             )
         previous_key = (
             previous.depth,
@@ -661,6 +692,16 @@ class HydrologyGraphBuilder:
                 HydrologyNode(
                     comid=comid,
                     point=record.point,
+                    geometry_ref=(
+                        record.geometry.geometry_ref
+                        if record.geometry is not None
+                        else None
+                    ),
+                    geometry_summary=(
+                        record.geometry.summary()
+                        if record.geometry is not None
+                        else None
+                    ),
                     depth=record.depth,
                     cumulative_distance_km=record.cumulative_distance_km,
                     is_target=comid == context.target.comid,
@@ -724,6 +765,11 @@ class HydrologyGraphBuilder:
                 target_comid=context.target.comid,
                 coverage=coverage,
                 nodes=ordered_nodes,
+                geometries={
+                    record.geometry.geometry_ref: record.geometry
+                    for record in nodes.values()
+                    if record.geometry is not None
+                },
                 edges=ordered_edges,
                 branch_outcomes=ordered_outcomes,
                 execution_layers=layers,

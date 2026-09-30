@@ -76,6 +76,16 @@ from app.domain.hydrology.unit_kind import UnitKind
 from app.domain.hydrology.unit_normalization import normalize_unit_identity
 from app.domain.hydrology.value_semantics import ValueSemantics
 from app.domain.hydrology.water_quality_parameter import WaterQualityParameter
+from app.domain.hydrology.waterbody_geometry import (
+    BoundingBox,
+    Coordinate,
+    WaterbodyGeometry,
+    WaterbodyGeometrySummary,
+    geodesic_distance_km,
+    linestring_length_km,
+    point_to_linestring_distance_km,
+    sample_linestring,
+)
 
 __all__ = [
     "AggregationProfile",
@@ -132,6 +142,14 @@ __all__ = [
     "UnitKind",
     "ValueSemantics",
     "WaterQualityParameter",
+    "BoundingBox",
+    "Coordinate",
+    "WaterbodyGeometry",
+    "WaterbodyGeometrySummary",
+    "geodesic_distance_km",
+    "linestring_length_km",
+    "point_to_linestring_distance_km",
+    "sample_linestring",
     "normalize_parameter_concept",
     "normalize_unit_identity",
 ]

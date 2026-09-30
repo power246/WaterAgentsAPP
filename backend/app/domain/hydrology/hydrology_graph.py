@@ -1,6 +1,6 @@
 from typing import Literal, Self
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from app.domain.common import DomainModel, NonEmptyString, ensure_unique_tuple
 from app.domain.hydrology._topology_validation import (
@@ -17,6 +17,7 @@ from app.domain.hydrology.hydrology_participation import HydrologyParticipation
 from app.domain.hydrology.topology_coverage import TopologyCoverage
 from app.domain.hydrology.topology_limits import TopologyLimits
 from app.domain.hydrology.topology_search_stats import TopologySearchStats
+from app.domain.hydrology.waterbody_geometry import WaterbodyGeometry
 
 
 class HydrologyGraph(DomainModel):
@@ -24,6 +25,7 @@ class HydrologyGraph(DomainModel):
     target_comid: NonEmptyString
     coverage: TopologyCoverage
     nodes: tuple[HydrologyNode, ...]
+    geometries: dict[NonEmptyString, WaterbodyGeometry] = Field(default_factory=dict)
     edges: tuple[HydrologyEdge, ...]
     branch_outcomes: tuple[BranchOutcome, ...]
     execution_layers: tuple[ComidLayer, ...]
@@ -42,6 +44,14 @@ class HydrologyGraph(DomainModel):
     def validate_comid(cls, value: str) -> str:
         return validate_comid(value)
 
+    @field_validator("geometries")
+    @classmethod
+    def normalize_geometries(
+        cls,
+        value: dict[str, WaterbodyGeometry],
+    ) -> dict[str, WaterbodyGeometry]:
+        return dict(sorted(value.items()))
+
     @model_validator(mode="after")
     def validate_graph(self) -> Self:
         if not self.nodes:
@@ -55,6 +65,24 @@ class HydrologyGraph(DomainModel):
         if self.nodes != tuple(sorted(self.nodes, key=_node_key)):
             raise ValueError("nodes must use stable graph order")
         node_by_comid = {node.comid: node for node in self.nodes}
+        referenced_geometry_refs = {
+            node.geometry_ref for node in self.nodes if node.geometry_ref is not None
+        }
+        if set(self.geometries) != referenced_geometry_refs:
+            raise ValueError("geometries must match node geometry references exactly")
+        for geometry_ref, geometry in self.geometries.items():
+            if geometry_ref != geometry.geometry_ref:
+                raise ValueError("geometry map keys must match geometry_ref")
+        for node in self.nodes:
+            if node.geometry_ref is None:
+                continue
+            geometry = self.geometries[node.geometry_ref]
+            if node.comid != geometry.source_comid:
+                raise ValueError("node geometry must match node COMID")
+            if node.geometry_summary != geometry.summary():
+                raise ValueError("node geometry summary must match full geometry")
+            if node.point != geometry.representative_point:
+                raise ValueError("node point must match geometry representative point")
         targets = tuple(node for node in self.nodes if node.is_target)
         if len(targets) != 1 or targets[0].comid != self.target_comid:
             raise ValueError("graph must contain exactly its declared target")

@@ -41,6 +41,7 @@ from app.domain import (
     TimeResolutionPreferenceSource,
     TopologyCoverage,
     TopologyLimits,
+    WaterbodyGeometry,
 )
 from app.ports import InvalidPortResponseError, PortRateLimitError, PortTimeoutError
 
@@ -158,11 +159,24 @@ class FakeTopology:
         *,
         probe: ConcurrencyProbe | None = None,
         error: Exception | None = None,
+        target_segment: RiverSegment | None = None,
     ) -> None:
         self.upstreams = upstreams
         self.probe = probe or ConcurrencyProbe()
         self.error = error
+        self.target_segment = target_segment
         self.calls: list[tuple[str, float]] = []
+        self.segment_calls: list[str] = []
+
+    async def get_segment(
+        self,
+        comid: str,
+        *,
+        deadline: float | None = None,
+    ) -> RiverSegment | None:
+        del deadline
+        self.segment_calls.append(comid)
+        return self.target_segment
 
     async def get_direct_upstreams(
         self,
@@ -310,7 +324,33 @@ def test_target_complete_stops_without_topology_navigation() -> None:
     assert [node.comid for node in graph.nodes] == [TARGET]
     assert graph.nodes[0].is_inlet
     assert graph.execution_layers[0].root == (TARGET,)
+    assert topology.segment_calls == [TARGET]
     assert topology.calls == []
+
+
+def test_target_geometry_is_stored_once_with_resolved_node_summary() -> None:
+    geometry = WaterbodyGeometry.from_coordinates(
+        source_comid=TARGET,
+        coordinates=((-77.1, 38.8), (-77.0, 38.9)),
+    )
+    topology = FakeTopology(
+        {},
+        target_segment=RiverSegment(
+            comid=TARGET,
+            location=geometry.representative_point,
+            geometry_ref=geometry.geometry_ref,
+            geometry_summary=geometry.summary(),
+            geometry=geometry,
+        ),
+    )
+    inventory = FakeInventory({TARGET: codes("00060", "00300")})
+
+    graph = run(builder(topology, inventory).build(context()))
+
+    assert graph.geometries == {geometry.geometry_ref: geometry}
+    assert graph.nodes[0].geometry_ref == geometry.geometry_ref
+    assert graph.nodes[0].geometry_summary == geometry.summary()
+    assert graph.model_dump_json().count('"full_coordinates"') == 1
 
 
 def test_every_segment_contains_deduplicated_discharge_and_target_parameter() -> None:
