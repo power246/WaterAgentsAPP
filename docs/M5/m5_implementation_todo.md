@@ -123,7 +123,7 @@
 - 实现：从 `origin/main` 的 `628518e` 创建 `codex/m5-evidence-tools-m0`，初始 tracked worktree/index 均无改动；盘点当前 backend 接缝并新增 production/test import isolation、单一 transcript writer/reader 和两层 SSE 架构守卫。Python `3.12.14`、pip `26.2.1`、FastAPI `0.141.1`、Pydantic `2.13.5`、SQLAlchemy `2.0.54`、pytest `9.1.1`；未修改 evidence model、manifest、provider、数据库 schema 或 production runtime。
 - 验证：首次原始 full command 为 `1150 passed, 2 failed, 45 errors`，失败均来自默认 pytest 临时目录 ACL 或当时未设置 `WATERAGENTS_TEST_DB_NAME`；沙箱外非 PostgreSQL回归为 `1185 passed`、architecture 为 `97 passed`、OpenAPI/typed-registry/manifest focused 为 `28 passed`。复查发现 Docker Desktop 的 `run/dockerInference` reparse point 损坏；确认进程/服务停止后将原 `run` 保留为 `run.codex-stale-20260930-m5-m0` 并重建空运行目录，未触碰 volume。随后通过项目 dotenv 与进程级 `wateragents_test` 验证 persistence `57 passed`、含 PostgreSQL 的完整 backend `1202 passed`、health `healthy`、history/restart/startup-repair 全部通过；`compileall`、154 项离线 audit、M4 workflow smoke、run SSE smoke 与 `git diff --check` 通过。真实 provider 和最新三平台 CI 为 `not run`。
 - 风险：Milestone 3–13 尚未开始；Milestone 1–2 已原子替换 evidence domain 并扩展唯一 capability manifest，NLDI LineString 仍只提取代表点，policy executor、五类 M5 typed content 与 provider execution 均未实现。
-- 提交：未提交（当前工作区）。
+- 提交：本地实现提交 `3d9235c`（`feat(m5): complete milestones 0-2`）；未 push。
 
 ## Milestone 1：当前唯一 V1 evidence domain
 
@@ -161,7 +161,7 @@
 - 实现：在当前唯一 V1 中加入七类 `SourceRecord` 与稳定 identity、七类 typed payload、严格 `EvidenceFragment`、`EvidenceCell`、reference-only `EvidenceBundle`、`CollectionManifest`、tool request/result/safe error、规范 decimal/time 序列化和稳定内容错误；同步 domain exports、当前 result 消费者及 M1/M3/M5 契约文档。未新增 V2/read fallback，也未实现 manifest policy、provider adapter、executor、runtime、HTTP 或 transcript registry。
 - 验证：Python `3.12.14`；focused evidence/serialization 为 `119 passed`，architecture 为 `98 passed`，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 与 Docker PostgreSQL 的完整 backend 为 `1268 passed`；legacy 名称扫描无 production/test 命中，`compileall`、文档 fence/JSON audit 与 `git diff --check` 通过。真实 provider 与 Windows/Linux/macOS 三平台 CI 为 `not run`。
 - 修复与风险：稳定 identity 初测暴露浮点坐标缺少规范表示，已改为有限值规范化并增加回归；受限 pytest 临时目录 ACL 通过显式独立 `--basetemp` 在沙箱外复核。Milestone 3–13 尚未开始，policy executor、真实 provider、geometry、执行与持久化链仍按后续阶段实现。
-- 提交：未提交；当前 HEAD/`origin/main` 为 `628518e`，改动保留在 `codex/m5-evidence-tools-m0` 工作区。
+- 提交：本地实现提交 `3d9235c`（`feat(m5): complete milestones 0-2`）；未 push。
 
 ## Milestone 2：154 项 manifest 与 policy registry
 
@@ -199,7 +199,7 @@
 - 实现：原子扩展 `parameter_capabilities.v1.json` 和当前不可变 registry，154 项 capability 全部引用 45 个 unit definitions、2 个 quality profiles、10 个 aggregation profiles、5 个 coverage profiles、5 个 evidence relations 与 211 个 provider/channel policies；`usgs:00060` 仍是唯一 required support。manifest canonical SHA-256 为 `52b840a0908c73c2b1059d363f95beb402686167822f56010befb788274733f7`，optional official refresh 保持只报告 drift。
 - 验证：focused manifest/audit 为 `30 passed`，domain 与 M4 parameter/context/station 回归为 `319 passed`，architecture 为 `98 passed`，使用 Docker PostgreSQL `wateragents_test` 的完整 backend 为 `1282 passed`；离线 audit 输出 `154/154`、154 unique/complete、引用状态 `valid`，checksum mismatch 启动失败，zip package 从不同 cwd 读取同一 resource 后得到相同 digest；`compileall`、文档 audit 与 `git diff --check` 通过。
 - 修复与风险：首次 domain 回归为 `318 passed, 1 failed`，原因是内部 `counter_delta_sum` 误扩展既有 result `AggregationMethod`；已拆为 M5 专用 `EvidenceAggregationMethod` 并恢复旧枚举稳定值。首次 wheel 命令因路径歧义误解析同名 PyPI 包，显式本地路径后又发现环境缺少 `setuptools.build_meta`，因此 wheel build 为 `not run`；改用标准库 zip package 完成资源隔离验证。Linux/macOS、真实 official refresh 和真实 provider 为 `not run`；数值转换/聚合执行仍属于 Milestone 3。
-- 提交：未提交；当前 HEAD/`origin/main` 为 `628518e`，改动保留在 `codex/m5-evidence-tools-m0` 工作区。
+- 提交：本地实现提交 `3d9235c`（`feat(m5): complete milestones 0-2`）；未 push。
 
 ## Milestone 3：确定性 evidence policy 引擎
 
