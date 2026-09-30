@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "catalog_key_set_sha256": "3f9a0146b474c6c637adf837774b0680c389025cb60771fae55f11ab13d2c8bb",
-  "manifest_digest_sha256": "52b840a0908c73c2b1059d363f95beb402686167822f56010befb788274733f7",
+  "manifest_digest_sha256": "657ca1d3c59780090e1ebf8af3d5b0cdea919f2241e49c871d1d306cf4842d66",
   "evidence_rule_ids": [
     "discharge_basin_estimate",
     "discharge_gage_height_estimate",
@@ -576,7 +576,12 @@
         "estimated",
         "provisional"
       ],
-      "unknown_token_class": "suspicious"
+      "unknown_token_class": "suspicious",
+      "valid_tokens": [
+        "accepted",
+        "approved",
+        "final"
+      ]
     },
     {
       "profile_id": "usgs_time_series_quality",
@@ -593,7 +598,12 @@
         "provisional",
         "working"
       ],
-      "unknown_token_class": "suspicious"
+      "unknown_token_class": "suspicious",
+      "valid_tokens": [
+        "accepted",
+        "approved",
+        "final"
+      ]
     }
   ],
   "aggregation_profiles": [
@@ -603,7 +613,8 @@
       "allowed_methods": [
         "latest"
       ],
-      "default_method": "latest"
+      "default_method": "latest",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "continuous_discharge",
@@ -616,7 +627,8 @@
         "p90",
         "latest"
       ],
-      "default_method": "mean"
+      "default_method": "mean",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "continuous_level",
@@ -629,7 +641,8 @@
         "p90",
         "latest"
       ],
-      "default_method": "mean"
+      "default_method": "mean",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "continuous_ph",
@@ -642,7 +655,8 @@
         "p90",
         "latest"
       ],
-      "default_method": "mean"
+      "default_method": "mean",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "cumulative_counter",
@@ -651,7 +665,8 @@
         "counter_delta_sum",
         "latest"
       ],
-      "default_method": "counter_delta_sum"
+      "default_method": "counter_delta_sum",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "discrete_concentration",
@@ -664,7 +679,8 @@
         "p90",
         "latest"
       ],
-      "default_method": "latest"
+      "default_method": "latest",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "discrete_count_density",
@@ -677,7 +693,8 @@
         "p90",
         "latest"
       ],
-      "default_method": "latest"
+      "default_method": "latest",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "forecast_numeric",
@@ -689,7 +706,8 @@
         "sum",
         "latest"
       ],
-      "default_method": "latest"
+      "default_method": "latest",
+      "allow_partial_coverage": true
     },
     {
       "profile_id": "interval_total",
@@ -700,7 +718,8 @@
         "max",
         "latest"
       ],
-      "default_method": "sum"
+      "default_method": "sum",
+      "allow_partial_coverage": false
     },
     {
       "profile_id": "provider_interval_statistic",
@@ -708,7 +727,8 @@
       "allowed_methods": [
         "latest"
       ],
-      "default_method": "latest"
+      "default_method": "latest",
+      "allow_partial_coverage": true
     }
   ],
   "coverage_profiles": [
@@ -892,6 +912,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -917,6 +940,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -940,6 +966,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -1066,6 +1097,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1091,6 +1125,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1114,6 +1151,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1235,6 +1277,9 @@
           "aggregation_profile_id": "cumulative_counter",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -1258,6 +1303,9 @@
           "aggregation_profile_id": "interval_total",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -1363,6 +1411,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1388,6 +1439,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1411,6 +1465,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1538,6 +1597,9 @@
           "aggregation_profile_id": "continuous_discharge",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1563,6 +1625,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1586,6 +1651,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1709,6 +1779,9 @@
           "aggregation_profile_id": "continuous_discharge",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1734,6 +1807,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -1839,6 +1915,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -1864,6 +1943,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -1968,6 +2050,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -1993,6 +2078,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2016,6 +2104,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2140,6 +2233,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -2224,6 +2322,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -2308,6 +2411,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2394,6 +2502,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -2419,6 +2530,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -2442,6 +2556,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -2566,6 +2685,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2591,6 +2713,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2614,6 +2739,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2736,6 +2866,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2823,6 +2958,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2910,6 +3050,9 @@
           "aggregation_profile_id": "continuous_ph",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2935,6 +3078,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -2958,6 +3104,11 @@
           "aggregation_profile_id": "continuous_ph",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3080,6 +3231,11 @@
           "aggregation_profile_id": "continuous_ph",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3166,6 +3322,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3191,6 +3350,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3214,6 +3376,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3337,6 +3504,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3424,6 +3596,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -3510,6 +3687,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Non-filterable",
           "direct_observation": true
@@ -3596,6 +3778,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Non-filterable",
           "direct_observation": true
@@ -3681,6 +3868,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -3769,6 +3961,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3858,6 +4055,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3883,6 +4083,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -3906,6 +4109,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4031,6 +4239,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4056,6 +4267,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4079,6 +4293,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4202,6 +4421,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4289,6 +4513,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4314,6 +4541,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4337,6 +4567,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4462,6 +4697,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4487,6 +4725,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4510,6 +4751,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4634,6 +4880,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4659,6 +4908,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4682,6 +4934,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -4803,6 +5060,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4890,6 +5152,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -4977,6 +5244,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -5064,6 +5336,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5151,6 +5428,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5238,6 +5520,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5325,6 +5612,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5412,6 +5704,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5501,6 +5798,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -5526,6 +5826,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -5549,6 +5852,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -5672,6 +5980,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5758,6 +6071,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -5844,6 +6162,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5932,6 +6255,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5957,6 +6283,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -5980,6 +6309,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6102,6 +6436,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -6190,6 +6529,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6215,6 +6557,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6238,6 +6583,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6360,6 +6710,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -6448,6 +6803,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6473,6 +6831,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6496,6 +6857,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6618,6 +6984,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -6704,6 +7075,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6790,6 +7166,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -6876,6 +7257,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -6964,6 +7350,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -6989,6 +7378,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7012,6 +7404,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7135,6 +7532,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -7222,6 +7624,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7309,6 +7716,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7334,6 +7744,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7357,6 +7770,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7481,6 +7899,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -7506,6 +7927,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -7529,6 +7953,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -7651,6 +8080,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -7737,6 +8171,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true
@@ -7823,6 +8262,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -7909,6 +8353,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -7997,6 +8446,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8022,6 +8474,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8045,6 +8500,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8167,6 +8627,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8253,6 +8718,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8340,6 +8810,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8427,6 +8902,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -8514,6 +8994,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8601,6 +9086,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8686,6 +9176,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -8773,6 +9268,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8860,6 +9360,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -8947,6 +9452,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -9034,6 +9544,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9121,6 +9636,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9208,6 +9728,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -9295,6 +9820,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9382,6 +9912,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9469,6 +10004,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9556,6 +10096,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9643,6 +10188,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9730,6 +10280,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9815,6 +10370,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9902,6 +10462,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -9989,6 +10554,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10076,6 +10646,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10163,6 +10738,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10250,6 +10830,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10337,6 +10922,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10424,6 +11014,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10511,6 +11106,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10598,6 +11198,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10685,6 +11290,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10772,6 +11382,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10859,6 +11474,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -10946,6 +11566,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -11033,6 +11658,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -11120,6 +11750,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -11207,6 +11842,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -11294,6 +11934,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -11380,6 +12025,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -11466,6 +12116,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -11551,6 +12206,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -11637,6 +12297,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -11723,6 +12388,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -11809,6 +12479,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -11894,6 +12569,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -11978,6 +12658,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12062,6 +12747,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12148,6 +12838,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -12234,6 +12929,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12319,6 +13019,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12408,6 +13113,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12433,6 +13141,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12456,6 +13167,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12578,6 +13294,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": null,
           "direct_observation": true
@@ -12667,6 +13388,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -12692,6 +13416,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -12715,6 +13442,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -12840,6 +13572,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -12865,6 +13600,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -12888,6 +13626,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -13009,6 +13752,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -13094,6 +13842,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -13180,6 +13933,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": null,
           "fraction_constraint": null,
           "direct_observation": true
@@ -13265,6 +14023,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": null,
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -13350,6 +14113,11 @@
           "aggregation_profile_id": "discrete_count_density",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": null,
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -13437,6 +14205,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -13524,6 +14297,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -13611,6 +14389,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -13698,6 +14481,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -13785,6 +14573,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -13872,6 +14665,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -13959,6 +14757,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14046,6 +14849,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14133,6 +14941,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14220,6 +15033,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14307,6 +15125,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -14394,6 +15217,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -14481,6 +15309,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14568,6 +15401,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14655,6 +15493,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14742,6 +15585,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14829,6 +15677,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -14916,6 +15769,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -15003,6 +15861,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Total",
           "direct_observation": true
@@ -15090,6 +15953,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -15177,6 +16045,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15264,6 +16137,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15351,6 +16229,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15438,6 +16321,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15525,6 +16413,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15612,6 +16505,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15699,6 +16597,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15786,6 +16689,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Recoverable",
           "direct_observation": true
@@ -15873,6 +16781,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -15960,6 +16873,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -16047,6 +16965,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -16132,6 +17055,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -16217,6 +17145,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Dissolved",
           "direct_observation": true
@@ -16306,6 +17239,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true
@@ -16331,6 +17267,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true
@@ -16354,6 +17293,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true
@@ -16477,6 +17421,9 @@
           "aggregation_profile_id": "continuous_level",
           "coverage_profile_id": "continuous_regular",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "sensor"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true
@@ -16502,6 +17449,9 @@
           "aggregation_profile_id": "provider_interval_statistic",
           "coverage_profile_id": "provider_interval",
           "quality_profile_id": "usgs_time_series_quality",
+          "accepted_methods": [
+            "provider_statistic"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true
@@ -16525,6 +17475,11 @@
           "aggregation_profile_id": "discrete_concentration",
           "coverage_profile_id": "discrete_sample",
           "quality_profile_id": "usgs_samples_quality",
+          "accepted_methods": [
+            "field",
+            "laboratory",
+            "provider_reported"
+          ],
           "medium_constraint": "Water",
           "fraction_constraint": "Suspended",
           "direct_observation": true

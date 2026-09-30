@@ -923,6 +923,10 @@ def make_unavailable_fragment(
             observed_count=0,
             expected_count=None,
             ratio=None,
+            covered_duration_seconds=0,
+            window_duration_seconds=int(
+                (time_range.end - time_range.start).total_seconds()
+            ),
             largest_gap_seconds=None,
         ),
         payload=CollectionFactPayload(

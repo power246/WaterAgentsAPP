@@ -106,6 +106,7 @@ def test_every_capability_has_complete_routes_aliases_evidence_and_fixture() -> 
             assert policy.aggregation_profile_id in registry.aggregation_profiles
             assert policy.coverage_profile_id in registry.coverage_profiles
             assert policy.quality_profile_id in registry.quality_profiles
+            assert policy.accepted_methods
             assert policy.direct_observation is True
 
 
@@ -118,6 +119,11 @@ def test_manifest_policy_registry_is_complete_and_reference_closed() -> None:
     assert len(registry.coverage_profiles) == 5
     assert set(registry.evidence_relations) == set(EvidenceRuleId)
     assert len(registry.manifest_digest) == 64
+    assert all(profile.valid_tokens for profile in registry.quality_profiles.values())
+    assert all(
+        isinstance(profile.allow_partial_coverage, bool)
+        for profile in registry.aggregation_profiles.values()
+    )
     assert registry.resolve_unit("  °C ").unit_id == "degree_celsius"
     assert registry.resolve_unit("μg/L").unit_id == "micrograms_per_liter"
     assert registry.resolve_unit("not-a-unit") is None

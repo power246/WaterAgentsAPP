@@ -46,12 +46,15 @@ channel
 value_semantics
 series_identity_fields[]
 accepted_statistics[]
+accepted_methods[]
 aggregation_profile_id
 coverage_profile_id
 quality_profile_id
 medium/fraction constraints
 direct_observation
 ```
+
+`QualityProfile` 显式区分 valid/suspicious/invalid token；`AggregationProfile` 显式声明是否接受 partial coverage，未声明的 provider method 或 partial 行为不得由 executor 猜测。
 
 `default_aggregation_by_resolution` 以 provider/channel/resolution 为键登记默认方法，避免 continuous、daily 与 discrete channel 共用一个错误默认值。quality、aggregation、coverage profile 均允许可选 `extends_profile_id`，loader 对未知 parent 和循环引用 fail closed；当前初始 profiles 均为完整定义，不依赖继承补字段。`evidence_relations[]` 保存 relation ID、same-parameter 语义或固定 input/output ParameterKey，所有固定输入输出必须属于同一 154 项 catalog。
 

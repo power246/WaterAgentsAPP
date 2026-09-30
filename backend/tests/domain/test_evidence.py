@@ -5,7 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from app.domain import (
     AggregatePayload,
-    AggregationMethod,
+    EvidenceAggregationMethod,
     CollectionCompletionProof,
     CollectionCounts,
     CollectionFactPayload,
@@ -350,6 +350,8 @@ def complete_coverage(*, count: int = 1) -> EvidenceCoverage:
         observed_count=count,
         expected_count=count,
         ratio="1.000",
+        covered_duration_seconds=3600,
+        window_duration_seconds=3600,
         largest_gap_seconds=0,
     )
 
@@ -405,7 +407,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
         payload=AggregatePayload(
             value="37.40",
             unit="ft3/s",
-            method=AggregationMethod.MEAN,
+            method=EvidenceAggregationMethod.MEAN,
             input_record_refs=(direct_ref, second_ref),
             valid_input_count=1,
             suspicious_input_count=1,
@@ -451,6 +453,8 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
                 observed_count=0,
                 expected_count=1,
                 ratio="0",
+                covered_duration_seconds=0,
+                window_duration_seconds=21600,
                 largest_gap_seconds=None,
             ),
         ),

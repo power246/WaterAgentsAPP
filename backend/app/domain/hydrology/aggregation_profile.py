@@ -1,6 +1,6 @@
 from typing import Self
 
-from pydantic import model_validator
+from pydantic import StrictBool, model_validator
 
 from app.domain.common import DomainModel, NonEmptyString, ensure_unique_tuple
 from app.domain.hydrology.evidence_aggregation_method import (
@@ -13,6 +13,7 @@ class AggregationProfile(DomainModel):
     extends_profile_id: NonEmptyString | None = None
     allowed_methods: tuple[EvidenceAggregationMethod, ...]
     default_method: EvidenceAggregationMethod
+    allow_partial_coverage: StrictBool
 
     @model_validator(mode="after")
     def validate_profile(self) -> Self:

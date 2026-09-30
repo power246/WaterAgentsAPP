@@ -2,7 +2,7 @@
 
 更新日期：2026-09-30
 
-> 当前状态：Milestone 0–2 已完成，Milestone 3–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
+> 当前状态：Milestone 0–3 已完成，Milestone 4–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
 
 本清单执行以下已确认文档：
 
@@ -205,34 +205,41 @@
 
 ### 工作
 
-- [ ] 实现 unit alias 的 NFKC/trim/casefold/受控空白规范化和精确查表；未知/不同 dimension/不同化学或温度基准返回 `evidence_unit_unresolved`，不模糊猜测。
-- [ ] 用 `Decimal` 实现 linear/affine/identity-only 换算，至少 28 位中间精度并在输出边界 round-half-even；provenance 保留原值/单位、公式、digest、未舍入值和最终值。
-- [ ] 实现 provider/channel quality mapping：valid/suspicious/invalid、原 qualifier、unknown qualifier 保守 suspicious、协议结构损坏 invalid；删除跨 series 冲突 detector。
-- [ ] 实现 coverage profiles，明确 complete/partial/insufficient/unknown、count、duration、ratio 和 largest gap；coverage 不从 quality 或记录数量猜 cadence。
-- [ ] 实现 mean/median/min/max/sum/p90/latest 和内部 `counter_delta_sum` 的稳定 Decimal 算法、排序、reset 和 overlap 规则。
-- [ ] 聚合前严格校验同 series identity、parameter/provider/channel/station/medium/fraction/method/statistic/value semantics、单位、窗口相交、collection completeness 和 profile threshold。
-- [ ] suspicious 输入允许聚合并把全部 flags、valid/suspicious/invalid counts 和真实 coverage 传播到 derived fragment；invalid 输入不参与。
-- [ ] 实现 direct/allowed-indirect/contextual relation resolver；未登记 relation 和 facility/history 默认 contextual，Agent 不能覆盖 applicability。
-- [ ] 实现内容层 `rag_eligible` 固定 policy；raw/error/empty/unavailable/invalid/cancelled/incomplete/bundle/inspection false，合格 reference-complete fragment 仅标 candidate。
+- [x] 实现 unit alias 的 NFKC/trim/casefold/受控空白规范化和精确查表；未知/不同 dimension/不同化学或温度基准返回 `evidence_unit_unresolved`，不模糊猜测。
+- [x] 用 `Decimal` 实现 linear/affine/identity-only 换算，至少 28 位中间精度并在输出边界 round-half-even；provenance 保留原值/单位、公式、digest、未舍入值和最终值。
+- [x] 实现 provider/channel quality mapping：valid/suspicious/invalid、原 qualifier、unknown qualifier 保守 suspicious、协议结构损坏 invalid；删除跨 series 冲突 detector。
+- [x] 实现 coverage profiles，明确 complete/partial/insufficient/unknown、count、duration、ratio 和 largest gap；coverage 不从 quality 或记录数量猜 cadence。
+- [x] 实现 mean/median/min/max/sum/p90/latest 和内部 `counter_delta_sum` 的稳定 Decimal 算法、排序、reset 和 overlap 规则。
+- [x] 聚合前严格校验同 series identity、parameter/provider/channel/station/medium/fraction/method/statistic/value semantics、单位、窗口相交、collection completeness 和 profile threshold。
+- [x] suspicious 输入允许聚合并把全部 flags、valid/suspicious/invalid counts 和真实 coverage 传播到 derived fragment；invalid 输入不参与。
+- [x] 实现 direct/allowed-indirect/contextual relation resolver；未登记 relation 和 facility/history 默认 contextual，Agent 不能覆盖 applicability。
+- [x] 实现内容层 `rag_eligible` 固定 policy；raw/error/empty/unavailable/invalid/cancelled/incomplete/bundle/inspection false，合格 reference-complete fragment 仅标 candidate。
 
 ### Tests
 
-- [ ] 温度/流量/浓度/长度/降水等正向换算、双向 round-trip、alias 和 Decimal 边界确定；pH 不与普通 dimensionless 互换。
-- [ ] pH sum、流量读数 sum、浓度 sum、累计降水直接 sum、重叠 interval total、跨 station/method/fraction/statistic series 聚合均拒绝；合法 interval-total sum 保持可用。
-- [ ] mean/median/p90 nearest-rank/latest tie/counter reset/partial coverage 的排序与输出字节稳定。
-- [ ] suspicious aggregate 传播 flags/counts；invalid 仅审计；M5 不产生 conflict flag、不自动选 winner。
-- [ ] direct 判定检查 current COMID/station ref、parameter/window、method/medium/fraction/statistic、quality、collection completion 和 closure。
-- [ ] RAG candidate 正反矩阵不改变 applicability，历史命中不能满足当前 target/discharge gate。
+- [x] 温度/流量/浓度/长度/降水等正向换算、双向 round-trip、alias 和 Decimal 边界确定；pH 不与普通 dimensionless 互换。
+- [x] pH sum、流量读数 sum、浓度 sum、累计降水直接 sum、重叠 interval total、跨 station/method/fraction/statistic series 聚合均拒绝；合法 interval-total sum 保持可用。
+- [x] mean/median/p90 nearest-rank/latest tie/counter reset/partial coverage 的排序与输出字节稳定。
+- [x] suspicious aggregate 传播 flags/counts；invalid 仅审计；M5 不产生 conflict flag、不自动选 winner。
+- [x] direct 判定检查 current COMID/station ref、parameter/window、method/medium/fraction/statistic、quality、collection completion 和 closure。
+- [x] RAG candidate 正反矩阵不改变 applicability，历史命中不能满足当前 target/discharge gate。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_policy backend/tests/domain/test_evidence.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_parameter_capability_audit.py -q`
-- [ ] `rg -n "float\(|CONFLICTING_OBSERVATIONS|conflicting_observations" backend/app/application/evidence_policy backend/app/domain/evidence`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_policy backend/tests/domain/test_evidence.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_parameter_capability_audit.py -q`
+- [x] `rg -n "float\(|CONFLICTING_OBSERVATIONS|conflicting_observations" backend/app/application/evidence_policy backend/app/domain/evidence`
 
 阶段出口：给定 typed records、manifest 和窗口，可纯确定性得到单位、质量、coverage、聚合、applicability 与 candidate 结果；尚未访问网络或写 transcript。
 
 提交边界：policy application/domain、fixtures 和 tests；不得夹带 HTTP adapters、executor orchestration、runtime 或 routes。
+
+#### Milestone 3 完成记录（2026-09-30）
+
+- 实现：新增纯 application policy 包，完成精确 unit alias/Decimal 换算、provider quality、五类 coverage、八种稳定聚合、direct/allowed-indirect/contextual resolver 与固定 RAG candidate policy；manifest 为 154 项 capability 的 211 个 channel policy 补齐 accepted methods，并显式登记 valid quality tokens 与 partial-coverage aggregation policy。当前 canonical manifest SHA-256 为 `657ca1d3c59780090e1ebf8af3d5b0cdea919f2241e49c871d1d306cf4842d66`。
+- 验证：M3 policy + evidence focused 为 `148 passed`，manifest audit focused 为 `3 passed`，domain/application 回归为 `774 passed`，architecture 为 `98 passed`；使用 Docker PostgreSQL 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1332 passed`。离线 audit 为 `154/154`、211 channel policies、引用闭包 `valid`；`compileall`、禁用名称扫描和 `git diff --check` 通过。
+- 修复与风险：首轮 focused 为 `174 passed, 1 failed`，失败来自 interval `TimeRange` 无排序运算，已改为显式 `(start, end)` 排序并增加非重叠/重叠回归。真实 provider、Linux/macOS CI 为 `not run`；Milestone 4–13 尚未开始，网络 adapter、executor、runtime、HTTP 与 transcript 写入均未夹带。
+- 提交：待本完成记录随本地提交落盘后回填；不 push。
 
 ## Milestone 4：LineString geometry 与 corridor planner
 

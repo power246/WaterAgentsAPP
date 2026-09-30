@@ -13,6 +13,7 @@ class ChannelPolicy(DomainModel):
     value_semantics: ValueSemantics
     series_identity_fields: tuple[NonEmptyString, ...]
     accepted_statistics: tuple[NonEmptyString, ...]
+    accepted_methods: tuple[NonEmptyString, ...]
     aggregation_profile_id: NonEmptyString
     coverage_profile_id: NonEmptyString
     quality_profile_id: NonEmptyString
@@ -25,6 +26,7 @@ class ChannelPolicy(DomainModel):
         for field_name in (
             "series_identity_fields",
             "accepted_statistics",
+            "accepted_methods",
         ):
             values = getattr(self, field_name)
             if not values:

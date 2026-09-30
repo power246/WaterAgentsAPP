@@ -11,3 +11,6 @@ class DataQualityFlag(DomainEnum):
     STALE = "stale"
     PROVIDER_FLAGGED = "provider_flagged"
     UNIT_UNRESOLVED = "unit_unresolved"
+    CENSORED = "censored"
+    COUNTER_RESET = "counter_reset"
+    INVALID_PROTOCOL = "invalid_protocol"

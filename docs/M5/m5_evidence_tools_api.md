@@ -169,6 +169,8 @@ JSON numbers representing measured values are serialized as normalized decimal s
     "observed_count": 1,
     "expected_count": null,
     "ratio": null,
+    "covered_duration_seconds": 0,
+    "window_duration_seconds": 21600,
     "largest_gap_seconds": null
   },
   "payload": {
@@ -221,6 +223,8 @@ JSON numbers representing measured values are serialized as normalized decimal s
     "observed_count": 20,
     "expected_count": 24,
     "ratio": "0.8333333333333333333333333333",
+    "covered_duration_seconds": 18000,
+    "window_duration_seconds": 21600,
     "largest_gap_seconds": 1800
   },
   "payload": {
@@ -274,7 +278,15 @@ aggregate 仍是 direct-measurement applicability，因为输入是本地直接�
   "series_identity": "sha256:series-digest",
   "quality_class": null,
   "quality_flags": ["missing"],
-  "coverage": {"status": "insufficient", "observed_count": 0},
+  "coverage": {
+    "status": "insufficient",
+    "observed_count": 0,
+    "expected_count": null,
+    "ratio": null,
+    "covered_duration_seconds": 0,
+    "window_duration_seconds": 21600,
+    "largest_gap_seconds": null
+  },
   "payload": {
     "payload_type": "collection_fact",
     "status": "empty",
