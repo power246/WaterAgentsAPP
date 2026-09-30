@@ -1,6 +1,6 @@
 # 前端接入约定
 
-更新日期：2026-09-25
+更新日期：2026-09-29
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
@@ -13,7 +13,8 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
 | M3 transcript/history/idempotency/SSE | Milestone 0–19 本机实现与复审完成，追加 findings 已关闭；实际 Windows/Linux runner、三平台完整 CI 与同库迁移仍为 `partial` | 以当前 OpenAPI、API 指南和 SSE frame 设计接入；Windows 入口、短前缀取消、private URL、性能与正文一致性已完成本机实现和复审，公共契约不变。正式消费由产品阶段 M9 接入。 |
 | M4 query/context/topology | 后端协议与本机集成审计已完成；外部 PostgreSQL/provider/三平台证据仍按实际结果保持 `not run`/`partial` | 以 M4 API、运行时 OpenAPI 和既有两层 SSE 作为 M9 前端实现输入；当前不开始正式联调，也不增加 M4 产品兼容分支。 |
-| M5–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
+| M5 evidence | 后端设计、typed content 与读取边界已冻结；尚未实现/验收 | production 不新增 direct tool route，前端只沿现有 transcript/reference/SSE 读取 evidence；正式消费仍由 M9 接入。 |
+| M6–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未全部冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
 
@@ -370,12 +371,12 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 ## 5. M4–M9 的前端接力边界
 
-M4 行已经冻结后端语义、运行时 schema 和事件示例，但新前端仍由 M9 统一实现并开始正式联调；M5–M9 其余行当前只冻结语义和责任，不提前冻结尚未实现的路由或 DTO。
+M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已冻结 evidence typed content、引用与读取边界，但尚未实现/验收。新前端仍由 M9 统一实现并开始正式联调；M6–M9 其余行当前只冻结语义和责任，不提前冻结尚未实现的路由或 DTO。
 
 | Milestone | 前端必须遵守的语义 |
 |---|---|
 | M4 query/context | 最终 create request 由 query、可选地图 target（COMID/坐标）、可选 date range、`auto/6h/12h/24h`、parser/waterbody 两个模型选择和 memory mode 组成；前端不提供参数表单，也不提交 mode/ParameterKey/key/topology limits。target/date 表单值优先，缺失才使用 query，实质冲突停止。首期日期只允许当地今天前后各 7 天，date-only inclusive end 由后端按固化 IANA timezone 转 UTC；浏览器不自行转换或截短。参数由 LLM 自主推测后经 capability registry 验证，并以 ParameterKey+rationale 展示；第一版正式联调能力范围见 [M4 的 154 项目录](M4/m4_parameter_capability_catalog.md)，单次最多 6 个用户目标，系统必需 discharge 不占上限。parser 过程走 session 流；context 是 session typed item，graph 是 run typed item，run snapshot 只给引用；没有第三条流或独立 topology_ready event。完整协议见 [M4 API](M4/m4_query_understanding_topology_api.md)。 |
-| M5 evidence | 区分 `available / empty / unavailable / invalid`，不能把无数据与取数失败合并。直接证据和 capability 白名单侧面证据分别标识；M4 availability metadata 不是实际 evidence。大 evidence 只在事件中提供 preview/reference；前端不得要求无界 raw payload 进入 SSE。单位、换算和 provenance 由后端确定性逻辑提供，前端不自行猜测单位。 |
+| M5 evidence | production 不提供 direct tool invocation，test-only 接口不接入前端；前端只读取现有 session transcript/SSE/reference。区分 tool execution 与 `available / empty / unavailable / invalid` collection，不能把无数据、失败和技术性分页不完整合并。direct/allowed-indirect/contextual 分别展示，M4 availability metadata 不是 evidence；suspicious 可用但带警告，invalid 只审计。大 source records 只提供 preview/reference，按需读取完整内容，不要求无界 payload 进入 SSE。单位、换算、聚合、coverage 和 provenance 由后端确定性逻辑提供，前端不自行猜测。任何多记录 aggregate/上游/天气/设施/历史结论不展示成原始 observed；未知或 indeterminate discharge 不显示为 0。完整契约见 [M5 API](M5/m5_evidence_tools_api.md)。 |
 | M6 reasoning/result | 每个计划窗口都有 quantified、directional 或 indeterminate 之一；完全无证据的范围由确定性逻辑生成 `insufficient_evidence` 且不调用水体模型，只有侧面证据时显式降级。前端不能丢弃 indeterminate point，也不能根据 confidence 自行改写结果类别。展示值、单位、confidence、evidence refs 和 attribution 时保留后端 identity；`basis` 为 observed/correlated/inferred/hypothesized。真实 completed payload 在当前 M3 envelope 上扩展。 |
 | M7 workflow | Agent/tool 事件仍以 session 为根关联。cancel 后不得展示晚到 result 或启动新的前端下游动作；`workflow_quiesced` 保持内部审计事实。 |
 | M8 RAG | 历史推理必须显示原 session、原 confidence、schema version、RAG score 和 provenance；当前有效观测优先，前端不得把历史推理伪装成当前 observation。 |

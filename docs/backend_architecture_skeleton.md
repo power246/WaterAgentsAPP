@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-25
+更新日期：2026-09-29
 
 本文档是当前后端架构骨架的最终版，也是给后续设计/实现 agent 阅读的架构引入文档。它只回答最高层问题：WaterAgents 后端要解决什么问题、第一版需要哪些大功能、系统分成哪些层、层与层之间如何协作。
 
@@ -180,9 +180,9 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
    - M4 availability metadata 只是候选资格；M5 仍须读取并校验真实数据。
 
 4. Evidence System
-   - 获取、组织和追踪证据。
-   - 基础证据包括检测站观测、流量、天气/预报、上游 agent 结果、历史 transcript/RAG。
-   - EPA facility 等外部信息作为 agent 可按需调用的 evidence tool。
+   - 以当前水体 session 为 scope，通过统一 evidence tools 按需获取、组织和追踪证据，不在 topology 后对整图预取。
+   - 有合格本地站点的水体先查询本站目标参数和 discharge；无站水体不制造本地空查询，而是消费直接上游结果并按需取证。
+   - discharge 是每个水体、每个最终窗口的必需支持参数；天气/预报、EPA facility 和历史 transcript/RAG 始终按任务与 evidence relation 按需调用。
 
 5. Agent Reasoning
    - 按 DAG 运行水体 Agent；各自在独立 session 中等待所有上游完成后执行一次完整 loop。
@@ -227,7 +227,7 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 
 如果检测站覆盖率不足，例如只有部分时间窗口有读数，则有真实读数的窗口锚定检测站，缺失窗口再由 agent 补全。每个窗口都必须标记来源。
 
-同一窗口存在多条冲突的有效观测时，Agent 可以基于全部证据判断采用方式，但不得静默丢弃冲突记录。原样采用某条有效观测可标记为 `observed`；任何加权、折中或综合结果必须标记为 `inferred`。
+M5 不跨 observation series 自动判定“明显冲突”或选择赢家。Agent 必须根据 system prompt 检查 station、时间、method、quality 等差异，引用所有影响判断的记录并解释选择或保持不确定；不得静默丢弃相反记录。只有一对一采用当前水体的一条具体直接观测（允许可逆确定性单位展示转换）可标记为 `observed`；任何多记录聚合、跨 series 选择、加权、折中或综合结果必须标记为 `inferred`。
 
 ### 3.3 证据不足时保持保守
 
@@ -239,14 +239,15 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 
 所有进入推理判断的事实都要成为结构化 evidence，不能只作为 prompt 文本散落存在。Reasoning layer 可以动态调用 evidence tools 或 subagents，但最终参与判断的内容都必须落为可追踪的 `EvidenceFragment` 或 `EvidenceBundle`。
 
-### 3.5 Mandatory 和 optional tool 只是 policy 区分
+### 3.5 Tool 调用等级由 policy 决定
 
-所有外部信息能力本质上都是 evidence tools。mandatory tools 和 optional tools 在技术上没有区别，区别只在 agent policy/prompt：
+所有外部信息能力本质上都是 evidence tools。mandatory、conditional-mandatory 和 optional 在技术上共用 registry/executor，区别由确定性 policy 与 Agent roster 决定：
 
-- mandatory tools：某类 agent 任务开始分析前必须调用。
+- conditional-mandatory tools：当前水体有合格本地 station refs 时，模型推理前必须先查询本地 observation/discharge；无站水体不注册该调用。
+- mandatory evidence requirement：每个目标参数窗口都必须有 discharge direct 或 capability 允许的 indirect evidence；它不等于每个水体都能调用本地 discharge provider。
 - optional tools：agent 根据任务和证据缺口按需调用。
 
-例如基础水文观测、流量、天气通常是 mandatory；EPA facility 可以是 optional。
+天气 observation/forecast、EPA facility 和历史检索均是 optional。直接上游结果由 M7 在依赖收敛后注入，不允许下游 Agent 越权查询上游站点。
 
 ### 3.6 Transcript 是事实源
 
@@ -442,7 +443,8 @@ Domain 层定义稳定业务概念。它应该是最少依赖、最容易测试�
 核心领域对象：
 
 - `RiverSegment`
-  - COMID、坐标、上下游关系。
+  - COMID、代表点、当前水体 NLDI LineString geometry 引用、长度/bbox/有界简化摘要和上下游关系。
+  - 完整 geometry 只在 `topology_ready v1` 原事实保存一次；M5 在当前唯一 V1 中补齐，供整段河道 corridor 查询使用，不新增模型版本或兼容分支。
   - 第一版业务身份只使用 COMID；`Waterbody` 抽象延后到真正出现非 COMID 水体需求时设计。
 
 - `MonitoringStation`
@@ -470,11 +472,17 @@ Domain 层定义稳定业务概念。它应该是最少依赖、最容易测试�
   - `prediction`
   - `mixed`
 
+- `SourceRecord`
+  - provider-neutral 的单条来源事实；完整标准化记录只保存一次。
+
 - `EvidenceFragment`
-  - 单条证据。
+  - 带 typed payload、quality、coverage、applicability、derivation 与来源引用的单条可消费证据。
+
+- `EvidenceCell`
+  - 一个 ParameterKey × final window × target/required-support role 的门禁输入索引。
 
 - `EvidenceBundle`
-  - 某个 agent 在某个时间上下文中可用的证据集合。
+  - 某个 Agent 在一个时间上下文中的 reference-only evidence manifest，不复制 source/fragment payload。
 
 - `ParameterTimeSeries`
   - 某参数按时间窗口组织的结果序列。
@@ -557,18 +565,25 @@ Evidence 层负责收集、整理、标准化和追踪证据。它可以表现�
 
 ### 8.1 Evidence 最小结构
 
-每条 evidence 至少需要：
+M5 把 provider `SourceRecord`、可推理的 `EvidenceFragment` 和只组装引用的 `EvidenceBundle` 分开保存。每条 fragment 至少需要：
 
 ```text
 evidence_id
 source
+collection_status
 target_comid
 location
 time_range
-data_type
-value_or_summary
+parameter_refs
+data_type + typed payload
+applicability: direct_measurement | allowed_indirect | contextual_only
+relation_id
+series_identity
+quality_class
 quality_flags
-confidence_hint
+coverage
+source_record_refs
+derivation
 provenance
 rag_eligible
 ```
@@ -583,29 +598,24 @@ station_id
 distance_to_target
 ```
 
+完整 source records 只保存一次；fragment、tool result 和 bundle 使用稳定引用。`EvidenceBundle` 按 ParameterKey × final window × target/required-support role 形成 cell manifest，不内嵌无界 raw arrays。精确 V1 模型见 [M5 实施设计](M5/m5_evidence_tools_implementation_design.md) 和 [M5 API](M5/m5_evidence_tools_api.md)，分阶段施工、验证门禁与证据记录见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
+
 ### 8.2 基础 evidence tools
 
-第一版 mandatory evidence tools 候选：
+第一版 Agent-facing roster：
 
-- COMID/location/topology evidence
-- station observation evidence
-- discharge/flow evidence
-- historical weather evidence
-- forecast weather evidence
-- upstream current-session result evidence
-- transcript RAG evidence，当 `memory_mode=memory_augmented`
+- `collect_water_observations`：station-backed 水体 conditional-mandatory，只查当前水体已确认 station/series refs；同时包含可执行的直接 discharge 通道。
+- `collect_weather_evidence`：optional，历史与预报都按任务需要调用。
+- `collect_facility_evidence`：optional，基于当前水体完整 LineString corridor 和 Agent 选择的有界半径。
+- `get_upstream_results`：M7 producer，只读直接上游已收敛结果。
+- `search_transcript_evidence`：M8 producer，只在 memory policy 允许时注册。
+- `convert_evidence_unit`、`aggregate_evidence`、`inspect_evidence_records`：确定性本地工具。
 
-其中 discharge/flow 使用 `usgs:00060` 作为每次分析计划都必须包含的支持参数；它也可以是用户目标参数，但自动支持角色不占单次用户目标参数上限。目标参数和 discharge 都经过“直接 / capability 允许的侧面 / 完全缺失”门禁，任一必需部分完全无证据时，对应水体 × 时间段不调用推理模型。
-
-第一版 optional evidence tools 候选：
-
-- EPA facility evidence
-- 更细的历史 transcript 检索
-- 参数相关补充证据
+discharge/flow 以 `usgs:00060` 为第一版 required-support ParameterKey；它也可以是用户目标参数，但自动支持角色不占单次用户目标参数上限。每个目标 cell 和同窗 discharge cell 都经过 direct / capability allowed-indirect / contextual-or-missing 门禁。天气和历史本身不能自动满足该门禁。
 
 ### 8.3 Aggregation tool
 
-聚合方法由 agent 在固定 tool/skill 列表中选择，不允许自由发明不可复现的方法。
+聚合方法由 agent 在 capability/channel policy 给出的固定子集中选择，不允许自由发明不可复现的方法，也不允许选择与参数/value semantics 不兼容的方法。
 
 固定方法候选：
 
@@ -617,20 +627,21 @@ max
 sum
 p90
 latest
+counter_delta_sum（内部累计计数器专用，不作为自由选择项）
 ```
 
-不同参数可以有不同默认聚合策略：
+共享 profile 决定不同参数/通道的默认策略：
 
 - flow/discharge：默认 mean。
-- precipitation：默认 sum。
+- interval precipitation：默认 sum；cumulative precipitation 使用差分累计，不能再次对累计值求和。
 - pH：默认 mean，可辅助 min/max 看异常。
-- 污染物浓度：默认 mean，同时可用 max/p90 支持风险判断。
+- 离散污染物浓度：默认 latest；只有 capability 允许且样本数/coverage 满足时才能选择 mean/max/p90，禁止 sum。
 
-如果 agent 选择了不合适的方法，第一版先接受并记录。这说明 tool/skill instructions 需要后续优化，架构层不强行覆盖。
+executor 必须拒绝不合适的方法，并返回 `evidence_aggregation_not_allowed`；不能“先接受并记录”。`suspicious` 输入允许参与聚合，但结果继承全部 flags、质量等级和输入计数；`invalid` 只保留审计。单位定义和算法由共享 registry 管理，154 项 capability 只引用 policy profile，不为每条观测值复制换算/聚合表。完整规则见 [M5 Evidence Policy Catalog](M5/m5_evidence_policy_catalog.md)。
 
 ### 8.4 原始数据
 
-第一版可以完整保存 raw data 到数据库。返回给模型的 tool 结果允许包含完整原始数据，也允许由 agent 指定时间范围、前 N 个或后 N 个读数。
+第一版保存完整标准化 SourceRecord 到数据库，但不保存或公开完整 provider envelope。tool result 给模型的是有界 manifest、summary 和 reference；需要查看具体记录时使用分页 `inspect_evidence_records`，默认 50、最大 200。模型上下文和 SSE 均不得内嵌无界 raw arrays。
 
 单条 transcript 内容按 M3 D23 的已确认设计，脱敏后不超过 `64 KiB` 时默认内联；超出后将全文保存在 PostgreSQL 独立内容记录中，timeline 返回引用、完整字节数和默认最多 `2 KiB` 的首尾预览正文。两个上限均可配置，完整内容仍须可读取。该存储/传输规则不决定前端折叠状态，也不改变 Agent 输入；skill/tool/hook 等按语义默认折叠。working memory 的输入装载策略由其所属模块定型，不能从 transcript 阈值直接推导。
 
@@ -676,15 +687,16 @@ memory_mode
 
 ```text
 receive agent task
-  -> call mandatory evidence tools
+  -> if station-backed: deterministic local observation/discharge preflight
+  -> receive settled direct-upstream results when M7 schedules the node
   -> optionally call additional evidence tools
-  -> decide evidence sufficiency
+  -> deterministic target + discharge sufficiency gate per window
   -> generate analysis_detail
   -> generate attribution_summary
   -> emit structured result
 ```
 
-证据搜寻阶段结束后，agent 再进入分析和归因。这样可以避免边想边乱查，也方便 transcript 记录。
+station-backed preflight 成功但完全没有 usable local target/discharge evidence 时，保留真实 session/tool/bundle 并停止该分支，不调用水体模型。部分 evidence 允许继续；stationless 水体按上游结果和 optional tools 继续。证据搜寻完成后才进入分析和归因。
 
 ### 9.3 Evidence sufficiency
 
@@ -696,8 +708,9 @@ Evidence sufficiency decision 属于 Reasoning 层。它决定当前证据是否
 - 当前真实检测站数据与历史记忆冲突时，当前真实检测站数据绝对优先。
 - 无直接检测站链路但有 capability 白名单侧面证据时，只允许受限的相关/方向判断，并保留不足事实、降低置信度。
 - 某个参数 × 时间段完全没有直接或允许的侧面证据时，不调用对应水体模型，确定性生成 `indeterminate / insufficient_evidence`。
+- 同一窗口的 discharge 也必须具有 direct 或 allowed-indirect evidence；缺失时目标水质结果必须 indeterminate，不能把未知流量当作 0。
 - provider unavailable/invalid 不得当作 empty/no evidence 降级；它是技术失败。
-- 未来天气覆盖不完整时，可以继续预测，但降低超出证据覆盖部分的置信度。
+- 天气始终按需；一旦某个 allowed-indirect relation 选择依赖天气，其所需天气证据不完整时该 relation 不成立。
 
 ### 9.4 上游到下游传递
 
@@ -844,7 +857,7 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 
 - NLDI adapter：NHDPlusV2 position/COMID、direct upstream flowlines 与 monitoring-site 水文关联；不得用近邻吸附掩盖无覆盖。
 - USGS Water Data OGC API v1 adapter：monitoring location、time-series metadata 及后续水质/流量观测；新生产基线不依赖即将退役的旧 WaterServices。
-- NOAA weather adapter：历史天气、预警、未来预报。
+- NWS weather adapter：按需获取当前水体附近的历史天气观测和未来预报。
 - EPA facility adapter：附近设施。
 - Google geocoding adapter：地名转坐标。
 - LLM provider adapter：Ollama/OpenAI/Gemini/Grok 或其他 provider。
@@ -867,11 +880,11 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 3. 准备解析时创建 query_parser session，按需订阅其 session SSE
 4. Parser LLM 只输出候选意图；deterministic resolver 生成唯一 AnalysisContext
 5. Hydrology Topology 按参数 × 时间段构建有界 COMID 图，保存候选 inlet、active/excluded 和原图引用
-6. M5 Evidence tools 获取并校验真实直接/侧面证据，不能把 availability metadata 当观测
-7. 调用水体模型前按参数 × 时间段执行确定性 sufficiency gate；完全无证据的范围直接 indeterminate
-8. 对通过门禁的范围，Agent 调 mandatory tools 并按需调用 optional tools
-9. Agent 基于 time_range/time_segments/time_resolution 生成结果、analysis_detail 和 attribution_summary
-10. M7 按 active DAG 在真正准备执行时创建水体 session，并由上游向目标传播
+6. M7 按 active DAG 在真正准备执行某水体时创建 session，并等待/注入全部直接上游已收敛结果
+7. station-backed 水体由确定性 policy 先调用 M5 本地 observation/discharge preflight；stationless 水体跳过本地 observation query
+8. Agent 根据任务和证据缺口按需调用天气、设施、inspection/aggregation 等 optional tools，M5 形成 reference-complete bundle
+9. 调用水体模型前按目标参数 × 时间窗口同时检查 target 与 discharge cell；不足范围直接 indeterminate
+10. Agent 只对通过门禁的范围生成结果、analysis_detail 和 attribution_summary；完成后由 M7 向下游传播
 11. Application 始终经 M3 统一入口写 transcript，run/session 两层 SSE 推送轻量通知与过程
 12. run/session 进入各自终态，历史 run、原 graph、结果与 session transcript 从数据库读取
 ```

@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-25
+更新日期：2026-09-29
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -357,29 +357,32 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 7. M5: Evidence Tools + EvidenceBundle
 
+详细设计：
+
+- [M5 设计决策](M5/m5_evidence_tools_design.md)
+- [M5 实施设计](M5/m5_evidence_tools_implementation_design.md)
+- [M5 Evidence Policy Catalog](M5/m5_evidence_policy_catalog.md)
+- [M5 API / 读取契约](M5/m5_evidence_tools_api.md)
+- [M5 Milestone 0–13 Implementation TODO](M5/m5_implementation_todo.md)
+
+Implementation TODO 已按当前冻结设计写成 coding-agent 施工清单；全部项目仍未开始，不能因文档存在宣称 M5 已实现。
+
 目标：
 
 - 建立统一 evidence tool 体系。
-- 让 agent 可以通过 mandatory/optional tool 获取结构化证据。
+- 让每个水体 Agent 在自身 scope 内通过 conditional-mandatory/optional tool 按需获取结构化证据，不在 topology 后全图预取。
+- 为 M6 提供逐 ParameterKey × window 的 target + required discharge 门禁输入。
 
 主要产物：
 
 - Evidence tool registry
-- `EvidenceBundle`
+- 当前唯一 V1 的 typed `SourceRecord`、`EvidenceFragment`、`EvidenceCell` 与 reference-only `EvidenceBundle`
 - 各真实 adapter 的标准化 source record DTO；Evidence Tool 负责把 record 转成 `EvidenceFragment`。
 - `collection_status: available | empty | unavailable | invalid`，明确区分“查无数据”和“本次取数失败”。
-- mandatory evidence tools：
-  - COMID/location/topology evidence
-  - station observation evidence
-  - discharge/flow evidence
-  - historical weather evidence
-  - forecast weather evidence
-  - upstream current-session result evidence
-  - transcript RAG evidence，当 `memory_mode=memory_augmented`
-- optional evidence tools：
-  - EPA facility evidence
-  - 更细的历史 transcript 检索
-  - 参数相关补充证据
+- station-backed 水体的本地 observation/discharge conditional-mandatory preflight；stationless 水体不制造本地空查询。
+- 每个水体/窗口必需的 discharge evidence requirement；本地无直接值时由直接上游结果或 registry 允许的估算关系提供。
+- optional weather/forecast、EPA facility 和更细历史检索；天气不因 prediction mode 自动变成 mandatory。
+- M7 upstream-result 与 M8 transcript-RAG producer slot。
 - aggregation tool：
   - `mean`
   - `median`
@@ -389,33 +392,29 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - `p90`
   - `latest`
 - unit registry/tool：
-  - `ParameterKey -> canonical_unit` 映射表
+  - 全局 UnitDefinition + shared policy profile + 154 项 capability 引用，不为每条观测维护独立换算/聚合表
   - 源单位、别名和转换 provenance
-  - 可调用确定性 Python 库或 API 执行量纲校验与换算
+  - 由确定性 Decimal 算法执行量纲校验与换算
   - 未知换算不得由 Agent 猜测
+- M5 在 `topology_ready v1` 补齐每个水体的 NLDI LineString geometry；facility radius 由 Agent 在 server 限制内选择，并覆盖整段河道 corridor。
 - M5 可以定型 upstream-result/RAG evidence tool 的槽位和 unavailable 语义；真实 upstream producer 由 M7 接入，真实 transcript-RAG producer 由 M8 接入，不在 M5 production path 中用 hidden fake 冒充完成。
 - 复用 M4 单一 parameter capability registry，将 evidence 按“参数 × 时间段”分为直接、明确允许的侧面和完全缺失；关系类型与不足事实进入 bundle。provider unavailable/invalid 不能伪装成 empty/no evidence。
+- production 不暴露直接 tool invocation；允许独立 test composition/API 复用真实 executor，前端不接入。
 
 阶段自测验收：
 
-- 每个 evidence tool 都能通过 fake adapter 返回 `EvidenceFragment`。
-- 每条 evidence 都包含：
-  - `evidence_id`
-  - `source`
-  - `target_comid`
-  - `location`
-  - `time_range`
-  - `data_type`
-  - `value_or_summary`
-  - `quality_flags`
-  - `confidence_hint`
-  - `provenance`
-  - `rag_eligible`
-- `EvidenceBundle` 能按 COMID、参数、时间窗口组织 evidence。
-- 可疑观测原样保留并降权；明确无效观测保留为 evidence，但不能作为 observed quantified result。
+- 每个 evidence tool 都能通过 fake adapter 返回结构完整、reference-closed 的 typed fragment/result；provider adapter 只返回 source DTO。
+- `EvidenceBundle` 能按 COMID、参数、时间窗口和 target/required-support role 组织引用，并为每个 target cell 提供同窗 discharge cell。
+- 可疑观测原样保留且可以参与允许的聚合，结果传播 quality flags/counters；明确无效观测保留审计但不能参与聚合或门禁。
 - aggregation tool 能对 fake raw series 输出 `6h / 12h / 24h` 聚合结果。
-- tool call 和 tool result 能写入 transcript。
+- capability policy 拒绝 pH sum、累计降水再次求和、流量读数 sum、跨 series 合并等错误组合；单位换算可重放。
+- 五类 tool/source/fragment/result/bundle typed content 能写入 transcript；大内容只传 preview/reference。
+- station-backed 全空时保留完整 session/tool/bundle 并以 0 次水体模型调用正常收敛；部分 evidence 可继续；技术失败不走自然 empty。
+- stationless 水体只消费自身 optional evidence 与上游传递结果，不能直接查询上游站点；查询扩展最多为目标范围前后各一个当地日。
+- geometry、corridor、半径上限、single-flight、pagination incomplete、取消和 budget 均有确定性 fixture。
+- production OpenAPI 不含 tool invocation route；test app 可调用真实 executor 且 frontend 无接入。
 - M4 的 availability qualification 不当作真实 evidence；直接/侧面/empty/unavailable 可由确定性 gate 输入稳定区分。
+- 详细契约见 [M5 设计决策](M5/m5_evidence_tools_design.md)、[实施设计](M5/m5_evidence_tools_implementation_design.md)、[Policy Catalog](M5/m5_evidence_policy_catalog.md)、[API/读取契约](M5/m5_evidence_tools_api.md)和 [Milestone 0–13 Implementation TODO](M5/m5_implementation_todo.md)。
 
 ## 8. M6: Single-Agent Reasoning
 
@@ -441,8 +440,8 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - `time_segments`
   - `time_resolution`
   - `mode`
-- agent 调用 mandatory evidence tools。
-- agent 可按需调用 optional evidence tools。
+- station-backed session 先执行确定性本地 observation/discharge preflight；stationless session 不调用本地 observation tool。
+- agent 可根据任务和 evidence 缺口按需调用 weather/facility/inspection/aggregation 等 optional tools。
 - 调用水体模型前由确定性 gate 按“参数 × 时间段”判断 evidence sufficiency。
 - 证据充分时输出 quantified result，并可附带风险/趋势。
 - 只有 capability 白名单侧面证据时可输出受限 directional result，并显式降低置信度。
@@ -452,14 +451,14 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 阶段自测验收：
 
 - 用 fake evidence bundle 可以跑出一个完整 `InferenceResult`。
-- 当存在目标检测站读数时，最终读数锚定 observed value。
+- 当存在目标检测站读数时，只有一对一采用一条当前水体具体直接记录（可做可逆单位展示转换）才能标 observed；任何多记录聚合均为 inferred。
 - 当无直接检测站链路但存在 capability 允许的侧面证据时，不输出具体数值，只输出明确降级的趋势/风险判断；完全无证据时走下一条确定性 indeterminate，不能调用模型。
 - 完全无可用证据时仍为每个窗口输出带 reason code 的结构化空判断。
 - 通过模型调用计数验证全部无证据为 0 次，部分无证据只调用通过门禁的范围；unavailable/invalid 不走无证据降级。
 - 每个 time window 都有 source、confidence、evidence refs。
 - attribution factor 都能追溯到 evidence refs，并标记 `basis: observed | correlated | inferred | hypothesized`。
 - confidence 规则在本 milestone 设计，保留 Agent 自主判断，不与 outcome status 做 Domain 硬绑定。
-- 同一窗口多个有效站点冲突时由 Agent 判断，但必须引用全部相关观测并解释；任何加权、折中或综合值标记为 inferred，只有原样采用的有效站点读数可标 observed。
+- M5 不自动判断多 series 是否冲突；system prompt 要求 Agent 检查 station/time/method/quality 等差异、引用所有影响判断的记录，并解释选择或保持不确定。任何多记录 aggregate、加权、折中或综合值标记为 inferred，只有一对一采用当前水体具体直接记录可标 observed。
 - prompt、raw LLM output、structured result 能写入 transcript。
 
 ## 9. M7: Topology-Driven Multi-Agent Workflow
