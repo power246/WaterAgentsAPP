@@ -197,7 +197,7 @@ AggregatePayload(value, unit, method, input_record_refs, input quality counts)
 ConversionPayload(value, unit, input_evidence_ref, conversion_id)
 ContextPayload(summary_fields, record_refs)
 CollectionFactPayload(status, reason, affected_window_ids, record_refs)
-UpstreamResultPayload(result_ref, closure_refs)
+UpstreamResultPayload(upstream_session_id, result_ref, closure_refs)
 HistoricalInferencePayload(original_item_ref, projection)
 ```
 

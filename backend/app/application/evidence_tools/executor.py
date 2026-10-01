@@ -46,6 +46,7 @@ from app.application.evidence_tools.models import (
     EvidenceProducerStatus,
     EvidenceToolLimits,
     EvidenceToolReader,
+    EvidenceToolExecution,
     EvidenceToolWriter,
 )
 from app.application.evidence_tools.registry import EvidenceToolRegistry
@@ -95,6 +96,13 @@ class _CompletedOperation:
     result: EvidenceToolResult
     result_ref: ItemReference
     value: EvidenceOperationValue
+
+
+class _PartialDispatchError(Exception):
+    def __init__(self, cause: BaseException, value: EvidenceOperationValue) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.value = value
 
 
 class _UtcClock:
@@ -158,6 +166,13 @@ class EvidenceToolExecutor:
         scope: EvidenceSessionScope,
         request: EvidenceToolRequest,
     ) -> EvidenceToolResult:
+        return (await self.execute_tracked(scope, request)).result
+
+    async def execute_tracked(
+        self,
+        scope: EvidenceSessionScope,
+        request: EvidenceToolRequest,
+    ) -> EvidenceToolExecution:
         operation_id = self._operation_id_factory()
         descriptor = self._registry.get(request.tool_name)
         try:
@@ -218,12 +233,37 @@ class EvidenceToolExecutor:
                     completed.value.inspection_page
                 )
             if not reused:
-                return completed.result
+                return EvidenceToolExecution(
+                    result=completed.result,
+                    result_ref=completed.result_ref,
+                )
             return await self._write_reused_result(
                 scope,
                 request,
                 operation_id=operation_id,
                 completed=completed,
+            )
+        except _PartialDispatchError as interrupted:
+            cancelled = isinstance(
+                interrupted.cause,
+                (WorkflowStopped, asyncio.CancelledError),
+            )
+            error = (
+                SafeEvidenceError(
+                    code="evidence_cancelled",
+                    message="The evidence operation was cancelled.",
+                    retryable=False,
+                )
+                if cancelled
+                else map_evidence_error(interrupted.cause)
+            )
+            return await self._write_failure_result(
+                scope,
+                request,
+                operation_id=operation_id,
+                cancelled=cancelled,
+                error=error,
+                value=interrupted.value,
             )
         except (WorkflowStopped, asyncio.CancelledError):
             return await self._write_failure_result(
@@ -376,33 +416,43 @@ class EvidenceToolExecutor:
             )
             batches = []
             collections = []
-            for plan in plans:
-                scope.cancel_token.checkpoint()
-                if batches:
-                    self._ensure_another_collection_request(tuple(batches))
-                if self._water_port is None:
-                    raise EvidenceProducerUnavailableError()
-                batch = await self._await_provider(
-                    scope,
-                    self._water_port.collect(
-                        plan,
-                        deadline=self._check_deadline(scope),
-                    ),
-                )
-                batches.append(batch)
-                collections.append(
-                    EvidenceCollectionInput(
-                        provider=plan.provider.value,
-                        channel=plan.channel,
-                        request_range=plan.request_range,
-                        requested_series=plan.series_refs,
-                        parameter_keys=plan.parameter_keys,
-                        affected_window_ids=plan.affected_window_ids,
-                        batch=batch,
-                        station_id=plan.station_id,
+            try:
+                for plan in plans:
+                    scope.cancel_token.checkpoint()
+                    if batches:
+                        self._ensure_another_collection_request(tuple(batches))
+                    if self._water_port is None:
+                        raise EvidenceProducerUnavailableError()
+                    batch = await self._await_provider(
+                        scope,
+                        self._water_port.collect(
+                            plan,
+                            deadline=self._check_deadline(scope),
+                        ),
                     )
-                )
-                self._validate_collected_batches(tuple(batches))
+                    self._validate_collected_batches((*batches, batch))
+                    batches.append(batch)
+                    collections.append(
+                        EvidenceCollectionInput(
+                            provider=plan.provider.value,
+                            channel=plan.channel,
+                            request_range=plan.request_range,
+                            requested_series=plan.series_refs,
+                            parameter_keys=plan.parameter_keys,
+                            affected_window_ids=plan.affected_window_ids,
+                            batch=batch,
+                            station_id=plan.station_id,
+                        )
+                    )
+            except (Exception, asyncio.CancelledError) as error:
+                if collections:
+                    partial = await self._persist_partial_collections(
+                        scope,
+                        operation_id,
+                        tuple(collections),
+                    )
+                    raise _PartialDispatchError(error, partial) from error
+                raise
             return await self._finish_collection(
                 scope,
                 operation_id,
@@ -419,39 +469,49 @@ class EvidenceToolExecutor:
             )
             batches = []
             collections = []
-            for index, kind in enumerate(kinds, start=1):
-                scope.cancel_token.checkpoint()
-                if batches:
-                    self._ensure_another_collection_request(tuple(batches))
-                plan = WeatherEvidenceRequest(
-                    operation_id=f"{operation_id}-{index:03d}",
-                    evidence_kind=kind,
-                    location=scope.target_node.point,
-                    variables=("temperature",),
-                    request_range=scope.query_envelope,
-                    affected_window_ids=request.window_ids,
-                )
-                authorize_provider_request(scope, plan, registry=self._capabilities)
-                batch = await self._await_provider(
-                    scope,
-                    self._weather_port.collect(
-                        plan,
-                        deadline=self._check_deadline(scope),
-                    ),
-                )
-                batches.append(batch)
-                collections.append(
-                    EvidenceCollectionInput(
-                        provider="nws",
-                        channel=kind,
-                        request_range=plan.request_range,
-                        requested_series=plan.variables,
-                        parameter_keys=request.parameter_keys,
-                        affected_window_ids=plan.affected_window_ids,
-                        batch=batch,
+            try:
+                for index, kind in enumerate(kinds, start=1):
+                    scope.cancel_token.checkpoint()
+                    if batches:
+                        self._ensure_another_collection_request(tuple(batches))
+                    plan = WeatherEvidenceRequest(
+                        operation_id=f"{operation_id}-{index:03d}",
+                        evidence_kind=kind,
+                        location=scope.target_node.point,
+                        variables=("temperature",),
+                        request_range=scope.query_envelope,
+                        affected_window_ids=request.window_ids,
                     )
-                )
-                self._validate_collected_batches(tuple(batches))
+                    authorize_provider_request(scope, plan, registry=self._capabilities)
+                    batch = await self._await_provider(
+                        scope,
+                        self._weather_port.collect(
+                            plan,
+                            deadline=self._check_deadline(scope),
+                        ),
+                    )
+                    self._validate_collected_batches((*batches, batch))
+                    batches.append(batch)
+                    collections.append(
+                        EvidenceCollectionInput(
+                            provider="nws",
+                            channel=kind,
+                            request_range=plan.request_range,
+                            requested_series=plan.variables,
+                            parameter_keys=request.parameter_keys,
+                            affected_window_ids=plan.affected_window_ids,
+                            batch=batch,
+                        )
+                    )
+            except (Exception, asyncio.CancelledError) as error:
+                if collections:
+                    partial = await self._persist_partial_collections(
+                        scope,
+                        operation_id,
+                        tuple(collections),
+                    )
+                    raise _PartialDispatchError(error, partial) from error
+                raise
             return await self._finish_collection(
                 scope,
                 operation_id,
@@ -689,6 +749,30 @@ class EvidenceToolExecutor:
             safe_error_code=None if complete else "evidence_collection_incomplete",
         )
 
+    async def _persist_partial_collections(
+        self,
+        scope: EvidenceSessionScope,
+        operation_id: str,
+        collections: tuple[EvidenceCollectionInput, ...],
+    ) -> EvidenceOperationValue:
+        artifacts = await self._collection_service.process(
+            scope,
+            operation_id=operation_id,
+            collections=collections,
+        )
+        batches = tuple(item.batch for item in collections)
+        return EvidenceOperationValue(
+            collection_status=CollectionStatus.UNAVAILABLE,
+            manifest_refs=artifacts.manifest_refs,
+            fragment_refs=artifacts.fragment_refs,
+            collection_fact_refs=artifacts.collection_fact_refs,
+            source_record_refs=artifacts.source_record_refs,
+            requests=sum(batch.counts.requests for batch in batches),
+            pages=sum(batch.counts.pages for batch in batches),
+            records=sum(batch.counts.records for batch in batches),
+            cacheable=False,
+        )
+
     def _ensure_another_collection_request(
         self,
         batches: tuple[ProviderCollectionBatch, ...],
@@ -899,7 +983,7 @@ class EvidenceToolExecutor:
         *,
         operation_id,
         completed,
-    ) -> EvidenceToolResult:
+    ) -> EvidenceToolExecution:
         successful = (
             completed.result.execution_status is EvidenceToolExecutionStatus.COMPLETED
         )
@@ -918,8 +1002,8 @@ class EvidenceToolExecutor:
         payload = completed.result.model_dump(mode="python")
         payload.update(update)
         result = EvidenceToolResult.model_validate(payload)
-        await self._writer.write_result(scope, result)
-        return result
+        result_ref = await self._writer.write_result(scope, result)
+        return EvidenceToolExecution(result=result, result_ref=result_ref)
 
     async def _write_failure_result(
         self,
@@ -929,7 +1013,9 @@ class EvidenceToolExecutor:
         operation_id,
         error,
         cancelled=False,
-    ) -> EvidenceToolResult:
+        value=None,
+    ) -> EvidenceToolExecution:
+        value = value or EvidenceOperationValue()
         result = EvidenceToolResult(
             tool_call_id=request.tool_call_id,
             operation_id=operation_id,
@@ -939,13 +1025,22 @@ class EvidenceToolExecutor:
                 if cancelled
                 else EvidenceToolExecutionStatus.FAILED
             ),
-            collection_status=None,
-            counts=EvidenceToolCounts(),
+            collection_status=value.collection_status,
+            manifest_refs=value.manifest_refs,
+            fragment_refs=value.fragment_refs,
+            collection_fact_refs=value.collection_fact_refs,
+            source_record_refs=value.source_record_refs,
+            counts=EvidenceToolCounts(
+                requests=value.requests,
+                pages=value.pages,
+                records=value.records,
+                fragments=len(value.fragment_refs) + len(value.collection_fact_refs),
+            ),
             safe_error=error,
             completed_at=self._clock.now(),
         )
-        await self._writer.write_result(scope, result)
-        return result
+        result_ref = await self._writer.write_result(scope, result)
+        return EvidenceToolExecution(result=result, result_ref=result_ref)
 
 
 def _fragment_numeric_value(fragment: EvidenceFragment) -> tuple[str, str]:

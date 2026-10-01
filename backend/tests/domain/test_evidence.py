@@ -485,6 +485,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
         applicability=EvidenceApplicability.ALLOWED_INDIRECT,
         relation_id=EvidenceRuleId.SAME_PARAMETER_UPSTREAM,
         payload=UpstreamResultPayload(
+            upstream_session_id="session-upstream",
             result_ref=ItemReference(item_id="item-upstream-result"),
             closure_refs=(ItemReference(item_id="item-upstream-evidence"),),
         ),

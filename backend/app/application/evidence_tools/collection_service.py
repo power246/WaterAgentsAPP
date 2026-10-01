@@ -538,16 +538,18 @@ class EvidenceCollectionService:
                 reference_complete=True,
                 upstream_result_complete=True,
             )
-            applicability = resolve_applicability(
-                self._registry,
-                capability,
-                scope.agent_comid,
-                window.time_range,
-                indirect_context=context,
-            )
+            if record.result_kind in {"quantified", "directional"}:
+                applicability = resolve_applicability(
+                    self._registry,
+                    capability,
+                    scope.agent_comid,
+                    window.time_range,
+                    indirect_context=context,
+                )
             if applicability is EvidenceApplicability.ALLOWED_INDIRECT:
                 relation_id = context.relation_id
                 payload = UpstreamResultPayload(
+                    upstream_session_id=record.upstream_session_id,
                     result_ref=record.result_ref,
                     closure_refs=record.evidence_closure_refs,
                 )

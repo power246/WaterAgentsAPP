@@ -136,6 +136,7 @@ class EvidenceBundle(DomainModel):
         run_id: str,
         session_id: str,
         resolved_scopes: tuple[ReferenceScope, ...],
+        same_run_session_item_ids: tuple[str, ...] = (),
     ) -> None:
         scopes_by_item = {scope.item_id: scope for scope in resolved_scopes}
         if len(scopes_by_item) != len(resolved_scopes):
@@ -143,6 +144,9 @@ class EvidenceBundle(DomainModel):
         expected_items = set(self.referenced_item_ids())
         if set(scopes_by_item) != expected_items:
             raise ValueError("resolved reference scopes must cover bundle refs exactly")
+        same_run_items = set(same_run_session_item_ids)
+        if not same_run_items <= expected_items:
+            raise ValueError("same-run session refs must belong to the bundle closure")
         run_global_items = {self.context_ref.item_id, self.topology_ref.item_id}
         for item_id, scope in scopes_by_item.items():
             if scope.run_id != run_id:
@@ -150,5 +154,8 @@ class EvidenceBundle(DomainModel):
             if item_id in run_global_items:
                 if scope.session_id not in {None, session_id}:
                     raise ValueError("run-global reference has incompatible session scope")
+            elif item_id in same_run_items:
+                if scope.session_id is None:
+                    raise ValueError("same-run related reference must be session-owned")
             elif scope.session_id != session_id:
                 raise ValueError("bundle references must belong to the same session")

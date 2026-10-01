@@ -222,3 +222,9 @@ class EvidenceOperationValue:
     cacheable: bool = True
     safe_error_code: str | None = None
     inspection_page: EvidenceInspectionPage | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceToolExecution:
+    result: EvidenceToolResult
+    result_ref: ItemReference

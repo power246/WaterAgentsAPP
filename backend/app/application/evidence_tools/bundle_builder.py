@@ -23,6 +23,7 @@ from app.domain import (
     QualitySummary,
     ReferenceScope,
     TimeRange,
+    UpstreamResultPayload,
 )
 
 
@@ -112,7 +113,7 @@ class EvidenceBundleBuilder:
             collection_summary=_collection_summary(fragments),
             created_at=created_at,
         )
-        await self._validate_reference_scope(scope, bundle)
+        await self._validate_reference_scope(scope, bundle, fragments)
         return bundle
 
     async def build_and_write(self, scope: EvidenceSessionScope, **kwargs):
@@ -307,7 +308,7 @@ class EvidenceBundleBuilder:
                     )
         return tuple(cells)
 
-    async def _validate_reference_scope(self, scope, bundle):
+    async def _validate_reference_scope(self, scope, bundle, fragments):
         known = (
             scope.analysis_context_ref,
             scope.topology_ref,
@@ -321,10 +322,31 @@ class EvidenceBundleBuilder:
         if {item.item_id for item in resolved} != set(remaining):
             raise EvidenceScopeViolationError()
         try:
+            upstream_pairs = tuple(
+                (item_id, fragment.payload.upstream_session_id)
+                for fragment in fragments
+                if isinstance(fragment.payload, UpstreamResultPayload)
+                for item_id in (
+                    fragment.payload.result_ref.item_id,
+                    *(item.item_id for item in fragment.payload.closure_refs),
+                )
+            )
+            upstream_scopes: dict[str, str] = {}
+            for item_id, upstream_session_id in upstream_pairs:
+                previous = upstream_scopes.setdefault(item_id, upstream_session_id)
+                if previous != upstream_session_id:
+                    raise EvidenceScopeViolationError()
+            resolved_by_item = {item.item_id: item for item in (*known, *resolved)}
+            if any(
+                resolved_by_item[item_id].session_id != upstream_session_id
+                for item_id, upstream_session_id in upstream_scopes.items()
+            ):
+                raise EvidenceScopeViolationError()
             bundle.validate_reference_scope(
                 run_id=scope.run_id,
                 session_id=scope.session_id,
                 resolved_scopes=(*known, *resolved),
+                same_run_session_item_ids=tuple(sorted(upstream_scopes)),
             )
         except ValueError as error:
             raise EvidenceScopeViolationError() from error

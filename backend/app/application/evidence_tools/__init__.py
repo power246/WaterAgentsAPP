@@ -1,4 +1,9 @@
 from app.application.evidence_tools.budget import EvidenceBudgetLedger
+from app.application.evidence_tools.acquisition import (
+    EvidenceAcquisitionCellGate,
+    EvidenceAcquisitionHandoff,
+    EvidenceAcquisitionService,
+)
 from app.application.evidence_tools.collection_manifest import build_collection_manifest
 from app.application.evidence_tools.collection_service import (
     EvidenceCollectionService,
@@ -37,6 +42,7 @@ from app.application.evidence_tools.models import (
     EvidenceToolDescriptor,
     EvidenceToolLimits,
     EvidenceToolReader,
+    EvidenceToolExecution,
     EvidenceToolWriter,
     StoredPolicyObservations,
 )
@@ -59,6 +65,9 @@ from app.application.evidence_tools.authorization import (
 
 __all__ = [
     "AuthorizedEvidenceRequest",
+    "EvidenceAcquisitionCellGate",
+    "EvidenceAcquisitionHandoff",
+    "EvidenceAcquisitionService",
     "EvidenceAggregationNotAllowedError",
     "EvidenceBudgetLedger",
     "EvidenceCollectionArtifacts",
@@ -81,6 +90,7 @@ __all__ = [
     "EvidenceToolBudgetExceededError",
     "EvidenceToolDeadlineExceededError",
     "EvidenceToolDescriptor",
+    "EvidenceToolExecution",
     "EvidenceToolError",
     "EvidenceToolExecutor",
     "EvidenceToolLimitExceededError",
