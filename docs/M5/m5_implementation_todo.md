@@ -439,34 +439,40 @@
 
 ### 工作
 
-- [ ] 实现 collection service：adapter records → quality/unit/series/completeness → direct/context/collection-fact fragments，不保存第二份 provider envelope。
-- [ ] 对 provider batch 生成唯一 CollectionManifest，保存 request range、series/pages/chunks、completed ranges、affected windows、counts 和 completion proof。
-- [ ] 按最终 windows 分配 fragments 与 collection facts；技术性 incomplete 窗口 blocked/`incomplete_source`，独立 complete 窗口可继续，数据 coverage 另算。
-- [ ] 建立每个 requested target 和 required discharge 的 `EvidenceCell`；只允许 direct/allowed-indirect 解锁，contextual/invalid 只能保留说明。
-- [ ] 同一 series 内按 manifest policy 聚合；跨 series 保持独立供 Agent inspection/解释，不自动冲突、选优或合并。
-- [ ] 保留 observed 资格闭包：只有一条 local direct record 加可逆展示 conversion；所有 aggregate/跨 series/upstream/weather/facility/history 标记 inferred candidate metadata。
-- [ ] 实现 bundle builder/validator：reference-only、scope/closure/role 唯一、fragment/source/result refs 存在、每个 target 同窗 discharge cell 齐全。
-- [ ] tool model preview 限于 32 records 或 16 KiB；完整 records 只保存一次并通过 inspection/full-content read 取得。
-- [ ] bundle 写入前校验必需 refs 已持久化或同批原子提交；写入失败沿 M3 pending/retry，不把未确认事实宣称完成。
+- [x] 实现 collection service：adapter records → quality/unit/series/completeness → direct/context/collection-fact fragments，不保存第二份 provider envelope。
+- [x] 对 provider batch 生成唯一 CollectionManifest，保存 request range、series/pages/chunks、completed ranges、affected windows、counts 和 completion proof。
+- [x] 按最终 windows 分配 fragments 与 collection facts；技术性 incomplete 窗口 blocked/`incomplete_source`，独立 complete 窗口可继续，数据 coverage 另算。
+- [x] 建立每个 requested target 和 required discharge 的 `EvidenceCell`；只允许 direct/allowed-indirect 解锁，contextual/invalid 只能保留说明。
+- [x] 同一 series 内按 manifest policy 聚合；跨 series 保持独立供 Agent inspection/解释，不自动冲突、选优或合并。
+- [x] 保留 observed 资格闭包：只有一条 local direct record 加可逆展示 conversion；所有 aggregate/跨 series/upstream/weather/facility/history 标记 inferred candidate metadata。
+- [x] 实现 bundle builder/validator：reference-only、scope/closure/role 唯一、fragment/source/result refs 存在、每个 target 同窗 discharge cell 齐全。
+- [x] tool model preview 限于 32 records 或 16 KiB；完整 records 只保存一次并通过 inspection/full-content read 取得。
+- [x] bundle 写入前校验必需 refs 已持久化或同批原子提交；写入失败沿 M3 pending/retry，不把未确认事实宣称完成。
 
 ### Tests
 
-- [ ] direct valid/suspicious/invalid、successful empty、unit unresolved、partial coverage 和 technical incomplete 的逐窗 cell 状态正确。
-- [ ] target supported 但 discharge missing、discharge supported 但 target missing、部分窗口 supported 和全部 blocked 的 bundle 均确定。
-- [ ] 同 parameter 不同 station/method/fraction/statistic/series 分开；去重只接受稳定 identity 并合并 provenance。
-- [ ] aggregate/conversion closure、suspicious counts、applicability/relation、RAG candidate 和 observed/inferred eligibility 不丢失。
-- [ ] reference cycle、missing ref、cross-scope ref、duplicate cell/ref、inline raw arrays 和未持久化 ref 被拒绝。
-- [ ] 相同输入在并发/分页完成顺序变化下产生稳定 manifest、fragments、cells 和 bundle serialization。
+- [x] direct valid/suspicious/invalid、successful empty、unit unresolved、partial coverage 和 technical incomplete 的逐窗 cell 状态正确。
+- [x] target supported 但 discharge missing、discharge supported 但 target missing、部分窗口 supported 和全部 blocked 的 bundle 均确定。
+- [x] 同 parameter 不同 station/method/fraction/statistic/series 分开；去重只接受稳定 identity 并合并 provenance。
+- [x] aggregate/conversion closure、suspicious counts、applicability/relation、RAG candidate 和 observed/inferred eligibility 不丢失。
+- [x] reference cycle、missing ref、cross-scope ref、duplicate cell/ref、inline raw arrays 和未持久化 ref 被拒绝。
+- [x] 相同输入在并发/分页完成顺序变化下产生稳定 manifest、fragments、cells 和 bundle serialization。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_collection_service.py backend/tests/application/evidence_tools/test_bundle_builder.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_evidence.py -q`
-- [ ] 运行 deterministic fixture audit，重复执行比对 canonical bytes/digests。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_collection_service.py backend/tests/application/evidence_tools/test_bundle_builder.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_evidence.py -q`
+- [x] 运行 deterministic fixture audit，重复执行比对 canonical bytes/digests。
 
 阶段出口：fake/real adapter records 能形成 reference-complete、逐窗口、含 discharge 的唯一 bundle；尚未注册五类 transcript content 或接入生产 runtime。
 
 提交边界：collection/bundle services、validators、fixtures 和 focused tests；不得夹带 API route、M6 result 或 DAG scheduler。
+
+完成记录（2026-10-01）：
+
+- 实现：新增 source-to-fragment collection service 与 reference-only bundle builder；每个 provider batch 保存唯一 manifest，同次完整 records 去重后只写一次，按最终窗口生成 direct/context/collection facts 和 target/required-discharge cells。新增显式 observed/inferred/explanatory 资格、稳定 series/record identity、bounded preview、嵌套 closure/scope/role/cycle 校验；executor 已贯通多 manifest 结果，但未提前实现 M10 typed persistence/SSE、M11 acquisition workflow、公开 API 或 frontend。
+- 验证：清单 focused 为 `12 passed`，domain evidence 为 `103 passed`，deterministic canonical bytes/digest audit 为 `2 passed`；M1–M9 正式组合验收的 domain/application 为 `850 passed`、architecture 为 `102 passed`。Docker Engine `29.8.1` 与 PostgreSQL 17 healthy，进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1471 passed`，health 与 history/独立进程重启/startup-repair smoke 均通过；`compileall` 与 `git diff --check` 通过。
+- 限制与提交：真实 USGS/NWS/EPA provider 请求和 Linux/macOS CI 为 `not run`；M1–M9 原子实现及验收已完成，但 M5 整体仍有 Milestone 10–13。实现本地提交为 `21f9aa1`（`feat(m5): complete milestone 9 source-to-bundle`），未 push。
 
 ## Milestone 10：typed content、持久化、读取与两层 SSE
 
