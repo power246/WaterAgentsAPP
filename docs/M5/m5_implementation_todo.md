@@ -555,31 +555,37 @@
 
 ### 工作
 
-- [ ] 在 production `m5` composition 一次装配 settings、registry/policy、ports/adapters、executor、dedup、writer/reader 和 acquisition service；缺必需组件启动失败。
-- [ ] 保持 production FastAPI/OpenAPI 的既有 run/session routes，不 import/register test router，不新增 `/tools`、`/evidence/collect` 或等价入口。
-- [ ] 创建独立 `create_m5_test_app()`/test composition，显式挂载 `POST /__test__/m5/evidence-tools:execute` 和 test transcript read；production module import graph不可达。
-- [ ] test request 只接受 checked-in `fixture_scope_id`、tool name、window/parameter IDs 和有界 options；不接受 provider/base URL/secret/任意 COMID/station/geometry 或绕过 writer/scope 的开关。
-- [ ] fixture scope 创建合法合成 run/session/context/graph 并复用 production executor、registry、policy、dedup、writer、deserializer 和 error mapping；fake 只替换外部 ports。
-- [ ] test app 不通过环境变量在 production 开启，不进入发布入口/依赖，不由 frontend 调用。
-- [ ] 增加 opt-in provider smoke scripts：分 provider preflight、实际 request/page/record count、安全摘要和 `not run` 原因；脚本不默认执行、不打印 secret。
+- [x] 在 production `m5` composition 一次装配 settings、registry/policy、ports/adapters、executor、dedup、writer/reader 和 acquisition service；缺必需组件启动失败。
+- [x] 保持 production FastAPI/OpenAPI 的既有 run/session routes，不 import/register test router，不新增 `/tools`、`/evidence/collect` 或等价入口。
+- [x] 创建独立 `create_m5_test_app()`/test composition，显式挂载 `POST /__test__/m5/evidence-tools:execute` 和 test transcript read；production module import graph不可达。
+- [x] test request 只接受 checked-in `fixture_scope_id`、tool name、window/parameter IDs 和有界 options；不接受 provider/base URL/secret/任意 COMID/station/geometry 或绕过 writer/scope 的开关。
+- [x] fixture scope 创建合法合成 run/session/context/graph 并复用 production executor、registry、policy、dedup、writer、deserializer 和 error mapping；fake 只替换外部 ports。
+- [x] test app 不通过环境变量在 production 开启，不进入发布入口/依赖，不由 frontend 调用。
+- [x] 增加 opt-in provider smoke scripts：分 provider preflight、实际 request/page/record count、安全摘要和 `not run` 原因；脚本不默认执行、不打印 secret。
 
 ### Tests
 
-- [ ] production OpenAPI 精确不含 test/tool invocation path，production app import test modules 的 architecture guard 失败。
-- [ ] test app happy/empty/unavailable/invalid/cancel/dedup/inspection 可调用并能从真实 transcript path 读回 refs。
-- [ ] test request 对未知 fixture/tool、越权 window/parameter、任意 extra URL/secret/control 字段 strict 拒绝。
-- [ ] application direct test 与 test HTTP app 对同 fixture 产生同一 contract semantics，不维护简化第二实现。
-- [ ] production startup 配置缺失/非法与 test fake composition 的边界明确；frontend tree 无 test route 消费。
+- [x] production OpenAPI 精确不含 test/tool invocation path，production app import test modules 的 architecture guard 失败。
+- [x] test app happy/empty/unavailable/invalid/cancel/dedup/inspection 可调用并能从真实 transcript path 读回 refs。
+- [x] test request 对未知 fixture/tool、越权 window/parameter、任意 extra URL/secret/control 字段 strict 拒绝。
+- [x] application direct test 与 test HTTP app 对同 fixture 产生同一 contract semantics，不维护简化第二实现。
+- [x] production startup 配置缺失/非法与 test fake composition 的边界明确；frontend tree 无 test route 消费。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_m5_test_app.py backend/tests/infrastructure/test_m5_runtime.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] 导出 production OpenAPI 并断言不含 `/__test__`、`/tools`、`/evidence/collect`。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_m5_test_app.py backend/tests/infrastructure/test_m5_runtime.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] 导出 production OpenAPI 并断言不含 `/__test__`、`/tools`、`/evidence/collect`。
 
 阶段出口：production runtime 可供后续 waterbody Agent application 调用且无公开 invocation surface；独立 test app 能自动化验证同一真实执行链。
 
 提交边界：production/test composition、test-only router、smoke scripts、OpenAPI/architecture tests；不得修改 frontend 或接入 M6/M7/M8 production producer。
+
+#### Milestone 12 完成记录（2026-10-01）
+
+- 实现：production `m5` runtime 一次装配三类 official adapters、固定 policy/registry、唯一 transcript writer/reader、single-flight executor 与 acquisition service，并在应用 lifespan 内提供内部调用对象；M7/M8 producer 仍为 unavailable。独立 `create_m5_test_app()` 仅暴露两条 `__test__` 路由，以 checked-in 合成 scope 覆盖 happy/empty/unavailable/invalid/cancel/dedup/inspection，且复用同一 production execution chain；provider smoke 按 USGS/NWS/EPA 显式 opt-in，并仅输出安全计数摘要。
+- 验证：M12 指定 focused 为 `18 passed`，provider HTTP 联合 focused 为 `28 passed`，architecture 为 `104 passed`；Docker Engine `29.8.1` 与 PostgreSQL 17 healthy，进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的完整 backend 为 `1506 passed`。production OpenAPI 为既有 10 条路径且禁止路径为 0，`compileall` 与 `git diff --check` 通过。
+- 边界与提交：未修改 frontend，未新增 production tool route，未接入 M6/M7/M8 producer；真实 USGS/NWS/EPA 请求与三平台 CI 为 `not run`。实现本地提交为 `6d4218a`（`feat(m5): complete milestone 12 runtime composition`），未 push。
 
 ## Milestone 13：集成验收、契约审计与 M6–M8 接力
 
