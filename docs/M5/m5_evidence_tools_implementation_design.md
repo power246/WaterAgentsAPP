@@ -297,13 +297,14 @@ tool_call_id
 operation_id
 execution_status: completed | failed | cancelled
 collection_status: available | empty | unavailable | invalid | null
-manifest_ref
+manifest_refs[]
 fragment_refs[]
 collection_fact_refs[]
-request_count
-page_count
-record_count
+source_record_refs[]
+counts: {requests, pages, records, fragments}
 deduplicated
+deduplicated_from_operation_id
+deduplicated_from_result_ref
 safe_error: null | {code, message, retryable}
 ```
 

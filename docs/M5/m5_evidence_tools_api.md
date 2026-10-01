@@ -136,6 +136,8 @@ JSON numbers representing measured values are serialized as normalized decimal s
 
 `rag_eligible` for this content is always false。完整 provider envelope、response headers 与 secret 不写入公共正文。
 
+timeline/SSE 的 public projection 保留 manifest 摘要，并提供 `record_count`、最多 32 条且受 16 KiB 总预算约束的 `records` preview 与 `records_truncated`；只保留无 query/fragment/user-info 的官方 HTTPS source URI，任意其他 URL 投影为 `null`。完整的已脱敏 normalized records 仍只在该 item 正文保存一次，并通过既有 content route 按 run/item ownership 读取。
+
 ## 5. `evidence_fragment v1`
 
 ### 5.1 Direct record
@@ -193,6 +195,7 @@ JSON numbers representing measured values are serialized as normalized decimal s
     "registry_digest": "sha256:manifest-digest",
     "operation_id": "019d1c65-145e-77ef-a85e-608e489d5004"
   },
+  "result_eligibility": "observed_or_inferred",
   "rag_eligible": true
 }
 ```
@@ -251,6 +254,7 @@ JSON numbers representing measured values are serialized as normalized decimal s
     "registry_digest": "sha256:manifest-digest"
   },
   "provenance": {"operation_id": "019d1c65-145e-77ef-a85e-608e489d5004"},
+  "result_eligibility": "inferred_only",
   "rag_eligible": true
 }
 ```
@@ -297,6 +301,7 @@ aggregate 仍是 direct-measurement applicability，因为输入是本地直接�
   "source_record_refs": [],
   "derivation": null,
   "provenance": {"operation_id": "019d1c65-145e-77ef-a85e-608e489d5004"},
+  "result_eligibility": "explanatory_only",
   "rag_eligible": false
 }
 ```
@@ -313,23 +318,20 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
   "tool_name": "collect_water_observations",
   "execution_status": "completed",
   "collection_status": "available",
-  "manifest_ref": {
-    "item_id": "019d1c65-17ab-78d0-a807-972e81864005",
-    "batch_ids": ["batch-0001"]
-  },
+  "manifest_refs": [
+    {"item_id": "019d1c65-17ab-78d0-a807-972e81864005"}
+  ],
   "fragment_refs": [
     {"item_id": "019d1c65-1a01-7890-a102-c9bc81c7a006", "evidence_id": "ev_01J8ZXB3VDD1QJJPDHVA3G3G8R"}
   ],
   "collection_fact_refs": [],
+  "source_record_refs": [
+    {"item_id": "019d1c65-17ab-78d0-a807-972e81864005", "record_id": "usgs-feature-id-1"}
+  ],
   "counts": {"requests": 1, "pages": 1, "records": 20, "fragments": 2},
   "deduplicated": false,
   "deduplicated_from_operation_id": null,
-  "preview": {
-    "available_windows": 1,
-    "empty_windows": 1,
-    "blocked_windows": 0,
-    "quality": {"valid": 1, "suspicious": 1, "invalid": 0}
-  },
+  "deduplicated_from_result_ref": null,
   "safe_error": null,
   "completed_at": "2026-09-29T02:12:42.031Z"
 }
@@ -382,6 +384,7 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
     {"item_id": "019d1c65-1b03-7994-8654-810497c14007", "evidence_id": "ev_01J8ZXDGDJ6S1BEHCMCN9ZE92A"}
   ],
   "source_record_item_refs": ["019d1c65-17ab-78d0-a807-972e81864005"],
+  "closure_refs": [],
   "tool_result_refs": [{"item_id": "019d1c65-1d05-7520-a145-f6666cc6d008"}],
   "quality_summary": {"valid": 1, "suspicious": 1, "invalid": 0},
   "collection_summary": {"available": 2, "empty": 0, "unavailable": 0, "invalid": 0},

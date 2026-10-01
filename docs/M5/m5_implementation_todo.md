@@ -478,32 +478,38 @@
 
 ### 工作
 
-- [ ] 注册 `evidence_tool_call v1`、`evidence_source_records v1`、`evidence_fragment v1`、`evidence_tool_result v1`、`evidence_bundle v1` 的 model/deserializer/reference extractor/public projection/redaction/visibility/size/corruption handler。
-- [ ] 正常写入顺序为 call → zero/more source batches → fragments/facts → result → final bundle；失败/cancel 路径保存实际存在的 immutable facts，不补假成功。
-- [ ] source records 完整正文只存一次；fragment/result/bundle 使用 item/evidence refs，禁止复制 raw arrays 或相同摘要成为第二事实源。
-- [ ] 复用 M3 inline/reference/preview/full-content 和 pending/retry 语义；大内容公开 preview 有界，全文读取验证 run/session/item ownership。
-- [ ] session SSE 继续只发送 `transcript_item`，使用原 session-local cursor/replay/stream_end；不增加 evidence SSE event 或第三条流。
-- [ ] run SSE 只投影轻量 session/run/persistence 状态，不复制 tool、records、fragments 或 bundle 正文。
-- [ ] 当前/历史 reader、strict `view=history`、补写、重启修复、取消可见性和 corruption issues 支持五类内容。
-- [ ] public projection 保留安全 provider/source URI、时间、质量、coverage、单位、applicability、provenance/ref；删除 secret、raw body、内部 exception、任意 URL 和 test controls。
+- [x] 注册 `evidence_tool_call v1`、`evidence_source_records v1`、`evidence_fragment v1`、`evidence_tool_result v1`、`evidence_bundle v1` 的 model/deserializer/reference extractor/public projection/redaction/visibility/size/corruption handler。
+- [x] 正常写入顺序为 call → zero/more source batches → fragments/facts → result → final bundle；失败/cancel 路径保存实际存在的 immutable facts，不补假成功。
+- [x] source records 完整正文只存一次；fragment/result/bundle 使用 item/evidence refs，禁止复制 raw arrays 或相同摘要成为第二事实源。
+- [x] 复用 M3 inline/reference/preview/full-content 和 pending/retry 语义；大内容公开 preview 有界，全文读取验证 run/session/item ownership。
+- [x] session SSE 继续只发送 `transcript_item`，使用原 session-local cursor/replay/stream_end；不增加 evidence SSE event 或第三条流。
+- [x] run SSE 只投影轻量 session/run/persistence 状态，不复制 tool、records、fragments 或 bundle 正文。
+- [x] 当前/历史 reader、strict `view=history`、补写、重启修复、取消可见性和 corruption issues 支持五类内容。
+- [x] public projection 保留安全 provider/source URI、时间、质量、coverage、单位、applicability、provenance/ref；删除 secret、raw body、内部 exception、任意 URL 和 test controls。
 
 ### Tests
 
-- [ ] 五类 content 的 schema round-trip、unknown schema、corrupt body、reference extraction、inline/reference 和 history reload 完整。
-- [ ] writer partial failure、pending/retry exhaustion/manual retry、同批 refs、PostgreSQL reload 和 startup repair 不产生悬空 bundle。
-- [ ] session SSE 首次补齐、重连 cursor、已结束 stream_end、cancel late output 和大正文 reference 行为沿用 M3。
-- [ ] source batch/result/bundle 不重复正文；公开 preview/全文/API/SSE/日志全出口脱敏扫描通过。
-- [ ] production registry/OpenAPI/schema fixtures 原子同步，不保留旧 evidence field union。
+- [x] 五类 content 的 schema round-trip、unknown schema、corrupt body、reference extraction、inline/reference 和 history reload 完整。
+- [x] writer partial failure、pending/retry exhaustion/manual retry、同批 refs、PostgreSQL reload 和 startup repair 不产生悬空 bundle。
+- [x] session SSE 首次补齐、重连 cursor、已结束 stream_end、cancel late output 和大正文 reference 行为沿用 M3。
+- [x] source batch/result/bundle 不重复正文；公开 preview/全文/API/SSE/日志全出口脱敏扫描通过。
+- [x] production registry/OpenAPI/schema fixtures 原子同步，不保留旧 evidence field union。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/test_transcript_registry.py backend/tests/application/test_run_writer.py backend/tests/api backend/tests/persistence -q`（PostgreSQL 无安全配置时单独记 `not run`）
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_run_sse_smoke.py backend/tests/architecture -q`
-- [ ] 导出实际 OpenAPI 和 production registry，核对五类 content、旧字段清除和无新 SSE event。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/test_transcript_registry.py backend/tests/application/test_run_writer.py backend/tests/api backend/tests/persistence -q`（PostgreSQL 无安全配置时单独记 `not run`）
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_run_sse_smoke.py backend/tests/architecture -q`
+- [x] 导出实际 OpenAPI 和 production registry，核对五类 content、旧字段清除和无新 SSE event。
 
 阶段出口：五类 M5 原事实能通过当前 M3 storage/read/SSE 路径完整交付且引用闭合；尚未接入 station-backed/stationless acquisition 主路径。
 
 提交边界：typed registry、writer/reader/projection/SSE/persistence integration 和 tests；不得新增 production tool route、frontend 或最终推理。
+
+#### Milestone 10 完成记录（2026-10-01）
+
+- 实现：五类 M5 V1 content 已注册到唯一 production registry；`EvidenceTranscriptStore` 仅通过现有 `RunCoordinator` reserve/finalize 与唯一 `TranscriptReader` 写读，source records 按 manifest 分 item 且每条正文只保存一次，fragment/result/bundle 只保留闭合引用。source public projection 有 32 records/16 KiB 上限，只公开去 query/fragment/user-info 的官方 HTTPS URI；完整正文、inline/reference、strict history、session SSE 与 run snapshot 均沿用 M3。未接 M11 acquisition workflow、M12 production composition/test route、frontend 或最终推理。
+- 验证：M10 focused `206 passed`，文档指定 registry/writer/API/PostgreSQL 门禁 `333 passed`，SSE smoke/architecture `113 passed`，domain/application `856 passed`，含进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的完整 backend `1478 passed`；五类内容真实 PostgreSQL reload/startup repair、`compileall`、`git diff --check`、实际 OpenAPI/production registry 与旧字段扫描均通过。Docker Engine `29.8.1`、PostgreSQL 17 容器 healthy；真实 provider 与三平台 CI 为 `not run`。
+- 提交：本地实现提交 `9d91dff`；未 push。
 
 ## Milestone 11：station-backed / stationless acquisition contract
 
