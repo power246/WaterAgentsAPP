@@ -2,7 +2,7 @@
 
 更新日期：2026-10-01
 
-> 当前状态：Milestone 0–5 已完成，Milestone 6–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
+> 当前状态：Milestone 0–6 已完成，Milestone 7–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
 
 本清单执行以下已确认文档：
 
@@ -324,31 +324,38 @@
 
 ### 工作
 
-- [ ] 实现 USGS OGC v1 continuous/daily adapter，使用 M4 monitoring-location/time-series identity、ParameterKey 和 UTC interval；只跟随官方 `rel=next` HTTPS link，不猜 offset。
-- [ ] `X-Api-Key` 只来自后端配置/header；公开 provenance 使用安全 source URI，不保存/输出 credential 或未脱敏 query。
-- [ ] continuous 为 6h/12h/24h 主要通道；daily 只在 channel policy 接受 provider interval statistic 时使用，不把 daily mean/max 当原始瞬时值再次任意聚合。
-- [ ] 实现 Samples `/results/narrow` 流式 CSV：固定官方参数与 `mimeType=text/csv`，unknown column 忽略，缺 required column/非法 row/超 byte 或 record limit 为明确 invalid/too-large。
-- [ ] direct discharge 复用 observation adapter，但保持 `usgs:00060` 或其他已登记 discharge ParameterKey/statistic；adapter 不自行制造 gage-height/basin estimate。
-- [ ] 每页/stream 产生标准化 SourceRecord 与 completion facts；provider envelope 只存在于 checked-in contract fixture，不写 transcript。
-- [ ] 实现 bounded retry/cancel：幂等 GET 最多 2 attempts，下一页/retry 前检查 deadline/cancel；技术失败不 fallback、不 stale-cache、不变 empty。
+- [x] 实现 USGS OGC v1 continuous/daily adapter，使用 M4 monitoring-location/time-series identity、ParameterKey 和 UTC interval；只跟随官方 `rel=next` HTTPS link，不猜 offset。
+- [x] `X-Api-Key` 只来自后端配置/header；公开 provenance 使用安全 source URI，不保存/输出 credential 或未脱敏 query。
+- [x] continuous 为 6h/12h/24h 主要通道；daily 只在 channel policy 接受 provider interval statistic 时使用，不把 daily mean/max 当原始瞬时值再次任意聚合。
+- [x] 实现 Samples `/results/narrow` 流式 CSV：固定官方参数与 `mimeType=text/csv`，unknown column 忽略，缺 required column/非法 row/超 byte 或 record limit 为明确 invalid/too-large。
+- [x] direct discharge 复用 observation adapter，但保持 `usgs:00060` 或其他已登记 discharge ParameterKey/statistic；adapter 不自行制造 gage-height/basin estimate。
+- [x] 每页/stream 产生标准化 SourceRecord 与 completion facts；provider envelope 只存在于 checked-in contract fixture，不写 transcript。
+- [x] 实现 bounded retry/cancel：幂等 GET 最多 2 attempts，下一页/retry 前检查 deadline/cancel；技术失败不 fallback、不 stale-cache、不变 empty。
 
 ### Tests
 
-- [ ] OGC continuous/daily normal、empty、approved/working、qualifier、unit/time/statistic、next-page、重复 identity 和 malformed fixture。
-- [ ] Samples normal/empty/quoted field/unknown column/缺列/非法数值/detection qualifier/byte/record limit/stream failure fixture。
-- [ ] 00060 和其他登记 discharge 通道保持参数与统计身份；不存在把估算值伪装 direct 的路径。
-- [ ] page 2 timeout/rate limit/invalid 时保留 page 1 records，complete 与 affected windows 判定不靠“少于 page size”等猜测。
-- [ ] request URI/header/log/error/transcript projection 的 secret 与 raw body 扫描通过。
+- [x] OGC continuous/daily normal、empty、approved/working、qualifier、unit/time/statistic、next-page、重复 identity 和 malformed fixture。
+- [x] Samples normal/empty/quoted field/unknown column/缺列/非法数值/detection qualifier/byte/record limit/stream failure fixture。
+- [x] 00060 和其他登记 discharge 通道保持参数与统计身份；不存在把估算值伪装 direct 的路径。
+- [x] page 2 timeout/rate limit/invalid 时保留 page 1 records，complete 与 affected windows 判定不靠“少于 page size”等猜测。
+- [x] request URI/header/log/error/transcript projection 的 secret 与 raw body 扫描通过。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_usgs_observations.py backend/tests/application/evidence_tools/test_usgs_collection.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_provider_http.py backend/tests/observability -q`
-- [ ] 可选 USGS contract smoke 先 preflight；无真实请求时记录 `not run`。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_usgs_observations.py backend/tests/application/evidence_tools/test_usgs_collection.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_provider_http.py backend/tests/observability -q`
+- [x] 可选 USGS contract smoke 先 preflight；无真实请求时记录 `not run`。
 
 阶段出口：checked-in fixtures 下能从 USGS 官方契约稳定得到 actual water/discharge SourceRecords 和 completeness；尚未构造 fragments/bundle 或接入 Agent。
 
 提交边界：USGS adapters、official contract fixtures、配置和 focused tests；不得夹带 NWS/EPA、tool registry、workflow 或 public route。
+
+完成记录（2026-10-01）：
+
+- 实现：新增同一 `UsgsObservationAdapter` 的 OGC continuous/daily、Samples narrow CSV 与 direct discharge 路径；只消费已授权 station/series/ParameterKey/UTC range，按官方 HTTPS `rel=next`、完整 CSV stream 和安全 completion facts 返回标准化 SourceRecord。API key 统一改为 `X-Api-Key` header；partial page failure 保留既有 records 但不猜 completed range，也未加入估算、fallback、fragment/bundle、Agent、NWS/EPA、registry、workflow 或公开路由。
+- 验证：两条清单命令分别为 `21 passed`、`76 passed`，architecture 为 `102 passed`；Docker Engine `29.8.1` 与 PostgreSQL 17 healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1422 passed`。health 为 healthy，run-history 的 history、独立进程重启与启动修复均通过；`compileall`、fixture JSON 解析和 `git diff --check` 通过。
+- 限制：真实 adapter USGS contract smoke 未显式 opt-in，0 次 smoke request，记为 `not run`；Linux/macOS CI 亦为 `not run`。本项仍只是 M1–M9 原子任务内部切片，正式整体验收在 Milestone 9 完成后开始。
+- 提交：本地实现提交 `56fdb6f`（`feat(m5): complete milestone 6 USGS observations`）；未 push。
 
 ## Milestone 7：NWS weather 与 EPA facility adapters
 
