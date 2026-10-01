@@ -516,7 +516,7 @@ M5 阶段不修改当前 frontend，也不接入 test route。
 }
 ```
 
-自然 empty 不产生 HTTP error；它作为成功 tool result + collection fact 保存。provider unavailable/invalid、scope violation、budget exceeded 等产生 typed error/result，并按 workflow 所在阶段决定 session/run 技术终态。
+自然 empty 不产生 HTTP error；它作为成功 tool result + collection fact 保存。未知工具，以及 roster、session/window/parameter、跨工具 options 或必需 request shape 的预检授权失败，都在合法 call 形成前拒绝，不写 `evidence_tool_call/result`；独立 test API 对这类请求返回 HTTP 422。合法 call 写入后的 producer unavailable、provider invalid、budget exceeded、cancelled 或执行期授权/引用失败产生 typed error/result，并按 workflow 所在阶段决定 session/run 技术终态。
 
 ## 13. 仅测试 HTTP 调用面
 
@@ -543,6 +543,8 @@ GET  /__test__/m5/runs/{run_id}/transcript
 ```
 
 fixture scope 在 test composition 中映射为合法 run/session/context/graph。请求不接受 provider、base URL、secret、任意 COMID/station/geometry 或关闭写入/授权的开关。
+
+test route 只把上述预检拒绝映射为 HTTP 422；一旦合法 call 已持久化，后续 completed/failed/cancelled 均返回 HTTP 200 和 typed result，以便验证 call/result 审计闭合。production application 不暴露该 tool invocation route。
 
 这些路由：
 

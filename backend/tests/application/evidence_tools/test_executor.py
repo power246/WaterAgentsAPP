@@ -91,6 +91,71 @@ def test_scope_violation_is_rejected_before_audit_records(evidence_scope) -> Non
     asyncio.run(exercise())
 
 
+@pytest.mark.parametrize(
+    "case",
+    (
+        "stationless_local_observation",
+        "stateless_transcript_search",
+        "cross_tool_option",
+        "missing_facility_radius",
+        "missing_conversion_inputs",
+        "missing_aggregation_inputs",
+        "missing_inspection_source",
+    ),
+)
+def test_descriptor_preflight_rejects_without_side_effects(
+    scope_factory,
+    context_factory,
+    case,
+) -> None:
+    async def exercise() -> None:
+        scope = scope_factory()
+        tool_name = "collect_water_observations"
+        options = EvidenceToolOptions()
+        producer_statuses = None
+        if case == "stationless_local_observation":
+            scope = scope_factory(with_station=False)
+        elif case == "stateless_transcript_search":
+            scope = scope_factory(
+                context=context_factory(memory_mode=MemoryMode.STATELESS)
+            )
+            tool_name = "search_transcript_evidence"
+            options = EvidenceToolOptions(record_limit=10)
+            producer_statuses = {
+                "search_transcript_evidence": EvidenceProducerStatus.READY
+            }
+        elif case == "cross_tool_option":
+            options = EvidenceToolOptions(include_forecast=True)
+        elif case == "missing_facility_radius":
+            tool_name = "collect_facility_evidence"
+        elif case == "missing_conversion_inputs":
+            tool_name = "convert_evidence_unit"
+        elif case == "missing_aggregation_inputs":
+            tool_name = "aggregate_evidence"
+        elif case == "missing_inspection_source":
+            tool_name = "inspect_evidence_records"
+
+        store = MemoryEvidenceStore()
+        prepared_scopes = []
+        runtime = executor(
+            store,
+            producer_statuses=producer_statuses,
+            scope_preparer=prepared_scopes.append,
+        )
+
+        with pytest.raises(EvidenceScopeViolationError):
+            await runtime.execute(
+                scope,
+                request(scope, tool_name, f"call-{case}", options=options),
+            )
+
+        assert prepared_scopes == []
+        assert store.calls == []
+        assert store.results == []
+
+    asyncio.run(exercise())
+
+
 def executor(
     store,
     *,

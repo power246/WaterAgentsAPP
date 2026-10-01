@@ -260,7 +260,7 @@ class EvidenceBundleBuilder:
                             set(rule.input_parameters).intersection(
                                 fragment.parameter_refs
                             )
-                            and _rule_fragment_applies(
+                            and temporal_relation_matches(
                                 rule.temporal_relation,
                                 fragment.time_range,
                                 window.time_range,
@@ -452,21 +452,6 @@ def _fragment_applies(fragment, window_id, window):
     if isinstance(fragment.payload, CollectionFactPayload):
         return window_id in fragment.payload.affected_window_ids
     return fragment.time_range.overlaps(window)
-
-
-def _rule_fragment_applies(
-    relation,
-    source,
-    target,
-    *,
-    analysis_timezone,
-):
-    return temporal_relation_matches(
-        relation,
-        source,
-        target,
-        analysis_timezone=analysis_timezone,
-    )
 
 
 def _bundle_id(scope, fragment_refs, tool_result_refs):

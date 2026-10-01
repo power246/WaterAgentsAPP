@@ -185,13 +185,16 @@ class EvidenceToolExecutor:
         descriptor = self._registry.get(request.tool_name)
         if descriptor is None:
             raise EvidenceScopeViolationError()
-        if self._scope_preparer is not None:
-            self._scope_preparer(scope)
+        if not self._registry.is_scope_authorized(scope, descriptor):
+            raise EvidenceScopeViolationError()
         authorize_evidence_tool_request(
             scope,
             request,
             max_agent_record_limit=self._limits.inspection_max_page_size,
         )
+        self._authorize_request_preflight(request, descriptor)
+        if self._scope_preparer is not None:
+            self._scope_preparer(scope)
         operation_id = self._operation_id_factory()
         await self._writer.write_call(
             scope,
@@ -200,7 +203,7 @@ class EvidenceToolExecutor:
             policy=descriptor.policy_class,
         )
         try:
-            self._authorize_descriptor(scope, request, descriptor)
+            self._ensure_producer_ready(descriptor)
             scope.cancel_token.checkpoint()
             canonical_key = canonical_request_key(
                 scope,
@@ -331,16 +334,7 @@ class EvidenceToolExecutor:
     def live_dedup_counts(self, run_id: str) -> tuple[int, int]:
         return self._single_flight.live_counts(run_id)
 
-    def _authorize_descriptor(self, scope, request, descriptor) -> None:
-        if scope.mode not in descriptor.allowed_modes:
-            raise EvidenceScopeViolationError()
-        if (
-            descriptor.name == "collect_water_observations"
-            and not scope.station_refs
-        ):
-            raise EvidenceScopeViolationError()
-        if descriptor.producer_status is EvidenceProducerStatus.UNAVAILABLE:
-            raise EvidenceProducerUnavailableError()
+    def _authorize_request_preflight(self, request, descriptor) -> None:
         supplied = set(
             request.options.model_dump(
                 mode="python",
@@ -376,6 +370,11 @@ class EvidenceToolExecutor:
         elif request.tool_name == "inspect_evidence_records":
             if options.source_item_id is None:
                 raise EvidenceScopeViolationError()
+
+    @staticmethod
+    def _ensure_producer_ready(descriptor) -> None:
+        if descriptor.producer_status is EvidenceProducerStatus.UNAVAILABLE:
+            raise EvidenceProducerUnavailableError()
 
     def _reserve_budget(
         self,

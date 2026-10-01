@@ -329,7 +329,7 @@ max_result_preview_bytes
 producer_status
 ```
 
-tool roster 由 server 按 session scope 生成：stationless 节点不注册本地 observation tool；`memory_mode=stateless` 不注册 transcript search；M7/M8 producer 未接入时保留 descriptor 供 contract test，但 production roster 不向 Agent 暴露不可执行工具。
+tool roster 由 server 按 session scope 生成：stationless 节点不注册本地 observation tool；`memory_mode=stateless` 不注册 transcript search；M7/M8 producer 未接入时保留 descriptor 供 contract test，但 production roster 不向 Agent 暴露不可执行工具。roster 与 executor 共用同一个 scope authorization predicate；producer readiness 与 scope authorization 分离，合法内部调用仍可得到 producer-unavailable typed result。
 
 ## 6. Provider 实现
 
@@ -486,7 +486,7 @@ run_id + agent_comid + tool_name + normalized parameters
 4. `evidence_tool_result v1`
 5. `evidence_bundle v1`
 
-正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。未知工具或 session/window/parameter 越权属于尚未形成合法调用的 preflight rejection，不写 call/result；合法 call 持久化成功后，包含已请求取消在内的运行期结局才写 completed/failed/cancelled result。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
+正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。未知工具，以及 roster、session/window/parameter、跨工具 options 或缺少 descriptor 必需 request shape，属于尚未形成合法调用的 preflight rejection；它们不得触发 scope preparer，也不写 call/result。合法 call 持久化成功后，producer unavailable、budget、provider failure 和已请求取消等运行期结局才写 completed/failed/cancelled result。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
 
 dispatch 已确认写入 manifest/source/fragment 后，即使紧接着发生 deadline 或取消，失败/取消 result 也必须携带这些已确认 references；不得回退为空 value，也不得把该 operation 放入成功 dedup cache。
 

@@ -106,6 +106,7 @@ FIXTURE_SCOPE_IDS = (
     "station-backed-unavailable",
     "station-backed-invalid",
     "station-backed-cancelled",
+    "stationless-two-windows",
 )
 
 
@@ -388,6 +389,7 @@ async def _create_test_composition() -> M5TestComposition:
         "station-backed-unavailable": "unavailable",
         "station-backed-invalid": "invalid",
         "station-backed-cancelled": "cancelled",
+        "stationless-two-windows": "stationless",
     }
     for fixture_scope_id in FIXTURE_SCOPE_IDS:
         scenario = scenario_by_fixture[fixture_scope_id]
@@ -458,7 +460,10 @@ async def _create_fixture_scope(
         1,
         context,
     )
-    graph = _hydrology_graph(station_id)
+    graph = _hydrology_graph(
+        station_id,
+        with_station=not fixture_scope_id.startswith("stationless-"),
+    )
     topology_item = await coordinator.reserve_transcript_item(created.run_id)
     await coordinator.finalize_transcript_item(
         created.run_id,
@@ -571,7 +576,11 @@ def _analysis_context() -> AnalysisContext:
     )
 
 
-def _hydrology_graph(station_id: str) -> HydrologyGraph:
+def _hydrology_graph(
+    station_id: str,
+    *,
+    with_station: bool = True,
+) -> HydrologyGraph:
     geometry = WaterbodyGeometry.from_coordinates(
         source_comid="123",
         coordinates=((-77.01, 39.0), (-76.99, 39.0)),
@@ -597,14 +606,16 @@ def _hydrology_graph(station_id: str) -> HydrologyGraph:
         depth=0,
         cumulative_distance_km=0,
         is_target=True,
-        is_inlet=True,
+        is_inlet=with_station,
         participation=HydrologyParticipation.ACTIVE,
-        qualified_units=(unit,),
-        station_refs=(station,),
+        qualified_units=((unit,) if with_station else ()),
+        station_refs=((station,) if with_station else ()),
     )
     return HydrologyGraph(
         target_comid="123",
-        coverage=TopologyCoverage.COMPLETE,
+        coverage=(
+            TopologyCoverage.COMPLETE if with_station else TopologyCoverage.NONE
+        ),
         nodes=(node,),
         geometries={geometry.geometry_ref: geometry},
         edges=(),
@@ -612,10 +623,18 @@ def _hydrology_graph(station_id: str) -> HydrologyGraph:
             BranchOutcome(
                 branch_root_comid="123",
                 coverage_unit=unit,
-                outcome=BranchOutcomeStatus.QUALIFIED,
+                outcome=(
+                    BranchOutcomeStatus.QUALIFIED
+                    if with_station
+                    else BranchOutcomeStatus.NO_QUALIFYING_SOURCE
+                ),
                 stop_comid="123",
                 path_to_target=("123",),
-                reason=BranchOutcomeReason.TARGET_STATION_QUALIFIED,
+                reason=(
+                    BranchOutcomeReason.TARGET_STATION_QUALIFIED
+                    if with_station
+                    else BranchOutcomeReason.NATURAL_HEADWATER
+                ),
             ),
         ),
         execution_layers=(ComidLayer(("123",)),),
@@ -625,7 +644,7 @@ def _hydrology_graph(station_id: str) -> HydrologyGraph:
             queried_nodes=1,
             max_depth=0,
             max_distance_km=0,
-            qualified_inlets=1,
+            qualified_inlets=int(with_station),
             excluded_nodes=0,
         ),
     )

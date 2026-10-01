@@ -219,6 +219,49 @@ def test_request_rejects_unknown_fixture_tool_window_parameter_and_option() -> N
         ).status_code == 422
 
 
+@pytest.mark.parametrize(
+    ("fixture_scope_id", "overrides"),
+    (
+        ("stationless-two-windows", {}),
+        (
+            HAPPY_FIXTURE,
+            {
+                "tool_name": "search_transcript_evidence",
+                "options": {"record_limit": 10},
+            },
+        ),
+        (HAPPY_FIXTURE, {"options": {"include_forecast": True}}),
+        (HAPPY_FIXTURE, {"tool_name": "collect_facility_evidence"}),
+        (HAPPY_FIXTURE, {"tool_name": "convert_evidence_unit"}),
+        (HAPPY_FIXTURE, {"tool_name": "aggregate_evidence"}),
+        (HAPPY_FIXTURE, {"tool_name": "inspect_evidence_records"}),
+    ),
+)
+def test_descriptor_preflight_returns_422_without_audit_records(
+    fixture_scope_id,
+    overrides,
+) -> None:
+    application = create_m5_test_app()
+    with TestClient(application) as client:
+        scope = application.state.m5_test_composition.fixtures[fixture_scope_id].scope
+        response = client.post(
+            "/__test__/m5/evidence-tools:execute",
+            json=_payload(application, fixture_scope_id, **overrides),
+        )
+
+        assert response.status_code == 422
+        transcript = client.get(
+            f"/__test__/m5/runs/{scope.run_id}/transcript"
+        ).json()
+        evidence_audit_items = tuple(
+            item
+            for item in transcript["items"]
+            if item["content_type"]
+            in {"evidence_tool_call", "evidence_tool_result"}
+        )
+        assert evidence_audit_items == ()
+
+
 def test_direct_application_and_http_use_the_same_executor_contract() -> None:
     direct_app = create_m5_test_app()
     with TestClient(direct_app) as direct_client:

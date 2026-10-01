@@ -56,6 +56,11 @@ def test_production_roster_filters_scope_and_unavailable_producer_slots(
     assert "collect_water_observations" not in names(registry.roster(stationless))
     assert "search_transcript_evidence" not in names(registry.roster(stateful))
     assert "get_upstream_results" not in names(registry.roster(stateful))
+    assert all(
+        registry.is_scope_authorized(stationless, descriptor)
+        == (descriptor.name in names(registry.roster(stationless, production=False)))
+        for descriptor in registry.descriptors
+    )
     assert names(registry.descriptors) == TOOL_NAMES
 
 

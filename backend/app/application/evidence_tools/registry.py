@@ -37,6 +37,22 @@ class EvidenceToolRegistry:
     def get(self, name: str) -> EvidenceToolDescriptor | None:
         return self._by_name.get(name)
 
+    def is_scope_authorized(
+        self,
+        scope: EvidenceSessionScope,
+        descriptor: EvidenceToolDescriptor,
+    ) -> bool:
+        if scope.mode not in descriptor.allowed_modes:
+            return False
+        if descriptor.name == "collect_water_observations" and not scope.station_refs:
+            return False
+        if (
+            descriptor.name == "search_transcript_evidence"
+            and scope.memory_mode is MemoryMode.STATELESS
+        ):
+            return False
+        return True
+
     def roster(
         self,
         scope: EvidenceSessionScope,
@@ -45,14 +61,7 @@ class EvidenceToolRegistry:
     ) -> tuple[EvidenceToolDescriptor, ...]:
         visible: list[EvidenceToolDescriptor] = []
         for descriptor in self._descriptors:
-            if scope.mode not in descriptor.allowed_modes:
-                continue
-            if descriptor.name == "collect_water_observations" and not scope.station_refs:
-                continue
-            if (
-                descriptor.name == "search_transcript_evidence"
-                and scope.memory_mode is MemoryMode.STATELESS
-            ):
+            if not self.is_scope_authorized(scope, descriptor):
                 continue
             if (
                 production

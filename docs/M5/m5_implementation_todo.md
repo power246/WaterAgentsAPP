@@ -400,8 +400,8 @@
 ### 工作
 
 - [x] 实现八个固定 tool descriptors：collection 三项、M7/M8 producer slots、conversion、aggregation、inspection；descriptor 包含 typed request/result、policy class、scope requirements、limits 和 producer status。
-- [x] 按 session scope 生成 roster：stationless 不注册 local observation；stateless 不注册 transcript search；M7/M8 producer unavailable 时 production 不暴露不可执行工具，contract test 仍可验证 slot schema。
-- [x] 实现唯一 `EvidenceToolExecutor.execute(scope, request)`：descriptor/scope preflight → call writer → budget → canonical key/single-flight → port/policy → typed result；未知工具和越权请求在合法 call 形成前拒绝，不写孤立 result。
+- [x] 按 session scope 生成 roster：stationless 不注册 local observation；stateless 不注册 transcript search；roster 与 executor 共用同一 scope authorization predicate；M7/M8 producer unavailable 时 production 不暴露不可执行工具，contract test 仍可验证 slot schema。
+- [x] 实现唯一 `EvidenceToolExecutor.execute(scope, request)`：descriptor/scope/options/request-shape preflight → scope preparer → call writer → budget → canonical key/single-flight → port/policy → typed result；未知工具和越权请求在合法 call 形成前拒绝，不写孤立 result。
 - [x] canonical request key 使用 run_id、agent_comid、tool、normalized options、sorted windows 和 manifest/policy digest；相同 run/scope/key 共享 in-flight operation。
 - [x] 每次调用仍生成自己的 call/result；success reuse 标记 `deduplicated=true` 并引用原 operation/result，不复制 source/fragment；failed/cancelled 不进入 success cache，不跨 run 复用。
 - [x] budget 分开计算 external collection 与 deterministic transforms；同义拆分仍归入 canonical accounting，deadline/cancel 在新请求、下一页、retry、transform、bundle 和 downstream handoff 前检查。
@@ -417,7 +417,7 @@
 - [x] collection/transform call budget、deadline、pages/records/bytes/preview/inspection limits 的边界与错误确定。
 - [x] cancel 胜出后不发新页/retry/transform、不写 final bundle、不向下游交付晚到响应。
 - [x] inspection 的 ownership、offset/limit、稳定排序、full-content read 和无 provider I/O 可证明。
-- [x] 未知工具与越权 scope 为 `0 call / 0 result`；已形成合法 call 的 unavailable/budget/timeout/cancel 保持 call/result 成对。
+- [x] 未知工具、roster/scope 越权、跨工具 option 和缺少必需 transform 参数为 `0 scope prepare / 0 call / 0 result`；已形成合法 call 的 unavailable/budget/timeout/cancel 保持 call/result 成对。
 
 ### Verify
 
@@ -637,6 +637,7 @@
 - 外部边界：USGS `usgs_waterdata_ogc_v1` 因缺 station 配置、NWS `nws_api_linked_data_v1` 因联系信息仍为 `.invalid`、EPA `epa_echo_cwa_v1` 因缺 LineString 配置，均为 `0 requests / 0 pages / 0 records / not run`；Ubuntu/macOS/Windows 三平台 CI 为 `not run`，因此中心 deferred contract 不登记 `implemented`。
 - 提交：M13 集成 smoke、审计与 API 契约修正为本地提交 `1f9f7d9`；未 push。
 - 复审修正：`adjacent_local_day` 统一按 IANA 当地自然日判断并覆盖 DST；M7 upstream output 在写入前复核直接上游 COMID、同 run session/COMID/completed、参数、窗口与引用归属；未知工具及 scope 越权在 call 前拒绝为 `0 call / 0 result`，合法 call 的取消仍保留 cancelled result。首轮完整回归因取消与 test API 仍沿用旧预检语义出现 `2 failed / 1528 passed`，分离预检与运行期取消并将 test API preflight 映射为 422 后，预检/API focused `12 passed`、当地自然日 focused `3 passed`、隔离 PostgreSQL 完整 backend `1531 passed`，health/history 与独立进程 restart/repair smoke 通过。
+- 复审修正（descriptor preflight）：registry roster 与 executor 共用 scope authorization；stationless/stateless、跨工具 options、facility/transform/inspection 必需 request shape 均在 scope preparer 和 call writer 前拒绝为 HTTP 422、`0 call / 0 result`，producer unavailable/cancel/budget 仍保留合法 call/result。删除 bundle 的单层时间策略转发函数；focused `46 passed`、evidence-tools/API/architecture `199 passed`、隔离 PostgreSQL 完整 backend `1545 passed`，health/history 与独立进程 restart/repair smoke 通过。
 
 ## 契约覆盖矩阵（实施时填写）
 
@@ -652,7 +653,7 @@
 | M5-C16 / M5-A04 | 本机已验证 | transcript registry/store、既有 M3 writer/reader/SSE | typed registry、PostgreSQL reload/repair、SSE/OpenAPI | 五类 content 与全文引用通过专用 PostgreSQL；production 无 tool route。 |
 | M5-C18 | 本机已验证 | `runtime/m5.py`；独立 `runtime/m5_test.py` | runtime import guard、test app/OpenAPI | production import graph 不含 test composition；frontend 未接入。 |
 | M5-C19 / M5-C20 / M5-A07 | 本机已验证 | applicability/RAG policy；registry producer slots | candidate gates、roster、runtime composition | candidate 只是 M8 输入；M7/M8 production producer 保持 unavailable，无 hidden fake。 |
-| M5-A08 / GLOBAL-C01–C11 | partial | M1–M5 当前 `backend/` 与 project contracts | 完整 backend `1531 passed`、architecture `108 passed`、PostgreSQL/history | Windows 本机与专用 PostgreSQL已验证；真实 providers 和 Ubuntu/macOS/Windows 同提交 CI 为 `not run`。 |
+| M5-A08 / GLOBAL-C01–C11 | partial | M1–M5 当前 `backend/` 与 project contracts | 完整 backend `1545 passed`、architecture `108 passed`、PostgreSQL/history | Windows 本机与专用 PostgreSQL已验证；真实 providers 和 Ubuntu/macOS/Windows 同提交 CI 为 `not run`。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码或 fixture 存在填写已验证；本机、PostgreSQL、外部 provider 和三平台 CI 证据分开记录。
 
