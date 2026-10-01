@@ -515,35 +515,41 @@
 
 ### 工作
 
-- [ ] 实现 session-scoped acquisition service，要求调用方提供已存在且准备执行的真实 waterbody session；M5 不因 topology 节点存在而预建 session。
-- [ ] station-backed 在首次水体模型调用前确定性执行 `collect_water_observations`，查询当前水体全部适用目标通道并始终包含 local discharge direct channel。
-- [ ] station-backed 成功查询后若所有适用窗口均无 usable target/discharge direct evidence，写完真实 calls/results/facts/bundle 并返回 `stop_before_model`；不调用模型、不造 fake message/confidence/value。
-- [ ] station-backed 只要任一 target 或 discharge cell 有 usable direct evidence即可继续 optional acquisition；其余缺口保持 unsupported/blocked，不要求整分支全有或全无。
-- [ ] provider unavailable/invalid/incomplete/cancelled 不走自然全空 completed 路径；返回技术结果并保留已确认事实。
-- [ ] stationless roster 不含 local observation tool，也不发送注定 empty 的 USGS 请求；初始输入只消费 M7 direct-upstream slot 并允许 bounded optional tools。
-- [ ] `get_upstream_results` 未接 M7 时明确 unavailable/not registered；正常上游全 indeterminate 只传递 result/bundle/缺口 refs，不构造 `same_parameter_upstream` allowed evidence。
-- [ ] 每个 target/window 同时要求同窗 discharge direct/allowed cell；本地缺失时可消费 upstream 或已登记 discharge estimate relation，仍缺失时保持 indeterminate input。
-- [ ] weather 始终 optional；只有 Agent 选择的已登记 relation 需要时才调用，前置证据不完整则 relation 不成立。
-- [ ] 输出给 M6 的 contract 只包含 EvidenceBundleRef、cells、read ports、tool roster/executor 和 stop/block facts，不输出最终 InferenceResult。
+- [x] 实现 session-scoped acquisition service，要求调用方提供已存在且准备执行的真实 waterbody session；M5 不因 topology 节点存在而预建 session。
+- [x] station-backed 在首次水体模型调用前确定性执行 `collect_water_observations`，查询当前水体全部适用目标通道并始终包含 local discharge direct channel。
+- [x] station-backed 成功查询后若所有适用窗口均无 usable target/discharge direct evidence，写完真实 calls/results/facts/bundle 并返回 `stop_before_model`；不调用模型、不造 fake message/confidence/value。
+- [x] station-backed 只要任一 target 或 discharge cell 有 usable direct evidence即可继续 optional acquisition；其余缺口保持 unsupported/blocked，不要求整分支全有或全无。
+- [x] provider unavailable/invalid/incomplete/cancelled 不走自然全空 completed 路径；返回技术结果并保留已确认事实。
+- [x] stationless roster 不含 local observation tool，也不发送注定 empty 的 USGS 请求；初始输入只消费 M7 direct-upstream slot 并允许 bounded optional tools。
+- [x] `get_upstream_results` 未接 M7 时明确 unavailable/not registered；正常上游全 indeterminate 只传递 result/bundle/缺口 refs，不构造 `same_parameter_upstream` allowed evidence。
+- [x] 每个 target/window 同时要求同窗 discharge direct/allowed cell；本地缺失时可消费 upstream 或已登记 discharge estimate relation，仍缺失时保持 indeterminate input。
+- [x] weather 始终 optional；只有 Agent 选择的已登记 relation 需要时才调用，前置证据不完整则 relation 不成立。
+- [x] 输出给 M6 的 contract 只包含 EvidenceBundleRef、cells、read ports、tool roster/executor 和 stop/block facts，不输出最终 InferenceResult。
 
 ### Tests
 
-- [ ] station-backed full usable、完整查询但 empty/仅有 row-level quality-invalid records、部分 evidence、provider protocol/transport technical failure、cancel 五条路径。
-- [ ] 全空停止路径有真实 session/call/result/facts/bundle，downstream fake model call count 为 0；session 最终 completed/indeterminate 由 M6 接力，不由 M5造结果。
-- [ ] stationless 不调用 local observation；direct upstream usable、upstream indeterminate、upstream unavailable、optional weather/facility 的组合稳定。
-- [ ] 每个窗口 target + discharge 的 supported/unsupported/blocked 组合和 `stop_before_model` 判断确定；未知 discharge 从不变 0。
-- [ ] M4 availability 只影响 plan，不成为 actual record/fragment；下游不能直接查询上游 station。
-- [ ] weather 未调用不算技术失败；选用天气 relation 后缺天气/流量前置时不能通过。
+- [x] station-backed full usable、完整查询但 empty/仅有 row-level quality-invalid records、部分 evidence、provider protocol/transport technical failure、cancel 五条路径。
+- [x] 全空停止路径有真实 session/call/result/facts/bundle，downstream fake model call count 为 0；session 最终 completed/indeterminate 由 M6 接力，不由 M5造结果。
+- [x] stationless 不调用 local observation；direct upstream usable、upstream indeterminate、upstream unavailable、optional weather/facility 的组合稳定。
+- [x] 每个窗口 target + discharge 的 supported/unsupported/blocked 组合和 `stop_before_model` 判断确定；未知 discharge 从不变 0。
+- [x] M4 availability 只影响 plan，不成为 actual record/fragment；下游不能直接查询上游 station。
+- [x] weather 未调用不算技术失败；选用天气 relation 后缺天气/流量前置时不能通过。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_acquisition_workflow.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m5_evidence_workflow_smoke.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/test_query_topology_workflow.py backend/tests/smoke/test_m4_workflow_smoke.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_acquisition_workflow.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m5_evidence_workflow_smoke.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/test_query_topology_workflow.py backend/tests/smoke/test_m4_workflow_smoke.py -q`
 
 阶段出口：station-backed/stationless 在 fake runtime 中产生正确 M6 输入和停止/继续事实，且未实现 M6 最终结果、M7 DAG 或水体模型 loop。
 
 提交边界：acquisition service、M6 handoff DTO、fake integration/smoke tests；不得实现 final inference、DAG scheduling、RAG producer 或 frontend。
+
+#### Milestone 11 完成记录（2026-10-01）
+
+- 实现：新增仅接受 sealed `EvidenceSessionScope` 的 station-backed/stationless acquisition service 与 reference-only M6 handoff；有站水体先执行真实 observation/discharge preflight，全空时写完 call/result/facts/bundle 后 `stop_before_model`，部分证据继续 optional。无站水体不暴露/调用 local observation，只消费 M7 producer slot；producer 未接时显式 unavailable，上游 indeterminate 保持 contextual，不提升为 `same_parameter_upstream`。target/window 与同窗 discharge 形成联合 gate，技术失败和取消保留已确认批次并只补缺失窗口的 unavailable facts。
+- 验证：清单三组命令分别为 `7 passed`、`1 passed`、`13 passed`；M5/domain/architecture focused 为 `285 passed`，domain/application 为 `863 passed`。Docker Engine `29.8.1`、PostgreSQL 17 healthy，进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的完整 backend 为 `1486 passed`；`compileall` 与 `git diff --check` 通过。
+- 边界与提交：未实现 M6 final inference、M7 DAG、M8 RAG producer、Milestone 12 composition/test app、production route 或 frontend；真实 USGS/NWS/EPA provider 与三平台 CI 为 `not run`。实现本地提交为 `2b74cc0`（`feat(m5): complete milestone 11 acquisition contract`），未 push。
 
 ## Milestone 12：production composition 与独立 test app
 
