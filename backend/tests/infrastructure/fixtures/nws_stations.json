@@ -1,0 +1,11 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "https://api.weather.gov/stations/KDCA",
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-77.0377, 38.8521]},
+      "properties": {"stationIdentifier": "KDCA"}
+    }
+  ]
+}

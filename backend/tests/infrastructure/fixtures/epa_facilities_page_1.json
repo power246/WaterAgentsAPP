@@ -1,0 +1,35 @@
+{
+  "Results": {
+    "Message": "Success",
+    "Version": "v2026",
+    "QueryRows": "3",
+    "QueryID": "qid-101",
+    "PageNo": "1",
+    "Facilities": [
+      {
+        "RegistryID": "110000000001",
+        "SourceID": "MD0000001",
+        "NPDESIDs": "MD0000001",
+        "Statute": "CWA",
+        "CWPName": "Inside Facility",
+        "CWPPermitStatusDesc": "Effective",
+        "CWPPermitTypeDesc": "NPDES Individual Permit",
+        "CWPFacilityTypeIndicator": "NON-POTW",
+        "CWPCity": "Example",
+        "CWPState": "MD",
+        "FacLat": "0.005",
+        "FacLong": "0.005"
+      },
+      {
+        "RegistryID": "110000000002",
+        "SourceID": "MD0000002",
+        "NPDESIDs": "MD0000002",
+        "Statute": "CWA",
+        "CWPName": "Coordinate Pending",
+        "CWPPermitStatusDesc": "Effective",
+        "FacLat": "",
+        "FacLong": ""
+      }
+    ]
+  }
+}

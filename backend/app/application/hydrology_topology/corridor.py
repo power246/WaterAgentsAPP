@@ -201,8 +201,13 @@ def filter_facilities_to_corridor(
         if distance_km > maximum_distance_km + 1e-9:
             continue
         payload = record.model_dump(mode="python")
+        stable_distance = float(f"{distance_km:.9f}")
         payload["location"] = record.location.model_copy(
-            update={"distance_to_target_km": float(f"{distance_km:.9f}")}
+            update={"distance_to_target_km": stable_distance}
+        ).model_dump(mode="python")
+        payload["spatially_in_scope"] = True
+        payload["provenance"] = record.provenance.model_copy(
+            update={"facility_final_distance_km": stable_distance}
         ).model_dump(mode="python")
         if record.provenance.provider_record_id is None:
             payload["record_id"] = None

@@ -10,10 +10,18 @@ class EvidenceLocation(DomainModel):
     point: GeoPoint | None
     comid: NonEmptyString | None
     station_id: NonEmptyString | None
+    provider_location_id: NonEmptyString | None = None
     distance_to_target_km: Annotated[DomainFloat, Field(ge=0)] | None
 
     @model_validator(mode="after")
     def require_location_identity(self) -> Self:
-        if self.point is None and self.comid is None and self.station_id is None:
-            raise ValueError("point, comid, or station_id is required")
+        if (
+            self.point is None
+            and self.comid is None
+            and self.station_id is None
+            and self.provider_location_id is None
+        ):
+            raise ValueError(
+                "point, comid, station_id, or provider_location_id is required"
+            )
         return self

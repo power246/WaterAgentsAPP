@@ -115,6 +115,11 @@ class AppSettings(BaseSettings):
     evidence_preview_max_records: int = Field(default=32, ge=1, le=32)
     evidence_preview_max_bytes: int = Field(default=16_384, ge=1024, le=16_384)
     evidence_facility_max_centers: int = Field(default=32, ge=1, le=32)
+    nws_user_agent_project: str = Field(default="WaterAgents", min_length=1)
+    nws_user_agent_contact: str = Field(
+        default="wateragents@example.invalid",
+        min_length=1,
+    )
     google_geocoding_api_key: SecretStr | None = None
     usgs_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
@@ -258,6 +263,13 @@ class AppSettings(BaseSettings):
         ):
             raise ValueError("openai_base_url must be an HTTP(S) URL")
         return normalized
+
+    @field_validator("nws_user_agent_project", "nws_user_agent_contact")
+    @classmethod
+    def validate_nws_user_agent_part(cls, value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise ValueError("NWS User-Agent values must be single-line text")
+        return value
 
     @field_validator("log_level", mode="before")
     @classmethod

@@ -190,11 +190,15 @@ def valid_source_records() -> tuple[object, ...]:
         issued_at=WINDOW.start - timedelta(hours=1),
         weather_variable="temperature",
         value="12.00",
+        duration_seconds=3600,
+        statistic="forecast_value",
     )
     facility = FacilityRecord(
         **source_base(
             record_type="facility",
-            location=point_location(),
+            location=point_location().model_copy(
+                update={"distance_to_target_km": None}
+            ),
             raw_unit=None,
             source_provenance=provenance(provider_record_id="facility-1"),
         ),

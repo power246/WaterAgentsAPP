@@ -1,6 +1,6 @@
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 
 from app.domain.common import CanonicalDecimal, NonEmptyString, UtcDatetime
 from app.domain.evidence.source_record_base import _SourceRecordBase
@@ -12,6 +12,8 @@ class WeatherForecastRecord(_SourceRecordBase):
     issued_at: UtcDatetime
     weather_variable: NonEmptyString
     value: CanonicalDecimal
+    duration_seconds: Annotated[int, Field(strict=True, ge=0)]
+    statistic: NonEmptyString
 
     @model_validator(mode="after")
     def validate_forecast(self) -> Self:
