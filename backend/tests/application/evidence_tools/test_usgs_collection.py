@@ -47,10 +47,14 @@ def request() -> WaterObservationRequest:
 
 WINDOWS = (
     EvidenceWindow(
-        window_id="window-1", time_range=TimeRange(start=START, end=MID)
+        window_id="window-1",
+        time_range=TimeRange(start=START, end=MID),
+        segment_index=0,
     ),
     EvidenceWindow(
-        window_id="window-2", time_range=TimeRange(start=MID, end=END)
+        window_id="window-2",
+        time_range=TimeRange(start=MID, end=END),
+        segment_index=0,
     ),
 )
 

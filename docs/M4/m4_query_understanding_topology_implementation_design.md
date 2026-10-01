@@ -322,13 +322,15 @@ StationAvailability
   comid
   provider
   covered_units[]
-  series_refs[]
+  series_refs[]: (series_identity, ParameterKey, channel, covered_segment_indexes)
   checked_at
 ```
 
 `coverage_units` 必须由用户目标参数与自动支持参数的去重并集生成，因此每个 time segment 都包含 discharge。discharge 已是用户目标时仍只查询一次；支持参数和目标参数在图中共用同一个 `ParameterKey` 身份，但结果层保留角色来源。
 
 coverage unit 是“参数 × time segment”，不是只按参数。历史段只有在 metadata 的 earliest/latest envelope 覆盖请求段，或 capability 指定的 existence probe 在段内发现记录时才取得候选资格；预测段要求相同参数最近观测时间不早于预测起点前 48 小时。metadata envelope 只是“可能覆盖”，M5 必须读取真实记录并验证空洞、质量、单位和精度。
+
+保存进拓扑的 series reference 必须保留 ParameterKey、provider channel 与覆盖的 segment indexes；M5 只可为这些精确组合生成 provider 请求，不能把同一裸 series identity 与节点上的其他参数或 channel 做笛卡尔积。
 
 站点与河段关联来自 NLDI 或同等级水文关联事实，不能只按坐标最近距离。成功空结果返回空 tuple；限流、超时、无效响应和 provider unavailable 抛出类型化 port error。topology builder 只把前者解释为没有合格站点。
 

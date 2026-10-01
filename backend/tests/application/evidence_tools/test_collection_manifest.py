@@ -27,8 +27,8 @@ SECOND = TimeRange(
 )
 REQUEST_RANGE = TimeRange(start=FIRST.start, end=SECOND.end)
 WINDOWS = (
-    EvidenceWindow(window_id="window-000", time_range=FIRST),
-    EvidenceWindow(window_id="window-001", time_range=SECOND),
+    EvidenceWindow(window_id="window-000", time_range=FIRST, segment_index=0),
+    EvidenceWindow(window_id="window-001", time_range=SECOND, segment_index=0),
 )
 
 

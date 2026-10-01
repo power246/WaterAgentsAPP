@@ -284,6 +284,7 @@ class RecordingInventory:
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id=f"USGS-{request.comid}",
                 parameter=unit.parameter,
+                channel="continuous",
                 series_identity=(
                     f"series-{request.comid}-{unit.parameter.code}-{unit.segment_index}"
                 ),

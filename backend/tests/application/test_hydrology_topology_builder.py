@@ -234,6 +234,7 @@ class FakeInventory:
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id=station_id,
                 parameter=unit.parameter,
+                channel="continuous",
                 series_identity=(
                     f"series-{request.comid}-{unit.parameter.code}-{unit.segment_index}"
                 ),

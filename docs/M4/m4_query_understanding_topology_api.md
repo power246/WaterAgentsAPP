@@ -343,7 +343,14 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
         {
           "provider": "wdfn_time_series",
           "station_id": "USGS-01234567",
-          "series_refs": ["series-safe-identifier"]
+          "series_refs": [
+            {
+              "series_identity": "series-safe-identifier",
+              "parameter": {"code_system": "usgs", "code": "00060"},
+              "channel": "continuous",
+              "covered_segment_indexes": [0]
+            }
+          ]
         }
       ],
       "excluded_reasons": []

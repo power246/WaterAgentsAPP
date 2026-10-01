@@ -32,7 +32,14 @@
         {
           "provider": "wdfn_time_series",
           "station_id": "USGS-123",
-          "series_refs": ["series-123"]
+          "series_refs": [
+            {
+              "series_identity": "series-123",
+              "parameter": {"code_system": "usgs", "code": "00060"},
+              "channel": "continuous",
+              "covered_segment_indexes": [0]
+            }
+          ]
         }
       ],
       "excluded_reasons": []

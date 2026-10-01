@@ -70,6 +70,7 @@ from app.domain.hydrology.topology_coverage import TopologyCoverage
 from app.domain.hydrology.topology_limits import TopologyLimits
 from app.domain.hydrology.topology_search_stats import TopologySearchStats
 from app.domain.hydrology.topology_station_ref import TopologyStationRef
+from app.domain.hydrology.topology_series_ref import TopologySeriesRef
 from app.domain.hydrology.usgs_parameter_metadata import UsgsParameterMetadata
 from app.domain.hydrology.unit_definition import UnitDefinition
 from app.domain.hydrology.unit_kind import UnitKind
@@ -137,6 +138,7 @@ __all__ = [
     "TopologyLimits",
     "TopologySearchStats",
     "TopologyStationRef",
+    "TopologySeriesRef",
     "UsgsParameterMetadata",
     "UnitDefinition",
     "UnitKind",

@@ -18,6 +18,7 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    TopologySeriesRef,
     WaterbodyGeometry,
 )
 
@@ -41,7 +42,14 @@ def target_node() -> HydrologyNode:
             TopologyStationRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id="USGS-123",
-                series_refs=("series-123",),
+                series_refs=(
+                    TopologySeriesRef(
+                        series_identity="series-123",
+                        parameter=UNIT.parameter,
+                        channel="continuous",
+                        covered_segment_indexes=(0,),
+                    ),
+                ),
             ),
         ),
     )

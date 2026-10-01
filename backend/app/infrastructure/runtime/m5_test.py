@@ -69,6 +69,7 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    TopologySeriesRef,
     WaterObservationRecord,
     WaterbodyGeometry,
     canonical_model_bytes,
@@ -573,7 +574,14 @@ def _hydrology_graph(station_id: str) -> HydrologyGraph:
     station = TopologyStationRef(
         provider=ParameterProvider.WDFN_TIME_SERIES,
         station_id=station_id,
-        series_refs=(f"series-{station_id.casefold()}",),
+        series_refs=(
+            TopologySeriesRef(
+                series_identity=f"series-{station_id.casefold()}",
+                parameter=SUPPORT_PARAMETER,
+                channel="continuous",
+                covered_segment_indexes=(0,),
+            ),
+        ),
     )
     node = HydrologyNode(
         comid="123",

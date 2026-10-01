@@ -32,6 +32,7 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    TopologySeriesRef,
     WaterbodyGeometry,
 )
 from app.ports import (
@@ -785,19 +786,53 @@ class HydrologyGraphBuilder:
         qualified_units: tuple[CoverageUnit, ...],
     ) -> tuple[TopologyStationRef, ...]:
         selected = set(qualified_units)
-        grouped: dict[tuple[ParameterProvider, str], set[str]] = {}
+        grouped: dict[
+            tuple[ParameterProvider, str],
+            dict[tuple[str, ParameterKey, str], set[int]],
+        ] = {}
         for item in availability:
             for reference in item.series_refs:
-                if selected.intersection(reference.covered_units):
-                    grouped.setdefault(
+                covered = selected.intersection(reference.covered_units)
+                if covered:
+                    station_series = grouped.setdefault(
                         (reference.provider, item.station.station_id),
-                        set(),
-                    ).add(reference.series_identity)
+                        {},
+                    )
+                    key = (
+                        reference.series_identity,
+                        reference.parameter,
+                        reference.channel,
+                    )
+                    station_series.setdefault(key, set()).update(
+                        unit.segment_index for unit in covered
+                    )
         return tuple(
             TopologyStationRef(
                 provider=provider,
                 station_id=station_id,
-                series_refs=tuple(sorted(series_refs)),
+                series_refs=tuple(
+                    sorted(
+                        (
+                            TopologySeriesRef(
+                                series_identity=series_identity,
+                                parameter=parameter,
+                                channel=channel,
+                                covered_segment_indexes=tuple(sorted(indexes)),
+                            )
+                            for (
+                                series_identity,
+                                parameter,
+                                channel,
+                            ), indexes in series_refs.items()
+                        ),
+                        key=lambda reference: (
+                            reference.parameter.code_system,
+                            reference.parameter.code,
+                            reference.channel,
+                            reference.series_identity,
+                        ),
+                    )
+                ),
             )
             for (provider, station_id), series_refs in sorted(
                 grouped.items(),

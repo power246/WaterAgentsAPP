@@ -28,6 +28,7 @@ _SCOPE_SEAL = object()
 class EvidenceWindow:
     window_id: str
     time_range: TimeRange
+    segment_index: int
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -145,7 +146,11 @@ def assemble_evidence_session_scope(
         raise ValueError("agent geometry reference must resolve in saved topology")
 
     windows = tuple(
-        EvidenceWindow(window_id=f"window-{index:03d}", time_range=value)
+        EvidenceWindow(
+            window_id=f"window-{index:03d}",
+            time_range=value,
+            segment_index=_segment_index(context, value),
+        )
         for index, value in enumerate(
             build_time_windows(
                 context.time_range,
@@ -187,6 +192,16 @@ def assemble_evidence_session_scope(
         cancel_token=cancel_token,
         _seal=_SCOPE_SEAL,
     )
+
+
+def _segment_index(context: AnalysisContext, window: TimeRange) -> int:
+    for segment in context.time_segments:
+        if (
+            window.start >= segment.time_range.start
+            and window.end <= segment.time_range.end
+        ):
+            return segment.segment_index
+    raise ValueError("result window must belong to one analysis segment")
 
 
 def _build_query_envelope(context: AnalysisContext) -> TimeRange:

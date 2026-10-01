@@ -28,6 +28,7 @@ REFERENCE = SeriesRef(
     provider=ParameterProvider.WDFN_TIME_SERIES,
     station_id="USGS-A",
     parameter=DISCHARGE,
+    channel="continuous",
     series_identity="wdfn:v1:series-a",
     coverage_source=(
         AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_ENVELOPE

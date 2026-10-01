@@ -39,6 +39,7 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    TopologySeriesRef,
     WaterbodyGeometry,
 )
 from app.infrastructure.config import load_parameter_capability_registry
@@ -153,7 +154,14 @@ def make_graph(
             TopologyStationRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id="USGS-123",
-                series_refs=("series-123",),
+                series_refs=(
+                    TopologySeriesRef(
+                        series_identity="series-123",
+                        parameter=SUPPORT_PARAMETER,
+                        channel="continuous",
+                        covered_segment_indexes=(0,),
+                    ),
+                ),
             ),
         )
         if with_station
@@ -185,7 +193,14 @@ def make_graph(
             TopologyStationRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id="USGS-200",
-                series_refs=("series-200",),
+                series_refs=(
+                    TopologySeriesRef(
+                        series_identity="series-200",
+                        parameter=SUPPORT_PARAMETER,
+                        channel="continuous",
+                        covered_segment_indexes=(0,),
+                    ),
+                ),
             ),
         ),
     )

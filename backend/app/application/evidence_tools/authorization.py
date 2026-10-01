@@ -75,6 +75,7 @@ def build_water_observation_plans(
     if request.tool_name != "collect_water_observations":
         raise EvidenceScopeViolationError()
     plans: list[WaterObservationRequest] = []
+    requested_segments = {window.segment_index for window in authorized.windows}
     for station in scope.station_refs:
         for parameter in authorized.parameters:
             capability = registry.get(parameter)
@@ -88,18 +89,37 @@ def build_water_observation_plans(
                 and station.provider in capability.observation_providers
             )
             for policy in policies:
+                series_refs = tuple(
+                    reference.series_identity
+                    for reference in station.series_refs
+                    if reference.parameter == parameter
+                    and reference.channel == policy.channel
+                    and requested_segments.intersection(
+                        reference.covered_segment_indexes
+                    )
+                )
+                affected_windows = tuple(
+                    window.window_id
+                    for window in authorized.windows
+                    if any(
+                        window.segment_index in reference.covered_segment_indexes
+                        for reference in station.series_refs
+                        if reference.parameter == parameter
+                        and reference.channel == policy.channel
+                    )
+                )
+                if not series_refs or not affected_windows:
+                    continue
                 plans.append(
                     WaterObservationRequest(
                         operation_id=f"{operation_id}-{len(plans) + 1:03d}",
                         provider=station.provider,
                         channel=policy.channel,
                         station_id=station.station_id,
-                        series_refs=station.series_refs,
+                        series_refs=series_refs,
                         parameter_keys=(parameter,),
                         request_range=scope.query_envelope,
-                        affected_window_ids=tuple(
-                            window.window_id for window in authorized.windows
-                        ),
+                        affected_window_ids=affected_windows,
                     )
                 )
     if scope.station_refs and not plans:
@@ -221,22 +241,36 @@ def _authorize_water_request(
         ),
         None,
     )
-    if station is None or request.series_refs != station.series_refs:
+    if station is None or len(request.parameter_keys) != 1:
         raise EvidenceStationNotAuthorizedError()
-    for parameter in request.parameter_keys:
-        policy = registry.get_channel_policy(
-            parameter,
-            request.provider,
-            request.channel,
-        )
-        capability = registry.get(parameter)
-        if (
-            policy is None
-            or not policy.direct_observation
-            or capability is None
-            or request.provider not in capability.observation_providers
-        ):
-            raise EvidenceScopeViolationError()
+    parameter = request.parameter_keys[0]
+    policy = registry.get_channel_policy(
+        parameter,
+        request.provider,
+        request.channel,
+    )
+    capability = registry.get(parameter)
+    if (
+        policy is None
+        or not policy.direct_observation
+        or capability is None
+        or request.provider not in capability.observation_providers
+    ):
+        raise EvidenceScopeViolationError()
+    affected_segments = {
+        window.segment_index
+        for window in scope.time_windows
+        if window.window_id in request.affected_window_ids
+    }
+    expected_series = tuple(
+        reference.series_identity
+        for reference in station.series_refs
+        if reference.parameter == parameter
+        and reference.channel == request.channel
+        and affected_segments.intersection(reference.covered_segment_indexes)
+    )
+    if request.series_refs != expected_series:
+        raise EvidenceStationNotAuthorizedError()
 
 
 def _authorize_time_range(scope: EvidenceSessionScope, request_range) -> None:
