@@ -361,32 +361,39 @@
 
 ### 工作
 
-- [ ] 实现 NWS `/points/{lat},{lon}` discovery，只跟随返回的同源 `api.weather.gov` HTTPS forecast/grid/station links；User-Agent 使用配置的项目和联系信息。
-- [ ] 历史观测从 discovered station observations 读取，forecast 优先 grid data，保留 issued_at、valid range、variable、unit、duration/statistic 和 provider quality。
-- [ ] weather adapter 只返回 records/completeness，不声明对某水质参数的 relation；applicability 由 policy registry 决定。
-- [ ] 实现 EPA ECHO CWA `get_facilities` query-only GET：固定 JSON、CWA/NPDES 所需公开字段、responseset/pagination 上限和安全 URI。
-- [ ] facility adapter 逐 corridor center 使用 planner 的 provider radius，请求完成后按 facility/permit identity 去重，再以 full LineString + Agent exact radius 最终过滤。
-- [ ] provenance 保存 Agent radius、provider radius、sample centers、request/page identity、dedup 和 final distance；Agent 不能提交中心点或 URL。
-- [ ] facility 默认始终 `contextual_only`；缺坐标记录保留质量/审计事实但不能伪造距离或通过空间过滤。
-- [ ] 两类 adapter 都遵守统一 timeout/retry/cancel/size/completeness/error 语义，无 fallback provider。
+- [x] 实现 NWS `/points/{lat},{lon}` discovery，只跟随返回的同源 `api.weather.gov` HTTPS forecast/grid/station links；User-Agent 使用配置的项目和联系信息。
+- [x] 历史观测从 discovered station observations 读取，forecast 优先 grid data，保留 issued_at、valid range、variable、unit、duration/statistic 和 provider quality。
+- [x] weather adapter 只返回 records/completeness，不声明对某水质参数的 relation；applicability 由 policy registry 决定。
+- [x] 实现 EPA ECHO CWA `get_facilities` query-only GET：固定 JSON、CWA/NPDES 所需公开字段、responseset/pagination 上限和安全 URI。
+- [x] facility adapter 逐 corridor center 使用 planner 的 provider radius，请求完成后按 facility/permit identity 去重，再以 full LineString + Agent exact radius 最终过滤。
+- [x] provenance 保存 Agent radius、provider radius、sample centers、request/page identity、dedup 和 final distance；Agent 不能提交中心点或 URL。
+- [x] facility 默认始终 `contextual_only`；缺坐标记录保留质量/审计事实但不能伪造距离或通过空间过滤。
+- [x] 两类 adapter 都遵守统一 timeout/retry/cancel/size/completeness/error 语义，无 fallback provider。
 
 ### Tests
 
-- [ ] NWS point discovery、同源校验、observation、grid forecast、valid interval、单位、missing/control fields 和 malformed fixture。
-- [ ] weather optional：prediction mode 本身不触发请求；未登记 relation 不提升 applicability。
-- [ ] ECHO single/multi-center、pagination、重复 facility/permit、边界内外、缺坐标、radius round-up 和 provider failure fixture。
-- [ ] long/curved geometry 的所有中心都被查询或在请求前因预算失败；绝不静默截断或 representative-point fallback。
-- [ ] NWS/EPA URI、headers、logs、typed content 和 errors 不含 secret、任意 Agent URL 或 raw provider envelope。
+- [x] NWS point discovery、同源校验、observation、grid forecast、valid interval、单位、missing/control fields 和 malformed fixture。
+- [x] weather optional：prediction mode 本身不触发请求；未登记 relation 不提升 applicability。
+- [x] ECHO single/multi-center、pagination、重复 facility/permit、边界内外、缺坐标、radius round-up 和 provider failure fixture。
+- [x] long/curved geometry 的所有中心都被查询或在请求前因预算失败；绝不静默截断或 representative-point fallback。
+- [x] NWS/EPA URI、headers、logs、typed content 和 errors 不含 secret、任意 Agent URL 或 raw provider envelope。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_nws_weather.py backend/tests/infrastructure/test_epa_echo_facilities.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_weather_collection.py backend/tests/application/evidence_tools/test_facility_collection.py -q`
-- [ ] 可选 NWS/EPA contract smoke 分开 preflight；0 请求或网络不满足记录 `not run`。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_nws_weather.py backend/tests/infrastructure/test_epa_echo_facilities.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_weather_collection.py backend/tests/application/evidence_tools/test_facility_collection.py -q`
+- [x] 可选 NWS/EPA contract smoke 分开 preflight；0 请求或网络不满足记录 `not run`。
 
 阶段出口：NWS/EPA fixture contract 可产生 typed records 与可信 completeness，空间和 relation 边界由 server 固定；尚未注册 Agent tools 或写 bundle。
 
 提交边界：NWS/EPA adapters、fixtures 和 focused tests；不得夹带 executor、transcript/API、M6 prompt 或 frontend。
+
+完成记录（2026-10-01）：
+
+- 实现：新增 NWS point discovery、station observation 官方分页与 grid forecast collector，配置化项目/联系 User-Agent，并对 discovery/pagination link 强制 `api.weather.gov` HTTPS 同源；新增 EPA ECHO CWA `get_facilities`/`get_qid` 有界分页、多中心查询、facility/permit 去重、完整 LineString 精确半径过滤及缺坐标审计记录。weather records 不携带 relation/applicability；facility 固定 `contextual_only`，provenance 保存 Agent/provider radius、全部命中中心、request/page identity、去重数和最终距离。两类 adapter 统一复用 M6 HTTP timeout/retry/cancel/byte limit 与 completion/error 语义，未加入 fallback、executor、bundle、workflow、公开路由或 frontend。
+- 验证：两条清单命令分别为 `10 passed`、`6 passed`；architecture 为 `102 passed`，domain/application 为 `819 passed`，Settings/health 为 `52 passed`。Docker Engine `29.8.1` 与项目 PostgreSQL 17 容器 healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的完整 backend 为 `1440 passed`；`compileall` 与 `git diff --check` 通过。
+- 限制：实现前已读取 NWS OpenAPI 与 EPA CWA Swagger 以固定 fixture/分页契约；真实 NWS/EPA 数据请求未显式 opt-in，0 次 provider smoke request，记为 `not run`；Linux/macOS CI 亦为 `not run`。本项仍只是 M1–M9 原子任务内部切片，正式整体验收在 Milestone 9 完成后开始。
+- 提交：本地实现提交 `44bda55`（`feat(m5): complete milestone 7 evidence adapters`）；未 push。
 
 ## Milestone 8：tool registry、executor 与 run-local single-flight
 
