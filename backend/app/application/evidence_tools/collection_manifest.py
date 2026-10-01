@@ -19,6 +19,7 @@ def build_collection_manifest(
     requested_series: tuple[str, ...],
     windows: tuple[EvidenceWindow, ...],
     batch: ProviderCollectionBatch[SourceRecord],
+    completion_applies_to_all_windows: bool = False,
 ) -> CollectionManifest:
     if not windows:
         raise ValueError("collection manifest requires affected windows")
@@ -27,7 +28,11 @@ def build_collection_manifest(
             raise ValueError("completed ranges must stay within the provider request")
 
     completeness = tuple(
-        _window_completeness(window, batch)
+        _window_completeness(
+            window,
+            batch,
+            completion_applies_to_all_windows=completion_applies_to_all_windows,
+        )
         for window in windows
     )
     all_complete = all(item.complete for item in completeness)
@@ -77,8 +82,14 @@ def require_complete_manifest(manifest: CollectionManifest) -> None:
 def _window_completeness(
     window: EvidenceWindow,
     batch: ProviderCollectionBatch[SourceRecord],
+    *,
+    completion_applies_to_all_windows: bool = False,
 ) -> WindowCompleteness:
-    complete = _range_is_covered(window.time_range, batch.completed_ranges)
+    complete = (
+        batch.completion_proof.complete
+        if completion_applies_to_all_windows
+        else _range_is_covered(window.time_range, batch.completed_ranges)
+    )
     if not complete:
         return WindowCompleteness(
             window_id=window.window_id,

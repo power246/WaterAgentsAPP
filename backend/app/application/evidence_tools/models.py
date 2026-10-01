@@ -6,7 +6,9 @@ from typing import Protocol
 from app.application.evidence_policy import PolicyObservation
 from app.application.evidence_tools.scope import EvidenceSessionScope
 from app.domain import (
+    CollectionManifest,
     CollectionStatus,
+    EvidenceBundle,
     EvidenceFragment,
     EvidenceFragmentReference,
     EvidenceToolRequest,
@@ -14,8 +16,11 @@ from app.domain import (
     InferenceMode,
     ItemReference,
     ProviderCollectionBatch,
+    ParameterKey,
+    ReferenceScope,
     SourceRecord,
     SourceRecordReference,
+    TimeRange,
 )
 
 
@@ -88,10 +93,32 @@ class EvidenceToolDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceCollectionArtifacts:
-    manifest_ref: ItemReference
+    manifest_refs: tuple[ItemReference, ...]
     source_record_refs: tuple[SourceRecordReference, ...]
     fragment_refs: tuple[EvidenceFragmentReference, ...] = ()
     collection_fact_refs: tuple[EvidenceFragmentReference, ...] = ()
+    record_preview: "EvidenceRecordPreview | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceRecordPreview:
+    records: tuple[SourceRecord, ...]
+    total_records: int
+    serialized_bytes: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceCollectionInput:
+    provider: str
+    channel: str
+    request_range: TimeRange
+    requested_series: tuple[str, ...]
+    parameter_keys: tuple[ParameterKey, ...]
+    affected_window_ids: tuple[str, ...]
+    batch: ProviderCollectionBatch[SourceRecord]
+    station_id: str | None = None
+    completion_applies_to_all_windows: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,7 +153,8 @@ class EvidenceToolWriter(Protocol):
         scope: EvidenceSessionScope,
         *,
         operation_id: str,
-        batches: tuple[ProviderCollectionBatch[SourceRecord], ...],
+        manifests: tuple[CollectionManifest, ...],
+        records: tuple[SourceRecord, ...],
     ) -> EvidenceCollectionArtifacts: ...
 
     async def write_fragment(
@@ -141,6 +169,12 @@ class EvidenceToolWriter(Protocol):
         self,
         scope: EvidenceSessionScope,
         result: EvidenceToolResult,
+    ) -> ItemReference: ...
+
+    async def write_bundle(
+        self,
+        scope: EvidenceSessionScope,
+        bundle: EvidenceBundle,
     ) -> ItemReference: ...
 
 
@@ -163,6 +197,11 @@ class EvidenceToolReader(Protocol):
         source_item_id: str,
     ) -> tuple[SourceRecord, ...]: ...
 
+    async def resolve_reference_scopes(
+        self,
+        item_ids: tuple[str, ...],
+    ) -> tuple[ReferenceScope, ...]: ...
+
 
 class EvidenceClock(Protocol):
     def now(self) -> datetime: ...
@@ -171,7 +210,7 @@ class EvidenceClock(Protocol):
 @dataclass(frozen=True, slots=True)
 class EvidenceOperationValue:
     collection_status: CollectionStatus | None = None
-    manifest_ref: ItemReference | None = None
+    manifest_refs: tuple[ItemReference, ...] = ()
     fragment_refs: tuple[EvidenceFragmentReference, ...] = ()
     collection_fact_refs: tuple[EvidenceFragmentReference, ...] = ()
     source_record_refs: tuple[SourceRecordReference, ...] = ()

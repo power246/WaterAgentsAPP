@@ -21,7 +21,7 @@ class EvidenceToolResult(DomainModel):
     tool_name: NonEmptyString
     execution_status: EvidenceToolExecutionStatus
     collection_status: CollectionStatus | None
-    manifest_ref: ItemReference | None = None
+    manifest_refs: tuple[ItemReference, ...] = ()
     fragment_refs: tuple[EvidenceFragmentReference, ...] = ()
     collection_fact_refs: tuple[EvidenceFragmentReference, ...] = ()
     source_record_refs: tuple[SourceRecordReference, ...] = ()
@@ -42,6 +42,14 @@ class EvidenceToolResult(DomainModel):
         ensure_unique_tuple(evidence_ids, field_name="tool result evidence IDs")
         return value
 
+    @field_validator("manifest_refs")
+    @classmethod
+    def validate_manifest_refs(
+        cls,
+        value: tuple[ItemReference, ...],
+    ) -> tuple[ItemReference, ...]:
+        return ensure_unique_tuple(value, field_name="tool result manifest refs")
+
     @field_validator("source_record_refs")
     @classmethod
     def validate_unique_record_refs(
@@ -52,10 +60,10 @@ class EvidenceToolResult(DomainModel):
 
     @model_validator(mode="after")
     def validate_status_matrix(self) -> Self:
-        if self.collection_status is None and self.manifest_ref is not None:
-            raise ValueError("manifest_ref requires collection_status")
-        if self.collection_status is not None and self.manifest_ref is None:
-            raise ValueError("collection_status requires manifest_ref")
+        if self.collection_status is None and self.manifest_refs:
+            raise ValueError("manifest_refs require collection_status")
+        if self.collection_status is not None and not self.manifest_refs:
+            raise ValueError("collection_status requires manifest_refs")
 
         if self.execution_status is EvidenceToolExecutionStatus.COMPLETED:
             if self.collection_status is CollectionStatus.UNAVAILABLE:
@@ -104,8 +112,7 @@ class EvidenceToolResult(DomainModel):
 
     def referenced_item_ids(self) -> tuple[str, ...]:
         item_ids: list[str] = []
-        if self.manifest_ref is not None:
-            item_ids.append(self.manifest_ref.item_id)
+        item_ids.extend(reference.item_id for reference in self.manifest_refs)
         item_ids.extend(reference.item_id for reference in self.fragment_refs)
         item_ids.extend(reference.item_id for reference in self.collection_fact_refs)
         item_ids.extend(reference.item_id for reference in self.source_record_refs)

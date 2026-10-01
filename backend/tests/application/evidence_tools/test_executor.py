@@ -19,6 +19,7 @@ from app.domain import (
     EvidenceFragmentReference,
     EvidenceLocation,
     EvidenceQualityClass,
+    EvidenceResultEligibility,
     EvidenceToolExecutionStatus,
     EvidenceToolOptions,
     EvidenceToolRequest,
@@ -133,6 +134,7 @@ def direct_fragment(scope, reference, record_ref):
         ),
         source_record_refs=(record_ref,),
         provenance=Provenance(operation_id="source-operation"),
+        result_eligibility=EvidenceResultEligibility.OBSERVED_OR_INFERRED,
         rag_eligible=True,
     )
 

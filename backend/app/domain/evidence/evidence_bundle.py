@@ -38,6 +38,7 @@ class EvidenceBundle(DomainModel):
     cells: tuple[EvidenceCell, ...]
     fragment_refs: tuple[EvidenceFragmentReference, ...]
     source_record_item_refs: tuple[NonEmptyString, ...] = ()
+    closure_refs: tuple[ItemReference, ...] = ()
     tool_result_refs: tuple[ItemReference, ...] = ()
     quality_summary: QualitySummary
     collection_summary: CollectionSummary
@@ -66,7 +67,7 @@ class EvidenceBundle(DomainModel):
             raise ValueError("window_refs must not be empty")
         return ensure_unique_tuple(value, field_name="window_refs")
 
-    @field_validator("source_record_item_refs", "tool_result_refs")
+    @field_validator("source_record_item_refs", "closure_refs", "tool_result_refs")
     @classmethod
     def validate_unique_references(cls, value: tuple[object, ...]) -> tuple[object, ...]:
         return ensure_unique_tuple(value, field_name="bundle references")
@@ -78,6 +79,21 @@ class EvidenceBundle(DomainModel):
         overlap = set(self.requested_parameters) & set(self.supporting_parameters)
         if overlap:
             raise ValueError("requested and supporting parameters must be disjoint")
+
+        reference_roles = (
+            ("context", {self.context_ref.item_id}),
+            ("topology", {self.topology_ref.item_id}),
+            ("fragment", {item.item_id for item in self.fragment_refs}),
+            ("source_record", set(self.source_record_item_refs)),
+            ("closure", {item.item_id for item in self.closure_refs}),
+            ("tool_result", {item.item_id for item in self.tool_result_refs}),
+        )
+        for index, (left_name, left_items) in enumerate(reference_roles):
+            for right_name, right_items in reference_roles[index + 1 :]:
+                if left_items & right_items:
+                    raise ValueError(
+                        f"bundle item refs cannot have both {left_name} and {right_name} roles"
+                    )
 
         expected_cells = {
             (parameter, window_id, EvidenceCellRole.TARGET)
@@ -110,6 +126,7 @@ class EvidenceBundle(DomainModel):
         item_ids = [self.context_ref.item_id, self.topology_ref.item_id]
         item_ids.extend(reference.item_id for reference in self.fragment_refs)
         item_ids.extend(self.source_record_item_refs)
+        item_ids.extend(reference.item_id for reference in self.closure_refs)
         item_ids.extend(reference.item_id for reference in self.tool_result_refs)
         return tuple(dict.fromkeys(item_ids))
 

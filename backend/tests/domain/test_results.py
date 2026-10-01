@@ -21,6 +21,7 @@ from app.domain import (
     EvidenceCoverage,
     EvidenceFragment,
     EvidenceLocation,
+    EvidenceResultEligibility,
     EvidenceReference,
     IndeterminateReason,
     InferenceMode,
@@ -948,6 +949,7 @@ def make_unavailable_fragment(
             source_timezone=None,
             source_utc_offset=None,
         ),
+        result_eligibility=EvidenceResultEligibility.EXPLANATORY_ONLY,
     )
 
 

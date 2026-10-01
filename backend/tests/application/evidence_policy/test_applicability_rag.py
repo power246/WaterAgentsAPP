@@ -19,6 +19,7 @@ from app.domain.evidence import (
     EvidenceFragment,
     EvidenceLocation,
     EvidenceQualityClass,
+    EvidenceResultEligibility,
     Provenance,
     SourceRecordReference,
 )
@@ -348,6 +349,11 @@ def fragment(
         provenance=Provenance(
             operation_id="operation-001",
             registry_digest=REGISTRY.manifest_digest,
+        ),
+        result_eligibility=(
+            EvidenceResultEligibility.EXPLANATORY_ONLY
+            if quality_class is EvidenceQualityClass.INVALID
+            else EvidenceResultEligibility.OBSERVED_OR_INFERRED
         ),
     )
 

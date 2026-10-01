@@ -31,6 +31,7 @@ from app.domain import (
     EvidenceFragmentReference,
     EvidenceLocation,
     EvidenceQualityClass,
+    EvidenceResultEligibility,
     EvidenceReference,
     EvidenceToolCounts,
     EvidenceToolExecutionStatus,
@@ -400,6 +401,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
             displayed_unit="mg/L",
         ),
         source_record_refs=(direct_ref,),
+        result_eligibility=EvidenceResultEligibility.OBSERVED_OR_INFERRED,
         rag_eligible=True,
     )
     aggregate = EvidenceFragment(
@@ -419,6 +421,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
         ),
         source_record_refs=(direct_ref, second_ref),
         derivation=derivation(),
+        result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
     )
     conversion = EvidenceFragment(
         **common,
@@ -435,6 +438,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
             conversion_id="identity-mg-l-v1",
         ),
         derivation=derivation(),
+        result_eligibility=EvidenceResultEligibility.OBSERVED_OR_INFERRED,
     )
     context = EvidenceFragment(
         **common,
@@ -446,6 +450,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
             record_refs=(direct_ref,),
         ),
         source_record_refs=(direct_ref,),
+        result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
     )
     fact = EvidenceFragment(
         **dict(
@@ -471,6 +476,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
             reason="no_records_in_completed_query",
             affected_window_ids=("w000",),
         ),
+        result_eligibility=EvidenceResultEligibility.EXPLANATORY_ONLY,
     )
     upstream = EvidenceFragment(
         **common,
@@ -482,6 +488,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
             result_ref=ItemReference(item_id="item-upstream-result"),
             closure_refs=(ItemReference(item_id="item-upstream-evidence"),),
         ),
+        result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
     )
     historical = EvidenceFragment(
         **common,
@@ -492,6 +499,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
             original_item_ref=ItemReference(item_id="item-historical"),
             projection="Historical inferred value",
         ),
+        result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
     )
     return direct, aggregate, conversion, context, fact, upstream, historical
 
@@ -522,9 +530,13 @@ def test_fragment_reference_extraction_follows_typed_payloads() -> None:
         (0, {"applicability": EvidenceApplicability.CONTEXTUAL_ONLY}),
         (0, {"collection_status": CollectionStatus.EMPTY}),
         (0, {"source_record_refs": ()}),
+        (0, {"result_eligibility": EvidenceResultEligibility.INFERRED_ONLY}),
         (1, {"derivation": None}),
+        (1, {"result_eligibility": EvidenceResultEligibility.OBSERVED_OR_INFERRED}),
         (2, {"source_record_refs": (source_ref(),)}),
+        (2, {"result_eligibility": EvidenceResultEligibility.EXPLANATORY_ONLY}),
         (3, {"applicability": EvidenceApplicability.DIRECT_MEASUREMENT}),
+        (3, {"result_eligibility": EvidenceResultEligibility.OBSERVED_OR_INFERRED}),
         (4, {"quality_class": EvidenceQualityClass.VALID}),
         (4, {"rag_eligible": True}),
         (5, {"relation_id": None}),
@@ -663,7 +675,13 @@ def test_bundle_validates_resolved_run_and_session_scope() -> None:
 
 @pytest.mark.parametrize(
     "mutation",
-    ("missing_cell", "duplicate_cell", "missing_fragment", "orphan_fragment"),
+    (
+        "missing_cell",
+        "duplicate_cell",
+        "missing_fragment",
+        "orphan_fragment",
+        "duplicate_role_ref",
+    ),
 )
 def test_bundle_rejects_incomplete_or_duplicate_closure(mutation: str) -> None:
     values = valid_bundle().model_dump(mode="python")
@@ -675,10 +693,12 @@ def test_bundle_rejects_incomplete_or_duplicate_closure(mutation: str) -> None:
         values["cells"].append(values["cells"][0])
     elif mutation == "missing_fragment":
         values["fragment_refs"].pop()
-    else:
+    elif mutation == "orphan_fragment":
         values["fragment_refs"].append(
             {"item_id": "item-orphan", "evidence_id": "ev-orphan"}
         )
+    else:
+        values["tool_result_refs"] = [{"item_id": "item-source"}]
 
     with pytest.raises(ValidationError):
         EvidenceBundle.model_validate(values)
@@ -777,10 +797,10 @@ def tool_result_values(
         "tool_name": "collect_water_observations",
         "execution_status": execution_status,
         "collection_status": collection_status,
-        "manifest_ref": (
-            ItemReference(item_id="item-manifest")
+        "manifest_refs": (
+            (ItemReference(item_id="item-manifest"),)
             if collection_status is not None
-            else None
+            else ()
         ),
         "counts": EvidenceToolCounts(),
         "safe_error": (

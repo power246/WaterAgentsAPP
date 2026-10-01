@@ -1,5 +1,10 @@
 from app.application.evidence_tools.budget import EvidenceBudgetLedger
 from app.application.evidence_tools.collection_manifest import build_collection_manifest
+from app.application.evidence_tools.collection_service import (
+    EvidenceCollectionService,
+    build_record_preview,
+)
+from app.application.evidence_tools.bundle_builder import EvidenceBundleBuilder
 from app.application.evidence_tools.dedup import RunLocalSingleFlight
 from app.application.evidence_tools.errors import (
     EvidenceAggregationNotAllowedError,
@@ -23,6 +28,8 @@ from app.application.evidence_tools.inspection_service import (
 )
 from app.application.evidence_tools.models import (
     EvidenceCollectionArtifacts,
+    EvidenceCollectionInput,
+    EvidenceRecordPreview,
     EvidenceInspectionPage,
     EvidencePolicyClass,
     EvidenceProducerStatus,
@@ -54,6 +61,10 @@ __all__ = [
     "EvidenceAggregationNotAllowedError",
     "EvidenceBudgetLedger",
     "EvidenceCollectionArtifacts",
+    "EvidenceCollectionInput",
+    "EvidenceCollectionService",
+    "EvidenceBundleBuilder",
+    "EvidenceRecordPreview",
     "EvidenceCollectionIncompleteError",
     "FacilityRadiusTooSmallForBudgetError",
     "EvidenceProducerUnavailableError",
@@ -84,6 +95,7 @@ __all__ = [
     "authorize_evidence_tool_request",
     "authorize_provider_request",
     "build_collection_manifest",
+    "build_record_preview",
     "build_water_observation_plans",
     "canonical_request_key",
     "create_evidence_tool_registry",

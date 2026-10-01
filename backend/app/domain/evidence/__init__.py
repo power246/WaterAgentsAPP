@@ -33,6 +33,7 @@ from app.domain.evidence.evidence_fragment_reference import EvidenceFragmentRefe
 from app.domain.evidence.evidence_location import EvidenceLocation
 from app.domain.evidence.evidence_payload import EvidencePayload
 from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
+from app.domain.evidence.evidence_result_eligibility import EvidenceResultEligibility
 from app.domain.evidence.evidence_reference import EvidenceReference
 from app.domain.evidence.evidence_tool_counts import EvidenceToolCounts
 from app.domain.evidence.evidence_tool_execution_status import (
@@ -106,6 +107,7 @@ __all__ = [
     "EvidenceLocation",
     "EvidencePayload",
     "EvidenceQualityClass",
+    "EvidenceResultEligibility",
     "EvidenceReference",
     "EvidenceToolCounts",
     "EvidenceToolExecutionStatus",

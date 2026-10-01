@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from hashlib import sha256
 from uuid import uuid4
 
 from app.application.analysis_runs.workflow import WorkflowStopped
@@ -34,9 +35,11 @@ from app.application.evidence_tools.errors import (
 from app.application.evidence_tools.inspection_service import (
     EvidenceInspectionService,
 )
+from app.application.evidence_tools.collection_service import EvidenceCollectionService
 from app.application.evidence_tools.models import (
     EvidenceClock,
     EvidenceCollectionArtifacts,
+    EvidenceCollectionInput,
     EvidenceInspectionPage,
     EvidenceOperationValue,
     EvidencePolicyClass,
@@ -63,6 +66,7 @@ from app.domain import (
     EvidenceFragmentReference,
     EvidenceLocation,
     EvidenceQualityClass,
+    EvidenceResultEligibility,
     EvidenceToolCounts,
     EvidenceToolExecutionStatus,
     EvidenceToolRequest,
@@ -139,6 +143,11 @@ class EvidenceToolExecutor:
             reader,
             default_page_size=limits.inspection_default_page_size,
             max_page_size=limits.inspection_max_page_size,
+        )
+        self._collection_service = EvidenceCollectionService(
+            registry=capability_registry,
+            writer=writer,
+            limits=limits,
         )
         self._budgets: dict[tuple[str, str], EvidenceBudgetLedger] = {}
         self._deadlines: dict[tuple[str, str], float] = {}
@@ -365,23 +374,39 @@ class EvidenceToolExecutor:
                 registry=self._capabilities,
             )
             batches = []
+            collections = []
             for plan in plans:
                 scope.cancel_token.checkpoint()
                 if batches:
                     self._ensure_another_collection_request(tuple(batches))
                 if self._water_port is None:
                     raise EvidenceProducerUnavailableError()
-                batches.append(
-                    await self._await_provider(
-                        scope,
-                        self._water_port.collect(
-                            plan,
-                            deadline=self._check_deadline(scope),
-                        ),
+                batch = await self._await_provider(
+                    scope,
+                    self._water_port.collect(
+                        plan,
+                        deadline=self._check_deadline(scope),
+                    ),
+                )
+                batches.append(batch)
+                collections.append(
+                    EvidenceCollectionInput(
+                        provider=plan.provider.value,
+                        channel=plan.channel,
+                        request_range=plan.request_range,
+                        requested_series=plan.series_refs,
+                        parameter_keys=plan.parameter_keys,
+                        affected_window_ids=plan.affected_window_ids,
+                        batch=batch,
+                        station_id=plan.station_id,
                     )
                 )
                 self._validate_collected_batches(tuple(batches))
-            return await self._finish_collection(scope, operation_id, tuple(batches))
+            return await self._finish_collection(
+                scope,
+                operation_id,
+                tuple(collections),
+            )
 
         if request.tool_name == "collect_weather_evidence":
             if self._weather_port is None:
@@ -392,6 +417,7 @@ class EvidenceToolExecutor:
                 else ("observation",)
             )
             batches = []
+            collections = []
             for index, kind in enumerate(kinds, start=1):
                 scope.cancel_token.checkpoint()
                 if batches:
@@ -405,17 +431,31 @@ class EvidenceToolExecutor:
                     affected_window_ids=request.window_ids,
                 )
                 authorize_provider_request(scope, plan, registry=self._capabilities)
-                batches.append(
-                    await self._await_provider(
-                        scope,
-                        self._weather_port.collect(
-                            plan,
-                            deadline=self._check_deadline(scope),
-                        ),
+                batch = await self._await_provider(
+                    scope,
+                    self._weather_port.collect(
+                        plan,
+                        deadline=self._check_deadline(scope),
+                    ),
+                )
+                batches.append(batch)
+                collections.append(
+                    EvidenceCollectionInput(
+                        provider="nws",
+                        channel=kind,
+                        request_range=plan.request_range,
+                        requested_series=plan.variables,
+                        parameter_keys=request.parameter_keys,
+                        affected_window_ids=plan.affected_window_ids,
+                        batch=batch,
                     )
                 )
                 self._validate_collected_batches(tuple(batches))
-            return await self._finish_collection(scope, operation_id, tuple(batches))
+            return await self._finish_collection(
+                scope,
+                operation_id,
+                tuple(collections),
+            )
 
         if request.tool_name == "collect_facility_evidence":
             if self._facility_port is None:
@@ -450,7 +490,22 @@ class EvidenceToolExecutor:
                     deadline=self._check_deadline(scope),
                 ),
             )
-            return await self._finish_collection(scope, operation_id, (batch,))
+            return await self._finish_collection(
+                scope,
+                operation_id,
+                (
+                    EvidenceCollectionInput(
+                        provider="epa_echo",
+                        channel="facility",
+                        request_range=scope.query_envelope,
+                        requested_series=(provider_request.geometry_ref,),
+                        parameter_keys=request.parameter_keys,
+                        affected_window_ids=provider_request.affected_window_ids,
+                        batch=batch,
+                        completion_applies_to_all_windows=True,
+                    ),
+                ),
+            )
 
         if request.tool_name == "get_upstream_results":
             if self._upstream_port is None or not scope.direct_upstream_comids:
@@ -472,7 +527,32 @@ class EvidenceToolExecutor:
                     deadline=self._check_deadline(scope),
                 ),
             )
-            return await self._finish_collection(scope, operation_id, (batch,))
+            return await self._finish_collection(
+                scope,
+                operation_id,
+                (
+                    EvidenceCollectionInput(
+                        provider="analysis_run",
+                        channel="upstream_result",
+                        request_range=scope.query_envelope,
+                        requested_series=tuple(
+                            sorted(
+                                (
+                                    *plan.direct_upstream_comids,
+                                    *(
+                                        f"{item.code_system}:{item.code}"
+                                        for item in plan.parameter_keys
+                                    ),
+                                )
+                            )
+                        ),
+                        parameter_keys=plan.parameter_keys,
+                        affected_window_ids=plan.affected_window_ids,
+                        batch=batch,
+                        completion_applies_to_all_windows=True,
+                    ),
+                ),
+            )
 
         if request.tool_name == "search_transcript_evidence":
             if self._transcript_port is None:
@@ -501,7 +581,23 @@ class EvidenceToolExecutor:
                     deadline=self._check_deadline(scope),
                 ),
             )
-            return await self._finish_collection(scope, operation_id, (batch,))
+            query_identity = sha256(plan.query.encode("utf-8")).hexdigest()
+            return await self._finish_collection(
+                scope,
+                operation_id,
+                (
+                    EvidenceCollectionInput(
+                        provider="transcript",
+                        channel="historical",
+                        request_range=scope.query_envelope,
+                        requested_series=(f"query:sha256:{query_identity}",),
+                        parameter_keys=request.parameter_keys,
+                        affected_window_ids=request.window_ids,
+                        batch=batch,
+                        completion_applies_to_all_windows=True,
+                    ),
+                ),
+            )
 
         if request.tool_name == "convert_evidence_unit":
             return await self._convert(scope, request, operation_id)
@@ -554,21 +650,22 @@ class EvidenceToolExecutor:
         self,
         scope: EvidenceSessionScope,
         operation_id: str,
-        batches: tuple[ProviderCollectionBatch, ...],
+        collections: tuple[EvidenceCollectionInput, ...],
     ) -> EvidenceOperationValue:
         scope.cancel_token.checkpoint()
-        if not batches:
+        if not collections:
             raise EvidenceScopeViolationError()
+        batches = tuple(item.batch for item in collections)
         self._validate_collected_batches(batches)
         requests = sum(batch.counts.requests for batch in batches)
         pages = sum(batch.counts.pages for batch in batches)
         records = sum(batch.counts.records for batch in batches)
         self._check_deadline(scope)
         scope.cancel_token.checkpoint()
-        artifacts: EvidenceCollectionArtifacts = await self._writer.write_collection(
+        artifacts: EvidenceCollectionArtifacts = await self._collection_service.process(
             scope,
             operation_id=operation_id,
-            batches=batches,
+            collections=collections,
         )
         complete = all(batch.completion_proof.complete for batch in batches)
         status = (
@@ -580,7 +677,7 @@ class EvidenceToolExecutor:
         )
         return EvidenceOperationValue(
             collection_status=status,
-            manifest_ref=artifacts.manifest_ref,
+            manifest_refs=artifacts.manifest_refs,
             fragment_refs=artifacts.fragment_refs,
             collection_fact_refs=artifacts.collection_fact_refs,
             source_record_refs=artifacts.source_record_refs,
@@ -675,6 +772,7 @@ class EvidenceToolExecutor:
                     "registry_digest": converted.registry_digest,
                 }
             ),
+            result_eligibility=fragment.result_eligibility,
             rag_eligible=fragment.rag_eligible,
         )
         self._check_deadline(scope)
@@ -749,6 +847,7 @@ class EvidenceToolExecutor:
                 operation_id=operation_id,
                 registry_digest=self._capabilities.manifest_digest,
             ),
+            result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
             rag_eligible=outcome.quality_class is not EvidenceQualityClass.INVALID,
         )
         self._check_deadline(scope)
@@ -778,7 +877,7 @@ class EvidenceToolExecutor:
                 else EvidenceToolExecutionStatus.COMPLETED
             ),
             collection_status=value.collection_status,
-            manifest_ref=value.manifest_ref,
+            manifest_refs=value.manifest_refs,
             fragment_refs=value.fragment_refs,
             collection_fact_refs=value.collection_fact_refs,
             source_record_refs=value.source_record_refs,

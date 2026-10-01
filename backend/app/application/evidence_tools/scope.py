@@ -13,6 +13,8 @@ from app.domain import (
     ParameterKey,
     ReferenceScope,
     TimeRange,
+    TimeResolution,
+    TimeResolutionSource,
     TopologyStationRef,
     build_time_windows,
 )
@@ -46,6 +48,9 @@ class EvidenceSessionScope:
     direct_upstream_comids: tuple[str, ...]
     memory_mode: MemoryMode
     mode: InferenceMode
+    analysis_timezone: str
+    time_resolution: TimeResolution
+    time_resolution_source: TimeResolutionSource
     query_envelope: TimeRange
     cancel_token: CancellationToken
 
@@ -68,6 +73,9 @@ class EvidenceSessionScope:
         direct_upstream_comids: tuple[str, ...],
         memory_mode: MemoryMode,
         mode: InferenceMode,
+        analysis_timezone: str,
+        time_resolution: TimeResolution,
+        time_resolution_source: TimeResolutionSource,
         query_envelope: TimeRange,
         cancel_token: CancellationToken,
         _seal: object,
@@ -94,6 +102,9 @@ class EvidenceSessionScope:
             "direct_upstream_comids": direct_upstream_comids,
             "memory_mode": memory_mode,
             "mode": mode,
+            "analysis_timezone": analysis_timezone,
+            "time_resolution": time_resolution,
+            "time_resolution_source": time_resolution_source,
             "query_envelope": query_envelope,
             "cancel_token": cancel_token,
         }
@@ -169,6 +180,9 @@ def assemble_evidence_session_scope(
         direct_upstream_comids=direct_upstreams,
         memory_mode=context.memory_mode,
         mode=context.mode,
+        analysis_timezone=context.analysis_timezone,
+        time_resolution=context.time_resolution,
+        time_resolution_source=context.time_resolution_source,
         query_envelope=_build_query_envelope(context),
         cancel_token=cancel_token,
         _seal=_SCOPE_SEAL,
