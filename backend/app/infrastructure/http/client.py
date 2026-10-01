@@ -4,7 +4,7 @@ import asyncio
 import codecs
 import json
 import logging
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from math import isfinite
@@ -25,7 +25,7 @@ from app.ports import (
 
 logger = logging.getLogger("wateragents.providers")
 
-QueryValue = str | int | float | bool
+QueryValue = str | int | float | bool | tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,7 +125,7 @@ class ProviderHttpClient:
             transport=self._transport,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "WaterAgents/0.1 metadata-adapters",
+                "User-Agent": "WaterAgents/0.1 provider-adapters",
             },
         )
         return self
@@ -152,6 +152,7 @@ class ProviderHttpClient:
         params: Mapping[str, QueryValue] | None = None,
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
+        on_attempt: Callable[[], None] | None = None,
     ) -> object:
         content = await self.get_bytes(
             url,
@@ -160,6 +161,7 @@ class ProviderHttpClient:
             params=params,
             headers=headers,
             deadline=deadline,
+            on_attempt=on_attempt,
         )
         try:
             return json.loads(content)
@@ -256,6 +258,7 @@ class ProviderHttpClient:
         params: Mapping[str, QueryValue] | None = None,
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
+        on_attempt: Callable[[], None] | None = None,
     ) -> bytes:
         return await self._request_bytes(
             url,
@@ -264,6 +267,7 @@ class ProviderHttpClient:
             params=params,
             headers=headers,
             deadline=deadline,
+            on_attempt=on_attempt,
         )
 
     async def _iter_sse(
@@ -303,12 +307,17 @@ class ProviderHttpClient:
         params: Mapping[str, QueryValue] | None = None,
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
+        on_attempt: Callable[[], None] | None = None,
     ) -> bytes:
         client = self._client
         if client is None:
             raise RuntimeError("provider HTTP client is not open")
         attempts = 2
         for attempt in range(attempts):
+            await self._cancellation_checkpoint()
+            self._remaining_timeout(deadline, provider, operation)
+            if on_attempt is not None:
+                on_attempt()
             try:
                 return await self._request_once(
                     client,
@@ -459,6 +468,7 @@ class ProviderHttpClient:
         operation: str,
         deadline: float | None,
     ) -> None:
+        await self._cancellation_checkpoint()
         if deadline is not None:
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= self._retry_delay_seconds:
@@ -468,6 +478,12 @@ class ProviderHttpClient:
                     operation=operation,
                 )
         await asyncio.sleep(self._retry_delay_seconds)
+
+    @staticmethod
+    async def _cancellation_checkpoint() -> None:
+        """Yield before every request/retry so cancellation cannot start new I/O."""
+
+        await asyncio.sleep(0)
 
     @staticmethod
     def _log_failure(error: PortError, attempts: int) -> None:

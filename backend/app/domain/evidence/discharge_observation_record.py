@@ -18,8 +18,6 @@ class DischargeObservationRecord(_SourceRecordBase):
 
     @model_validator(mode="after")
     def validate_observation(self) -> Self:
-        if self.observed_time is None:
-            raise ValueError("discharge observation requires observed_time")
         if self.location.station_id is None:
             raise ValueError("discharge observation requires station_id")
         if self.raw_unit is None:
