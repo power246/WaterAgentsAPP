@@ -399,34 +399,41 @@
 
 ### 工作
 
-- [ ] 实现八个固定 tool descriptors：collection 三项、M7/M8 producer slots、conversion、aggregation、inspection；descriptor 包含 typed request/result、policy class、scope requirements、limits 和 producer status。
-- [ ] 按 session scope 生成 roster：stationless 不注册 local observation；stateless 不注册 transcript search；M7/M8 producer unavailable 时 production 不暴露不可执行工具，contract test 仍可验证 slot schema。
-- [ ] 实现唯一 `EvidenceToolExecutor.execute(scope, request)`：authorize → budget → canonical key/single-flight → port/policy → writer → typed result。
-- [ ] canonical request key 使用 run_id、agent_comid、tool、normalized options、sorted windows 和 manifest/policy digest；相同 run/scope/key 共享 in-flight operation。
-- [ ] 每次调用仍生成自己的 call/result；success reuse 标记 `deduplicated=true` 并引用原 operation/result，不复制 source/fragment；failed/cancelled 不进入 success cache，不跨 run 复用。
-- [ ] budget 分开计算 external collection 与 deterministic transforms；同义拆分仍归入 canonical accounting，deadline/cancel 在新请求、下一页、retry、transform、bundle 和 downstream handoff 前检查。
-- [ ] 实现 conversion/aggregation tools，严格复用 Milestone 3 policy；Agent 只能选择 descriptor 暴露的方法/target unit。
-- [ ] 实现 inspection：只读取已保存 records，按 `(observed_time, record_id)` 稳定分页，default 50/max 200，不访问 provider、不改变原记录、不标 RAG eligible。
-- [ ] producer slot 返回结构化 `evidence_producer_unavailable` 或不注册；不得用 hidden fake 使 production 看似已接入 M7/M8。
+- [x] 实现八个固定 tool descriptors：collection 三项、M7/M8 producer slots、conversion、aggregation、inspection；descriptor 包含 typed request/result、policy class、scope requirements、limits 和 producer status。
+- [x] 按 session scope 生成 roster：stationless 不注册 local observation；stateless 不注册 transcript search；M7/M8 producer unavailable 时 production 不暴露不可执行工具，contract test 仍可验证 slot schema。
+- [x] 实现唯一 `EvidenceToolExecutor.execute(scope, request)`：authorize → budget → canonical key/single-flight → port/policy → writer → typed result。
+- [x] canonical request key 使用 run_id、agent_comid、tool、normalized options、sorted windows 和 manifest/policy digest；相同 run/scope/key 共享 in-flight operation。
+- [x] 每次调用仍生成自己的 call/result；success reuse 标记 `deduplicated=true` 并引用原 operation/result，不复制 source/fragment；failed/cancelled 不进入 success cache，不跨 run 复用。
+- [x] budget 分开计算 external collection 与 deterministic transforms；同义拆分仍归入 canonical accounting，deadline/cancel 在新请求、下一页、retry、transform、bundle 和 downstream handoff 前检查。
+- [x] 实现 conversion/aggregation tools，严格复用 Milestone 3 policy；Agent 只能选择 descriptor 暴露的方法/target unit。
+- [x] 实现 inspection：只读取已保存 records，按 `(observed_time, record_id)` 稳定分页，default 50/max 200，不访问 provider、不改变原记录、不标 RAG eligible。
+- [x] producer slot 返回结构化 `evidence_producer_unavailable` 或不注册；不得用 hidden fake 使 production 看似已接入 M7/M8。
 
 ### Tests
 
-- [ ] roster 对 station-backed/stationless、stateful/stateless、producer ready/unavailable 和 allowed modes 的矩阵稳定。
-- [ ] 同 run 并发 exact request 只有一次 provider operation；两个 call/result 都存在且 refs 正确；不同 scope/options/digest/run 不合并。
-- [ ] success reuse 到 workflow quiesced，failed/cancelled 可重试且不缓存；cleanup 移除 live dedup state。
-- [ ] collection/transform call budget、deadline、pages/records/bytes/preview/inspection limits 的边界与错误确定。
-- [ ] cancel 胜出后不发新页/retry/transform、不写 final bundle、不向下游交付晚到响应。
-- [ ] inspection 的 ownership、offset/limit、稳定排序、full-content read 和无 provider I/O 可证明。
+- [x] roster 对 station-backed/stationless、stateful/stateless、producer ready/unavailable 和 allowed modes 的矩阵稳定。
+- [x] 同 run 并发 exact request 只有一次 provider operation；两个 call/result 都存在且 refs 正确；不同 scope/options/digest/run 不合并。
+- [x] success reuse 到 workflow quiesced，failed/cancelled 可重试且不缓存；cleanup 移除 live dedup state。
+- [x] collection/transform call budget、deadline、pages/records/bytes/preview/inspection limits 的边界与错误确定。
+- [x] cancel 胜出后不发新页/retry/transform、不写 final bundle、不向下游交付晚到响应。
+- [x] inspection 的 ownership、offset/limit、稳定排序、full-content read 和无 provider I/O 可证明。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_registry.py backend/tests/application/evidence_tools/test_executor.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_dedup.py backend/tests/application/evidence_tools/test_inspection.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_registry.py backend/tests/application/evidence_tools/test_executor.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_dedup.py backend/tests/application/evidence_tools/test_inspection.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
 
 阶段出口：八工具通过同一 application interface 在 fake ports 下执行，scope/budget/dedup/cancel/producer 状态可验证；尚未完成完整 source-to-bundle 和 production composition。
 
 提交边界：registry/executor/dedup/inspection、application tests 和必要 fakes；不得夹带 public HTTP、M6/M7 workflow 或 frontend。
+
+完成记录（2026-10-01）：
+
+- 实现：新增八工具 descriptor/按 scope roster、唯一 `EvidenceToolExecutor.execute`、collection/transform 双预算、规范 key 与 run/session-local single-flight；成功复用保留独立 call/result 并引用原 result，失败/取消不缓存，cleanup 清除 live state。conversion/aggregation 直接复用 M3 policy；inspection 仅从授权已保存 records 生成稳定有界页；延后 producer 默认 unavailable 且 production roster 隐藏。collection writer/reader 仍是 application 接缝，未提前实现 M9 bundle、production composition、公开 HTTP 或 frontend。
+- 验证：两条清单命令分别为 `7 passed`、`6 passed`；architecture 为 `102 passed`，domain/application 为 `833 passed`。Docker Engine `29.8.1` 与项目 PostgreSQL 17 容器 healthy，使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的最终完整 backend 为 `1454 passed`；`compileall` 与 `git diff --check` 通过。
+- 限制：真实 USGS/NWS/EPA provider 请求与 Linux/macOS CI 为 `not run`；本项仍是 M1–M9 原子任务内部切片，正式整体验收在 Milestone 9 完成后开始。
+- 提交：本地实现提交 `c1c72b3`（`feat(m5): complete milestone 8 evidence executor`）；未 push。
 
 ## Milestone 9：source-to-bundle 构造链
 
