@@ -470,7 +470,7 @@ run_id + agent_comid + tool_name + normalized parameters
 + sorted window IDs + policy/manifest digest
 ```
 
-同 run 相同 key 的并发调用共享一个 in-flight future；成功完成后保留到 run workflow quiesced，再随 run live cleanup 移除。failed/cancelled 不进入成功复用。不同 run 永不复用，避免当前数据被旧 cache 替代。
+同 run 相同 key 的并发调用共享一个 in-flight future；成功完成后保留到 run workflow quiesced，再随 run live cleanup 移除。production composition 必须在首个 run 创建前把 `M5Runtime.cleanup_run` 注册为 coordinator 的唯一 run-resource cleanup hook；live cleanup 只有在 hook 成功后才移除 run，失败沿既有 cleanup monitor 重试。应用 shutdown 也必须在 M5 provider context 关闭前对剩余 run 执行同一幂等 hook。failed/cancelled 不进入成功复用。不同 run 永不复用，避免当前数据被旧 cache 替代。
 
 每个调用仍写自己的 `evidence_tool_call v1`；复用者的 `evidence_tool_result v1` 写 `deduplicated=true` 并引用原 operation/result，不复制 records/fragments。
 

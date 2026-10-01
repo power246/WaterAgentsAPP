@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
 
@@ -778,6 +779,45 @@ def test_live_cleanup_waits_for_terminal_quiescence_and_retries_failure() -> Non
                 pass
             else:
                 raise AssertionError("cleaned live state remained addressable")
+
+    run(exercise)
+
+
+def test_live_cleanup_retries_registered_run_resource_hook_before_release() -> None:
+    async def exercise() -> None:
+        workflow = GatedWorkflow()
+        application = create_app(
+            AppSettings(_env_file=None, live_state_grace_seconds=0.01),
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+        )
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            registered_hook = coordinator._run_cleanup_hook
+            assert registered_hook is not None
+            with pytest.raises(RuntimeError, match="already registered"):
+                coordinator.register_run_cleanup_hook(registered_hook)
+
+            attempts: list[UUID] = []
+
+            async def fail_once(run_id: UUID) -> None:
+                attempts.append(run_id)
+                if len(attempts) == 1:
+                    raise RuntimeError("injected resource cleanup failure")
+                await registered_hook(run_id)
+
+            coordinator._run_cleanup_hook = fail_once
+            created = await coordinator.create_run("cleanup resources", CONFIGURATION)
+            await workflow.started.wait()
+            workflow.release.set()
+
+            for _ in range(500):
+                if created.run_id not in coordinator._runs:
+                    break
+                await asyncio.sleep(0.001)
+
+            assert attempts == [created.run_id, created.run_id]
+            assert created.run_id not in coordinator._runs
 
     run(exercise)
 

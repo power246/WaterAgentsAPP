@@ -586,6 +586,7 @@
 - 实现：production `m5` runtime 一次装配三类 official adapters、固定 policy/registry、唯一 transcript writer/reader、single-flight executor 与 acquisition service，并在应用 lifespan 内提供内部调用对象；M7/M8 producer 仍为 unavailable。独立 `create_m5_test_app()` 仅暴露两条 `__test__` 路由，以 checked-in 合成 scope 覆盖 happy/empty/unavailable/invalid/cancel/dedup/inspection，且复用同一 production execution chain；provider smoke 按 USGS/NWS/EPA 显式 opt-in，并仅输出安全计数摘要。
 - 验证：M12 指定 focused 为 `18 passed`，provider HTTP 联合 focused 为 `28 passed`，architecture 为 `104 passed`；Docker Engine `29.8.1` 与 PostgreSQL 17 healthy，进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的完整 backend 为 `1506 passed`。production OpenAPI 为既有 10 条路径且禁止路径为 0，`compileall` 与 `git diff --check` 通过。
 - 边界与提交：未修改 frontend，未新增 production tool route，未接入 M6/M7/M8 producer；真实 USGS/NWS/EPA 请求与三平台 CI 为 `not run`。实现本地提交为 `6d4218a`（`feat(m5): complete milestone 12 runtime composition`），未 push。
+- 复审修正：production composition 在首个 run 前注册唯一 M5 run-resource cleanup hook；live cleanup 失败保留 run 并重试，shutdown 在 provider context 关闭前清理剩余 run，重复 shutdown 不重复清理。focused `18 passed`；Docker/Engine `29.8.1`、PostgreSQL 17 healthy，隔离库完整 backend `1518 passed`，health/history 与独立进程 restart/repair smoke 通过。
 
 ## Milestone 13：集成验收、契约审计与 M6–M8 接力
 

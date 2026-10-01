@@ -151,6 +151,7 @@ _SESSION_TRANSITIONS = {
 }
 StatusT = TypeVar("StatusT", RunStatus, AgentSessionStatus)
 WorkflowTaskFactory = Callable[[Coroutine[object, object, None], str], asyncio.Task[None]]
+RunCleanupHook = Callable[[UUID], Awaitable[None]]
 
 
 @dataclass
@@ -306,6 +307,8 @@ class RunCoordinator:
         self._shutdown_save_grace_period = shutdown_save_grace_period
         self._shutdown_lock = asyncio.Lock()
         self._closing = False
+        self._run_cleanup_hook: RunCleanupHook | None = None
+        self._cleaned_run_resources: set[UUID] = set()
         self._keepalive_interval = keepalive_interval
         self._idempotency_wait_timeout = idempotency_wait_timeout
         self._inline_content_bytes = inline_content_bytes
@@ -335,6 +338,24 @@ class RunCoordinator:
             completion_delivery_grace=completion_delivery_grace,
             sleep=persistence_sleep,
         )
+
+    def register_run_cleanup_hook(self, hook: RunCleanupHook) -> None:
+        if self._closing:
+            raise RuntimeError("cannot register run cleanup during shutdown")
+        if self._runs:
+            raise RuntimeError("run cleanup hook must be registered before runs")
+        if self._run_cleanup_hook is not None:
+            raise RuntimeError("run cleanup hook is already registered")
+        self._run_cleanup_hook = hook
+
+    async def _cleanup_run_resources(self, run_id: UUID) -> None:
+        if (
+            self._run_cleanup_hook is None
+            or run_id in self._cleaned_run_resources
+        ):
+            return
+        await self._run_cleanup_hook(run_id)
+        self._cleaned_run_resources.add(run_id)
 
     async def create_run(
         self,
@@ -937,7 +958,9 @@ class RunCoordinator:
                     < eligible_at + self._live_state_grace_period
                 ):
                     return False
+                await self._cleanup_run_resources(runtime.snapshot.run_id)
                 self._runs.pop(runtime.snapshot.run_id)
+                self._cleaned_run_resources.discard(runtime.snapshot.run_id)
                 runtime.writer_stop.set()
                 runtime.writer_wakeup.set()
         writer = runtime.writer_task
@@ -1003,6 +1026,25 @@ class RunCoordinator:
                         ),
                     )
             await self._shutdown_run_writers()
+            cleanup_runtimes = tuple(self._runs.values())
+            cleanup_results = await asyncio.gather(
+                *(
+                    self._cleanup_run_resources(runtime.snapshot.run_id)
+                    for runtime in cleanup_runtimes
+                ),
+                return_exceptions=True,
+            )
+            for runtime, result in zip(
+                cleanup_runtimes,
+                cleanup_results,
+                strict=True,
+            ):
+                if isinstance(result, BaseException):
+                    self._log_activity(
+                        "run_resource_cleanup_failed",
+                        runtime,
+                        exception=result,
+                    )
 
     async def _shutdown_run_writers(self) -> None:
         runtimes = tuple(self._runs.values())

@@ -164,11 +164,16 @@ def create_app(
                     capability_registry=resolved_parameter_capabilities,
                     clock=resolved_clock,
                 ) as m5_runtime:
+                    coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
                     application.state.run_coordinator = coordinator
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store
                     application.state.m5_runtime = m5_runtime
-                    yield
+                    try:
+                        yield
+                    finally:
+                        await coordinator.shutdown()
+                        coordinator = None
             finally:
                 if coordinator is not None:
                     await coordinator.shutdown()

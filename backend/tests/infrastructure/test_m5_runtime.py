@@ -1,8 +1,11 @@
 import asyncio
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -23,7 +26,7 @@ from app.infrastructure.config import (
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime import build_m5_runtime, compose_m5_runtime
-from tests.m4_support import create_test_app
+from tests.m4_support import create_request_bytes, create_test_app
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -129,3 +132,46 @@ def test_production_app_starts_with_internal_m5_runtime_and_no_invocation_route(
         for path in paths
         for forbidden in ("/__test__", "/tools", "/evidence/collect")
     )
+
+
+def test_app_shutdown_cleans_run_resources_before_m5_runtime_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.main as app_main
+
+    runtime_open = False
+    cleaned: list[UUID] = []
+
+    async def cleanup_run(run_id: UUID) -> None:
+        assert runtime_open
+        cleaned.append(run_id)
+
+    @asynccontextmanager
+    async def fake_m5_runtime(*args, **kwargs):
+        nonlocal runtime_open
+        del args, kwargs
+        runtime_open = True
+        try:
+            yield SimpleNamespace(cleanup_run=cleanup_run)
+        finally:
+            runtime_open = False
+
+    monkeypatch.setattr(app_main, "build_m5_runtime", fake_m5_runtime)
+    application = create_test_app(
+        settings=AppSettings(_env_file=None),
+        transcript_store=InMemoryTranscriptStore(),
+        shutdown_grace_period=0,
+    )
+
+    async def exercise() -> UUID:
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            created = await coordinator.create_run(
+                create_request_bytes("cleanup on shutdown")
+            )
+            await coordinator._runs[created.run_id].workflow_quiesced.wait()
+            return created.run_id
+
+    run_id = asyncio.run(exercise())
+    assert cleaned == [run_id]
+    assert not runtime_open
