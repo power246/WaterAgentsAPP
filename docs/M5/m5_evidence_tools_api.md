@@ -1,8 +1,8 @@
 # M5 Evidence Tools + EvidenceBundle API / 读取契约
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
-> 状态：设计已冻结。M5 不增加 production tool invocation endpoint；本文定义现有 run/session/transcript 路由如何读取 M5 typed content，以及只供自动化测试的独立调用面。分阶段实施、验证命令、完成记录和当前进度见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+> 状态：当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。M5 不增加 production tool invocation endpoint；本文定义现有 run/session/transcript 路由如何读取 M5 typed content，以及只供自动化测试的独立调用面。真实 USGS/NWS/EPA 请求与 Ubuntu/macOS/Windows 三平台 CI 尚未执行，完成证据与剩余风险见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 ## 1. Production 路由不变
 
@@ -11,7 +11,6 @@ M5 继续使用 M3/M4 已有路由：
 ```text
 POST /api/analysis/runs
 GET  /api/analysis/runs/{run_id}
-GET  /api/analysis/runs/{run_id}/status
 GET  /api/analysis/runs
 GET  /api/analysis/runs/{run_id}/sessions/{session_id}
 GET  /api/analysis/runs/{run_id}/sessions/{session_id}/transcript
@@ -62,7 +61,7 @@ M5 typed content 仍装在 M3 的 transcript item 中：
   "session_id": "019d1c65-0828-72cb-8b33-f1fc76628002",
   "tool_name": "collect_water_observations",
   "purpose": "local_station_preflight",
-  "window_ids": ["w000", "w001"],
+  "window_ids": ["window-000", "window-001"],
   "parameter_keys": [
     {"code_system": "usgs", "code": "00300"},
     {"code_system": "usgs", "code": "00060"}
@@ -84,18 +83,49 @@ M5 typed content 仍装在 M3 的 transcript item 中：
   "schema_version": 1,
   "operation_id": "019d1c65-145e-77ef-a85e-608e489d5004",
   "batch_id": "batch-0001",
-  "provider": "usgs_waterdata",
-  "channel": "continuous",
-  "request_range": {
-    "start": "2026-09-28T04:00:00Z",
-    "end": "2026-09-30T04:00:00Z"
-  },
   "manifest": {
-    "page_identity": "page-0001",
-    "record_count": 2,
-    "response_bytes": 2187,
-    "page_complete": true,
-    "next_page": false
+    "schema_version": 1,
+    "manifest_id": "batch-0001",
+    "operation_id": "019d1c65-145e-77ef-a85e-608e489d5004",
+    "provider": "usgs_waterdata",
+    "channel": "continuous",
+    "collection_status": "available",
+    "request_range": {
+      "start": "2026-09-28T04:00:00Z",
+      "end": "2026-09-30T04:00:00Z"
+    },
+    "requested_series": ["series-identity"],
+    "page_or_chunk_manifests": [
+      {
+        "page_identity": "page-0001",
+        "record_count": 1,
+        "response_bytes": 2187,
+        "page_complete": true,
+        "next_page_identity": null
+      }
+    ],
+    "completed_ranges": [
+      {
+        "start": "2026-09-28T04:00:00Z",
+        "end": "2026-09-30T04:00:00Z"
+      }
+    ],
+    "affected_window_ids": ["window-000"],
+    "window_completeness": [
+      {
+        "window_id": "window-000",
+        "complete": true,
+        "status": "available",
+        "reason": null
+      }
+    ],
+    "counts": {"requests": 1, "pages": 1, "records": 1, "response_bytes": 2187},
+    "completion_proof": {
+      "contract": "official_next_chain",
+      "complete": true,
+      "terminal_identity": "page-0001",
+      "digest": "sha256:collection-proof"
+    }
   },
   "records": [
     {
@@ -223,10 +253,10 @@ timeline/SSE 的 public projection 保留 manifest 摘要，并提供 `record_co
   "quality_flags": ["estimated", "provider_flagged"],
   "coverage": {
     "status": "complete",
-    "observed_count": 20,
-    "expected_count": 24,
-    "ratio": "0.8333333333333333333333333333",
-    "covered_duration_seconds": 18000,
+    "observed_count": 2,
+    "expected_count": 2,
+    "ratio": "1",
+    "covered_duration_seconds": 21600,
     "window_duration_seconds": 21600,
     "largest_gap_seconds": 1800
   },
@@ -239,8 +269,8 @@ timeline/SSE 的 public projection 保留 manifest 摘要，并提供 `record_co
       {"item_id": "019d1c65-17ab-78d0-a807-972e81864005", "record_id": "usgs-feature-id-1"},
       {"item_id": "019d1c65-17ab-78d0-a807-972e81864005", "record_id": "usgs-feature-id-2"}
     ],
-    "valid_input_count": 17,
-    "suspicious_input_count": 3,
+    "valid_input_count": 1,
+    "suspicious_input_count": 1,
     "invalid_input_count": 0
   },
   "source_record_refs": [
@@ -295,7 +325,7 @@ aggregate 仍是 direct-measurement applicability，因为输入是本地直接�
     "payload_type": "collection_fact",
     "status": "empty",
     "reason": "no_records_in_completed_query",
-    "affected_window_ids": ["w001"],
+    "affected_window_ids": ["window-001"],
     "record_refs": []
   },
   "source_record_refs": [],
@@ -328,7 +358,7 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
   "source_record_refs": [
     {"item_id": "019d1c65-17ab-78d0-a807-972e81864005", "record_id": "usgs-feature-id-1"}
   ],
-  "counts": {"requests": 1, "pages": 1, "records": 20, "fragments": 2},
+  "counts": {"requests": 1, "pages": 1, "records": 1, "fragments": 1},
   "deduplicated": false,
   "deduplicated_from_operation_id": null,
   "deduplicated_from_result_ref": null,
@@ -354,11 +384,11 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
   "time_resolution_source": "frontend",
   "requested_parameters": [{"code_system": "usgs", "code": "00300"}],
   "supporting_parameters": [{"code_system": "usgs", "code": "00060"}],
-  "window_refs": ["w000"],
+  "window_refs": ["window-000"],
   "cells": [
     {
       "parameter": {"code_system": "usgs", "code": "00300"},
-      "window_id": "w000",
+      "window_id": "window-000",
       "role": "target",
       "direct_fragment_refs": ["ev_01J8ZXB3VDD1QJJPDHVA3G3G8R"],
       "allowed_indirect_fragment_refs": [],
@@ -369,7 +399,7 @@ empty/invalid/unavailable fact 必须可审计，但不能作为 direct/allowed 
     },
     {
       "parameter": {"code_system": "usgs", "code": "00060"},
-      "window_id": "w000",
+      "window_id": "window-000",
       "role": "required_support",
       "direct_fragment_refs": ["ev_01J8ZXDGDJ6S1BEHCMCN9ZE92A"],
       "allowed_indirect_fragment_refs": [],
@@ -503,7 +533,7 @@ GET  /__test__/m5/runs/{run_id}/transcript
 {
   "fixture_scope_id": "station-backed-two-windows",
   "tool_name": "collect_water_observations",
-  "window_ids": ["w000", "w001"],
+  "window_ids": ["window-000", "window-001"],
   "parameter_keys": [
     {"code_system": "usgs", "code": "00300"},
     {"code_system": "usgs", "code": "00060"}
