@@ -25,6 +25,7 @@ from app.domain import (
     CoverageUnit,
     GeoPoint,
     HydrologyGraph,
+    HydrologyEdge,
     HydrologyNode,
     HydrologyParticipation,
     MemoryMode,
@@ -127,7 +128,12 @@ def make_context(
     )
 
 
-def make_graph(*, with_geometry: bool = True) -> HydrologyGraph:
+def make_graph(
+    *,
+    with_geometry: bool = True,
+    with_station: bool = True,
+    with_upstream: bool = False,
+) -> HydrologyGraph:
     geometry = (
         WaterbodyGeometry.from_coordinates(
             source_comid="123",
@@ -142,6 +148,17 @@ def make_graph(*, with_geometry: bool = True) -> HydrologyGraph:
         else GeoPoint(latitude=39.0, longitude=-77.0)
     )
     unit = CoverageUnit(parameter=SUPPORT_PARAMETER, segment_index=0)
+    station_refs = (
+        (
+            TopologyStationRef(
+                provider=ParameterProvider.WDFN_TIME_SERIES,
+                station_id="USGS-123",
+                series_refs=("series-123",),
+            ),
+        )
+        if with_station
+        else ()
+    )
     node = HydrologyNode(
         comid="123",
         point=point,
@@ -150,24 +167,31 @@ def make_graph(*, with_geometry: bool = True) -> HydrologyGraph:
         depth=0,
         cumulative_distance_km=0,
         is_target=True,
+        is_inlet=with_station,
+        participation=HydrologyParticipation.ACTIVE,
+        qualified_units=(unit,) if with_station else (),
+        station_refs=station_refs,
+    )
+    upstream = HydrologyNode(
+        comid="200",
+        point=GeoPoint(latitude=39.01, longitude=-77.01),
+        depth=1,
+        cumulative_distance_km=1.0,
+        is_target=False,
         is_inlet=True,
         participation=HydrologyParticipation.ACTIVE,
         qualified_units=(unit,),
         station_refs=(
             TopologyStationRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
-                station_id="USGS-123",
-                series_refs=("series-123",),
+                station_id="USGS-200",
+                series_refs=("series-200",),
             ),
         ),
     )
-    return HydrologyGraph(
-        target_comid="123",
-        coverage=TopologyCoverage.COMPLETE,
-        nodes=(node,),
-        geometries=({geometry.geometry_ref: geometry} if geometry is not None else {}),
-        edges=(),
-        branch_outcomes=(
+    outcomes = []
+    if with_station:
+        outcomes.append(
             BranchOutcome(
                 branch_root_comid="123",
                 coverage_unit=unit,
@@ -175,43 +199,106 @@ def make_graph(*, with_geometry: bool = True) -> HydrologyGraph:
                 stop_comid="123",
                 path_to_target=("123",),
                 reason=BranchOutcomeReason.TARGET_STATION_QUALIFIED,
-            ),
+            )
+        )
+    if with_upstream:
+        outcomes.append(
+            BranchOutcome(
+                branch_root_comid="200",
+                coverage_unit=unit,
+                outcome=BranchOutcomeStatus.QUALIFIED,
+                stop_comid="200",
+                path_to_target=("200", "123"),
+                reason=BranchOutcomeReason.STATION_QUALIFIED,
+            )
+        )
+    if not outcomes:
+        outcomes.append(
+            BranchOutcome(
+                branch_root_comid="123",
+                coverage_unit=unit,
+                outcome=BranchOutcomeStatus.NO_QUALIFYING_SOURCE,
+                stop_comid="123",
+                path_to_target=("123",),
+                reason=BranchOutcomeReason.NATURAL_HEADWATER,
+            )
+        )
+    return HydrologyGraph(
+        target_comid="123",
+        coverage=(
+            TopologyCoverage.COMPLETE
+            if all(
+                item.outcome is BranchOutcomeStatus.QUALIFIED for item in outcomes
+            )
+            else TopologyCoverage.NONE
         ),
-        execution_layers=(ComidLayer(("123",)),),
+        nodes=(node, upstream) if with_upstream else (node,),
+        geometries=({geometry.geometry_ref: geometry} if geometry is not None else {}),
+        edges=(
+            (
+                HydrologyEdge(
+                    upstream_comid="200",
+                    downstream_comid="123",
+                    distance_km=1.0,
+                    participating=True,
+                ),
+            )
+            if with_upstream
+            else ()
+        ),
+        branch_outcomes=tuple(outcomes),
+        execution_layers=(
+            (ComidLayer(("200",)), ComidLayer(("123",)))
+            if with_upstream
+            else (ComidLayer(("123",)),)
+        ),
         limits=TopologyLimits(max_distance_km=100, max_hops=12, max_nodes=128),
         stats=TopologySearchStats(
-            discovered_nodes=1,
-            queried_nodes=1,
-            max_depth=0,
-            max_distance_km=0,
-            qualified_inlets=1,
+            discovered_nodes=2 if with_upstream else 1,
+            queried_nodes=2 if with_upstream else 1,
+            max_depth=1 if with_upstream else 0,
+            max_distance_km=1.0 if with_upstream else 0,
+            qualified_inlets=(int(with_station) + int(with_upstream)),
             excluded_nodes=0,
         ),
     )
 
 
-def make_scope(*, context: AnalysisContext | None = None, with_geometry: bool = True):
+def make_scope(
+    *,
+    run_id: str = "run-1",
+    session_id: str = "session-1",
+    cancel_event: asyncio.Event | None = None,
+    context: AnalysisContext | None = None,
+    with_geometry: bool = True,
+    with_station: bool = True,
+    with_upstream: bool = False,
+):
     return assemble_evidence_session_scope(
-        run_id="run-1",
-        session_id="session-1",
+        run_id=run_id,
+        session_id=session_id,
         session_fact=ReferenceScope(
             item_id="session-fact",
-            run_id="run-1",
-            session_id="session-1",
+            run_id=run_id,
+            session_id=session_id,
         ),
         analysis_context_ref=ReferenceScope(
             item_id="context-item",
-            run_id="run-1",
+            run_id=run_id,
         ),
         topology_ref=ReferenceScope(
             item_id="topology-item",
-            run_id="run-1",
+            run_id=run_id,
         ),
         context=context or make_context(),
-        topology=make_graph(with_geometry=with_geometry),
+        topology=make_graph(
+            with_geometry=with_geometry,
+            with_station=with_station,
+            with_upstream=with_upstream,
+        ),
         agent_comid="123",
         registry=load_parameter_capability_registry(),
-        cancel_token=CancellationToken(asyncio.Event()),
+        cancel_token=CancellationToken(cancel_event or asyncio.Event()),
     )
 
 

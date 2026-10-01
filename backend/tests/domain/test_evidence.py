@@ -807,7 +807,7 @@ def tool_result_values(
         (EvidenceToolExecutionStatus.FAILED, CollectionStatus.UNAVAILABLE, True),
         (EvidenceToolExecutionStatus.FAILED, CollectionStatus.INVALID, True),
         (EvidenceToolExecutionStatus.FAILED, CollectionStatus.AVAILABLE, False),
-        (EvidenceToolExecutionStatus.FAILED, None, False),
+        (EvidenceToolExecutionStatus.FAILED, None, True),
         (EvidenceToolExecutionStatus.CANCELLED, None, True),
         (EvidenceToolExecutionStatus.CANCELLED, CollectionStatus.UNAVAILABLE, True),
         (EvidenceToolExecutionStatus.CANCELLED, CollectionStatus.INVALID, False),

@@ -25,6 +25,7 @@ from app.domain import (
     GeoPoint,
     ParameterKey,
     ReferenceScope,
+    SourceRecordReference,
     TimeRange,
     WaterObservationRequest,
     WeatherEvidenceRequest,
@@ -316,6 +317,41 @@ def test_canonical_accounting_ignores_synonymous_purpose_but_counts_split_work(
     )
     with pytest.raises(EvidenceToolBudgetExceededError):
         ledger.reserve("collection", split_key)
+
+
+def test_canonical_key_normalizes_default_options_and_reference_order(
+    evidence_scope,
+) -> None:
+    refs = (
+        SourceRecordReference(item_id="source", record_id="record-2"),
+        SourceRecordReference(item_id="source", record_id="record-1"),
+    )
+    first = tool_request(
+        evidence_scope,
+        options=EvidenceToolOptions(
+            include_forecast=False,
+            page_offset=0,
+            source_record_refs=refs,
+        ),
+    )
+    second = first.model_copy(
+        update={
+            "tool_call_id": "call-2",
+            "options": EvidenceToolOptions(
+                source_record_refs=tuple(reversed(refs)),
+            ),
+        }
+    )
+
+    assert canonical_request_key(
+        evidence_scope,
+        first,
+        policy_manifest_digest="manifest-digest",
+    ) == canonical_request_key(
+        evidence_scope,
+        second,
+        policy_manifest_digest="manifest-digest",
+    )
 
 
 def test_evidence_settings_defaults_tightening_and_deployment_caps() -> None:

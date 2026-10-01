@@ -22,20 +22,6 @@ from app.domain import (
 )
 
 
-_TOOL_NAMES = frozenset(
-    {
-        "collect_water_observations",
-        "collect_weather_evidence",
-        "collect_facility_evidence",
-        "get_upstream_results",
-        "search_transcript_evidence",
-        "convert_evidence_unit",
-        "aggregate_evidence",
-        "inspect_evidence_records",
-    }
-)
-
-
 @dataclass(frozen=True, slots=True)
 class AuthorizedEvidenceRequest:
     request: EvidenceToolRequest
@@ -50,13 +36,14 @@ def authorize_evidence_tool_request(
     max_agent_record_limit: int = 200,
 ) -> AuthorizedEvidenceRequest:
     scope.cancel_token.checkpoint()
-    if request.session_id != scope.session_id or request.tool_name not in _TOOL_NAMES:
+    if request.session_id != scope.session_id:
         raise EvidenceScopeViolationError()
-    window_by_id = {item.window_id: item for item in scope.time_windows}
-    try:
-        windows = tuple(window_by_id[item] for item in request.window_ids)
-    except KeyError as error:
-        raise EvidenceScopeViolationError() from error
+    requested_window_ids = set(request.window_ids)
+    if not requested_window_ids <= {item.window_id for item in scope.time_windows}:
+        raise EvidenceScopeViolationError()
+    windows = tuple(
+        item for item in scope.time_windows if item.window_id in requested_window_ids
+    )
     allowed_parameters = set(
         (*scope.requested_parameters, *scope.supporting_parameters)
     )
@@ -68,7 +55,12 @@ def authorize_evidence_tool_request(
     return AuthorizedEvidenceRequest(
         request=request,
         windows=windows,
-        parameters=request.parameter_keys,
+        parameters=tuple(
+            sorted(
+                request.parameter_keys,
+                key=lambda item: (item.code_system, item.code),
+            )
+        ),
     )
 
 
@@ -174,6 +166,24 @@ def canonical_request_key(
     *,
     policy_manifest_digest: str,
 ) -> str:
+    options = request.options.model_dump(
+        mode="json",
+        exclude_none=True,
+        exclude_defaults=True,
+    )
+    if options.get("include_forecast") is False:
+        options.pop("include_forecast")
+    if options.get("page_offset") == 0:
+        options.pop("page_offset")
+    for field_name, identity_fields in (
+        ("source_record_refs", ("item_id", "record_id")),
+        ("fragment_refs", ("item_id", "evidence_id")),
+    ):
+        if field_name in options:
+            options[field_name] = sorted(
+                options[field_name],
+                key=lambda item: tuple(item[field] for field in identity_fields),
+            )
     payload = {
         "run_id": scope.run_id,
         "agent_comid": scope.agent_comid,
@@ -182,7 +192,7 @@ def canonical_request_key(
             f"{item.code_system}:{item.code}" for item in request.parameter_keys
         ),
         "window_ids": sorted(request.window_ids),
-        "options": request.options.model_dump(mode="json", exclude_none=True),
+        "options": options,
         "policy_manifest_digest": policy_manifest_digest,
     }
     encoded = json.dumps(

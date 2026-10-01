@@ -7,6 +7,7 @@ from app.domain import (
     HydrologyGraph,
     HydrologyNode,
     HydrologyParticipation,
+    InferenceMode,
     MemoryMode,
     ParameterCapabilityRegistry,
     ParameterKey,
@@ -32,8 +33,10 @@ class EvidenceSessionScope:
     run_id: str
     session_id: str
     agent_comid: str
+    query: str
     analysis_context_ref: ReferenceScope
     topology_ref: ReferenceScope
+    topology: HydrologyGraph
     target_node: HydrologyNode
     time_windows: tuple[EvidenceWindow, ...]
     requested_parameters: tuple[ParameterKey, ...]
@@ -42,6 +45,7 @@ class EvidenceSessionScope:
     geometry_ref: str | None
     direct_upstream_comids: tuple[str, ...]
     memory_mode: MemoryMode
+    mode: InferenceMode
     query_envelope: TimeRange
     cancel_token: CancellationToken
 
@@ -51,8 +55,10 @@ class EvidenceSessionScope:
         run_id: str,
         session_id: str,
         agent_comid: str,
+        query: str,
         analysis_context_ref: ReferenceScope,
         topology_ref: ReferenceScope,
+        topology: HydrologyGraph,
         target_node: HydrologyNode,
         time_windows: tuple[EvidenceWindow, ...],
         requested_parameters: tuple[ParameterKey, ...],
@@ -61,6 +67,7 @@ class EvidenceSessionScope:
         geometry_ref: str | None,
         direct_upstream_comids: tuple[str, ...],
         memory_mode: MemoryMode,
+        mode: InferenceMode,
         query_envelope: TimeRange,
         cancel_token: CancellationToken,
         _seal: object,
@@ -74,8 +81,10 @@ class EvidenceSessionScope:
             "run_id": run_id,
             "session_id": session_id,
             "agent_comid": agent_comid,
+            "query": query,
             "analysis_context_ref": analysis_context_ref,
             "topology_ref": topology_ref,
+            "topology": topology,
             "target_node": target_node,
             "time_windows": time_windows,
             "requested_parameters": requested_parameters,
@@ -84,6 +93,7 @@ class EvidenceSessionScope:
             "geometry_ref": geometry_ref,
             "direct_upstream_comids": direct_upstream_comids,
             "memory_mode": memory_mode,
+            "mode": mode,
             "query_envelope": query_envelope,
             "cancel_token": cancel_token,
         }
@@ -146,8 +156,10 @@ def assemble_evidence_session_scope(
         run_id=run_id,
         session_id=session_id,
         agent_comid=agent_comid,
+        query=context.query,
         analysis_context_ref=analysis_context_ref,
         topology_ref=topology_ref,
+        topology=topology,
         target_node=node,
         time_windows=windows,
         requested_parameters=tuple(item.key for item in context.params_used),
@@ -156,6 +168,7 @@ def assemble_evidence_session_scope(
         geometry_ref=node.geometry_ref,
         direct_upstream_comids=direct_upstreams,
         memory_mode=context.memory_mode,
+        mode=context.mode,
         query_envelope=_build_query_envelope(context),
         cancel_token=cancel_token,
         _seal=_SCOPE_SEAL,

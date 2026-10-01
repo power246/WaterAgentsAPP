@@ -42,6 +42,17 @@ class EvidenceToolBudgetExceededError(EvidenceToolError):
     public_message = "The evidence tool budget has been exhausted."
 
 
+class EvidenceToolDeadlineExceededError(EvidenceToolError):
+    code = "evidence_provider_timeout"
+    public_message = "The evidence operation exceeded its deadline."
+    retryable = True
+
+
+class EvidenceToolLimitExceededError(EvidenceToolError):
+    code = "evidence_provider_response_too_large"
+    public_message = "The evidence response exceeded a safety limit."
+
+
 class EvidenceCollectionIncompleteError(EvidenceToolError):
     code = "evidence_collection_incomplete"
     public_message = "The evidence collection could not be proven complete."
@@ -61,6 +72,11 @@ class EvidenceAggregationNotAllowedError(EvidenceToolError):
 class WaterbodyGeometryUnavailableError(EvidenceToolError):
     code = "waterbody_geometry_unavailable"
     public_message = "The waterbody geometry is unavailable."
+
+
+class FacilityRadiusTooSmallForBudgetError(EvidenceToolError):
+    code = "facility_radius_too_small_for_budget"
+    public_message = "The selected facility radius requires too many requests."
 
 
 class EvidenceProducerUnavailableError(EvidenceToolError):
