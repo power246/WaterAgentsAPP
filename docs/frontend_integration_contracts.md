@@ -1,6 +1,6 @@
 # 前端接入约定
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
@@ -13,7 +13,7 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M2 session/SSE/cancel/error | 历史阶段证据 | 仅用于追溯旧整体 session 协议，不作为当前 HTTP 路径。 |
 | M3 transcript/history/idempotency/SSE | Milestone 0–19 本机实现与复审完成，追加 findings 已关闭；实际 Windows/Linux runner、三平台完整 CI 与同库迁移仍为 `partial` | 以当前 OpenAPI、API 指南和 SSE frame 设计接入；Windows 入口、短前缀取消、private URL、性能与正文一致性已完成本机实现和复审，公共契约不变。正式消费由产品阶段 M9 接入。 |
 | M4 query/context/topology | 后端协议与本机集成审计已完成；外部 PostgreSQL/provider/三平台证据仍按实际结果保持 `not run`/`partial` | 以 M4 API、运行时 OpenAPI 和既有两层 SSE 作为 M9 前端实现输入；当前不开始正式联调，也不增加 M4 产品兼容分支。 |
-| M5 evidence | 后端设计、typed content 与读取边界已冻结；尚未实现/验收 | production 不新增 direct tool route，前端只沿现有 transcript/reference/SSE 读取 evidence；正式消费仍由 M9 接入。 |
+| M5 evidence | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run`/`partial` | production 不新增 direct tool route，前端只沿现有 transcript/reference/SSE 读取 evidence；正式消费仍由 M9 接入。 |
 | M6–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未全部冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -371,7 +371,7 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 ## 5. M4–M9 的前端接力边界
 
-M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已冻结 evidence typed content、引用与读取边界，但尚未实现/验收。新前端仍由 M9 统一实现并开始正式联调；M6–M9 其余行当前只冻结语义和责任，不提前冻结尚未实现的路由或 DTO。
+M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完成 evidence typed content、引用、读取、policy、provider adapter 与 production/test composition 的本机实现和集成审计。新前端仍由 M9 统一实现并开始正式联调；M6–M9 其余行当前只冻结语义和责任，不提前冻结尚未实现的路由或 DTO。
 
 | Milestone | 前端必须遵守的语义 |
 |---|---|

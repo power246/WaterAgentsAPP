@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -365,7 +365,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 - [M5 API / 读取契约](M5/m5_evidence_tools_api.md)
 - [M5 Milestone 0–13 Implementation TODO](M5/m5_implementation_todo.md)
 
-Implementation TODO 已按当前冻结设计写成 coding-agent 施工清单；全部项目仍未开始，不能因文档存在宣称 M5 已实现。
+状态：Milestone 0–13 已完成本机实现与集成审计；固定 fake workflow、official provider fixture、专用 PostgreSQL、完整 backend regression、history/restart 与当前唯一 V1 契约审计均已通过。真实 USGS/NWS/EPA 业务请求和 Ubuntu/macOS/Windows 三平台 CI 仍按实际结果保持 `not run`/`partial`；M5 未实现 M6–M9 或开始前端联调。
 
 目标：
 

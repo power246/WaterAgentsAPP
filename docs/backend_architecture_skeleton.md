@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
 本文档是当前后端架构骨架的最终版，也是给后续设计/实现 agent 阅读的架构引入文档。它只回答最高层问题：WaterAgents 后端要解决什么问题、第一版需要哪些大功能、系统分成哪些层、层与层之间如何协作。
 
@@ -435,6 +435,8 @@ Agent session 使用 `pending / running / completed / failed / cancelled`，不�
 M3 的完成判定按 [D38](M3/m3_transcript_history_design.md#d38终态选定前检查既有写入后续保存失败保留终态)：分析结束时检查此前固定范围内的必需写入，再由现有状态机选定唯一终态。完成事件自身与适用收尾写入随后失败时，当前读取返回持久化警告，业务终态保持不变；completed 不代表全部必需写入已确认，内存清理仍等待全部保存、workflow 收敛及保留窗口到期。
 
 Application 层负责编排流程和调用模型前的确定性 evidence gate；Agent 只对通过门禁的范围进行推理，不能自行绕过完全无证据的停止规则。
+
+M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 upstream 与 M8 transcript-RAG producer 仍按后续责任保持 unavailable；真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
 
 ## 7. Domain Layer
 

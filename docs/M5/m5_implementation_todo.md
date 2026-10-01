@@ -2,7 +2,7 @@
 
 更新日期：2026-10-01
 
-> 当前状态：Milestone 0–6 已完成，Milestone 7–13 尚未开始。本文中的 checkbox、验证命令、contract 状态和提交位置只有在实际证据支持时才表示完成。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；没有实际运行证据的项目必须保持未勾选或记录为 `not run` / `partial`。
+> 当前状态：Milestone 0–13 已完成本机实现、集成回归与契约审计。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；真实 USGS/NWS/EPA 业务请求与 Ubuntu/macOS/Windows 三平台 CI 没有实际运行证据，继续记录为 `not run` / `partial`。
 
 本清单执行以下已确认文档：
 
@@ -36,41 +36,41 @@
 
 ## Coding agent 执行原则
 
-- [ ] 只以当前 `backend/`、`docs/M1`–`docs/M5` 和项目级当前契约为实现输入。`backend_bk/`、`frontend_bk/`、`docs/backend_refactor_contract.md` 是完全不相关、最终丢弃的归档；不得读取、导入、复制、适配、枚举、运行或把其中行为当测试 oracle。
-- [ ] 开始每个 Milestone 前记录当前 branch、HEAD、`origin/main`、merge-base、`git status` 和已有用户改动。不得清理、覆盖、回退或顺手提交不属于本阶段的文件。
-- [ ] 一个 Milestone 只交付表中一个可观察目标。先写或更新会失败的测试，再做最小 production 实现，再跑 focused gate；阶段出口未满足时不得进入下一阶段，也不得勾选项目。
-- [ ] 每个 Milestone 原则上形成一个可独立审查的提交。提交前运行适用 focused tests、architecture tests、`compileall` 和 `git diff --check`；未经用户要求不 push、不创建 PR、不改写历史。
-- [ ] 直接原子更新当前唯一 V1 的 domain、manifest、typed content、fixture、reader 和调用方。不得新增 `EvidenceFragmentV2`、`EvidenceBundleV2`、旧新 read union、migration branch、milestone feature flag、双写或临时兼容入口。
-- [ ] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup。不得建立第二套事实库、历史、重试队列、session 状态或第三条 SSE。
-- [ ] M5 扩展 M4 的唯一 capability manifest、`AnalysisContext`、`HydrologyGraph`、station/series refs 和 `topology_ready v1`；M4 availability 只是候选资格，不能直接变成 SourceRecord 或 EvidenceFragment。
-- [ ] M5 只构造 evidence 和 M6 gate 输入，不输出最终水质结论、confidence、attribution 或 `InferenceResult`，不调度 DAG，也不为尚未准备执行的水体预建 session。
-- [ ] production 不公开直接 tool invocation route，当前 frontend 不改动。独立 test app 必须通过单独 composition 显式创建，不能由 production runtime flag 开启，也不能绕过 scope、writer 或授权。
-- [ ] Agent-facing 请求不接受 provider、base URL、secret、任意 COMID、station、geometry、中心点或自由时间范围。server 必须从已保存的 context/topology/capability/station facts 生成 provider plan。
-- [ ] 当前 Agent 只主动查询自身 `agent_comid`。上游 station 数据只能由上游 session 的结果引用传递；不得让下游 Agent 直接查询上游站点。provider 查询范围最多扩展到目标范围前后各一个当地日，且不新增结果窗口。
-- [ ] discharge 对每个实际执行水体、每个最终窗口都是 required support。有站先查询直接 discharge；无站或本地缺失时只接受上游结果或 registry 登记的估算关系。未知 discharge 不能写成 0。
-- [ ] weather observation/forecast 始终按需；prediction mode 不自动使天气必查。设施邻近与历史 RAG 默认 `contextual_only`，不能解锁 target/discharge gate。
-- [ ] adapter 只返回强类型 SourceRecord 和 completion facts；quality、unit、coverage、aggregation、applicability、RAG candidate、fragment/cell/bundle 构造权统一属于 application policy/tool 层。
-- [ ] provider success-empty 与 timeout、auth、rate limit、invalid response、超限、分页/stream 不完整必须分开。技术失败不得变成 `empty`；已解析事实不删除，但受影响窗口必须 blocked/`incomplete_source`。
-- [ ] 单位与数值算法只使用 manifest 驱动的 `Decimal` 确定性实现。不得让 Agent 提供换算系数；不得按参数名称散落 if/else；不得插值、补值、替换异常值、跨 series 合并或在 M5 预测数值。
-- [ ] `suspicious` 可按 capability policy 参与聚合并传播 flags/counts；`invalid` 只保留审计。M5 不自动检测跨 series 冲突，也不保留 `CONFLICTING_OBSERVATIONS` 兼容枚举。
-- [ ] 只有一对一 local direct record 加可逆展示换算具备后续 `observed` 资格；任何多记录 aggregate、跨 series 选择、上游、天气、设施或历史支持均只能成为 inferred 候选。
-- [ ] 外部真实 provider smoke 不是单元测试前置条件。先用 checked-in fixtures 和 fakes 完成确定性覆盖；需凭据、联网或可能计费的 smoke 必须先 preflight，0 请求、缺凭据或网络不满足一律记录 `not run`，不能写成通过或零结果。
-- [ ] 实际完成记录必须写清改动路径、命令、环境、pass/fail/skip/not run 数、失败后的修复、剩余风险和 commit SHA。不得复制旧阶段 pass count，不得用 exit code 0 代替业务断言。
+- [x] 只以当前 `backend/`、`docs/M1`–`docs/M5` 和项目级当前契约为实现输入。`backend_bk/`、`frontend_bk/`、`docs/backend_refactor_contract.md` 是完全不相关、最终丢弃的归档；不得读取、导入、复制、适配、枚举、运行或把其中行为当测试 oracle。
+- [x] 开始每个 Milestone 前记录当前 branch、HEAD、`origin/main`、merge-base、`git status` 和已有用户改动。不得清理、覆盖、回退或顺手提交不属于本阶段的文件。
+- [x] 一个 Milestone 只交付表中一个可观察目标。先写或更新会失败的测试，再做最小 production 实现，再跑 focused gate；阶段出口未满足时不得进入下一阶段，也不得勾选项目。
+- [x] 每个 Milestone 原则上形成一个可独立审查的提交。提交前运行适用 focused tests、architecture tests、`compileall` 和 `git diff --check`；未经用户要求不 push、不创建 PR、不改写历史。
+- [x] 直接原子更新当前唯一 V1 的 domain、manifest、typed content、fixture、reader 和调用方。不得新增 `EvidenceFragmentV2`、`EvidenceBundleV2`、旧新 read union、migration branch、milestone feature flag、双写或临时兼容入口。
+- [x] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup。不得建立第二套事实库、历史、重试队列、session 状态或第三条 SSE。
+- [x] M5 扩展 M4 的唯一 capability manifest、`AnalysisContext`、`HydrologyGraph`、station/series refs 和 `topology_ready v1`；M4 availability 只是候选资格，不能直接变成 SourceRecord 或 EvidenceFragment。
+- [x] M5 只构造 evidence 和 M6 gate 输入，不输出最终水质结论、confidence、attribution 或 `InferenceResult`，不调度 DAG，也不为尚未准备执行的水体预建 session。
+- [x] production 不公开直接 tool invocation route，当前 frontend 不改动。独立 test app 必须通过单独 composition 显式创建，不能由 production runtime flag 开启，也不能绕过 scope、writer 或授权。
+- [x] Agent-facing 请求不接受 provider、base URL、secret、任意 COMID、station、geometry、中心点或自由时间范围。server 必须从已保存的 context/topology/capability/station facts 生成 provider plan。
+- [x] 当前 Agent 只主动查询自身 `agent_comid`。上游 station 数据只能由上游 session 的结果引用传递；不得让下游 Agent 直接查询上游站点。provider 查询范围最多扩展到目标范围前后各一个当地日，且不新增结果窗口。
+- [x] discharge 对每个实际执行水体、每个最终窗口都是 required support。有站先查询直接 discharge；无站或本地缺失时只接受上游结果或 registry 登记的估算关系。未知 discharge 不能写成 0。
+- [x] weather observation/forecast 始终按需；prediction mode 不自动使天气必查。设施邻近与历史 RAG 默认 `contextual_only`，不能解锁 target/discharge gate。
+- [x] adapter 只返回强类型 SourceRecord 和 completion facts；quality、unit、coverage、aggregation、applicability、RAG candidate、fragment/cell/bundle 构造权统一属于 application policy/tool 层。
+- [x] provider success-empty 与 timeout、auth、rate limit、invalid response、超限、分页/stream 不完整必须分开。技术失败不得变成 `empty`；已解析事实不删除，但受影响窗口必须 blocked/`incomplete_source`。
+- [x] 单位与数值算法只使用 manifest 驱动的 `Decimal` 确定性实现。不得让 Agent 提供换算系数；不得按参数名称散落 if/else；不得插值、补值、替换异常值、跨 series 合并或在 M5 预测数值。
+- [x] `suspicious` 可按 capability policy 参与聚合并传播 flags/counts；`invalid` 只保留审计。M5 不自动检测跨 series 冲突，也不保留 `CONFLICTING_OBSERVATIONS` 兼容枚举。
+- [x] 只有一对一 local direct record 加可逆展示换算具备后续 `observed` 资格；任何多记录 aggregate、跨 series 选择、上游、天气、设施或历史支持均只能成为 inferred 候选。
+- [x] 外部真实 provider smoke 不是单元测试前置条件。先用 checked-in fixtures 和 fakes 完成确定性覆盖；需凭据、联网或可能计费的 smoke 必须先 preflight，0 请求、缺凭据或网络不满足一律记录 `not run`，不能写成通过或零结果。
+- [x] 实际完成记录必须写清改动路径、命令、环境、pass/fail/skip/not run 数、失败后的修复、剩余风险和 commit SHA。不得复制旧阶段 pass count，不得用 exit code 0 代替业务断言。
 
 ## M5 完成标准
 
-- [ ] 当前唯一 V1 已包含完整 SourceRecord 判别联合、typed EvidencePayload、EvidenceCell、CollectionManifest 和 reference-only EvidenceBundle；不存在旧 `value_or_summary` 兼容读取。
-- [ ] 154 项 capability 的 unit/channel/value-semantics/quality/coverage/aggregation/relation policy 全部来自同一 manifest，集合与 M4 key/hash 不漂移，规范 digest 字节稳定。
-- [ ] Decimal 单位换算、八种固定聚合算法、quality、coverage、series identity、applicability 和 RAG candidate policy 均有正反 fixture；明显错误组合被拒绝。
-- [ ] NLDI LineString 在当前 V1 中保存一次并由 node 摘要引用；validator、geodesic length、bbox、representative point、简化和完整 corridor 规划均确定性成立。
-- [ ] USGS OGC continuous/daily、USGS Samples CSV、direct discharge、NWS weather 和 EPA ECHO facility adapters 都有 checked-in 官方 contract fixtures；无 silent fallback。
-- [ ] 八个 evidence tools 共用同一 registry、executor、scope、budget、dedup、writer、error mapping 和 result schema；M7/M8 producer 未接入时不向 production Agent 暴露假可用工具。
-- [ ] 五类 M5 typed content 可写入、读取、补写、全文引用并由既有 session SSE 交付；公开投影不泄露 secret、raw provider envelope、无界 records 或内部异常。
-- [ ] station-backed 全空、部分 evidence、provider failure 与 stationless upstream/optional 四条主路径均有 fixture；逐 ParameterKey × window 的 target/discharge cells 稳定区分 supported/unsupported/blocked。
-- [ ] 全部 usable direct evidence 为空的 station-backed preflight 形成真实 call/result/facts/bundle 和停止指令，不调用水体模型；技术失败不走自然全空完成路径。
-- [ ] run-local exact-request single-flight、success reuse、failed/cancelled 不缓存、跨 run 不复用、bounded retry/cancel/budget 和 partial-provider failure 均有并发测试。
-- [ ] production OpenAPI 不含 tool/test route；独立 `create_m5_test_app()` 可通过 fixture scope 复用真实 executor，frontend 没有接入。
-- [ ] M1–M4 regression、M5 focused tests、architecture guards、离线 manifest/doc/fixture audit、`compileall` 和 `git diff --check` 有实际通过证据；外部、PostgreSQL和三平台未执行项如实记录。
+- [x] 当前唯一 V1 已包含完整 SourceRecord 判别联合、typed EvidencePayload、EvidenceCell、CollectionManifest 和 reference-only EvidenceBundle；不存在旧 `value_or_summary` 兼容读取。
+- [x] 154 项 capability 的 unit/channel/value-semantics/quality/coverage/aggregation/relation policy 全部来自同一 manifest，集合与 M4 key/hash 不漂移，规范 digest 字节稳定。
+- [x] Decimal 单位换算、八种固定聚合算法、quality、coverage、series identity、applicability 和 RAG candidate policy 均有正反 fixture；明显错误组合被拒绝。
+- [x] NLDI LineString 在当前 V1 中保存一次并由 node 摘要引用；validator、geodesic length、bbox、representative point、简化和完整 corridor 规划均确定性成立。
+- [x] USGS OGC continuous/daily、USGS Samples CSV、direct discharge、NWS weather 和 EPA ECHO facility adapters 都有 checked-in 官方 contract fixtures；无 silent fallback。
+- [x] 八个 evidence tools 共用同一 registry、executor、scope、budget、dedup、writer、error mapping 和 result schema；M7/M8 producer 未接入时不向 production Agent 暴露假可用工具。
+- [x] 五类 M5 typed content 可写入、读取、补写、全文引用并由既有 session SSE 交付；公开投影不泄露 secret、raw provider envelope、无界 records 或内部异常。
+- [x] station-backed 全空、部分 evidence、provider failure 与 stationless upstream/optional 四条主路径均有 fixture；逐 ParameterKey × window 的 target/discharge cells 稳定区分 supported/unsupported/blocked。
+- [x] 全部 usable direct evidence 为空的 station-backed preflight 形成真实 call/result/facts/bundle 和停止指令，不调用水体模型；技术失败不走自然全空完成路径。
+- [x] run-local exact-request single-flight、success reuse、failed/cancelled 不缓存、跨 run 不复用、bounded retry/cancel/budget 和 partial-provider failure 均有并发测试。
+- [x] production OpenAPI 不含 tool/test route；独立 `create_m5_test_app()` 可通过 fixture scope 复用真实 executor，frontend 没有接入。
+- [x] M1–M4 regression、M5 focused tests、architecture guards、离线 manifest/doc/fixture audit、`compileall` 和 `git diff --check` 有实际通过证据；外部、PostgreSQL和三平台未执行项如实记录。
 
 ## Milestone 0：基线、边界与接缝盘点
 
@@ -591,56 +591,63 @@
 
 ### 工作
 
-- [ ] 建立固定 fake providers 的完整 M5 workflow smoke：station-backed usable、全空停止、部分 evidence、provider failure、stationless upstream/optional、逐窗 discharge 缺失。
-- [ ] 建立完整 provider fixture suite 和离线 contract audit：USGS next-chain/Samples CSV、NWS discovery/grid、EPA corridor、geometry、policy、typed content/reference closure。
-- [ ] 完整回归 M1–M4：创建幂等、四表、writer/reader、history、两层 SSE、取消、补写、重启修复、parser/context/topology/availability 和 OpenAPI。
-- [ ] 在专用 PostgreSQL `wateragents_test` 执行 persistence、补写、history reload 和启动修复；仅用进程级 `WATERAGENTS_TEST_DB_NAME`，不接触业务库。
-- [ ] 分 provider 执行可选真实 contract smoke；预检网络/凭据并记录实际请求数、endpoint contract、pages/records 和安全结果，未执行保持 `not run`。
-- [ ] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M5-C01`–`M5-C20`、`M5-A01`–`M5-A08`，逐项填写实现位置、测试、实际状态和剩余风险。
-- [ ] 搜索并清除旧 evidence fields、重复 policy/allowlist、orphan adapters/methods、M5 feature flags、production test route import 和无 caller 代码；不清理无关历史代码。
-- [ ] 同步 M5 设计/实施/Policy/API/TODO、架构骨架、总 Milestones、延后契约和前端接入边界；只勾选有实际证据的任务。
-- [ ] 写明 M6 接力：消费 bundle/cells/read ports/executor，执行 sufficiency/final result validator；system prompt 负责跨 series 差异的检查、引用、解释或保持不确定。
-- [ ] 写明 M7 接力：实现 direct-upstream producer、依赖收敛和 session 调度；M5 不把 slot/fake 当 production producer。
-- [ ] 写明 M8 接力：实现 transcript index/search，且在 candidate 外继续检查 run/session completed、persistence、memory mode 和 safe projection；历史不能解锁当前 gate。
+- [x] 建立固定 fake providers 的完整 M5 workflow smoke：station-backed usable、全空停止、部分 evidence、provider failure、stationless upstream/optional、逐窗 discharge 缺失。
+- [x] 建立完整 provider fixture suite 和离线 contract audit：USGS next-chain/Samples CSV、NWS discovery/grid、EPA corridor、geometry、policy、typed content/reference closure。
+- [x] 完整回归 M1–M4：创建幂等、四表、writer/reader、history、两层 SSE、取消、补写、重启修复、parser/context/topology/availability 和 OpenAPI。
+- [x] 在专用 PostgreSQL `wateragents_test` 执行 persistence、补写、history reload 和启动修复；仅用进程级 `WATERAGENTS_TEST_DB_NAME`，不接触业务库。
+- [x] 分 provider 执行可选真实 contract smoke；预检网络/凭据并记录实际请求数、endpoint contract、pages/records 和安全结果，未执行保持 `not run`。
+- [x] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M5-C01`–`M5-C20`、`M5-A01`–`M5-A08`，逐项填写实现位置、测试、实际状态和剩余风险。
+- [x] 搜索并清除旧 evidence fields、重复 policy/allowlist、orphan adapters/methods、M5 feature flags、production test route import 和无 caller 代码；不清理无关历史代码。
+- [x] 同步 M5 设计/实施/Policy/API/TODO、架构骨架、总 Milestones、延后契约和前端接入边界；只勾选有实际证据的任务。
+- [x] 写明 M6 接力：消费 bundle/cells/read ports/executor，执行 sufficiency/final result validator；system prompt 负责跨 series 差异的检查、引用、解释或保持不确定。
+- [x] 写明 M7 接力：实现 direct-upstream producer、依赖收敛和 session 调度；M5 不把 slot/fake 当 production producer。
+- [x] 写明 M8 接力：实现 transcript index/search，且在 candidate 外继续检查 run/session completed、persistence、memory mode 和 safe projection；历史不能解锁当前 gate。
 
 ### Tests
 
-- [ ] fake end-to-end 覆盖所有主路径、每类 technical failure、cancel race、single-flight、budget、persistence failure 和 deterministic serialization。
-- [ ] 154 项 manifest/policy、geometry/corridor、八工具 roster、五类 typed content、逐窗 target/discharge cell 和 RAG candidate 均有可执行 gate。
-- [ ] secrets、raw provider envelope、URL query、Authorization、内部异常、无界 records 和 test controls 的 logs/API/SSE/history 全出口扫描通过。
-- [ ] 当前唯一 V1 producer/consumer/fixture/OpenAPI 同步，无 V2/read union；production OpenAPI 无 test/tool route。
-- [ ] contract ID 集合与覆盖矩阵双向一致；Markdown links、JSON examples、code fences、trailing whitespace 和 `git diff --check` 通过。
+- [x] fake end-to-end 覆盖所有主路径、每类 technical failure、cancel race、single-flight、budget、persistence failure 和 deterministic serialization。
+- [x] 154 项 manifest/policy、geometry/corridor、八工具 roster、五类 typed content、逐窗 target/discharge cell 和 RAG candidate 均有可执行 gate。
+- [x] secrets、raw provider envelope、URL query、Authorization、内部异常、无界 records 和 test controls 的 logs/API/SSE/history 全出口扫描通过。
+- [x] 当前唯一 V1 producer/consumer/fixture/OpenAPI 同步，无 V2/read union；production OpenAPI 无 test/tool route。
+- [x] contract ID 集合与覆盖矩阵双向一致；Markdown links、JSON examples、code fences、trailing whitespace 和 `git diff --check` 通过。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`（仅专用 `wateragents_test`；未配置则 `not run`）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/m5_evidence_workflow_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL 安全门禁时）
-- [ ] 运行 manifest、provider fixture、typed registry、OpenAPI、docs/link/JSON 离线 audits。
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`（仅专用 `wateragents_test`；未配置则 `not run`）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/m5_evidence_workflow_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL 安全门禁时）
+- [x] 运行 manifest、provider fixture、typed registry、OpenAPI、docs/link/JSON 离线 audits。
+- [x] `git diff --check`
 
 阶段出口：M5 内部切片的代码、测试、协议和接力证据完整；没有把未运行的 provider/PostgreSQL/三平台项写成通过，也没有实现 M6–M9 或开始正式前端联调。
 
 提交边界：只包含集成修复、审计、smoke、文档同步和完成记录；发现实质功能缺口时必须回到对应 Milestone 修复并重跑其 focused gate，不能把大功能补丁藏在最终审计提交。
 
+#### Milestone 13 完成记录（2026-10-01）
+
+- 实现：新增 `m5_evidence_workflow_smoke.py`，复用 production acquisition/executor/bundle/transcript 接缝的既有固定 fakes，覆盖 station-backed usable/partial/empty/failure、stationless upstream/optional、逐窗 discharge、cancel、single-flight、budget、持久化失败与确定性序列化；新增 M5 文档/contract ID/typed JSON/registry/OpenAPI 可执行审计，并修正 API 文档中不存在的 `/status` 路由、fixture window identity 和失效 JSON 示例。未接入 M6 validator、M7/M8 production producer 或 frontend。
+- 验证：workflow smoke `29 passed`，official provider/geometry/policy/typed/docs 离线审计 `119 passed`，architecture + 文档契约 `108 passed`；Docker Desktop 4.93.0 / Engine 29.8.1 与 PostgreSQL 17 healthy。仅以进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 运行 persistence `58 passed`、完整 backend `1510 passed`，SSE completed/cancelled 与 history/独立进程重启/startup repair 均通过；`compileall`、旧字段/feature flag/production test import 扫描和 `git diff --check` 通过。
+- 外部边界：USGS `usgs_waterdata_ogc_v1` 因缺 station 配置、NWS `nws_api_linked_data_v1` 因联系信息仍为 `.invalid`、EPA `epa_echo_cwa_v1` 因缺 LineString 配置，均为 `0 requests / 0 pages / 0 records / not run`；Ubuntu/macOS/Windows 三平台 CI 为 `not run`，因此中心 deferred contract 不登记 `implemented`。
+- 提交：M13 集成 smoke、审计与 API 契约修正为本地提交 `1f9f7d9`；未 push。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |
 |---|---|---|---|---|
-| M5-C01 / M5-C02 / M5-A01 | pending | — | typed models、reference closure、corruption | — |
-| M5-C03 / M5-C04 / M5-C15 | pending | — | execution/collection、quality/coverage、partial failure | — |
-| M5-C05 / M5-C06 / M5-A05 | pending | — | scope/time、geometry/corridor、facility filtering | — |
-| M5-C07 / M5-C17 / M5-A06 | pending | — | roster/executor、single-flight、budget/cancel | — |
-| M5-C08 / M5-C09 / M5-C10 / M5-A03 | pending | — | station-backed/stationless、discharge、optional weather | — |
-| M5-C11 / M5-C12 / M5-C13 / M5-A02 | pending | — | manifest、unit/aggregation、series、applicability | — |
-| M5-C14 | pending | — | provider fixtures、single-source、official contract | — |
-| M5-C16 / M5-A04 | pending | — | five typed contents、writer/reader/SSE/OpenAPI | — |
-| M5-C18 | pending | — | production/test import and route isolation | — |
-| M5-C19 / M5-C20 / M5-A07 | pending | — | RAG candidate、M7/M8 producer unavailable | — |
-| M5-A08 / GLOBAL-C01–C11 | pending | — | M1–M4 regression、architecture、current V1、platform | — |
+| M5-C01 / M5-C02 / M5-A01 | 本机已验证 | `backend/app/domain/evidence/`；`backend/app/application/evidence_tools/` | domain evidence、bundle closure、transcript corruption | 唯一 V1、单份 source facts 与引用闭包均通过；无旧 read union。 |
+| M5-C03 / M5-C04 / M5-C15 | 本机已验证 | `backend/app/domain/evidence/collection_*`；`backend/app/application/evidence_tools/collection_service.py` | collection manifest、quality/coverage、USGS incomplete | empty/technical failure/partial window 分离，已解析事实保留。 |
+| M5-C05 / M5-C06 / M5-A05 | 本机已验证 | `scope.py`；`hydrology_topology/corridor.py`；facility adapter | scope/DST、geometry、corridor、facility filtering | server-owned plan 与 `[1,20]` mile 拒绝式边界已验证。 |
+| M5-C07 / M5-C17 / M5-A06 | 本机已验证 | `registry.py`；`executor.py`；`dedup.py` | registry/executor、dedup、budget/cancel | 八工具共用执行链；failed/cancelled 不进入成功 cache。 |
+| M5-C08 / M5-C09 / M5-C10 / M5-A03 | 本机已验证 | `acquisition.py`；`bundle_builder.py` | M13 workflow smoke、acquisition、逐窗 cells | station-backed/stationless、required discharge 与 optional weather 均通过固定 fake；M7 upstream production producer 仍延后。 |
+| M5-C11 / M5-C12 / M5-C13 / M5-A02 | 本机已验证 | capability manifest；`backend/app/application/evidence_policy/` | 154 audit、units/quality/aggregation/applicability/RAG | 154/154 与规范 digest 稳定；错误算法/series/relation 组合拒绝。 |
+| M5-C14 | 本机已验证 | `backend/app/infrastructure/adapters/` | USGS OGC/Samples、NWS discovery/grid、EPA ECHO fixture suite | official contract fixtures 全通过；真实 provider 业务请求均为 `not run`。 |
+| M5-C16 / M5-A04 | 本机已验证 | transcript registry/store、既有 M3 writer/reader/SSE | typed registry、PostgreSQL reload/repair、SSE/OpenAPI | 五类 content 与全文引用通过专用 PostgreSQL；production 无 tool route。 |
+| M5-C18 | 本机已验证 | `runtime/m5.py`；独立 `runtime/m5_test.py` | runtime import guard、test app/OpenAPI | production import graph 不含 test composition；frontend 未接入。 |
+| M5-C19 / M5-C20 / M5-A07 | 本机已验证 | applicability/RAG policy；registry producer slots | candidate gates、roster、runtime composition | candidate 只是 M8 输入；M7/M8 production producer 保持 unavailable，无 hidden fake。 |
+| M5-A08 / GLOBAL-C01–C11 | partial | M1–M5 当前 `backend/` 与 project contracts | 完整 backend `1510 passed`、architecture `108 passed`、PostgreSQL/history | Windows 本机与专用 PostgreSQL已验证；真实 providers 和 Ubuntu/macOS/Windows 同提交 CI 为 `not run`。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码或 fixture 存在填写已验证；本机、PostgreSQL、外部 provider 和三平台 CI 证据分开记录。
 

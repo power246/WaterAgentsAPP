@@ -1,8 +1,8 @@
 # M5 Evidence Policy Catalog
 
-更新日期：2026-09-30
+更新日期：2026-10-01
 
-> 状态：设计已冻结，Milestone 2 的 manifest schema、不可变 registry、规范 digest 与离线 audit 已实现；数值转换、质量判定、coverage 计算和聚合执行仍属于 Milestone 3。本文定义后续实现必须落入同一 capability manifest 的单位、质量、聚合、coverage 与 evidence relation policy；不为每条观测值维护单独规则表。分阶段施工、证据门禁和当前进度见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+> 状态：设计已冻结，manifest schema、不可变 registry、规范 digest、Decimal 数值转换、质量/coverage、聚合、applicability 与 RAG candidate policy 均已完成 M5 本机实现和 154 项离线审计。本文定义的规则全部落入同一 capability manifest，不为每条观测值维护单独规则表；真实 provider 与三平台 CI 的未运行边界见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 ## 1. 为什么不是“每个数值一张表”
 

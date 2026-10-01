@@ -1,8 +1,8 @@
 # M5 Evidence Tools + EvidenceBundle 设计决策记录
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
-> 状态：设计方向与实施模式已完成对齐。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收接缝和当前进度见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+> 状态：设计方向与实施模式已完成对齐，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收证据和未运行边界见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 本文承接：
 

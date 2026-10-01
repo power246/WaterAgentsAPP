@@ -1,8 +1,8 @@
 # M5 Evidence Tools + EvidenceBundle 实施设计
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
-> 状态：设计已冻结，供后续实现使用。本文不表示 M5 已整体实现或验收；实施步骤、验证门禁和当前进度见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+> 状态：设计已冻结，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。真实 USGS/NWS/EPA 请求和 Ubuntu/macOS/Windows 三平台 CI 仍为 `not run`；实施步骤、验证证据和剩余风险见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 本文把 [M5 设计决策](m5_evidence_tools_design.md) 落到模块、类型、provider、执行链、持久化与测试接缝。确定性单位、质量、聚合和 applicability 规则见 [M5 Policy Catalog](m5_evidence_policy_catalog.md)，公开读取与 typed content 示例见 [M5 API 文档](m5_evidence_tools_api.md)。
 

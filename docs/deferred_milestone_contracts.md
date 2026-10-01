@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -524,6 +524,14 @@ M4 Milestone 0–10 已完成本机实现与契约审计；这里只索引本机
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07` | [M4 契约覆盖矩阵](M4/m4_implementation_todo.md#契约覆盖矩阵)、[实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[API/前端接入](M4/m4_query_understanding_topology_api.md)和[154 项 capability 目录](M4/m4_parameter_capability_catalog.md)。固定 fake workflow、离线 manifest 审计、1 请求官方 refresh、完整非 PostgreSQL backend regression 与 standalone run SSE smoke 已在 Windows 本机通过。 | 在专用 PostgreSQL 测试库运行完整 persistence/health/history/restart，并补齐 Google 与已配置 parser provider contract smoke 及 Ubuntu/macOS/Windows 同一提交 CI 后，再评估中心最终承接。 |
+
+### M5 待验收索引
+
+M5 Milestone 0–13 已完成本机实现与契约审计；这里只索引本机证据，不把缺少的真实 provider 业务请求或三平台 CI 冒充中心最终承接。专用 PostgreSQL `wateragents_test` 的 persistence、完整 backend regression、history reload 和 startup repair 已通过；USGS/NWS/EPA smoke 完成网络与配置预检，但因缺少安全 fixture 参数或有效联系信息而发出 0 个业务请求，均记为 `not run`。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M5-C01`–`M5-C20`、`M5-A01`–`M5-A08` | [M5 契约覆盖矩阵](M5/m5_implementation_todo.md#契约覆盖矩阵实施时填写)、[实施设计](M5/m5_evidence_tools_implementation_design.md)、[Policy Catalog](M5/m5_evidence_policy_catalog.md)、[API/读取契约](M5/m5_evidence_tools_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 fake workflow、official provider fixtures、154 项 manifest/policy、geometry/corridor、五类 typed content、production OpenAPI、专用 PostgreSQL 和 M1–M4 完整回归均已在 Windows 本机通过。 | 以安全的 station/series/time、NWS contact 和 EPA geometry 配置分别执行真实 USGS/NWS/EPA contract smoke，并在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke；通过后再评估中心最终承接表的 `implemented` 记录。 |
 
 未新增、拆分、替换或取消 contract；Milestone 11–16 是既有 M3/Global/MR 约束的审查修复分解。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
