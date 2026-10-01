@@ -15,6 +15,12 @@ from app.application.evidence_tools.models import (
 )
 from app.application.evidence_tools.registry import EvidenceToolRegistry
 from app.application.evidence_tools.scope import EvidenceSessionScope
+from app.application.evidence_tools.relation_materializer import (
+    EvidenceRelationMaterializer,
+)
+from app.application.evidence_tools.evidence_sources import (
+    weather_capable_parameters,
+)
 from app.domain import (
     CollectionFactPayload,
     CollectionStatus,
@@ -29,11 +35,14 @@ from app.domain import (
     EvidenceResultEligibility,
     EvidenceToolExecutionStatus,
     EvidenceToolRequest,
+    EvidenceToolOptions,
     EvidenceLocation,
     EvidenceFragmentReference,
     ItemReference,
     ParameterKey,
+    ParameterCapabilityRegistry,
     Provenance,
+    InferenceMode,
 )
 
 
@@ -78,6 +87,7 @@ class EvidenceAcquisitionService:
         executor: EvidenceToolExecutor,
         reader: EvidenceToolReader,
         writer: EvidenceToolWriter,
+        capability_registry: ParameterCapabilityRegistry,
         clock: EvidenceClock | None = None,
     ) -> None:
         self._registry = registry
@@ -86,6 +96,11 @@ class EvidenceAcquisitionService:
         self._writer = writer
         self._clock = clock or _UtcClock()
         self._bundle_builder = EvidenceBundleBuilder(reader=reader, writer=writer)
+        self._relation_materializer = EvidenceRelationMaterializer(
+            registry=capability_registry,
+            reader=reader,
+            writer=writer,
+        )
 
     async def acquire(
         self,
@@ -111,10 +126,12 @@ class EvidenceAcquisitionService:
                 required.result.execution_status
                 is EvidenceToolExecutionStatus.COMPLETED
             )
-            stop_before_model = completed and not await self._has_usable_direct(
+            has_direct = await self._has_usable_direct(
                 scope,
                 required.result.fragment_refs,
             )
+            has_rules = bool(scope.evidence_rule_plan.effective_rules)
+            stop_before_model = completed and not has_direct and not has_rules
             run_optional = completed and not stop_before_model
         else:
             upstream = await self._execute(
@@ -132,7 +149,10 @@ class EvidenceAcquisitionService:
             )
 
         if run_optional:
-            for request in optional_requests:
+            for request in (
+                *self._required_rule_requests(scope),
+                *optional_requests,
+            ):
                 execution = await self._execute(
                     scope,
                     request,
@@ -146,6 +166,23 @@ class EvidenceAcquisitionService:
                     is EvidenceToolExecutionStatus.CANCELLED
                 ):
                     break
+
+        fragment_refs.extend(
+            await self._relation_materializer.materialize(
+                scope,
+                _unique_fragment_refs(fragment_refs),
+                operation_id=f"m5:materialize-relations:{scope.session_id}",
+            )
+        )
+        if (
+            scope.station_refs
+            and not stop_before_model
+            and scope.evidence_rule_plan.effective_rules
+        ):
+            stop_before_model = not await self._has_usable_target_evidence(
+                scope,
+                _unique_fragment_refs(fragment_refs),
+            )
 
         bundle, bundle_ref = await self._bundle_builder.build_and_write(
             scope,
@@ -287,6 +324,57 @@ class EvidenceAcquisitionService:
                 return True
         return False
 
+    async def _has_usable_target_evidence(
+        self,
+        scope: EvidenceSessionScope,
+        references: tuple[EvidenceFragmentReference, ...],
+    ) -> bool:
+        target_parameters = set(scope.requested_parameters)
+        for reference in references:
+            fragment = await self._reader.read_fragment(scope, reference)
+            if (
+                target_parameters.intersection(fragment.parameter_refs)
+                and fragment.applicability
+                in {
+                    EvidenceApplicability.DIRECT_MEASUREMENT,
+                    EvidenceApplicability.ALLOWED_INDIRECT,
+                }
+                and fragment.quality_class
+                in {EvidenceQualityClass.VALID, EvidenceQualityClass.SUSPICIOUS}
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _required_rule_requests(
+        scope: EvidenceSessionScope,
+    ) -> tuple[EvidenceToolRequest, ...]:
+        parameters = weather_capable_parameters(
+            tuple(
+                dict.fromkeys(
+                    parameter
+                    for rule in scope.evidence_rule_plan.effective_rules
+                    if rule.required_collection_attempt
+                    for parameter in rule.input_parameters
+                )
+            )
+        )
+        if not parameters:
+            return ()
+        return (
+            EvidenceToolRequest(
+                tool_call_id=f"m5:required-rule-weather:{scope.session_id}",
+                session_id=scope.session_id,
+                tool_name="collect_weather_evidence",
+                purpose="Collect weather inputs required by the inherited evidence rules.",
+                window_ids=tuple(item.window_id for item in scope.time_windows),
+                parameter_keys=parameters,
+                options=EvidenceToolOptions(
+                    include_forecast=scope.mode is not InferenceMode.GAP_FILLING,
+                ),
+            ),
+        )
+
     def _request(
         self,
         scope: EvidenceSessionScope,
@@ -305,6 +393,11 @@ class EvidenceAcquisitionService:
             parameter_keys=tuple(
                 dict.fromkeys(
                     (*scope.requested_parameters, *scope.supporting_parameters)
+                    + tuple(
+                        key
+                        for rule in scope.evidence_rule_plan.effective_rules
+                        for key in rule.input_parameters
+                    )
                 )
             ),
         )

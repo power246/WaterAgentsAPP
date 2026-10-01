@@ -10,6 +10,13 @@ from app.application.evidence_policy import (
     is_rag_candidate,
     resolve_applicability,
 )
+from app.application.query_understanding import (
+    EvidenceInferenceStrength,
+    EvidenceRuleOrigin,
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
+    create_evidence_rule,
+)
 from app.domain.evidence import (
     CollectionStatus,
     CoverageStatus,
@@ -23,11 +30,7 @@ from app.domain.evidence import (
     Provenance,
     SourceRecordReference,
 )
-from app.domain.hydrology import (
-    EvidenceRuleId,
-    ParameterKey,
-    ParameterProvider,
-)
+from app.domain.hydrology import ParameterKey, ParameterProvider
 from app.domain.time import TimeRange
 from app.infrastructure.config import load_parameter_capability_registry
 
@@ -42,6 +45,25 @@ def capability(code: str):
     result = REGISTRY.get(ParameterKey(code_system="usgs", code=code))
     assert result is not None
     return result
+
+
+def evidence_rule(
+    output_code: str,
+    input_codes: tuple[str, ...],
+    *,
+    temporal_relation: EvidenceTemporalRelation = EvidenceTemporalRelation.SAME_WINDOW,
+    spatial_relation: EvidenceSpatialRelation = EvidenceSpatialRelation.SAME_WATERBODY,
+):
+    return create_evidence_rule(
+        output_parameter=capability(output_code).key,
+        input_parameters=tuple(capability(code).key for code in input_codes),
+        temporal_relation=temporal_relation,
+        spatial_relation=spatial_relation,
+        maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+        required_collection_attempt=True,
+        rationale="Test-owned directional evidence rule.",
+        origin=EvidenceRuleOrigin.QUERY_PARSER,
+    )
 
 
 def direct_observation(
@@ -169,10 +191,14 @@ def test_confirmed_station_segment_can_supply_direct_location_association() -> N
     assert result is EvidenceApplicability.DIRECT_MEASUREMENT
 
 
-def test_registered_upstream_relation_is_indirect_but_not_direct() -> None:
+def test_parser_owned_upstream_relation_is_indirect_but_not_direct() -> None:
     current = capability("00300")
     context = IndirectEvidenceContext(
-        relation_id=EvidenceRuleId.SAME_PARAMETER_UPSTREAM,
+        rule=evidence_rule(
+            "00300",
+            ("00300",),
+            spatial_relation=EvidenceSpatialRelation.UPSTREAM_TO_DOWNSTREAM,
+        ),
         input_parameters=(current.key,),
         input_windows=(WINDOW,),
         reference_complete=True,
@@ -203,18 +229,21 @@ def test_registered_upstream_relation_is_indirect_but_not_direct() -> None:
     )
 
 
-def test_relation_registry_and_relation_specific_conditions_cannot_be_overridden() -> None:
+def test_rule_output_and_temporal_conditions_cannot_be_overridden() -> None:
     dissolved_oxygen = capability("00300")
     unsupported = IndirectEvidenceContext(
-        relation_id=EvidenceRuleId.DISCHARGE_GAGE_HEIGHT_ESTIMATE,
+        rule=evidence_rule("00060", ("00065",)),
         input_parameters=(ParameterKey(code_system="usgs", code="00065"),),
         input_windows=(WINDOW,),
+        same_location=True,
         reference_complete=True,
-        relationship_registered=True,
-        model_version="rating-v1",
     )
     adjacent_too_far = IndirectEvidenceContext(
-        relation_id=EvidenceRuleId.SAME_LOCATION_ADJACENT_TIME,
+        rule=evidence_rule(
+            "00300",
+            ("00300",),
+            temporal_relation=EvidenceTemporalRelation.ADJACENT_LOCAL_DAY,
+        ),
         input_parameters=(dissolved_oxygen.key,),
         input_windows=(
             TimeRange(
@@ -248,15 +277,18 @@ def test_relation_registry_and_relation_specific_conditions_cannot_be_overridden
     )
 
 
-def test_registered_discharge_rating_relation_requires_versioned_relationship() -> None:
+def test_generic_same_waterbody_relation_requires_same_location() -> None:
     discharge = capability("00060")
     context = IndirectEvidenceContext(
-        relation_id=EvidenceRuleId.DISCHARGE_GAGE_HEIGHT_ESTIMATE,
+        rule=evidence_rule(
+            "00060",
+            ("00065",),
+            temporal_relation=EvidenceTemporalRelation.OVERLAPPING_WINDOW,
+        ),
         input_parameters=(ParameterKey(code_system="usgs", code="00065"),),
         input_windows=(WINDOW,),
+        same_location=True,
         reference_complete=True,
-        relationship_registered=True,
-        model_version="rating-v1",
     )
 
     assert (
@@ -275,21 +307,22 @@ def test_registered_discharge_rating_relation_requires_versioned_relationship() 
             discharge,
             COMID,
             WINDOW,
-            indirect_context=context.model_copy(update={"model_version": None}),
+            indirect_context=context.model_copy(update={"same_location": False}),
         )
         is EvidenceApplicability.CONTEXTUAL_ONLY
     )
 
 
-def test_registered_directional_relation_requires_all_same_window_inputs() -> None:
+def test_parser_directional_relation_requires_all_same_window_inputs() -> None:
     turbidity = capability("61028")
     context = IndirectEvidenceContext(
-        relation_id=EvidenceRuleId.TURBIDITY_PRECIPITATION_DISCHARGE_DIRECTIONAL,
+        rule=evidence_rule("61028", ("00045", "00060")),
         input_parameters=(
             ParameterKey(code_system="usgs", code="00045"),
             ParameterKey(code_system="usgs", code="00060"),
         ),
         input_windows=(WINDOW, WINDOW),
+        same_location=True,
         reference_complete=True,
     )
 

@@ -10,6 +10,13 @@ from app.application.evidence_policy import (
     IndirectEvidenceContext,
     resolve_applicability,
 )
+from app.application.query_understanding import (
+    EvidenceInferenceStrength,
+    EvidenceRuleOrigin,
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
+    create_evidence_rule,
+)
 from app.domain import (
     EvidenceApplicability,
     GeoPoint,
@@ -18,7 +25,6 @@ from app.domain import (
     TimeRange,
     WeatherEvidenceRequest,
 )
-from app.domain.hydrology import EvidenceRuleId
 from app.infrastructure.adapters import NwsWeatherAdapter
 from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.http import ProviderHttpClient
@@ -93,12 +99,25 @@ def test_unregistered_weather_relation_remains_contextual() -> None:
     target = registry.get(ParameterKey(code_system="usgs", code="00300"))
     assert target is not None
     context = IndirectEvidenceContext(
-        relation_id=EvidenceRuleId.TURBIDITY_PRECIPITATION_DISCHARGE_DIRECTIONAL,
+        rule=create_evidence_rule(
+            output_parameter=ParameterKey(code_system="usgs", code="61028"),
+            input_parameters=(
+                ParameterKey(code_system="usgs", code="00045"),
+                ParameterKey(code_system="usgs", code="00060"),
+            ),
+            temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+            spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+            maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+            required_collection_attempt=True,
+            rationale="Rainfall and discharge provide directional turbidity support.",
+            origin=EvidenceRuleOrigin.QUERY_PARSER,
+        ),
         input_parameters=(
             ParameterKey(code_system="usgs", code="00045"),
             ParameterKey(code_system="usgs", code="00060"),
         ),
         input_windows=(WINDOW, WINDOW),
+        same_location=True,
         reference_complete=True,
     )
 

@@ -45,7 +45,15 @@ def authorize_evidence_tool_request(
         item for item in scope.time_windows if item.window_id in requested_window_ids
     )
     allowed_parameters = set(
-        (*scope.requested_parameters, *scope.supporting_parameters)
+        (
+            *scope.requested_parameters,
+            *scope.supporting_parameters,
+            *(
+                key
+                for rule in scope.evidence_rule_plan.effective_rules
+                for key in (rule.output_parameter, *rule.input_parameters)
+            ),
+        )
     )
     if not set(request.parameter_keys) <= allowed_parameters:
         raise EvidenceScopeViolationError()
@@ -294,6 +302,14 @@ def _authorize_parameters(
     scope: EvidenceSessionScope,
     parameters: tuple[ParameterKey, ...],
 ) -> None:
-    allowed = set((*scope.requested_parameters, *scope.supporting_parameters))
+    allowed = {
+        *scope.requested_parameters,
+        *scope.supporting_parameters,
+        *(
+            key
+            for rule in scope.evidence_rule_plan.effective_rules
+            for key in (rule.output_parameter, *rule.input_parameters)
+        ),
+    }
     if not set(parameters) <= allowed:
         raise EvidenceScopeViolationError()

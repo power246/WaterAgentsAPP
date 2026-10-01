@@ -133,6 +133,7 @@ class HydrologyGraphBuilder:
             comid=context.target.comid,
             target_parameters=tuple(item.key for item in context.params_used),
             supporting_parameters=tuple(item.key for item in context.supporting_params),
+            evidence_parameters=context.evidence_rule_parameters,
             time_segments=context.time_segments,
             prediction_baseline_hours=self._prediction_baseline_hours,
         )

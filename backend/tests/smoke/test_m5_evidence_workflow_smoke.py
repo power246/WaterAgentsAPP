@@ -36,6 +36,7 @@ def test_station_backed_empty_preflight_stops_before_any_model_call() -> None:
             executor=executor,
             reader=store,
             writer=store,
+            capability_registry=capabilities,
             clock=FixedClock(),
         )
 

@@ -34,7 +34,6 @@ def audit_parameter_capabilities() -> dict[str, object]:
         "quality_profile_count": len(registry.quality_profiles),
         "aggregation_profile_count": len(registry.aggregation_profiles),
         "coverage_profile_count": len(registry.coverage_profiles),
-        "evidence_relation_count": len(registry.evidence_relations),
         "channel_policy_count": sum(
             len(capability.channel_policies)
             for capability in registry.capabilities

@@ -169,6 +169,7 @@ def compose_m5_runtime(
         executor=executor,
         reader=transcript,
         writer=transcript,
+        capability_registry=capability_registry,
         clock=clock,
     )
     return M5Runtime(

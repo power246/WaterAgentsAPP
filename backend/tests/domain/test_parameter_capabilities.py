@@ -11,7 +11,6 @@ from app.domain.hydrology import (
     EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256,
     EXPECTED_PARAMETER_GROUP_COUNTS,
     EvidenceAggregationMethod,
-    EvidenceRuleId,
     ParameterCapabilityManifest,
     ParameterCapabilityRegistry,
     ParameterProvider,
@@ -55,6 +54,7 @@ def keys(matches) -> tuple[str, ...]:
 
 def test_manifest_matches_the_complete_m4_catalog_contract() -> None:
     registry = load_parameter_capability_registry()
+    payload = manifest_payload()
 
     assert len(registry.capabilities) == EXPECTED_PARAMETER_CAPABILITY_COUNT == 154
     assert dict(registry.group_counts) == dict(EXPECTED_PARAMETER_GROUP_COUNTS)
@@ -68,9 +68,15 @@ def test_manifest_matches_the_complete_m4_catalog_contract() -> None:
     assert Counter(capability.official_group for capability in registry.capabilities) == Counter(
         EXPECTED_PARAMETER_GROUP_COUNTS
     )
+    assert "evidence_rule_ids" not in payload
+    assert "evidence_relations" not in payload
+    assert all(
+        "allowed_indirect_evidence_rules" not in item
+        for item in payload["capabilities"]
+    )
 
 
-def test_every_capability_has_complete_routes_aliases_evidence_and_fixture() -> None:
+def test_every_capability_has_complete_routes_aliases_and_fixture() -> None:
     registry = load_parameter_capability_registry()
 
     for capability in registry.capabilities:
@@ -88,13 +94,11 @@ def test_every_capability_has_complete_routes_aliases_evidence_and_fixture() -> 
         assert capability.aliases_en
         assert capability.availability_providers
         assert capability.observation_providers
-        assert capability.allowed_indirect_evidence_rules
         assert capability.fixture_identity == (
             f"usgs_parameter_{capability.key.code}_v1"
         )
         assert set(capability.availability_providers) <= set(ParameterProvider)
         assert set(capability.observation_providers) <= set(ParameterProvider)
-        assert set(capability.allowed_indirect_evidence_rules) <= set(EvidenceRuleId)
         assert ParameterRole.TARGET in capability.roles
         assert {policy.provider for policy in capability.channel_policies} == set(
             capability.observation_providers
@@ -117,7 +121,6 @@ def test_manifest_policy_registry_is_complete_and_reference_closed() -> None:
     assert len(registry.quality_profiles) == 2
     assert len(registry.aggregation_profiles) == 10
     assert len(registry.coverage_profiles) == 5
-    assert set(registry.evidence_relations) == set(EvidenceRuleId)
     assert len(registry.manifest_digest) == 64
     assert all(profile.valid_tokens for profile in registry.quality_profiles.values())
     assert all(
@@ -128,22 +131,12 @@ def test_manifest_policy_registry_is_complete_and_reference_closed() -> None:
     assert registry.resolve_unit("μg/L").unit_id == "micrograms_per_liter"
     assert registry.resolve_unit("not-a-unit") is None
 
-    registered_keys = {capability.key for capability in registry.capabilities}
-    for relation in registry.evidence_relations.values():
-        assert set(relation.input_parameter_keys) <= registered_keys
-        assert set(relation.output_parameter_keys) <= registered_keys
-
-
-def test_required_discharge_has_direct_channels_and_registered_relations() -> None:
+def test_required_discharge_has_direct_channels() -> None:
     registry = load_parameter_capability_registry()
     discharge = registry.required_support[0]
 
     assert discharge.key.code == "00060"
     assert all(policy.direct_observation for policy in discharge.channel_policies)
-    assert {
-        EvidenceRuleId.DISCHARGE_GAGE_HEIGHT_ESTIMATE,
-        EvidenceRuleId.DISCHARGE_BASIN_ESTIMATE,
-    } <= set(discharge.allowed_indirect_evidence_rules)
 
 
 def test_representative_policy_families_reject_obvious_sum_misuse() -> None:
@@ -245,18 +238,13 @@ def test_method_fraction_and_unit_specific_names_are_not_merged(
     )
 
 
-def test_manifest_models_reject_unknown_provider_rule_and_duplicate_alias() -> None:
+def test_manifest_models_reject_unknown_provider_and_duplicate_alias() -> None:
     registry = load_parameter_capability_registry()
     capability = registry.capabilities[0]
     payload = capability.model_dump(mode="json")
 
     payload["availability_providers"] = ["unknown_provider"]
     with pytest.raises(ValidationError, match="unknown_provider"):
-        type(capability).model_validate(payload)
-
-    payload = capability.model_dump(mode="json")
-    payload["allowed_indirect_evidence_rules"] = ["unknown_rule"]
-    with pytest.raises(ValidationError, match="unknown_rule"):
         type(capability).model_validate(payload)
 
     payload = capability.model_dump(mode="json")
@@ -271,12 +259,10 @@ def test_registry_rejects_a_manifest_with_the_wrong_catalog_digest() -> None:
         schema_version=1,
         catalog_key_set_sha256="0" * 64,
         manifest_digest_sha256=registry.manifest_digest,
-        evidence_rule_ids=tuple(EvidenceRuleId),
         unit_definitions=tuple(registry.unit_definitions.values()),
         quality_profiles=tuple(registry.quality_profiles.values()),
         aggregation_profiles=tuple(registry.aggregation_profiles.values()),
         coverage_profiles=tuple(registry.coverage_profiles.values()),
-        evidence_relations=tuple(registry.evidence_relations.values()),
         capabilities=registry.capabilities,
     )
 
@@ -296,7 +282,6 @@ def test_registry_rejects_a_manifest_with_the_wrong_catalog_digest() -> None:
         ("illegal_method", "incompatible with value semantics"),
         ("illegal_semantics", "incompatible with value semantics"),
         ("duplicate_unit_alias", "globally unique"),
-        ("unknown_relation", "every supported rule"),
         ("digest_mismatch", "digest does not match"),
     ],
 )
@@ -330,8 +315,6 @@ def test_registry_rejects_invalid_policy_configuration(
         payload["unit_definitions"][1]["aliases"].append(
             payload["unit_definitions"][0]["symbol"]
         )
-    elif mutation == "unknown_relation":
-        payload["evidence_relations"].pop()
     elif mutation == "digest_mismatch":
         payload["manifest_digest_sha256"] = "0" * 64
 

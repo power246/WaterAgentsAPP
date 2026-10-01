@@ -17,7 +17,7 @@ from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
 from app.domain.evidence.source_record_reference import SourceRecordReference
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.hydrology.parameter_provider import ParameterProvider
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
+from app.application.query_understanding import EvidenceRule
 from app.domain.hydrology.value_semantics import ValueSemantics
 from app.domain.time.time_range import TimeRange
 
@@ -75,14 +75,12 @@ class PolicyObservation(DomainModel):
 
 
 class IndirectEvidenceContext(DomainModel):
-    relation_id: EvidenceRuleId
+    rule: EvidenceRule
     input_parameters: tuple[ParameterKey, ...]
     input_windows: tuple[TimeRange, ...]
     same_location: StrictBool = False
     reference_complete: StrictBool
     upstream_result_complete: StrictBool = False
-    relationship_registered: StrictBool = False
-    model_version: NonEmptyString | None = None
 
     @model_validator(mode="after")
     def validate_inputs(self) -> Self:

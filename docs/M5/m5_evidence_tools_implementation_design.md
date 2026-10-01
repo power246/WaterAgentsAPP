@@ -198,6 +198,7 @@ ConversionPayload(value, unit, input_evidence_ref, conversion_id)
 ContextPayload(summary_fields, record_refs)
 CollectionFactPayload(status, reason, affected_window_ids, record_refs)
 UpstreamResultPayload(upstream_session_id, result_ref, closure_refs)
+RelationSupportPayload(rule_id, plan_digest, input_evidence_refs, inference_strength, rationale)
 HistoricalInferencePayload(original_item_ref, projection)
 ```
 
@@ -206,7 +207,7 @@ HistoricalInferencePayload(original_item_ref, projection)
 ```text
 payload
 applicability: direct_measurement | allowed_indirect | contextual_only
-relation_id: EvidenceRuleId | null
+relation_id: NonEmptyString | null       # 动态规则的稳定 rule_id
 series_identity
 coverage
 quality_class: valid | suspicious | invalid | null  # collection fact 为 null
@@ -258,7 +259,7 @@ collection_summary
 created_at
 ```
 
-bundle validator 校验引用去重、每个 parameter/window/role 恰有一个 cell、fragment/reference closure 完整，以及每个目标 cell 都能找到同窗 discharge cell；item 由统一 reader 解析后，再用 `ReferenceScope` 校验同 run/current session（context/topology 可为同 run 的 run-global item）。
+bundle validator 校验引用去重、每个 parameter/window/role 恰有一个 cell、fragment/reference closure 完整，以及每个目标 cell 都能找到同窗 discharge cell；`RelationSupportPayload` 的每个 input ref 必须精确指向 bundle 内相应 ParameterKey 的 fragment，依赖图不得成环，且 `plan_digest/rule_id` 必须命中 sealed scope 的 `EvidenceRulePlan`。规则输入片段作为目标 cell 的 contextual 辅助引用，不因输入缺失把已经成立的 direct 证据降级。item 由统一 reader 解析后，再用 `ReferenceScope` 校验同 run/current session（context/topology 可为同 run 的 run-global item）。
 
 ## 5. Tool registry 与执行契约
 
@@ -357,7 +358,7 @@ GET https://api.waterdata.usgs.gov/samples-data/results/narrow
 
 ### 6.3 Discharge
 
-直接 discharge 使用与 water observation 相同 USGS adapter，并固定 ParameterKey `usgs:00060`；若 capability 为其他已登记 discharge 通道，必须保留原 parameter/statistic，不能改名冒充 00060。站点缺失后的 upstream/估算由 evidence relation 承接，不由 USGS adapter生成推理值。
+直接 discharge 使用与 water observation 相同 USGS adapter，并固定 ParameterKey `usgs:00060`；若 capability 为其他已登记 discharge 通道，必须保留原 parameter/statistic，不能改名冒充 00060。站点缺失后的 upstream/估算先保存为 contextual 输入，只有当前 `EvidenceRulePlan` 的规则被 materializer 满足后才产生方向性 support；USGS adapter 不生成推理值。
 
 ### 6.4 NWS weather
 
@@ -389,7 +390,7 @@ ECHO point-radius 能力由 corridor planner 调用：
 6. 用原始 facility point 对完整 LineString 计算最终最短距离，并按 Agent 选择的精确半径过滤；provider 查询使用的向上取整半径不能扩大最终结果；
 7. 保留 Agent radius、provider radius、采样中心、去重和最终 distance provenance。
 
-设施位置始终是 `contextual_only`；只有后续明确登记且具有真实排放/受纳水关系的数据才能成为 allowed-indirect。
+设施位置始终是 `contextual_only`；只有问题解析 Agent 或后续水体 Agent 明确追加关系，且真实排放/受纳水、时间与引用输入全部满足时，materializer 才能另行生成 allowed-indirect support。
 
 ### 6.6 单一来源与失败
 
@@ -428,12 +429,12 @@ geometry 缺失时，observation station 查询仍可按 M4 refs 运行；facili
 
 ## 8. 单位、质量、聚合与 applicability
 
-四类 policy 都由 [M5 Policy Catalog](m5_evidence_policy_catalog.md) 的 schema 驱动，并与 154 项 capability 位于同一 manifest：
+前三类确定性执行 policy 由 [M5 Policy Catalog](m5_evidence_policy_catalog.md) 的 schema 驱动并与 154 项 capability 位于同一 manifest；第四类 relation policy 位于每次分析的 append-only `EvidenceRulePlan`：
 
 - unit definition 表只登记单位维度、别名和确定性变换；
 - capability-channel policy 决定某参数可接受哪些 source unit、value semantics 与 aggregation；
 - provider quality mapping 把 approval/qualifier 映射为 valid/suspicious/invalid；
-- evidence relation 决定 direct/allowed-indirect/contextual。
+- `EvidenceRulePlan` 与通用 materializer 决定 contextual 输入何时产生新的 allowed-indirect support；capability manifest 不保存人类写死的因果规则。
 
 Agent 只能从 registry 给出的 aggregation methods 中选择；executor 再校验 series identity、value semantics、coverage 和单位。`suspicious` 可参与聚合，但 derived fragment 必须继承 flags、输入计数和 suspicious 计数；`invalid` 只供审计。
 

@@ -8,6 +8,7 @@ from app.application.evidence_tools import assemble_evidence_session_scope
 from app.application.query_understanding import (
     AnalysisContext,
     DateResolver,
+    EvidenceRulePlan,
     ParameterConcept,
     ParameterIntentSource,
     ParsedIntentV1,
@@ -16,6 +17,7 @@ from app.application.query_understanding import (
     SupportingIntentReason,
     SupportingParameterIntent,
     TargetSource,
+    empty_evidence_rule_plan,
 )
 from app.domain import (
     BranchOutcome,
@@ -57,6 +59,7 @@ def make_context(
     analysis_timezone: str = "America/Chicago",
     decision_instant: datetime | None = None,
     memory_mode: MemoryMode = MemoryMode.STATELESS,
+    evidence_rule_plan: EvidenceRulePlan | None = None,
 ) -> AnalysisContext:
     registry = load_parameter_capability_registry()
     target = registry.get(TARGET_PARAMETER)
@@ -126,6 +129,7 @@ def make_context(
         parser_model=MODEL,
         waterbody_model=MODEL,
         memory_mode=memory_mode,
+        evidence_rule_plan=evidence_rule_plan or empty_evidence_rule_plan(),
     )
 
 

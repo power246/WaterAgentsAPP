@@ -50,6 +50,9 @@ from app.application.evidence_tools.registry import (
     EvidenceToolRegistry,
     create_evidence_tool_registry,
 )
+from app.application.evidence_tools.relation_materializer import (
+    EvidenceRelationMaterializer,
+)
 from app.application.evidence_tools.scope import (
     EvidenceSessionScope,
     EvidenceWindow,
@@ -79,6 +82,7 @@ __all__ = [
     "FacilityRadiusTooSmallForBudgetError",
     "EvidenceProducerUnavailableError",
     "EvidenceProducerStatus",
+    "EvidenceRelationMaterializer",
     "EvidencePolicyClass",
     "EvidenceInspectionPage",
     "EvidenceInspectionService",

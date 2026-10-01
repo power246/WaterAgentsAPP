@@ -286,7 +286,7 @@ resolver 顺序固定：
 | `usgs:00095` | specific conductance | `uS/cm@25C` | `target` | 比电导率、conductivity |
 | `usgs:63680` | turbidity | `FNU` | `target` | 浊度、turbidity、雨后浑浊 |
 
-除锚点外，manifest 必须覆盖目录规定的全部问题族。目录是交付目标，不是“已实现”声明；任何条目只有接通可查询 provider、canonical unit、availability、evidence 规则和验证 fixture 后才能设为 enabled。完整 USGS 目录仍只负责候选发现。
+除锚点外，manifest 必须覆盖目录规定的全部问题族。目录是交付目标，不是“已实现”声明；任何条目只有接通可查询 provider、canonical unit、availability 和验证 fixture 后才能设为 enabled。完整 USGS 目录仍只负责候选发现。
 
 每个注册项还包含：
 
@@ -299,12 +299,11 @@ ParameterCapability
   aliases[]
   availability_providers[]
   observation_providers[]
-  allowed_indirect_evidence_rules[]
 ```
 
-初始允许的侧面证据只登记可审计关系，不把它们标成直接测量：同一参数的上游观测、同一位置相邻时间基线，以及对 turbidity 的 precipitation + discharge directional support。discharge 也必须经过 evidence gate：直接观测优先，只有注册表明确允许的流域/水位等估算关系才能作为较弱侧面证据；完全无证据时，受影响的水体 × 时间段不得调用水体模型。其他跨参数关系默认不允许，直到 M5/M6 用明确依据和测试扩展。水体模型不能临时声明新的 evidence relation。
+证据关系不再写死在 capability manifest。问题解析 Agent 在 `ParsedIntentV1.evidence_rules` 中声明本题需要的基线关系，例如 precipitation + discharge 对 turbidity 的同窗方向性支持；resolver 把概念唯一解析为 `ParameterKey` 后生成带稳定 `rule_id/plan_digest` 的 `EvidenceRulePlan`。所有水体 Agent 继承同一基线，可在自己的 session 中追加规则，但没有删除或替换接口。规则只能声明 input/output、时空关系、最大 `directional` 强度、是否必须尝试采集和理由；provider/channel/unit/预算仍由 capability registry 决定。输入缺失、概念歧义、引用不完整或时空条件不满足时不得生成 allowed-indirect，更不得伪造目标数值。
 
-能力注册表由后端唯一的 checked-in manifest 构建一次，并同时驱动 resolver、availability 查询、单位规则和前端公开说明；禁止在不同模块维护多份 code allowlist。manifest 校验必须保证 key 唯一、与目录的 154 个 key 精确一致、上述问题族都有覆盖、所有 enabled 条目都有单位/provider/availability/evidence rule/fixture，且 `usgs:00060` 唯一并标记为 required support。任一目录条目尚未 enabled 时，M9 后的正式联调门禁失败，不能通过减少清单或把目录存在当作能力实现来绕过。
+能力注册表由后端唯一的 checked-in manifest 构建一次，并同时驱动 resolver、availability 查询、单位规则和前端公开说明；禁止在不同模块维护多份 code allowlist。manifest 校验必须保证 key 唯一、与目录的 154 个 key 精确一致、上述问题族都有覆盖、所有 enabled 条目都有单位/provider/availability/fixture，且 `usgs:00060` 唯一并标记为 required support。证据规则属于每次分析的 `AnalysisContext`，不属于这份静态 manifest。任一目录条目尚未 enabled 时，M9 后的正式联调门禁失败，不能通过减少清单或把目录存在当作能力实现来绕过。
 
 ## 9. Availability qualification
 
@@ -326,7 +325,7 @@ StationAvailability
   checked_at
 ```
 
-`coverage_units` 必须由用户目标参数与自动支持参数的去重并集生成，因此每个 time segment 都包含 discharge。discharge 已是用户目标时仍只查询一次；支持参数和目标参数在图中共用同一个 `ParameterKey` 身份，但结果层保留角色来源。
+`coverage_units` 必须由用户目标参数、自动支持参数与 evidence-rule 输入参数的去重并集生成，因此每个 time segment 都包含 discharge 以及基线规则所需的可执行输入。discharge 已是用户目标时仍只查询一次；支持参数和目标参数在图中共用同一个 `ParameterKey` 身份，但结果层保留角色来源。
 
 coverage unit 是“参数 × time segment”，不是只按参数。历史段只有在 metadata 的 earliest/latest envelope 覆盖请求段，或 capability 指定的 existence probe 在段内发现记录时才取得候选资格；预测段要求相同参数最近观测时间不早于预测起点前 48 小时。metadata envelope 只是“可能覆盖”，M5 必须读取真实记录并验证空洞、质量、单位和精度。
 
@@ -498,7 +497,7 @@ WATERAGENTS_QUERY_PARSER_TIMEOUT_SECONDS=45
 WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS=120
 ```
 
-数字使用严格类型和合理范围，未知/非法值启动失败，不静默回默认。模型目录、参数 capability、provider API version 和允许 evidence relation 同样只由一个运行时来源构建。参数上限只计算用户目标，required support 不占用；discharge 必带规则不是可由前端或普通运行设置关闭的开关。M9 的设置接口可公开安全 metadata，但不能回显 secrets 或让前端修改 topology hard limits。
+数字使用严格类型和合理范围，未知/非法值启动失败，不静默回默认。模型目录、参数 capability 和 provider API version 各自由唯一运行时来源构建；本次分析允许的 evidence relation 唯一来自已保存的 append-only `EvidenceRulePlan`。参数上限只计算用户目标，required support 不占用；discharge 必带规则不是可由前端或普通运行设置关闭的开关。M9 的设置接口可公开安全 metadata，但不能回显 secrets 或让前端修改 topology hard limits。
 
 ## 16. 测试与验收设计
 

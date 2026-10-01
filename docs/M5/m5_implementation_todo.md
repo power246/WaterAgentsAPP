@@ -521,7 +521,7 @@
 - [x] station-backed 只要任一 target 或 discharge cell 有 usable direct evidence即可继续 optional acquisition；其余缺口保持 unsupported/blocked，不要求整分支全有或全无。
 - [x] provider unavailable/invalid/incomplete/cancelled 不走自然全空 completed 路径；返回技术结果并保留已确认事实。
 - [x] stationless roster 不含 local observation tool，也不发送注定 empty 的 USGS 请求；初始输入只消费 M7 direct-upstream slot 并允许 bounded optional tools。
-- [x] `get_upstream_results` 未接 M7 时明确 unavailable/not registered；正常上游全 indeterminate 只传递 result/bundle/缺口 refs，不构造 `same_parameter_upstream` allowed evidence。
+- [x] `get_upstream_results` 未接 M7 时明确 unavailable/not registered；正常上游全 indeterminate 只传递 result/bundle/缺口 refs，不满足任何 `upstream_to_downstream` 动态规则。
 - [x] 每个 target/window 同时要求同窗 discharge direct/allowed cell；本地缺失时可消费 upstream 或已登记 discharge estimate relation，仍缺失时保持 indeterminate input。
 - [x] weather 始终 optional；只有 Agent 选择的已登记 relation 需要时才调用，前置证据不完整则 relation 不成立。
 - [x] 输出给 M6 的 contract 只包含 EvidenceBundleRef、cells、read ports、tool roster/executor 和 stop/block facts，不输出最终 InferenceResult。
@@ -547,7 +547,7 @@
 
 #### Milestone 11 完成记录（2026-10-01）
 
-- 实现：新增仅接受 sealed `EvidenceSessionScope` 的 station-backed/stationless acquisition service 与 reference-only M6 handoff；有站水体先执行真实 observation/discharge preflight，全空时写完 call/result/facts/bundle 后 `stop_before_model`，部分证据继续 optional。无站水体不暴露/调用 local observation，只消费 M7 producer slot；producer 未接时显式 unavailable，上游 indeterminate 保持 contextual，不提升为 `same_parameter_upstream`。target/window 与同窗 discharge 形成联合 gate，技术失败和取消保留已确认批次并只补缺失窗口的 unavailable facts。
+- 实现：新增仅接受 sealed `EvidenceSessionScope` 的 station-backed/stationless acquisition service 与 reference-only M6 handoff；有站水体先执行真实 observation/discharge preflight，全空时写完 call/result/facts/bundle 后 `stop_before_model`，部分证据继续 optional。无站水体不暴露/调用 local observation，只消费 M7 producer slot；producer 未接时显式 unavailable，上游 indeterminate 保持 contextual，不满足动态上游规则。target/window 与同窗 discharge 形成联合 gate，技术失败和取消保留已确认批次并只补缺失窗口的 unavailable facts。
 - 验证：清单三组命令分别为 `7 passed`、`1 passed`、`13 passed`；M5/domain/architecture focused 为 `285 passed`，domain/application 为 `863 passed`。Docker Engine `29.8.1`、PostgreSQL 17 healthy，进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 的完整 backend 为 `1486 passed`；`compileall` 与 `git diff --check` 通过。
 - 边界与提交：未实现 M6 final inference、M7 DAG、M8 RAG producer、Milestone 12 composition/test app、production route 或 frontend；真实 USGS/NWS/EPA provider 与三平台 CI 为 `not run`。实现本地提交为 `2b74cc0`（`feat(m5): complete milestone 11 acquisition contract`），未 push。
 

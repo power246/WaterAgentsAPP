@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from hashlib import sha256
 
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
@@ -21,6 +22,7 @@ from app.domain import (
     EvidenceResultEligibility,
     ItemReference,
     QualitySummary,
+    RelationSupportPayload,
     ReferenceScope,
     TimeRange,
     UpstreamResultPayload,
@@ -125,8 +127,20 @@ class EvidenceBundleBuilder:
 
     def _validate_fragments(self, scope, by_evidence_id):
         allowed_parameters = set(
-            (*scope.requested_parameters, *scope.supporting_parameters)
+            (
+                *scope.requested_parameters,
+                *scope.supporting_parameters,
+                *(
+                    key
+                    for rule in scope.evidence_rule_plan.effective_rules
+                    for key in (rule.output_parameter, *rule.input_parameters)
+                ),
+            )
         )
+        rules_by_id = {
+            rule.rule_id: rule
+            for rule in scope.evidence_rule_plan.effective_rules
+        }
         graph: dict[str, tuple[str, ...]] = {}
         for evidence_id, (reference, fragment) in by_evidence_id.items():
             if (
@@ -173,6 +187,34 @@ class EvidenceBundleBuilder:
                     )
                 ):
                     raise EvidenceScopeViolationError()
+            elif isinstance(fragment.payload, RelationSupportPayload):
+                rule = rules_by_id.get(fragment.payload.rule_id)
+                if (
+                    rule is None
+                    or fragment.payload.plan_digest
+                    != scope.evidence_rule_plan.plan_digest
+                    or fragment.parameter_refs != (rule.output_parameter,)
+                ):
+                    raise EvidenceScopeViolationError()
+                dependency_ids = []
+                if len(fragment.payload.input_evidence_refs) != len(
+                    rule.input_parameters
+                ):
+                    raise EvidenceScopeViolationError()
+                for expected_parameter, dependency in zip(
+                    rule.input_parameters,
+                    fragment.payload.input_evidence_refs,
+                    strict=True,
+                ):
+                    stored = by_evidence_id.get(dependency.evidence_id)
+                    if (
+                        stored is None
+                        or stored[0] != dependency
+                        or expected_parameter not in stored[1].parameter_refs
+                    ):
+                        raise EvidenceScopeViolationError()
+                    dependency_ids.append(dependency.evidence_id)
+                dependencies = tuple(dependency_ids)
             graph[evidence_id] = dependencies
         _reject_cycles(graph)
 
@@ -205,6 +247,27 @@ class EvidenceBundleBuilder:
                         for _, fragment in by_evidence_id.values()
                         if parameter in fragment.parameter_refs
                         and _fragment_applies(fragment, window.window_id, window.time_range)
+                    )
+                    applicable_rules = tuple(
+                        rule
+                        for rule in scope.evidence_rule_plan.effective_rules
+                        if rule.output_parameter == parameter
+                    )
+                    auxiliary = tuple(
+                        fragment
+                        for _, fragment in by_evidence_id.values()
+                        if any(
+                            set(rule.input_parameters).intersection(
+                                fragment.parameter_refs
+                            )
+                            and _rule_fragment_applies(
+                                rule.temporal_relation.value,
+                                fragment.time_range,
+                                window.time_range,
+                            )
+                            for rule in applicable_rules
+                        )
+                        and parameter not in fragment.parameter_refs
                     )
                     direct = tuple(
                         sorted(
@@ -244,9 +307,11 @@ class EvidenceBundleBuilder:
                     classified = set((*direct, *indirect, *facts))
                     contextual = tuple(
                         sorted(
-                            fragment.evidence_id
-                            for fragment in matching
-                            if fragment.evidence_id not in classified
+                            {
+                                fragment.evidence_id
+                                for fragment in (*matching, *auxiliary)
+                                if fragment.evidence_id not in classified
+                            }
                         )
                     )
                     blockers = tuple(
@@ -386,6 +451,18 @@ def _fragment_applies(fragment, window_id, window):
     if isinstance(fragment.payload, CollectionFactPayload):
         return window_id in fragment.payload.affected_window_ids
     return fragment.time_range.overlaps(window)
+
+
+def _rule_fragment_applies(relation, source, target):
+    if relation == "same_window":
+        return source == target
+    if relation == "overlapping_window":
+        return source.overlaps(target)
+    return (
+        source != target
+        and source.start >= target.start - timedelta(days=1)
+        and source.end <= target.end + timedelta(days=1)
+    )
 
 
 def _bundle_id(scope, fragment_refs, tool_result_refs):

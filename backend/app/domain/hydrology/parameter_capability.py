@@ -7,7 +7,6 @@ from app.domain.hydrology.channel_aggregation_default import (
     ChannelAggregationDefault,
 )
 from app.domain.hydrology.channel_policy import ChannelPolicy
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
 from app.domain.hydrology.parameter_concept_normalization import (
     normalize_parameter_concept,
 )
@@ -35,7 +34,6 @@ class ParameterCapability(DomainModel):
     roles: tuple[ParameterRole, ...]
     availability_providers: tuple[ParameterProvider, ...]
     observation_providers: tuple[ParameterProvider, ...]
-    allowed_indirect_evidence_rules: tuple[EvidenceRuleId, ...]
     fixture_identity: NonEmptyString
     resolution_enabled: StrictBool
 
@@ -54,7 +52,6 @@ class ParameterCapability(DomainModel):
             "roles",
             "availability_providers",
             "observation_providers",
-            "allowed_indirect_evidence_rules",
         ):
             values = getattr(self, field_name)
             if not values:

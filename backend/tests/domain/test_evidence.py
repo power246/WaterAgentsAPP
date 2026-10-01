@@ -48,6 +48,7 @@ from app.domain import (
     ProviderQuality,
     QualitySummary,
     ReferenceScope,
+    RelationSupportPayload,
     ResultSource,
     SafeEvidenceError,
     SourceRecord,
@@ -62,7 +63,6 @@ from app.domain import (
     WeatherObservationRecord,
     WindowCompleteness,
 )
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
 
 NOW = datetime(2026, 1, 2, 12, tzinfo=timezone.utc)
 OBSERVED_AT = datetime(2026, 1, 2, 10, tzinfo=timezone.utc)
@@ -482,8 +482,7 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
         **common,
         evidence_id="ev-upstream",
         data_type="upstream_result",
-        applicability=EvidenceApplicability.ALLOWED_INDIRECT,
-        relation_id=EvidenceRuleId.SAME_PARAMETER_UPSTREAM,
+        applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
         payload=UpstreamResultPayload(
             upstream_session_id="session-upstream",
             result_ref=ItemReference(item_id="item-upstream-result"),
@@ -525,6 +524,46 @@ def test_fragment_reference_extraction_follows_typed_payloads() -> None:
     assert historical.referenced_item_ids() == ("item-historical",)
 
 
+def test_relation_support_payload_is_typed_and_reference_closed() -> None:
+    direct = sample_fragments()[0]
+    input_ref = EvidenceFragmentReference(
+        item_id="item-direct-fragment",
+        evidence_id=direct.evidence_id,
+    )
+    relation = EvidenceFragment(
+        evidence_id="ev-relation",
+        source="evidence_rule_materializer",
+        collection_status=CollectionStatus.AVAILABLE,
+        target_comid=direct.target_comid,
+        location=direct.location,
+        time_range=direct.time_range,
+        parameter_refs=direct.parameter_refs,
+        data_type="relation_support",
+        applicability=EvidenceApplicability.ALLOWED_INDIRECT,
+        relation_id="rule:sha256:test",
+        quality_class=EvidenceQualityClass.VALID,
+        coverage=direct.coverage,
+        payload=RelationSupportPayload(
+            rule_id="rule:sha256:test",
+            plan_digest="sha256:plan",
+            input_evidence_refs=(input_ref,),
+            rationale="One typed directional support relation.",
+        ),
+        derivation=EvidenceDerivation(
+            algorithm="evidence_relation_materialization",
+            algorithm_version=1,
+            policy_id="rule:sha256:test",
+            registry_digest="sha256:registry",
+        ),
+        provenance=Provenance(operation_id="operation-relation"),
+        result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
+    )
+
+    restored = EvidenceFragment.model_validate_json(relation.model_dump_json())
+    assert restored == relation
+    assert relation.referenced_item_ids() == ("item-direct-fragment",)
+
+
 @pytest.mark.parametrize(
     ("fragment_index", "updates"),
     [
@@ -540,7 +579,7 @@ def test_fragment_reference_extraction_follows_typed_payloads() -> None:
         (3, {"result_eligibility": EvidenceResultEligibility.OBSERVED_OR_INFERRED}),
         (4, {"quality_class": EvidenceQualityClass.VALID}),
         (4, {"rag_eligible": True}),
-        (5, {"relation_id": None}),
+        (5, {"applicability": EvidenceApplicability.ALLOWED_INDIRECT}),
         (6, {"quality_class": EvidenceQualityClass.INVALID, "rag_eligible": True}),
     ],
 )

@@ -7,6 +7,10 @@ from app.application.analysis_runs.models import AnalysisConfigurationSnapshot
 from app.application.query_understanding import (
     AnalysisContext,
     DateResolver,
+    EvidenceInferenceStrength,
+    EvidenceRuleOrigin,
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
     ParameterConcept,
     ParameterIntentSource,
     ParsedIntentV1,
@@ -15,6 +19,9 @@ from app.application.query_understanding import (
     SupportingIntentReason,
     SupportingParameterIntent,
     TargetSource,
+    append_evidence_rules,
+    create_evidence_rule,
+    create_evidence_rule_plan,
 )
 from app.domain import (
     GeoPoint,
@@ -127,6 +134,39 @@ def test_valid_context_rechecks_capability_registry_and_run_configuration() -> N
 
     context.validate_capability_registry(load_parameter_capability_registry())
     context.validate_configuration(configuration())
+
+
+def test_waterbody_agent_can_only_append_to_parser_rule_plan() -> None:
+    context = valid_context()
+    parser_rule = create_evidence_rule(
+        output_parameter=context.params_used[0].key,
+        input_parameters=(context.supporting_params[0].key,),
+        temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+        spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+        maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+        required_collection_attempt=True,
+        rationale="Parser baseline.",
+        origin=EvidenceRuleOrigin.QUERY_PARSER,
+    )
+    agent_rule = create_evidence_rule(
+        output_parameter=context.params_used[0].key,
+        input_parameters=(context.params_used[0].key,),
+        temporal_relation=EvidenceTemporalRelation.ADJACENT_LOCAL_DAY,
+        spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+        maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+        required_collection_attempt=False,
+        rationale="Agent-added context.",
+        origin=EvidenceRuleOrigin.WATERBODY_AGENT,
+        origin_session_id="session-123",
+    )
+    baseline = create_evidence_rule_plan((parser_rule,))
+    extended = append_evidence_rules(baseline, (agent_rule,))
+
+    assert extended.baseline_rules == baseline.baseline_rules
+    assert set(extended.effective_rules) == {parser_rule, agent_rule}
+    assert append_evidence_rules(extended, (agent_rule,)) == extended
+    with pytest.raises(ValueError, match="waterbody Agent"):
+        append_evidence_rules(baseline, (parser_rule,))
 
 
 @pytest.mark.parametrize(

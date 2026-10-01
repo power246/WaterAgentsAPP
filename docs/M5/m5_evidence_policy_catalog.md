@@ -2,7 +2,7 @@
 
 更新日期：2026-10-01
 
-> 状态：设计已冻结，manifest schema、不可变 registry、规范 digest、Decimal 数值转换、质量/coverage、聚合、applicability 与 RAG candidate policy 均已完成 M5 本机实现和 154 项离线审计。本文定义的规则全部落入同一 capability manifest，不为每条观测值维护单独规则表；真实 provider 与三平台 CI 的未运行边界见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+> 状态：设计已冻结，manifest schema、不可变 registry、规范 digest、Decimal 数值转换、质量/coverage、聚合、applicability 与 RAG candidate policy 均已完成 M5 本机实现和 154 项离线审计。确定性执行能力落入 capability manifest；每次问题需要的证据关系由问题解析 Agent 写入 append-only `EvidenceRulePlan`，不在人类维护的 manifest 中写死因果规则。真实 provider 与三平台 CI 的未运行边界见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 ## 1. 为什么不是“每个数值一张表”
 
@@ -10,7 +10,7 @@
 
 1. `UnitDefinition`：描述“单位本身如何理解和换算”，全项目共享；
 2. `PolicyProfile`：描述一类 series 如何判质量、coverage 和允许何种聚合；多个参数复用；
-3. `ParameterCapability`：154 项参数各自引用 unit/profile/relation ID，并可做极少量 override。
+3. `ParameterCapability`：154 项参数各自引用 unit/profile 和 provider/channel 执行策略，并可做极少量 override。
 
 因此观测记录只携带 provider 给出的值、单位和语义；它不会复制一份“可用单位 × 可用聚合算法 × 换算公式”。修改规则时只改 registry/manifest，并由 digest 固化到本次 evidence provenance。
 
@@ -23,7 +23,6 @@ unit_definitions[]
 quality_profiles[]
 aggregation_profiles[]
 coverage_profiles[]
-evidence_relations[]
 capabilities[]
 ```
 
@@ -35,7 +34,6 @@ unit_policy_id
 channel_policies[]
 default_aggregation_by_resolution
 quality_profile_id
-allowed_indirect_evidence_rules[]    # 既有字段继续使用
 ```
 
 每个 `ChannelPolicy`：
@@ -56,7 +54,7 @@ direct_observation
 
 `QualityProfile` 显式区分 valid/suspicious/invalid token；`AggregationProfile` 显式声明是否接受 partial coverage，未声明的 provider method 或 partial 行为不得由 executor 猜测。
 
-`default_aggregation_by_resolution` 以 provider/channel/resolution 为键登记默认方法，避免 continuous、daily 与 discrete channel 共用一个错误默认值。quality、aggregation、coverage profile 均允许可选 `extends_profile_id`，loader 对未知 parent 和循环引用 fail closed；当前初始 profiles 均为完整定义，不依赖继承补字段。`evidence_relations[]` 保存 relation ID、same-parameter 语义或固定 input/output ParameterKey，所有固定输入输出必须属于同一 154 项 catalog。
+`default_aggregation_by_resolution` 以 provider/channel/resolution 为键登记默认方法，避免 continuous、daily 与 discrete channel 共用一个错误默认值。quality、aggregation、coverage profile 均允许可选 `extends_profile_id`，loader 对未知 parent 和循环引用 fail closed；当前初始 profiles 均为完整定义，不依赖继承补字段。证据关系不属于这份 manifest：问题解析 Agent 先给出概念级规则，resolver 再用同一 154 项 catalog 唯一解析 input/output `ParameterKey`。
 
 manifest loader 必须验证：
 
@@ -65,11 +63,11 @@ manifest loader 必须验证：
 - canonical unit 的 dimension 与 accepted source units 一致；
 - 每个 provider/channel 都有明确 value semantics；
 - 每个允许方法都能由该 value semantics 支持；
-- required-support `usgs:00060` 具有 direct channel 和 discharge relation；
+- required-support `usgs:00060` 具有 direct channel；
 - 每项至少有一个 observation channel，不允许只登记名称；
 - 规范序列化后的 manifest digest 可重现。
 
-当前离线 audit 从唯一 manifest 生成 canonical JSON，报告 `154/154`、唯一 key、required support、unit/profile/relation/channel 数量、引用闭包状态和完整 manifest SHA-256。可选 official refresh 只报告 drift，不修改 manifest。
+当前离线 audit 从唯一 manifest 生成 canonical JSON，报告 `154/154`、唯一 key、required support、unit/profile/channel 数量、引用闭包状态和完整 manifest SHA-256。可选 official refresh 只报告 drift，不修改 manifest。
 
 ## 3. 单位定义与换算
 
@@ -282,20 +280,14 @@ hard bound 只用于不可能值并必须在 capability/profile 明确登记；�
 | applicability | 能否解锁 target/discharge gate | 示例 |
 |---|---|---|
 | `direct_measurement` | 是 | 当前水体、适用窗口、正确参数与 series 的具体观测 |
-| `allowed_indirect` | 是，但 M6 必须降级 | 同参数上游结果、登记的相邻时间基线、登记的天气/流量关系 |
-| `contextual_only` | 否 | 设施邻近、未登记天气、历史推理、一般背景事实 |
+| `allowed_indirect` | 是，但 M6 必须降级 | 命中当前 `EvidenceRulePlan` 且输入闭包、时空关系均完整的方向性支持 |
+| `contextual_only` | 否 | 原始上游结果、设施邻近、尚未被规则物化的天气、历史推理、一般背景事实 |
 
-### 8.2 初始 evidence relations
+### 8.2 每次分析的 evidence rule plan
 
-| relation ID | 输入要求 | 输出限制 |
-|---|---|---|
-| `same_parameter_upstream` | 直接上游已收敛结果、同 ParameterKey/window、引用闭包完整 | 下游只能 inferred；保留 upstream confidence/uncertainty |
-| `same_location_adjacent_time` | 当前水体同 series，最多超出目标窗口前/后一个当地日，capability 明确允许 | 只能 allowed-indirect，不伪装当前 observed |
-| `turbidity_precipitation_discharge_directional` | 同窗 precipitation 与 discharge 均有 usable evidence | 只支持 directional/inferred，不生成具体 turbidity observed value |
-| `discharge_gage_height_estimate` | capability 登记的 station/rating 关系与适用时效 | inferred discharge，保留公式/版本 |
-| `discharge_basin_estimate` | 登记的 basin/上游输入与模型版本 | inferred discharge，不能作为 direct |
+`AnalysisContext.evidence_rule_plan` 分为 parser-owned `baseline_rules` 与 waterbody-Agent-owned `appended_rules`。每条规则保存稳定 `rule_id`、output/input `ParameterKey`、`same_window | overlapping_window | adjacent_local_day`、`same_waterbody | upstream_to_downstream`、最大 `directional` 强度、是否必须尝试采集和理由。下游只能通过 append 操作扩展，重复追加是 no-op，不存在删除/替换基线的接口。
 
-未登记关系一律 contextual。facility proximity 默认 `contextual_only/hypothesized`；ECHO facility 本身不证明目标水体当前受到排放。历史 RAG 默认 contextual，不能满足当前 target 或 discharge gate。
+materializer 只有在每个 input 都引用 available 且 valid/suspicious 的证据、时间与空间条件成立、引用闭包完整时，才生成 `RelationSupportPayload(rule_id, plan_digest, input_evidence_refs, directional, rationale)`。该片段没有目标数值、始终为 inferred。原始上游结果和天气记录先保持 contextual；没有命中当前 plan 的关系也保持 contextual。facility proximity 默认 `contextual_only/hypothesized`；ECHO facility 本身不证明目标水体当前受到排放。历史 RAG 默认 contextual，不能满足当前 target 或 discharge gate。
 
 ### 8.3 Direct 判定
 
@@ -309,7 +301,7 @@ direct 必须同时满足：
 - quality 为 valid 或 suspicious；
 - provenance/reference closure 完整。
 
-Agent 不能修改 applicability；它只能选择是否使用、调用 inspection 或在结果中解释。
+Agent 不能直接修改 applicability；它可以追加证据规则或选择是否使用、调用 inspection、在结果中解释。追加规则仍须经过相同的参数解析、引用闭包和确定性 materializer 门禁，不能把已有 contextual fragment 原地改成 indirect。
 
 ## 9. Series identity 与重复
 

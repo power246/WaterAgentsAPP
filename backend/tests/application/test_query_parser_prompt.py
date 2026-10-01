@@ -68,7 +68,7 @@ def test_prompt_contains_safe_request_context_schema_capabilities_and_few_shots(
     user = json.loads(prompt.messages[1].text)
     assert system["response_schema"]["title"] == "ParsedIntentV1"
     assert len(system["executable_capabilities"]) == 154
-    assert len(system["few_shots"]) == 3
+    assert len(system["few_shots"]) == 4
     assert user["structured_target"]["comid"] == "12345678"
     assert user["structured_date_range"] == {
         "start_date": "2026-09-26",

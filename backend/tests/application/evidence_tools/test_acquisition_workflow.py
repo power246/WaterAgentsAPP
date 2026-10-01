@@ -1,5 +1,5 @@
 import asyncio
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -9,6 +9,14 @@ from app.application.evidence_tools import (
     EvidenceScopeViolationError,
     EvidenceToolExecutor,
     create_evidence_tool_registry,
+)
+from app.application.query_understanding import (
+    EvidenceInferenceStrength,
+    EvidenceRuleOrigin,
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
+    create_evidence_rule,
+    create_evidence_rule_plan,
 )
 from app.domain import (
     DischargeObservationRecord,
@@ -21,8 +29,10 @@ from app.domain import (
     Provenance,
     ProviderQuality,
     ResultSource,
+    RelationSupportPayload,
     UpstreamResultRecord,
     WaterObservationRecord,
+    WeatherObservationRecord,
 )
 from app.infrastructure.config import load_parameter_capability_registry
 from tests.application.evidence_tools.fakes import (
@@ -69,6 +79,7 @@ def _runtime(
         executor=executor,
         reader=store,
         writer=store,
+        capability_registry=capabilities,
         clock=FixedClock(),
     )
 
@@ -282,6 +293,93 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
     asyncio.run(exercise())
 
 
+def test_required_rain_and_discharge_rule_materializes_directional_support(
+    scope_factory,
+    context_factory,
+):
+    async def exercise():
+        registry = load_parameter_capability_registry()
+        precipitation = registry.exact_matches("precipitation")[0].key
+        base_context = context_factory(
+            decision_instant=datetime(2026, 9, 30, 12, tzinfo=timezone.utc)
+        )
+        rule = create_evidence_rule(
+            output_parameter=base_context.params_used[0].key,
+            input_parameters=(precipitation, base_context.supporting_params[0].key),
+            temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+            spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+            maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+            required_collection_attempt=True,
+            rationale="Rainfall plus discharge directionally supports the target.",
+            origin=EvidenceRuleOrigin.QUERY_PARSER,
+        )
+        context = base_context.model_copy(
+            update={"evidence_rule_plan": create_evidence_rule_plan((rule,))}
+        )
+        scope = scope_factory(
+            run_id="run-rain-flow-rule",
+            session_id="session-rain-flow-rule",
+            context=context,
+        )
+
+        def weather_batch(plan):
+            window = scope.time_windows[0]
+            record = WeatherObservationRecord(
+                provider="nws",
+                channel="observation",
+                source_uri="https://weather.example.test/observation",
+                retrieved_at=scope.query_envelope.end,
+                observed_time=window.time_range.start + timedelta(minutes=5),
+                location=EvidenceLocation(
+                    point=scope.target_node.point,
+                    comid=None,
+                    station_id="NWS-TEST",
+                    distance_to_target_km=0,
+                ),
+                provider_quality=ProviderQuality(),
+                raw_unit="mm",
+                provenance=Provenance(
+                    operation_id=plan.operation_id,
+                    page_identity=f"page:{plan.operation_id}",
+                    provider_record_id=f"weather:{plan.operation_id}",
+                ),
+                grid_id="LWX/96,70",
+                weather_variable="precipitationLastHour",
+                value="2.5",
+                duration_seconds=3600,
+                statistic="interval_total",
+            )
+            return complete_batch(plan, (record,))
+
+        store = MemoryEvidenceStore()
+        weather = FakeCollectionPort(weather_batch)
+        handoff = await _runtime(
+            store,
+            water_port=_water_port(scope),
+            weather_port=weather,
+        ).acquire(scope)
+
+        relations = tuple(
+            fragment
+            for fragment in store.fragments.values()
+            if isinstance(fragment.payload, RelationSupportPayload)
+        )
+        assert weather.calls
+        assert relations
+        assert all(fragment.relation_id == rule.rule_id for fragment in relations)
+        assert all(
+            fragment.payload.plan_digest == scope.evidence_rule_plan.plan_digest
+            for fragment in relations
+        )
+        assert any(
+            cell.allowed_indirect_fragment_refs
+            for cell in handoff.cells
+            if cell.parameter == base_context.params_used[0].key
+        )
+
+    asyncio.run(exercise())
+
+
 def test_station_backed_technical_failure_and_incomplete_are_not_natural_empty(
     scope_factory,
 ):
@@ -370,15 +468,45 @@ def test_station_backed_cancellation_returns_auditable_technical_handoff(scope_f
 )
 def test_stationless_consumes_only_upstream_and_indeterminate_never_unlocks_gate(
     scope_factory,
+    context_factory,
     result_kind,
     expected,
 ):
     async def exercise():
+        base_context = context_factory()
+        upstream_rule = create_evidence_rule(
+            output_parameter=base_context.params_used[0].key,
+            input_parameters=(base_context.params_used[0].key,),
+            temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+            spatial_relation=EvidenceSpatialRelation.UPSTREAM_TO_DOWNSTREAM,
+            maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+            required_collection_attempt=True,
+            rationale="Use a completed direct-upstream result directionally.",
+            origin=EvidenceRuleOrigin.QUERY_PARSER,
+        )
+        discharge_rule = create_evidence_rule(
+            output_parameter=base_context.supporting_params[0].key,
+            input_parameters=(base_context.supporting_params[0].key,),
+            temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+            spatial_relation=EvidenceSpatialRelation.UPSTREAM_TO_DOWNSTREAM,
+            maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+            required_collection_attempt=True,
+            rationale="Use completed direct-upstream discharge directionally.",
+            origin=EvidenceRuleOrigin.QUERY_PARSER,
+        )
+        context = base_context.model_copy(
+            update={
+                "evidence_rule_plan": create_evidence_rule_plan(
+                    (upstream_rule, discharge_rule)
+                )
+            }
+        )
         scope = scope_factory(
             run_id=f"run-upstream-{result_kind}",
             session_id=f"session-downstream-{result_kind}",
             with_station=False,
             with_upstream=True,
+            context=context,
         )
         store = MemoryEvidenceStore()
         upstream = _upstream_port(scope, store, result_kind=result_kind)

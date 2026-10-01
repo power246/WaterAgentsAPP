@@ -47,13 +47,21 @@ class QueryParserPromptBuilder:
         system_payload = {
             "task": (
                 "Extract candidate location, coordinate, local date range, water "
-                "parameter concepts, and material ambiguities. Return only JSON "
-                "matching response_schema."
+                "parameter concepts, material ambiguities, and the baseline evidence "
+                "rules needed to answer the question. Return only JSON matching "
+                "response_schema."
             ),
             "constraints": (
                 "Do not output COMID, ParameterKey, UTC boundaries, inference mode, "
                 "time resolution, topology, tool calls, or evidence sufficiency. "
-                "Do not replace an unsupported concept with a weaker supported one."
+                "Do not replace an unsupported concept with a weaker supported one. "
+                "Each evidence rule names a requested output concept or the required "
+                "discharge support concept, plus one or more executable inputs. Rules express "
+                "only temporal/spatial relationships, a maximum directional inference "
+                "strength, whether collection must be attempted, and a rationale; do "
+                "not choose providers, stations, URLs, channels, units, or fabricate "
+                "values. These rules become an inherited baseline that downstream "
+                "waterbody agents may append to but never remove."
             ),
             "response_schema": schema,
             "executable_capabilities": capabilities,
@@ -125,7 +133,9 @@ class QueryParserPromptBuilder:
             "response_schema": schema,
             "constraints": (
                 "Do not add COMID, ParameterKey, UTC boundaries, inference mode, "
-                "time resolution, topology, tools, or evidence conclusions."
+                "time resolution, topology, tools, providers, channels, units, or "
+                "evidence conclusions. Preserve any valid baseline evidence rules; "
+                "repair schema shape only."
             ),
         }
         user_payload = {
@@ -168,6 +178,7 @@ class QueryParserPromptBuilder:
                             "explicitly_named": True,
                         }
                     ],
+                    "evidence_rules": [],
                     "ambiguities": [],
                 },
             },
@@ -181,6 +192,7 @@ class QueryParserPromptBuilder:
                             "explicitly_named": False,
                         }
                     ],
+                    "evidence_rules": [],
                     "ambiguities": [],
                 },
             },
@@ -194,12 +206,49 @@ class QueryParserPromptBuilder:
                             "explicitly_named": False,
                         }
                     ],
+                    "evidence_rules": [],
                     "ambiguities": [
                         {
                             "subject": "location",
                             "message": "Springfield does not identify one location.",
                         }
                     ],
+                },
+            },
+            {
+                "input": (
+                    "Could warmer water directionally reduce dissolved oxygen "
+                    "tomorrow?"
+                ),
+                "output": {
+                    "parameters": [
+                        {
+                            "concept": "dissolved oxygen",
+                            "rationale": "Dissolved oxygen is the requested outcome.",
+                            "explicitly_named": True,
+                        },
+                        {
+                            "concept": "water temperature",
+                            "rationale": "Water temperature is the stated input.",
+                            "explicitly_named": True,
+                        },
+                    ],
+                    "evidence_rules": [
+                        {
+                            "output_parameter": "dissolved oxygen",
+                            "input_parameters": ["water temperature"],
+                            "temporal_relation": "overlapping_window",
+                            "spatial_relation": "same_waterbody",
+                            "maximum_inference_strength": "directional",
+                            "required_collection_attempt": True,
+                            "rationale": (
+                                "Concurrent water temperature can provide directional "
+                                "support for dissolved oxygen, but not a fabricated "
+                                "dissolved-oxygen value."
+                            ),
+                        }
+                    ],
+                    "ambiguities": [],
                 },
             },
         )

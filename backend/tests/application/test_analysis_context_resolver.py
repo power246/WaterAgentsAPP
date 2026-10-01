@@ -10,11 +10,15 @@ from app.application.query_understanding import (
     ClarificationIssue,
     ClarificationSubject,
     DateResolver,
+    EvidenceInferenceStrength,
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
     LocationResolver,
     ParameterConcept,
     ParameterIntentSource,
     ParameterResolver,
     ParsedIntentV1,
+    ParsedEvidenceRuleV1,
     SupportingIntentReason,
     TargetSource,
 )
@@ -133,6 +137,7 @@ def parsed_intent(
     *,
     ambiguities: tuple[ClarificationIssue, ...] = (),
     concept: str = "dissolved oxygen",
+    evidence_rules: tuple[ParsedEvidenceRuleV1, ...] = (),
 ) -> ParsedIntentV1:
     return ParsedIntentV1(
         coordinate_mention=POINT,
@@ -150,6 +155,7 @@ def parsed_intent(
                 explicitly_named=True,
             ),
         ),
+        evidence_rules=evidence_rules,
         ambiguities=ambiguities,
     )
 
@@ -226,6 +232,71 @@ def test_omitted_api_resolution_becomes_12h_default_in_context() -> None:
     assert result.context is not None
     assert result.context.time_resolution.value == "12h"
     assert result.context.time_resolution_source.value == "default"
+
+
+def test_parser_evidence_rules_resolve_to_stable_inherited_baseline() -> None:
+    context_resolver, _, _ = resolver()
+    rule = ParsedEvidenceRuleV1(
+        output_parameter="dissolved oxygen",
+        input_parameters=("precipitation", "discharge"),
+        temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+        spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+        maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+        required_collection_attempt=True,
+        rationale="Rainfall and flow provide directional context for oxygen.",
+    )
+
+    first = run(
+        context_resolver.resolve(
+            request(),
+            parsed_intent(evidence_rules=(rule,)),
+            analysis_timezone="America/New_York",
+        )
+    )
+    second = run(
+        context_resolver.resolve(
+            request(),
+            parsed_intent(evidence_rules=(rule,)),
+            analysis_timezone="America/New_York",
+        )
+    )
+
+    assert first.context is not None and second.context is not None
+    plan = first.context.evidence_rule_plan
+    assert plan.plan_digest == second.context.evidence_rule_plan.plan_digest
+    assert plan.appended_rules == ()
+    assert len(plan.baseline_rules) == 1
+    assert tuple(key.code for key in plan.baseline_rules[0].input_parameters) == (
+        "00045",
+        "00060",
+    )
+
+
+def test_ambiguous_or_unsupported_rule_concept_fails_closed() -> None:
+    context_resolver, _, _ = resolver()
+
+    for concept, expected in (
+        ("turbidity", AnalysisContextResolutionStatus.PARAMETER_AMBIGUOUS),
+        ("invented signal", AnalysisContextResolutionStatus.PARAMETER_UNSUPPORTED),
+    ):
+        rule = ParsedEvidenceRuleV1(
+            output_parameter="dissolved oxygen",
+            input_parameters=(concept,),
+            temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+            spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+            maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+            required_collection_attempt=True,
+            rationale="Test failure semantics.",
+        )
+        result = run(
+            context_resolver.resolve(
+                request(),
+                parsed_intent(evidence_rules=(rule,)),
+                analysis_timezone="America/New_York",
+            )
+        )
+        assert result.status is expected
+        assert result.context is None
 
 
 def test_clarification_failure_exposes_no_partial_context_or_port_defaults() -> None:

@@ -1,14 +1,7 @@
 {
   "schema_version": 1,
   "catalog_key_set_sha256": "3f9a0146b474c6c637adf837774b0680c389025cb60771fae55f11ab13d2c8bb",
-  "manifest_digest_sha256": "657ca1d3c59780090e1ebf8af3d5b0cdea919f2241e49c871d1d306cf4842d66",
-  "evidence_rule_ids": [
-    "discharge_basin_estimate",
-    "discharge_gage_height_estimate",
-    "same_location_adjacent_time",
-    "same_parameter_upstream",
-    "turbidity_precipitation_discharge_directional"
-  ],
+  "manifest_digest_sha256": "a8d311fbc1619acfbede2620f823ed4064d7fc8ee955878fefd202363b556644",
   "unit_definitions": [
     {
       "unit_id": "cells_per_liter",
@@ -778,76 +771,6 @@
       "max_gap_cadence_multiplier": null
     }
   ],
-  "evidence_relations": [
-    {
-      "relation_id": "discharge_basin_estimate",
-      "same_parameter": false,
-      "input_parameter_keys": [
-        {
-          "code_system": "usgs",
-          "code": "00060"
-        }
-      ],
-      "output_parameter_keys": [
-        {
-          "code_system": "usgs",
-          "code": "00060"
-        }
-      ]
-    },
-    {
-      "relation_id": "discharge_gage_height_estimate",
-      "same_parameter": false,
-      "input_parameter_keys": [
-        {
-          "code_system": "usgs",
-          "code": "00065"
-        }
-      ],
-      "output_parameter_keys": [
-        {
-          "code_system": "usgs",
-          "code": "00060"
-        }
-      ]
-    },
-    {
-      "relation_id": "same_location_adjacent_time",
-      "same_parameter": true,
-      "input_parameter_keys": [],
-      "output_parameter_keys": []
-    },
-    {
-      "relation_id": "same_parameter_upstream",
-      "same_parameter": true,
-      "input_parameter_keys": [],
-      "output_parameter_keys": []
-    },
-    {
-      "relation_id": "turbidity_precipitation_discharge_directional",
-      "same_parameter": false,
-      "input_parameter_keys": [
-        {
-          "code_system": "usgs",
-          "code": "00045"
-        },
-        {
-          "code_system": "usgs",
-          "code": "00060"
-        }
-      ],
-      "output_parameter_keys": [
-        {
-          "code_system": "usgs",
-          "code": "61028"
-        },
-        {
-          "code_system": "usgs",
-          "code": "63680"
-        }
-      ]
-    }
-  ],
   "capabilities": [
     {
       "key": {
@@ -877,10 +800,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00004_v1",
       "resolution_enabled": true,
@@ -1064,10 +983,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00010_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -1245,10 +1160,6 @@
       "observation_providers": [
         "wdfn_time_series"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00045_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -1378,10 +1289,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00055_v1",
       "resolution_enabled": true,
@@ -1563,12 +1470,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time",
-        "discharge_gage_height_estimate",
-        "discharge_basin_estimate"
-      ],
       "fixture_identity": "usgs_parameter_00060_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -1747,10 +1648,6 @@
       "observation_providers": [
         "wdfn_time_series"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00061_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -1880,10 +1777,6 @@
       ],
       "observation_providers": [
         "wdfn_time_series"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00065_v1",
       "resolution_enabled": true,
@@ -2018,10 +1911,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00074_v1",
       "resolution_enabled": true,
@@ -2199,10 +2088,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00078_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -2291,10 +2176,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00080_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -2379,10 +2260,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00081_v1",
       "resolution_enabled": true,
@@ -2470,10 +2347,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00090_v1",
       "resolution_enabled": true,
@@ -2654,10 +2527,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00095_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -2833,10 +2702,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00310_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -2924,10 +2789,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00340_v1",
       "resolution_enabled": true,
@@ -3018,10 +2879,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00400_v1",
       "resolution_enabled": true,
@@ -3200,10 +3057,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00403_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -3290,10 +3143,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00480_v1",
       "resolution_enabled": true,
@@ -3471,10 +3320,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00500_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -3563,10 +3408,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00515_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -3654,10 +3495,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00530_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -3744,10 +3581,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00535_v1",
       "resolution_enabled": true,
@@ -3837,10 +3670,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00900_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -3926,10 +3755,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_53048_v1",
       "resolution_enabled": true,
@@ -4022,11 +3847,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time",
-        "turbidity_precipitation_discharge_directional"
       ],
       "fixture_identity": "usgs_parameter_61028_v1",
       "resolution_enabled": true,
@@ -4207,11 +4027,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time",
-        "turbidity_precipitation_discharge_directional"
-      ],
       "fixture_identity": "usgs_parameter_63680_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -4388,10 +4203,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_70300_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -4481,10 +4292,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_90860_v1",
       "resolution_enabled": true,
@@ -4663,10 +4470,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00300_v1",
       "resolution_enabled": true,
@@ -4849,10 +4652,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00301_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -5029,10 +4828,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00410_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -5118,10 +4913,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00440_v1",
       "resolution_enabled": true,
@@ -5211,10 +5002,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00445_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -5302,10 +5089,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00940_v1",
       "resolution_enabled": true,
@@ -5395,10 +5178,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00945_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -5486,10 +5265,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00950_v1",
       "resolution_enabled": true,
@@ -5579,10 +5354,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00955_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -5670,10 +5441,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_71870_v1",
       "resolution_enabled": true,
@@ -5764,10 +5531,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00600_v1",
       "resolution_enabled": true,
@@ -5947,10 +5710,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00602_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -6039,10 +5798,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00605_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -6129,10 +5884,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00607_v1",
       "resolution_enabled": true,
@@ -6222,10 +5973,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00608_v1",
       "resolution_enabled": true,
@@ -6404,10 +6151,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00610_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -6496,10 +6239,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00613_v1",
       "resolution_enabled": true,
@@ -6678,10 +6417,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00615_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -6770,10 +6505,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00618_v1",
       "resolution_enabled": true,
@@ -6952,10 +6683,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00620_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -7042,10 +6769,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00623_v1",
       "resolution_enabled": true,
@@ -7134,10 +6857,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00625_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -7224,10 +6943,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00630_v1",
       "resolution_enabled": true,
@@ -7317,10 +7032,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00631_v1",
       "resolution_enabled": true,
@@ -7499,10 +7210,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00650_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -7590,10 +7297,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00653_v1",
       "resolution_enabled": true,
@@ -7684,10 +7387,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00660_v1",
       "resolution_enabled": true,
@@ -7867,10 +7566,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00665_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -8048,10 +7743,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00666_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -8138,10 +7829,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00667_v1",
       "resolution_enabled": true,
@@ -8230,10 +7917,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00669_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -8320,10 +8003,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00670_v1",
       "resolution_enabled": true,
@@ -8413,10 +8092,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00671_v1",
       "resolution_enabled": true,
@@ -8595,10 +8270,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00672_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -8686,10 +8357,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00673_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -8776,10 +8443,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00915_v1",
       "resolution_enabled": true,
@@ -8869,10 +8532,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00916_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -8960,10 +8619,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00925_v1",
       "resolution_enabled": true,
@@ -9053,10 +8708,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00930_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -9145,10 +8796,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00931_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -9234,10 +8881,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00935_v1",
       "resolution_enabled": true,
@@ -9327,10 +8970,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01000_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -9418,10 +9057,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01002_v1",
       "resolution_enabled": true,
@@ -9511,10 +9146,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01020_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -9602,10 +9233,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01095_v1",
       "resolution_enabled": true,
@@ -9695,10 +9322,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01097_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -9786,10 +9409,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01145_v1",
       "resolution_enabled": true,
@@ -9879,10 +9498,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_71865_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -9970,10 +9585,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01005_v1",
       "resolution_enabled": true,
@@ -10063,10 +9674,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01010_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -10154,10 +9761,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01025_v1",
       "resolution_enabled": true,
@@ -10247,10 +9850,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01030_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -10339,10 +9938,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01032_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -10428,10 +10023,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01035_v1",
       "resolution_enabled": true,
@@ -10521,10 +10112,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01040_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -10612,10 +10199,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01046_v1",
       "resolution_enabled": true,
@@ -10705,10 +10288,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01049_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -10796,10 +10375,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01056_v1",
       "resolution_enabled": true,
@@ -10889,10 +10464,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01057_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -10980,10 +10551,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01060_v1",
       "resolution_enabled": true,
@@ -11073,10 +10640,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01065_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -11164,10 +10727,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01075_v1",
       "resolution_enabled": true,
@@ -11257,10 +10816,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01080_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -11348,10 +10903,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01085_v1",
       "resolution_enabled": true,
@@ -11441,10 +10992,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01090_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -11532,10 +11079,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01100_v1",
       "resolution_enabled": true,
@@ -11625,10 +11168,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01106_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -11716,10 +11255,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_01130_v1",
       "resolution_enabled": true,
@@ -11809,10 +11344,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_01150_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -11900,10 +11431,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_50287_v1",
       "resolution_enabled": true,
@@ -11994,10 +11521,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_31501_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12085,10 +11608,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_31625_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12174,10 +11693,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_31633_v1",
       "resolution_enabled": true,
@@ -12266,10 +11781,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_31649_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12356,10 +11867,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_50468_v1",
       "resolution_enabled": true,
@@ -12448,10 +11955,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_50569_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12538,10 +12041,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_61214_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12627,10 +12126,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_61229_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12715,10 +12210,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_61230_v1",
       "resolution_enabled": true,
@@ -12807,10 +12298,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_90900_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12898,10 +12385,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_90901_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -12987,10 +12470,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_90903_v1",
       "resolution_enabled": true,
@@ -13079,10 +12558,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_32209_v1",
       "resolution_enabled": true,
@@ -13261,10 +12736,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_32213_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -13354,10 +12825,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_32329_v1",
       "resolution_enabled": true,
@@ -13539,10 +13006,6 @@
         "wdfn_time_series",
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_50223_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -13721,10 +13184,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_50227_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -13810,10 +13269,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_60050_v1",
       "resolution_enabled": true,
@@ -13902,10 +13357,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_70943_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -13991,10 +13442,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_70945_v1",
       "resolution_enabled": true,
@@ -14082,10 +13529,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_70946_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -14171,10 +13614,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_04035_v1",
       "resolution_enabled": true,
@@ -14264,10 +13703,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_04095_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -14355,10 +13790,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_34655_v1",
       "resolution_enabled": true,
@@ -14448,10 +13879,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_38442_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -14539,10 +13966,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_38933_v1",
       "resolution_enabled": true,
@@ -14632,10 +14055,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_39341_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -14723,10 +14142,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_39381_v1",
       "resolution_enabled": true,
@@ -14816,10 +14231,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_39415_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -14907,10 +14318,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_39572_v1",
       "resolution_enabled": true,
@@ -15000,10 +14407,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_39632_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -15091,10 +14494,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_39818_v1",
       "resolution_enabled": true,
@@ -15184,10 +14583,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_39941_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -15275,10 +14670,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_46342_v1",
       "resolution_enabled": true,
@@ -15368,10 +14759,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_49260_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -15459,10 +14846,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_49291_v1",
       "resolution_enabled": true,
@@ -15552,10 +14935,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_49309_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -15643,10 +15022,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_49310_v1",
       "resolution_enabled": true,
@@ -15736,10 +15111,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_82660_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -15827,10 +15198,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_00680_v1",
       "resolution_enabled": true,
@@ -15920,10 +15287,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_00681_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -16011,10 +15374,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_34010_v1",
       "resolution_enabled": true,
@@ -16104,10 +15463,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_34030_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -16195,10 +15550,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_34371_v1",
       "resolution_enabled": true,
@@ -16288,10 +15639,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_34423_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -16379,10 +15726,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_34475_v1",
       "resolution_enabled": true,
@@ -16472,10 +15815,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_39175_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -16563,10 +15902,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_39180_v1",
       "resolution_enabled": true,
@@ -16656,10 +15991,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_78032_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -16747,10 +16078,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_22703_v1",
       "resolution_enabled": true,
@@ -16840,10 +16167,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_80020_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -16931,10 +16254,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_80030_v1",
       "resolution_enabled": true,
@@ -17024,10 +16343,6 @@
       "observation_providers": [
         "usgs_samples"
       ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
-      ],
       "fixture_identity": "usgs_parameter_80050_v1",
       "resolution_enabled": true,
       "accepted_source_units": [
@@ -17113,10 +16428,6 @@
       ],
       "observation_providers": [
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_81366_v1",
       "resolution_enabled": true,
@@ -17205,10 +16516,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_80154_v1",
       "resolution_enabled": true,
@@ -17389,10 +16696,6 @@
       "observation_providers": [
         "wdfn_time_series",
         "usgs_samples"
-      ],
-      "allowed_indirect_evidence_rules": [
-        "same_parameter_upstream",
-        "same_location_adjacent_time"
       ],
       "fixture_identity": "usgs_parameter_80155_v1",
       "resolution_enabled": true,

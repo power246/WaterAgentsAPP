@@ -6,7 +6,10 @@ from app.application.evidence_policy.models import (
 )
 from app.domain.evidence.evidence_applicability import EvidenceApplicability
 from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
+from app.application.query_understanding import (
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
+)
 from app.domain.hydrology.parameter_capability import ParameterCapability
 from app.domain.hydrology.parameter_capability_registry import (
     ParameterCapabilityRegistry,
@@ -57,64 +60,39 @@ def _direct_measurement_matches(
     )
 
 
-def _fixed_relation_inputs_match(
-    context: IndirectEvidenceContext,
-    expected_inputs: tuple[object, ...],
-) -> bool:
-    return set(context.input_parameters) == set(expected_inputs)
-
-
 def _indirect_relation_matches(
-    registry: ParameterCapabilityRegistry,
     capability: ParameterCapability,
     context: IndirectEvidenceContext,
     target_window: TimeRange,
 ) -> bool:
-    relation = registry.evidence_relations.get(context.relation_id)
-    if (
-        relation is None
-        or context.relation_id not in capability.allowed_indirect_evidence_rules
-        or not context.reference_complete
-    ):
+    rule = context.rule
+    if not context.reference_complete or rule.output_parameter != capability.key:
         return False
-    if relation.same_parameter:
-        if any(key != capability.key for key in context.input_parameters):
-            return False
-    elif (
-        capability.key not in relation.output_parameter_keys
-        or not _fixed_relation_inputs_match(context, relation.input_parameter_keys)
-    ):
+    if set(context.input_parameters) != set(rule.input_parameters):
         return False
-
-    if context.relation_id is EvidenceRuleId.SAME_PARAMETER_UPSTREAM:
-        return context.upstream_result_complete and all(
+    temporal_matches = False
+    if rule.temporal_relation is EvidenceTemporalRelation.SAME_WINDOW:
+        temporal_matches = all(
             source_window == target_window for source_window in context.input_windows
         )
-    if context.relation_id is EvidenceRuleId.SAME_LOCATION_ADJACENT_TIME:
-        if not context.same_location or len(context.input_windows) != 1:
-            return False
-        source_window = context.input_windows[0]
-        return (
+    elif rule.temporal_relation is EvidenceTemporalRelation.OVERLAPPING_WINDOW:
+        temporal_matches = all(
+            source_window.overlaps(target_window)
+            for source_window in context.input_windows
+        )
+    elif rule.temporal_relation is EvidenceTemporalRelation.ADJACENT_LOCAL_DAY:
+        temporal_matches = all(
             source_window != target_window
             and source_window.start >= target_window.start - timedelta(days=1)
             and source_window.end <= target_window.end + timedelta(days=1)
+            for source_window in context.input_windows
         )
-    if context.relation_id is EvidenceRuleId.TURBIDITY_PRECIPITATION_DISCHARGE_DIRECTIONAL:
-        return all(
-            source_window == target_window for source_window in context.input_windows
-        )
-    if context.relation_id in {
-        EvidenceRuleId.DISCHARGE_GAGE_HEIGHT_ESTIMATE,
-        EvidenceRuleId.DISCHARGE_BASIN_ESTIMATE,
-    }:
-        return (
-            context.relationship_registered
-            and context.model_version is not None
-            and all(
-                source_window.overlaps(target_window)
-                for source_window in context.input_windows
-            )
-        )
+    if not temporal_matches:
+        return False
+    if rule.spatial_relation is EvidenceSpatialRelation.SAME_WATERBODY:
+        return context.same_location
+    if rule.spatial_relation is EvidenceSpatialRelation.UPSTREAM_TO_DOWNSTREAM:
+        return context.upstream_result_complete
     return False
 
 
@@ -132,7 +110,6 @@ def resolve_applicability(
 ) -> EvidenceApplicability:
     if indirect_context is not None:
         if _indirect_relation_matches(
-            registry,
             capability,
             indirect_context,
             target_window,

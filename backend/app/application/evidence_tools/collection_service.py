@@ -4,7 +4,6 @@ from hashlib import sha256
 
 from app.application.evidence_policy import (
     EvidencePolicyError,
-    IndirectEvidenceContext,
     PolicyObservation,
     apply_rag_policy,
     assess_provider_quality,
@@ -24,6 +23,9 @@ from app.application.evidence_tools.models import (
     EvidenceToolWriter,
 )
 from app.application.evidence_tools.scope import EvidenceSessionScope, EvidenceWindow
+from app.application.evidence_tools.evidence_sources import (
+    weather_parameter_for_variable,
+)
 from app.domain import (
     CollectionFactPayload,
     CollectionManifest,
@@ -38,7 +40,6 @@ from app.domain import (
     EvidenceFragment,
     EvidenceQualityClass,
     EvidenceResultEligibility,
-    EvidenceRuleId,
     FacilityRecord,
     HistoricalInferencePayload,
     HistoricalTranscriptRecord,
@@ -303,6 +304,35 @@ class EvidenceCollectionService:
                         )
                     )
                 elif isinstance(record, _CONTEXT_TYPES):
+                    allowed_parameters = {
+                        *scope.requested_parameters,
+                        *scope.supporting_parameters,
+                        *(
+                            key
+                            for rule in scope.evidence_rule_plan.effective_rules
+                            for key in rule.input_parameters
+                        ),
+                    }
+                    context_parameters = (
+                        (record.parameter,)
+                        if isinstance(record, UpstreamResultRecord)
+                        else (
+                            (mapped_parameter,)
+                            if isinstance(
+                                record,
+                                (WeatherObservationRecord, WeatherForecastRecord),
+                            )
+                            and (
+                                mapped_parameter := weather_parameter_for_variable(
+                                    record.weather_variable,
+                                    collection.channel,
+                                )
+                            )
+                            is not None
+                            and mapped_parameter in allowed_parameters
+                            else collection.parameter_keys
+                        )
+                    )
                     fragments.append(
                         self._context_fragment(
                             scope,
@@ -310,11 +340,7 @@ class EvidenceCollectionService:
                             reference,
                             window,
                             complete=complete,
-                            parameter_keys=(
-                                (record.parameter,)
-                                if isinstance(record, UpstreamResultRecord)
-                                else collection.parameter_keys
-                            ),
+                            parameter_keys=context_parameters,
                             discovery_identities=discoveries[record.record_id],
                         )
                     )
@@ -528,26 +554,7 @@ class EvidenceCollectionService:
         applicability = EvidenceApplicability.CONTEXTUAL_ONLY
         relation_id = None
         if isinstance(record, UpstreamResultRecord):
-            capability = self._registry.get(record.parameter)
-            if capability is None:
-                raise EvidenceScopeViolationError()
-            context = IndirectEvidenceContext(
-                relation_id=EvidenceRuleId.SAME_PARAMETER_UPSTREAM,
-                input_parameters=(record.parameter,),
-                input_windows=(record.valid_time_range,),
-                reference_complete=True,
-                upstream_result_complete=True,
-            )
             if record.result_kind in {"quantified", "directional"}:
-                applicability = resolve_applicability(
-                    self._registry,
-                    capability,
-                    scope.agent_comid,
-                    window.time_range,
-                    indirect_context=context,
-                )
-            if applicability is EvidenceApplicability.ALLOWED_INDIRECT:
-                relation_id = context.relation_id
                 payload = UpstreamResultPayload(
                     upstream_session_id=record.upstream_session_id,
                     result_ref=record.result_ref,

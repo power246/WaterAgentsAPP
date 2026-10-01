@@ -14,12 +14,8 @@ from app.domain.hydrology.coverage_unit import CoverageUnit
 from app.domain.hydrology.geocoding_candidate import GeocodingCandidate
 from app.domain.hydrology.location import GeoPoint
 from app.domain.hydrology.monitoring_station import MonitoringStation
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
 from app.domain.hydrology.evidence_aggregation_method import (
     EvidenceAggregationMethod,
-)
-from app.domain.hydrology.evidence_relation_definition import (
-    EvidenceRelationDefinition,
 )
 from app.domain.hydrology.parameter_capability import ParameterCapability
 from app.domain.hydrology.parameter_capability_configuration_error import (
@@ -105,9 +101,7 @@ __all__ = [
     "EXPECTED_PARAMETER_CAPABILITY_COUNT",
     "EXPECTED_PARAMETER_CATALOG_KEY_SET_SHA256",
     "EXPECTED_PARAMETER_GROUP_COUNTS",
-    "EvidenceRuleId",
     "EvidenceAggregationMethod",
-    "EvidenceRelationDefinition",
     "ParameterCapability",
     "ParameterCapabilityConfigurationError",
     "ParameterCapabilityManifest",

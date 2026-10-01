@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, time, timedelta, timezone
+from hashlib import sha256
 from typing import Literal, Self
 from zoneinfo import ZoneInfo
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, StrictBool, field_validator, model_validator
 
 from app.application.analysis_runs.models import AnalysisConfigurationSnapshot
 from app.application.query_understanding.models import ParameterConcept
@@ -98,12 +100,255 @@ class ClarificationIssue(DomainModel):
     message: NonEmptyString
 
 
+class EvidenceTemporalRelation(DomainEnum):
+    SAME_WINDOW = "same_window"
+    OVERLAPPING_WINDOW = "overlapping_window"
+    ADJACENT_LOCAL_DAY = "adjacent_local_day"
+
+
+class EvidenceSpatialRelation(DomainEnum):
+    SAME_WATERBODY = "same_waterbody"
+    UPSTREAM_TO_DOWNSTREAM = "upstream_to_downstream"
+
+
+class EvidenceInferenceStrength(DomainEnum):
+    DIRECTIONAL = "directional"
+
+
+class EvidenceRuleOrigin(DomainEnum):
+    QUERY_PARSER = "query_parser"
+    WATERBODY_AGENT = "waterbody_agent"
+
+
+class ParsedEvidenceRuleV1(DomainModel):
+    output_parameter: NonEmptyString
+    input_parameters: tuple[NonEmptyString, ...]
+    temporal_relation: EvidenceTemporalRelation
+    spatial_relation: EvidenceSpatialRelation
+    maximum_inference_strength: EvidenceInferenceStrength
+    required_collection_attempt: StrictBool
+    rationale: NonEmptyString
+
+    @model_validator(mode="after")
+    def validate_inputs(self) -> Self:
+        if not self.input_parameters:
+            raise ValueError("evidence rule input_parameters must not be empty")
+        ensure_unique_tuple(
+            self.input_parameters,
+            field_name="evidence rule input_parameters",
+        )
+        return self
+
+
+class EvidenceRule(DomainModel):
+    rule_id: NonEmptyString
+    output_parameter: ParameterKey
+    input_parameters: tuple[ParameterKey, ...]
+    temporal_relation: EvidenceTemporalRelation
+    spatial_relation: EvidenceSpatialRelation
+    maximum_inference_strength: EvidenceInferenceStrength
+    required_collection_attempt: StrictBool
+    rationale: NonEmptyString
+    origin: EvidenceRuleOrigin
+    origin_session_id: NonEmptyString | None = None
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> Self:
+        if not self.input_parameters:
+            raise ValueError("evidence rule input_parameters must not be empty")
+        ensure_unique_tuple(
+            self.input_parameters,
+            field_name="evidence rule input_parameters",
+        )
+        if self.rule_id != _evidence_rule_id(self):
+            raise ValueError("evidence rule_id must match canonical rule content")
+        if (self.origin is EvidenceRuleOrigin.QUERY_PARSER) != (
+            self.origin_session_id is None
+        ):
+            raise ValueError("only waterbody Agent rules require origin_session_id")
+        return self
+
+
+class EvidenceRulePlan(DomainModel):
+    baseline_rules: tuple[EvidenceRule, ...] = ()
+    appended_rules: tuple[EvidenceRule, ...] = ()
+    plan_digest: NonEmptyString
+
+    @model_validator(mode="after")
+    def validate_plan(self) -> Self:
+        if any(
+            rule.origin is not EvidenceRuleOrigin.QUERY_PARSER
+            for rule in self.baseline_rules
+        ):
+            raise ValueError("baseline evidence rules must originate from query parser")
+        if any(
+            rule.origin is not EvidenceRuleOrigin.WATERBODY_AGENT
+            for rule in self.appended_rules
+        ):
+            raise ValueError("appended evidence rules must originate from waterbody Agents")
+        rules = self.effective_rules
+        ensure_unique_tuple(
+            tuple(rule.rule_id for rule in rules),
+            field_name="evidence rule ids",
+        )
+        signatures = tuple(
+            (
+                rule.output_parameter,
+                rule.input_parameters,
+                rule.temporal_relation,
+                rule.spatial_relation,
+                rule.maximum_inference_strength,
+            )
+            for rule in rules
+        )
+        ensure_unique_tuple(signatures, field_name="evidence rule signatures")
+        _reject_evidence_rule_cycles(rules)
+        if self.baseline_rules != tuple(
+            sorted(self.baseline_rules, key=lambda item: item.rule_id)
+        ) or self.appended_rules != tuple(
+            sorted(self.appended_rules, key=lambda item: item.rule_id)
+        ):
+            raise ValueError("evidence rules must use stable rule_id order")
+        if self.plan_digest != _evidence_rule_plan_digest(rules):
+            raise ValueError("evidence rule plan digest does not match its rules")
+        return self
+
+    @property
+    def effective_rules(self) -> tuple[EvidenceRule, ...]:
+        return (*self.baseline_rules, *self.appended_rules)
+
+
+def create_evidence_rule(
+    *,
+    output_parameter: ParameterKey,
+    input_parameters: tuple[ParameterKey, ...],
+    temporal_relation: EvidenceTemporalRelation,
+    spatial_relation: EvidenceSpatialRelation,
+    maximum_inference_strength: EvidenceInferenceStrength,
+    required_collection_attempt: bool,
+    rationale: str,
+    origin: EvidenceRuleOrigin,
+    origin_session_id: str | None = None,
+) -> EvidenceRule:
+    values = {
+        "output_parameter": output_parameter,
+        "input_parameters": input_parameters,
+        "temporal_relation": temporal_relation,
+        "spatial_relation": spatial_relation,
+        "maximum_inference_strength": maximum_inference_strength,
+        "required_collection_attempt": required_collection_attempt,
+        "rationale": rationale,
+        "origin": origin,
+        "origin_session_id": origin_session_id,
+    }
+    draft = EvidenceRule.model_construct(rule_id="pending", **values)
+    return EvidenceRule(rule_id=_evidence_rule_id(draft), **values)
+
+
+def create_evidence_rule_plan(
+    baseline_rules: tuple[EvidenceRule, ...] = (),
+    appended_rules: tuple[EvidenceRule, ...] = (),
+) -> EvidenceRulePlan:
+    baseline = tuple(sorted(baseline_rules, key=lambda item: item.rule_id))
+    appended = tuple(sorted(appended_rules, key=lambda item: item.rule_id))
+    return EvidenceRulePlan(
+        baseline_rules=baseline,
+        appended_rules=appended,
+        plan_digest=_evidence_rule_plan_digest((*baseline, *appended)),
+    )
+
+
+def append_evidence_rules(
+    plan: EvidenceRulePlan,
+    additions: tuple[EvidenceRule, ...],
+) -> EvidenceRulePlan:
+    if any(
+        rule.origin is not EvidenceRuleOrigin.WATERBODY_AGENT
+        for rule in additions
+    ):
+        raise ValueError("only waterbody Agent rules may be appended")
+    by_id = {rule.rule_id: rule for rule in plan.effective_rules}
+    appended = list(plan.appended_rules)
+    for rule in additions:
+        existing = by_id.get(rule.rule_id)
+        if existing is not None:
+            # The canonical identity deliberately excludes provenance.  Re-appending
+            # a parser rule from a waterbody session is therefore a no-op, not a
+            # provenance rewrite of the inherited baseline.
+            continue
+        by_id[rule.rule_id] = rule
+        appended.append(rule)
+    return create_evidence_rule_plan(plan.baseline_rules, tuple(appended))
+
+
+def empty_evidence_rule_plan() -> EvidenceRulePlan:
+    return create_evidence_rule_plan()
+
+
+def _evidence_rule_id(rule: EvidenceRule) -> str:
+    payload = rule.model_dump(
+        mode="json",
+        exclude={"rule_id", "origin", "origin_session_id"},
+    )
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"rule:sha256:{sha256(encoded).hexdigest()}"
+
+
+def _evidence_rule_plan_digest(rules: tuple[EvidenceRule, ...]) -> str:
+    encoded = json.dumps(
+        [
+            rule.model_dump(mode="json")
+            for rule in sorted(rules, key=lambda item: item.rule_id)
+        ],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return f"sha256:{sha256(encoded).hexdigest()}"
+
+
+def _reject_evidence_rule_cycles(rules: tuple[EvidenceRule, ...]) -> None:
+    outputs = {rule.output_parameter for rule in rules}
+    graph = {
+        output: {
+            input_parameter
+            for rule in rules
+            if rule.output_parameter == output
+            for input_parameter in rule.input_parameters
+            if input_parameter in outputs and input_parameter != output
+        }
+        for output in outputs
+    }
+    visiting: set[ParameterKey] = set()
+    visited: set[ParameterKey] = set()
+
+    def visit(parameter: ParameterKey) -> None:
+        if parameter in visiting:
+            raise ValueError("evidence rule plan must not contain dependency cycles")
+        if parameter in visited:
+            return
+        visiting.add(parameter)
+        for dependency in graph[parameter]:
+            visit(dependency)
+        visiting.remove(parameter)
+        visited.add(parameter)
+
+    for parameter in graph:
+        visit(parameter)
+
+
 class ParsedIntentV1(DomainModel):
     location_mention: NonEmptyString | None = None
     coordinate_mention: GeoPoint | None = None
     start_date: date | None = None
     end_date: date | None = None
     parameters: tuple[ParameterConcept, ...]
+    evidence_rules: tuple[ParsedEvidenceRuleV1, ...] = ()
     ambiguities: tuple[ClarificationIssue, ...] = ()
 
     @model_validator(mode="after")
@@ -112,6 +357,7 @@ class ParsedIntentV1(DomainModel):
             raise ValueError("start_date and end_date must be provided together")
         if not self.parameters:
             raise ValueError("parameters must not be empty")
+        ensure_unique_tuple(self.evidence_rules, field_name="evidence_rules")
         ensure_unique_tuple(self.ambiguities, field_name="ambiguities")
         return self
 
@@ -224,6 +470,9 @@ class AnalysisContext(DomainModel):
     parser_model: ModelSelection
     waterbody_model: ModelSelection
     memory_mode: MemoryMode
+    evidence_rule_plan: EvidenceRulePlan = Field(
+        default_factory=empty_evidence_rule_plan
+    )
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -282,6 +531,13 @@ class AnalysisContext(DomainModel):
             raise ValueError("target and supporting parameters must not overlap")
         if DISCHARGE_KEY not in set(target_keys) | set(support_keys):
             raise ValueError("analysis parameter plan must include usgs:00060 discharge")
+        if any(
+            rule.output_parameter not in set((*target_keys, *support_keys))
+            for rule in self.evidence_rule_plan.effective_rules
+        ):
+            raise ValueError(
+                "evidence rule outputs must be target or required-support parameters"
+            )
         return self
 
     def validate_capability_registry(
@@ -297,11 +553,29 @@ class AnalysisContext(DomainModel):
                 or item.canonical_unit != capability.canonical_unit
             ):
                 raise ValueError("parameter identity must match the capability registry")
+        for rule in self.evidence_rule_plan.effective_rules:
+            if registry.get(rule.output_parameter) is None or any(
+                registry.get(key) is None for key in rule.input_parameters
+            ):
+                raise ValueError("evidence rule parameters must be executable")
         expected_support = {
             capability.key for capability in registry.required_support
         } - {item.key for item in self.params_used}
         if {item.key for item in self.supporting_params} != expected_support:
             raise ValueError("supporting_params must match registry requirements")
+
+    @property
+    def evidence_rule_parameters(self) -> tuple[ParameterKey, ...]:
+        return tuple(
+            sorted(
+                {
+                    key
+                    for rule in self.evidence_rule_plan.effective_rules
+                    for key in (rule.output_parameter, *rule.input_parameters)
+                },
+                key=lambda key: (key.code_system, key.code),
+            )
+        )
 
     def validate_configuration(
         self,

@@ -11,6 +11,7 @@ from app.domain.evidence.historical_inference_payload import (
     HistoricalInferencePayload,
 )
 from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
+from app.domain.evidence.relation_support_payload import RelationSupportPayload
 
 EvidencePayload: TypeAlias = Annotated[
     DirectRecordPayload
@@ -19,6 +20,7 @@ EvidencePayload: TypeAlias = Annotated[
     | ContextPayload
     | CollectionFactPayload
     | UpstreamResultPayload
+    | RelationSupportPayload
     | HistoricalInferencePayload,
     Field(discriminator="payload_type"),
 ]

@@ -77,7 +77,6 @@ def test_offline_audit_and_official_refresh_match_all_154_capabilities() -> None
     assert offline["quality_profile_count"] == 2
     assert offline["aggregation_profile_count"] == 10
     assert offline["coverage_profile_count"] == 5
-    assert offline["evidence_relation_count"] == 5
     assert len(offline["manifest_digest_sha256"]) == 64
     assert official == {
         "api_version": "USGS Water Data OGC API v1",

@@ -7,13 +7,9 @@ from typing import Mapping
 from app.domain.hydrology.aggregation_profile import AggregationProfile
 from app.domain.hydrology.channel_policy import ChannelPolicy
 from app.domain.hydrology.coverage_profile import CoverageProfile
-from app.domain.hydrology.evidence_relation_definition import (
-    EvidenceRelationDefinition,
-)
 from app.domain.hydrology.evidence_aggregation_method import (
     EvidenceAggregationMethod,
 )
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
 from app.domain.hydrology.parameter_capability import ParameterCapability
 from app.domain.hydrology.parameter_capability_configuration_error import (
     ParameterCapabilityConfigurationError,
@@ -156,7 +152,6 @@ class ParameterCapabilityRegistry:
         "_canonical_manifest_bytes",
         "_capabilities",
         "_coverage_profiles",
-        "_evidence_relations",
         "_group_counts",
         "_manifest_digest",
         "_quality_profiles",
@@ -210,29 +205,6 @@ class ParameterCapabilityRegistry:
                 "parameter capability manifest digest does not match canonical content"
             )
 
-        declared_rules = manifest.evidence_rule_ids
-        relation_ids = tuple(
-            relation.relation_id for relation in manifest.evidence_relations
-        )
-        if (
-            len(declared_rules) != len(set(declared_rules))
-            or set(declared_rules) != set(EvidenceRuleId)
-            or len(relation_ids) != len(set(relation_ids))
-            or set(relation_ids) != set(declared_rules)
-        ):
-            raise ParameterCapabilityConfigurationError(
-                "evidence relations must define every supported rule exactly once"
-            )
-        declared_rule_set = set(declared_rules)
-        if any(
-            not set(capability.allowed_indirect_evidence_rules)
-            <= declared_rule_set
-            for capability in capabilities
-        ):
-            raise ParameterCapabilityConfigurationError(
-                "capability references an undeclared evidence rule"
-            )
-
         unit_by_id = self._index_models(
             manifest.unit_definitions,
             id_attribute="unit_id",
@@ -253,9 +225,6 @@ class ParameterCapabilityRegistry:
             id_attribute="profile_id",
             label="coverage profile",
         )
-        relation_by_id = {
-            relation.relation_id: relation for relation in manifest.evidence_relations
-        }
         self._validate_profiles(
             manifest.quality_profiles,
             profile_ids=frozenset(quality_by_id),
@@ -273,14 +242,6 @@ class ParameterCapabilityRegistry:
         )
         unit_alias_index = self._validate_unit_aliases(manifest.unit_definitions)
 
-        key_set = set(keys)
-        for relation in manifest.evidence_relations:
-            if not set(relation.input_parameter_keys) <= key_set or not set(
-                relation.output_parameter_keys
-            ) <= key_set:
-                raise ParameterCapabilityConfigurationError(
-                    "evidence relation references an unregistered parameter"
-                )
         for capability in capabilities:
             self._validate_capability_policy(
                 capability,
@@ -288,7 +249,6 @@ class ParameterCapabilityRegistry:
                 quality_by_id=quality_by_id,
                 aggregation_by_id=aggregation_by_id,
                 coverage_by_id=coverage_by_id,
-                relation_by_id=relation_by_id,
             )
 
         if not all(
@@ -308,21 +268,11 @@ class ParameterCapabilityRegistry:
                 "usgs:00060 must be the unique required support capability"
             )
         discharge = required_support[0]
-        discharge_relations = {
-            EvidenceRuleId.DISCHARGE_GAGE_HEIGHT_ESTIMATE,
-            EvidenceRuleId.DISCHARGE_BASIN_ESTIMATE,
-        }
-        if (
-            not any(policy.direct_observation for policy in discharge.channel_policies)
-            or not discharge_relations
-            <= set(discharge.allowed_indirect_evidence_rules)
-            or any(
-                discharge_key not in relation_by_id[relation_id].output_parameter_keys
-                for relation_id in discharge_relations
-            )
+        if not any(
+            policy.direct_observation for policy in discharge.channel_policies
         ):
             raise ParameterCapabilityConfigurationError(
-                "usgs:00060 requires a direct channel and discharge relations"
+                "usgs:00060 requires a direct channel"
             )
 
         by_key = {capability.key: capability for capability in capabilities}
@@ -356,7 +306,6 @@ class ParameterCapabilityRegistry:
         self._quality_profiles = MappingProxyType(quality_by_id)
         self._aggregation_profiles = MappingProxyType(aggregation_by_id)
         self._coverage_profiles = MappingProxyType(coverage_by_id)
-        self._evidence_relations = MappingProxyType(relation_by_id)
         self._canonical_manifest_bytes = manifest_bytes
         self._manifest_digest = manifest_digest
 
@@ -420,7 +369,6 @@ class ParameterCapabilityRegistry:
         quality_by_id: Mapping[str, object],
         aggregation_by_id: Mapping[str, object],
         coverage_by_id: Mapping[str, object],
-        relation_by_id: Mapping[EvidenceRuleId, EvidenceRelationDefinition],
     ) -> None:
         if capability.unit_policy_id not in unit_by_id:
             raise ParameterCapabilityConfigurationError(
@@ -466,13 +414,6 @@ class ParameterCapabilityRegistry:
             raise ParameterCapabilityConfigurationError(
                 "capability references an unknown quality profile"
             )
-        if not set(capability.allowed_indirect_evidence_rules) <= set(
-            relation_by_id
-        ):
-            raise ParameterCapabilityConfigurationError(
-                "capability references an unknown evidence relation"
-            )
-
         policies = {
             (policy.provider, policy.channel): policy
             for policy in capability.channel_policies
@@ -583,12 +524,6 @@ class ParameterCapabilityRegistry:
     @property
     def coverage_profiles(self) -> Mapping[str, CoverageProfile]:
         return self._coverage_profiles
-
-    @property
-    def evidence_relations(
-        self,
-    ) -> Mapping[EvidenceRuleId, EvidenceRelationDefinition]:
-        return self._evidence_relations
 
     def get(self, key: ParameterKey) -> ParameterCapability | None:
         return self._by_key.get(key)

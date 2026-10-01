@@ -51,6 +51,9 @@ from app.application.evidence_tools.models import (
 )
 from app.application.evidence_tools.registry import EvidenceToolRegistry
 from app.application.evidence_tools.scope import EvidenceSessionScope
+from app.application.evidence_tools.evidence_sources import (
+    weather_variables_for_parameters,
+)
 from app.application.hydrology_topology import build_facility_corridor_plan
 from app.application.hydrology_topology.corridor import (
     FacilityRadiusTooSmallForBudgetError,
@@ -481,11 +484,19 @@ class EvidenceToolExecutor:
                     scope.cancel_token.checkpoint()
                     if batches:
                         self._ensure_another_collection_request(tuple(batches))
+                    variables = weather_variables_for_parameters(
+                        request.parameter_keys,
+                        kind,
+                    )
+                    if not variables:
+                        if scope.evidence_rule_plan.effective_rules:
+                            raise EvidenceScopeViolationError()
+                        variables = ("temperature",)
                     plan = WeatherEvidenceRequest(
                         operation_id=f"{operation_id}-{index:03d}",
                         evidence_kind=kind,
                         location=scope.target_node.point,
-                        variables=("temperature",),
+                        variables=variables,
                         request_range=scope.query_envelope,
                         affected_window_ids=request.window_ids,
                     )

@@ -25,7 +25,7 @@ from app.domain.evidence.historical_inference_payload import (
 from app.domain.evidence.provenance import Provenance
 from app.domain.evidence.source_record_reference import SourceRecordReference
 from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
-from app.domain.hydrology.evidence_rule_id import EvidenceRuleId
+from app.domain.evidence.relation_support_payload import RelationSupportPayload
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.time.time_range import TimeRange
 
@@ -41,7 +41,7 @@ class EvidenceFragment(DomainModel):
     parameter_refs: tuple[ParameterKey, ...]
     data_type: NonEmptyString
     applicability: EvidenceApplicability
-    relation_id: EvidenceRuleId | None = None
+    relation_id: NonEmptyString | None = None
     series_identity: NonEmptyString | None = None
     quality_class: EvidenceQualityClass | None
     quality_flags: tuple[DataQualityFlag, ...] = ()
@@ -165,8 +165,8 @@ class EvidenceFragment(DomainModel):
             ):
                 raise ValueError("usable contextual evidence is inferred only")
         elif isinstance(self.payload, UpstreamResultPayload):
-            if self.applicability is not EvidenceApplicability.ALLOWED_INDIRECT:
-                raise ValueError("upstream result must be allowed_indirect")
+            if self.applicability is not EvidenceApplicability.CONTEXTUAL_ONLY:
+                raise ValueError("raw upstream result must be contextual_only")
             if self.source_record_refs or self.derivation is not None:
                 raise ValueError("upstream result uses result closure references only")
             if (
@@ -175,6 +175,15 @@ class EvidenceFragment(DomainModel):
                 is not EvidenceResultEligibility.INFERRED_ONLY
             ):
                 raise ValueError("upstream evidence is inferred only")
+        elif isinstance(self.payload, RelationSupportPayload):
+            if self.applicability is not EvidenceApplicability.ALLOWED_INDIRECT:
+                raise ValueError("relation support must be allowed_indirect")
+            if self.relation_id != self.payload.rule_id:
+                raise ValueError("relation support rule identity must match fragment")
+            if self.source_record_refs or self.derivation is None:
+                raise ValueError("relation support requires evidence-only derivation")
+            if self.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY:
+                raise ValueError("relation support is inferred only")
         elif isinstance(self.payload, HistoricalInferencePayload):
             if self.applicability is not EvidenceApplicability.CONTEXTUAL_ONLY:
                 raise ValueError("historical inference must be contextual_only")
@@ -195,6 +204,11 @@ class EvidenceFragment(DomainModel):
         elif isinstance(self.payload, UpstreamResultPayload):
             item_ids.append(self.payload.result_ref.item_id)
             item_ids.extend(reference.item_id for reference in self.payload.closure_refs)
+        elif isinstance(self.payload, RelationSupportPayload):
+            item_ids.extend(
+                reference.item_id
+                for reference in self.payload.input_evidence_refs
+            )
         elif isinstance(self.payload, HistoricalInferencePayload):
             item_ids.append(self.payload.original_item_ref.item_id)
         return tuple(dict.fromkeys(item_ids))

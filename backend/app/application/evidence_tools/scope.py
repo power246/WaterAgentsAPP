@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 
 from app.application.analysis_runs.workflow import CancellationToken
-from app.application.query_understanding import AnalysisContext
+from app.application.query_understanding import AnalysisContext, EvidenceRulePlan
 from app.domain import (
     HydrologyGraph,
     HydrologyNode,
@@ -44,6 +44,7 @@ class EvidenceSessionScope:
     time_windows: tuple[EvidenceWindow, ...]
     requested_parameters: tuple[ParameterKey, ...]
     supporting_parameters: tuple[ParameterKey, ...]
+    evidence_rule_plan: EvidenceRulePlan
     station_refs: tuple[TopologyStationRef, ...]
     geometry_ref: str | None
     direct_upstream_comids: tuple[str, ...]
@@ -69,6 +70,7 @@ class EvidenceSessionScope:
         time_windows: tuple[EvidenceWindow, ...],
         requested_parameters: tuple[ParameterKey, ...],
         supporting_parameters: tuple[ParameterKey, ...],
+        evidence_rule_plan: EvidenceRulePlan,
         station_refs: tuple[TopologyStationRef, ...],
         geometry_ref: str | None,
         direct_upstream_comids: tuple[str, ...],
@@ -98,6 +100,7 @@ class EvidenceSessionScope:
             "time_windows": time_windows,
             "requested_parameters": requested_parameters,
             "supporting_parameters": supporting_parameters,
+            "evidence_rule_plan": evidence_rule_plan,
             "station_refs": station_refs,
             "geometry_ref": geometry_ref,
             "direct_upstream_comids": direct_upstream_comids,
@@ -180,6 +183,7 @@ def assemble_evidence_session_scope(
         time_windows=windows,
         requested_parameters=tuple(item.key for item in context.params_used),
         supporting_parameters=tuple(item.key for item in context.supporting_params),
+        evidence_rule_plan=context.evidence_rule_plan,
         station_refs=node.station_refs,
         geometry_ref=node.geometry_ref,
         direct_upstream_comids=direct_upstreams,

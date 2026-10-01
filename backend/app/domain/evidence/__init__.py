@@ -56,6 +56,7 @@ from app.domain.evidence.provider_quality import ProviderQuality
 from app.domain.evidence.provider_collection_batch import ProviderCollectionBatch
 from app.domain.evidence.quality_summary import QualitySummary
 from app.domain.evidence.reference_scope import ReferenceScope
+from app.domain.evidence.relation_support_payload import RelationSupportPayload
 from app.domain.evidence.safe_evidence_error import SafeEvidenceError
 from app.domain.evidence.serialization import (
     canonical_model_bytes,
@@ -130,6 +131,7 @@ __all__ = [
     "ProviderCollectionBatch",
     "QualitySummary",
     "ReferenceScope",
+    "RelationSupportPayload",
     "SafeEvidenceError",
     "SourceRecord",
     "SourceRecordReference",
