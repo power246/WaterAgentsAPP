@@ -52,8 +52,8 @@ class MemoryEvidenceStore:
             tuple[SourceRecordReference, ...], StoredPolicyObservations
         ] = {}
 
-    async def write_call(self, scope, request, *, operation_id):
-        self.calls.append((scope.run_id, request, operation_id))
+    async def write_call(self, scope, request, *, operation_id, policy):
+        self.calls.append((scope.run_id, request, operation_id, policy))
         reference = ItemReference(item_id=f"call-item-{len(self.calls):03d}")
         self._remember_scope(scope, reference.item_id)
         return reference
@@ -117,11 +117,14 @@ class MemoryEvidenceStore:
             raise EvidenceScopeViolationError()
         return records
 
-    async def resolve_reference_scopes(self, item_ids):
+    async def resolve_reference_scopes(self, scope, item_ids):
         try:
-            return tuple(self.scopes[item_id] for item_id in item_ids)
+            resolved = tuple(self.scopes[item_id] for item_id in item_ids)
         except KeyError as error:
             raise EvidenceScopeViolationError() from error
+        if any(item.run_id != scope.run_id for item in resolved):
+            raise EvidenceScopeViolationError()
+        return resolved
 
     def seed_records(self, scope, item_id, records):
         self.records[(scope.run_id, scope.session_id, item_id)] = tuple(records)

@@ -38,6 +38,7 @@ def _utf8_tail(value: str, maximum_bytes: int) -> str:
 def locate_content(
     safe_body: str,
     *,
+    preview_body: str | None = None,
     inline_content_bytes: int = DEFAULT_INLINE_CONTENT_BYTES,
     preview_bytes: int = DEFAULT_PREVIEW_BYTES,
 ) -> ContentLocation:
@@ -47,9 +48,10 @@ def locate_content(
         raise ValueError("preview_bytes must be positive")
     if len(safe_body.encode("utf-8")) <= inline_content_bytes:
         return ContentLocation(inline_body=safe_body)
+    preview = preview_body if preview_body is not None else safe_body
     return ContentLocation(
-        preview_head=_utf8_head(safe_body, preview_bytes),
-        preview_tail=_utf8_tail(safe_body, preview_bytes),
+        preview_head=_utf8_head(preview, preview_bytes),
+        preview_tail=_utf8_tail(preview, preview_bytes),
     )
 
 
@@ -157,6 +159,11 @@ class TranscriptBuffer:
                     )
             location = locate_content(
                 content.safe_body,
+                preview_body=self._registry.public_safe_body(
+                    content.content_type,
+                    content.content_schema_version,
+                    content.safe_body,
+                ),
                 inline_content_bytes=inline_content_bytes,
                 preview_bytes=preview_bytes,
             )

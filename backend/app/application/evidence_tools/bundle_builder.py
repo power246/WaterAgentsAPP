@@ -317,7 +317,7 @@ class EvidenceBundleBuilder:
             for item_id in bundle.referenced_item_ids()
             if item_id not in {item.item_id for item in known}
         )
-        resolved = await self._reader.resolve_reference_scopes(remaining)
+        resolved = await self._reader.resolve_reference_scopes(scope, remaining)
         if {item.item_id for item in resolved} != set(remaining):
             raise EvidenceScopeViolationError()
         try:

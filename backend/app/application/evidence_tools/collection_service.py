@@ -66,6 +66,56 @@ _CONTEXT_TYPES = (
 )
 
 
+def build_policy_observation(
+    registry: ParameterCapabilityRegistry,
+    record: SourceRecord,
+    reference: SourceRecordReference | None,
+    *,
+    provider_name: str | None = None,
+    channel: str | None = None,
+) -> PolicyObservation | None:
+    if reference is None or not isinstance(record, _OBSERVATION_TYPES):
+        return None
+    try:
+        provider = ParameterProvider(provider_name or record.provider)
+    except ValueError:
+        return None
+    capability = registry.get(record.parameter)
+    policy = registry.get_channel_policy(
+        record.parameter,
+        provider,
+        channel or record.channel,
+    )
+    if capability is None or policy is None:
+        return None
+    quality = assess_provider_quality(
+        registry,
+        capability,
+        provider,
+        channel or record.channel,
+        record.provider_quality,
+    )
+    return PolicyObservation(
+        record_ref=reference,
+        parameter=record.parameter,
+        provider=provider,
+        channel=channel or record.channel,
+        location_comid=record.location.comid,
+        station_id=record.location.station_id or "unknown-station",
+        medium=record.medium,
+        fraction=record.fraction,
+        method=record.method or "missing-method",
+        statistic=record.statistic,
+        value_semantics=policy.value_semantics,
+        observed_time=record.observed_time,
+        valid_time_range=record.valid_time_range,
+        value=record.value,
+        unit=record.raw_unit or "missing-unit",
+        quality=quality,
+        series_identity=_series_identity(record, policy.value_semantics.value),
+    )
+
+
 class EvidenceCollectionService:
     """Turn normalized provider records into persisted, policy-labelled fragments."""
 
@@ -301,48 +351,18 @@ class EvidenceCollectionService:
 
     def _observation_details(self, collection, refs_by_record):
         details = {}
-        try:
-            provider = ParameterProvider(collection.provider)
-        except ValueError:
-            return details
         for record in collection.batch.records:
-            if not isinstance(record, _OBSERVATION_TYPES):
-                continue
-            capability = self._registry.get(record.parameter)
-            policy = self._registry.get_channel_policy(
-                record.parameter,
-                provider,
-                collection.channel,
-            )
-            if capability is None or policy is None:
-                continue
-            quality = assess_provider_quality(
+            observation = build_policy_observation(
                 self._registry,
-                capability,
-                provider,
-                collection.channel,
-                record.provider_quality,
-            )
-            series_identity = _series_identity(record, policy.value_semantics.value)
-            observation = PolicyObservation(
-                record_ref=refs_by_record[record.record_id],
-                parameter=record.parameter,
-                provider=provider,
+                record,
+                refs_by_record.get(record.record_id),
+                provider_name=collection.provider,
                 channel=collection.channel,
-                location_comid=record.location.comid,
-                station_id=record.location.station_id or "unknown-station",
-                medium=record.medium,
-                fraction=record.fraction,
-                method=record.method or "missing-method",
-                statistic=record.statistic,
-                value_semantics=policy.value_semantics,
-                observed_time=record.observed_time,
-                valid_time_range=record.valid_time_range,
-                value=record.value,
-                unit=record.raw_unit or "missing-unit",
-                quality=quality,
-                series_identity=series_identity,
             )
+            if observation is None:
+                continue
+            capability = self._registry.get(observation.parameter)
+            assert capability is not None
             try:
                 conversion = convert_value(
                     self._registry,
@@ -354,7 +374,7 @@ class EvidenceCollectionService:
                 if error.code != "evidence_unit_unresolved":
                     raise
                 conversion = None
-            details[record.record_id] = (quality, observation, conversion)
+            details[record.record_id] = (observation.quality, observation, conversion)
         return details
 
     def _observation_fragment(

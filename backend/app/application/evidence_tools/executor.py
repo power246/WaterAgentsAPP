@@ -136,7 +136,7 @@ class EvidenceToolExecutor:
         self._clock = clock or _UtcClock()
         self._monotonic = monotonic
         self._operation_id_factory = operation_id_factory or (
-            lambda: f"evidence-{uuid4()}"
+            lambda: str(uuid4())
         )
         self._single_flight = single_flight or RunLocalSingleFlight()
         self._inspection = EvidenceInspectionService(
@@ -172,6 +172,7 @@ class EvidenceToolExecutor:
                 scope,
                 request,
                 operation_id=operation_id,
+                policy=descriptor.policy_class,
             )
             self._authorize_descriptor(scope, request, descriptor)
             scope.cancel_token.checkpoint()

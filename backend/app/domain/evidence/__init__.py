@@ -34,6 +34,8 @@ from app.domain.evidence.evidence_location import EvidenceLocation
 from app.domain.evidence.evidence_payload import EvidencePayload
 from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
 from app.domain.evidence.evidence_result_eligibility import EvidenceResultEligibility
+from app.domain.evidence.evidence_source_records import EvidenceSourceRecords
+from app.domain.evidence.evidence_tool_call import EvidenceToolCall
 from app.domain.evidence.evidence_reference import EvidenceReference
 from app.domain.evidence.evidence_tool_counts import EvidenceToolCounts
 from app.domain.evidence.evidence_tool_execution_status import (
@@ -61,6 +63,8 @@ from app.domain.evidence.serialization import (
     load_evidence_bundle_json,
     load_evidence_fragment_json,
     load_evidence_payload_json,
+    load_evidence_source_records_json,
+    load_evidence_tool_call_json,
     load_evidence_tool_result_json,
     load_source_record_json,
 )
@@ -108,6 +112,8 @@ __all__ = [
     "EvidencePayload",
     "EvidenceQualityClass",
     "EvidenceResultEligibility",
+    "EvidenceSourceRecords",
+    "EvidenceToolCall",
     "EvidenceReference",
     "EvidenceToolCounts",
     "EvidenceToolExecutionStatus",
@@ -142,6 +148,8 @@ __all__ = [
     "load_evidence_bundle_json",
     "load_evidence_fragment_json",
     "load_evidence_payload_json",
+    "load_evidence_source_records_json",
+    "load_evidence_tool_call_json",
     "load_evidence_tool_result_json",
     "load_source_record_json",
 ]

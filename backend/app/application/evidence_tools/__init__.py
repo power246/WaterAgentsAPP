@@ -26,6 +26,7 @@ from app.application.evidence_tools.executor import EvidenceToolExecutor
 from app.application.evidence_tools.inspection_service import (
     EvidenceInspectionService,
 )
+from app.application.evidence_tools.transcript_store import EvidenceTranscriptStore
 from app.application.evidence_tools.models import (
     EvidenceCollectionArtifacts,
     EvidenceCollectionInput,
@@ -76,6 +77,7 @@ __all__ = [
     "EvidenceSessionScope",
     "EvidenceStationNotAuthorizedError",
     "EvidenceTimeOutOfRangeError",
+    "EvidenceTranscriptStore",
     "EvidenceToolBudgetExceededError",
     "EvidenceToolDeadlineExceededError",
     "EvidenceToolDescriptor",

@@ -8,6 +8,8 @@ from app.domain.evidence.evidence_bundle import EvidenceBundle
 from app.domain.evidence.evidence_content_error import EvidenceContentError
 from app.domain.evidence.evidence_fragment import EvidenceFragment
 from app.domain.evidence.evidence_payload import EvidencePayload
+from app.domain.evidence.evidence_source_records import EvidenceSourceRecords
+from app.domain.evidence.evidence_tool_call import EvidenceToolCall
 from app.domain.evidence.evidence_tool_result import EvidenceToolResult
 from app.domain.evidence.source_record import SourceRecord
 
@@ -72,5 +74,19 @@ def load_collection_manifest_json(data: str | bytes) -> CollectionManifest:
 def load_evidence_tool_result_json(data: str | bytes) -> EvidenceToolResult:
     try:
         return EvidenceToolResult.model_validate_json(data)
+    except ValidationError as exc:
+        raise _validation_error(exc) from exc
+
+
+def load_evidence_tool_call_json(data: str | bytes) -> EvidenceToolCall:
+    try:
+        return EvidenceToolCall.model_validate_json(data)
+    except ValidationError as exc:
+        raise _validation_error(exc) from exc
+
+
+def load_evidence_source_records_json(data: str | bytes) -> EvidenceSourceRecords:
+    try:
+        return EvidenceSourceRecords.model_validate_json(data)
     except ValidationError as exc:
         raise _validation_error(exc) from exc

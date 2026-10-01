@@ -146,6 +146,7 @@ class EvidenceToolWriter(Protocol):
         request: EvidenceToolRequest,
         *,
         operation_id: str,
+        policy: EvidencePolicyClass,
     ) -> ItemReference: ...
 
     async def write_collection(
@@ -199,6 +200,7 @@ class EvidenceToolReader(Protocol):
 
     async def resolve_reference_scopes(
         self,
+        scope: EvidenceSessionScope,
         item_ids: tuple[str, ...],
     ) -> tuple[ReferenceScope, ...]: ...
 

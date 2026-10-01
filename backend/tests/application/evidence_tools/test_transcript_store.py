@@ -1,0 +1,415 @@
+import asyncio
+import json
+from datetime import UTC, datetime, timedelta
+from functools import wraps
+from uuid import UUID, uuid4
+
+from app.api.sse.response import create_session_event_response
+from app.application.analysis_runs.models import AgentRole
+from app.application.analysis_runs.persistence import PersistenceState
+from app.application.analysis_runs.workflow import WorkflowContext
+from app.application.evidence_tools import (
+    EvidenceBundleBuilder,
+    EvidenceCollectionService,
+    EvidencePolicyClass,
+    EvidenceTranscriptStore,
+    assemble_evidence_session_scope,
+)
+from app.application.transcripts.read_models import ReadView
+from app.application.transcripts.reader import TranscriptReader
+from app.application.transcripts.registry import create_production_registry
+from app.application.transcripts.stream_models import TranscriptItemProcessRecord
+from app.domain import (
+    CollectionStatus,
+    EvidenceToolCounts,
+    EvidenceToolExecutionStatus,
+    EvidenceToolRequest,
+    EvidenceToolResult,
+    ReferenceScope,
+)
+from app.infrastructure.config import AppSettings, load_parameter_capability_registry
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from tests.application.evidence_tools.test_collection_service import (
+    batch,
+    collection,
+    observation,
+)
+from tests.m4_support import MODEL_CATALOG, create_request_bytes, create_test_app
+
+
+def run_async(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        return asyncio.run(asyncio.wait_for(function(*args, **kwargs), timeout=15))
+
+    return wrapped
+
+
+class StepClock:
+    def __init__(self) -> None:
+        self.value = datetime(2026, 10, 1, tzinfo=UTC)
+
+    def now(self) -> datetime:
+        value = self.value
+        self.value += timedelta(microseconds=1)
+        return value
+
+
+class HoldingWorkflow:
+    def __init__(self) -> None:
+        self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+        self.release = asyncio.Event()
+
+    async def run(self, context: WorkflowContext) -> None:
+        self.calls.put_nowait(context)
+        await self.release.wait()
+        context.cancellation.checkpoint()
+
+
+async def wait_until(predicate, timeout: float = 2) -> None:
+    async with asyncio.timeout(timeout):
+        while not predicate():
+            await asyncio.sleep(0)
+
+
+async def collect_response(response):
+    messages = []
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    async def send(message):
+        messages.append(message)
+
+    await response(
+        {"type": "http", "asgi": {"spec_version": "2.4"}},
+        receive,
+        send,
+    )
+    return messages
+
+
+def decoded_frames(messages):
+    decoded = []
+    for message in messages:
+        if not message.get("body"):
+            continue
+        lines = message["body"].decode("utf-8").splitlines()
+        offset = 1 if lines and lines[0].startswith("id: ") else 0
+        decoded.append((
+            lines[offset].removeprefix("event: "),
+            json.loads(lines[offset + 1].removeprefix("data: ")),
+        ))
+    return decoded
+
+
+@run_async
+async def test_evidence_content_uses_existing_writer_reader_history_and_session_stream(
+    context_factory,
+    graph_factory,
+):
+    workflow = HoldingWorkflow()
+    persistence = InMemoryTranscriptStore()
+    capabilities = load_parameter_capability_registry()
+    application = create_test_app(
+        settings=AppSettings(
+            _env_file=None,
+            transcript_inline_max_bytes=256,
+            transcript_preview_bytes=64,
+        ),
+        clock=StepClock(),
+        workflow=workflow,
+        transcript_store=persistence,
+        model_catalog=MODEL_CATALOG,
+        parameter_capability_registry=capabilities,
+        shutdown_grace_period=0,
+    )
+    async with application.router.lifespan_context(application):
+        coordinator = application.state.run_coordinator
+        created = await coordinator.create_run(create_request_bytes("evidence"))
+        workflow_context = await workflow.calls.get()
+
+        parser = await coordinator.prepare_agent_session(
+            created.run_id,
+            agent_role=AgentRole.QUERY_PARSER,
+        )
+        await coordinator.mark_agent_session_running(created.run_id, parser.session_id)
+        context = context_factory()
+        context_identity = await coordinator.reserve_transcript_item(
+            created.run_id,
+            session_id=parser.session_id,
+        )
+        await coordinator.finalize_transcript_item(
+            created.run_id,
+            context_identity.item_id,
+            "query_understood",
+            1,
+            context,
+        )
+        graph = graph_factory()
+        topology_identity = await coordinator.reserve_transcript_item(created.run_id)
+        await coordinator.finalize_transcript_item(
+            created.run_id,
+            topology_identity.item_id,
+            "topology_ready",
+            1,
+            graph,
+        )
+        session = await coordinator.prepare_agent_session(
+            created.run_id,
+            agent_role=AgentRole.WATERBODY,
+            target_comid="123",
+        )
+        await coordinator.mark_agent_session_running(created.run_id, session.session_id)
+        scope = assemble_evidence_session_scope(
+            run_id=str(created.run_id),
+            session_id=str(session.session_id),
+            session_fact=ReferenceScope(
+                item_id=str(session.session_id),
+                run_id=str(created.run_id),
+                session_id=str(session.session_id),
+            ),
+            analysis_context_ref=ReferenceScope(
+                item_id=str(context_identity.item_id),
+                run_id=str(created.run_id),
+            ),
+            topology_ref=ReferenceScope(
+                item_id=str(topology_identity.item_id),
+                run_id=str(created.run_id),
+            ),
+            context=context,
+            topology=graph,
+            agent_comid="123",
+            registry=capabilities,
+            cancel_token=workflow_context.cancellation,
+        )
+        transcript = EvidenceTranscriptStore(
+            operations=coordinator,
+            reader=application.state.transcript_reader,
+            capability_registry=capabilities,
+        )
+        operation_id = str(uuid4())
+        request = EvidenceToolRequest(
+            tool_call_id="call-001",
+            session_id=scope.session_id,
+            tool_name="collect_water_observations",
+            purpose="local_station_preflight",
+            window_ids=tuple(item.window_id for item in scope.time_windows),
+            parameter_keys=(
+                scope.requested_parameters[0],
+                scope.supporting_parameters[0],
+            ),
+        )
+        await transcript.write_call(
+            scope,
+            request,
+            operation_id=operation_id,
+            policy=EvidencePolicyClass.CONDITIONAL_MANDATORY,
+        )
+        records = (
+            observation(scope, 1).model_copy(
+                update={
+                    "source_uri": (
+                        "https://api.waterdata.usgs.gov/ogcapi/items/record-1"
+                        "?api_key=private-value"
+                    )
+                }
+            ),
+            observation(scope, 2).model_copy(
+                update={"source_uri": "https://arbitrary.example/record-2"}
+            ),
+        )
+        artifacts = await EvidenceCollectionService(
+            registry=capabilities,
+            writer=transcript,
+        ).process(
+            scope,
+            operation_id=operation_id,
+            collections=(
+                collection(
+                    scope,
+                    batch(scope, records, operation_id="source-page"),
+                ),
+            ),
+        )
+        result = EvidenceToolResult(
+            tool_call_id=request.tool_call_id,
+            operation_id=operation_id,
+            tool_name=request.tool_name,
+            execution_status=EvidenceToolExecutionStatus.COMPLETED,
+            collection_status=CollectionStatus.AVAILABLE,
+            manifest_refs=artifacts.manifest_refs,
+            fragment_refs=artifacts.fragment_refs,
+            collection_fact_refs=artifacts.collection_fact_refs,
+            source_record_refs=artifacts.source_record_refs,
+            counts=EvidenceToolCounts(
+                requests=1,
+                pages=1,
+                records=2,
+                fragments=len(artifacts.fragment_refs) + len(artifacts.collection_fact_refs),
+            ),
+            completed_at=StepClock().now(),
+        )
+        result_ref = await transcript.write_result(scope, result)
+        bundle, bundle_ref = await EvidenceBundleBuilder(
+            reader=transcript,
+            writer=transcript,
+        ).build_and_write(
+            scope,
+            fragment_refs=(*artifacts.fragment_refs, *artifacts.collection_fact_refs),
+            tool_result_refs=(result_ref,),
+            created_at=StepClock().now(),
+        )
+
+        runtime = coordinator._runs[created.run_id]
+        await wait_until(
+            lambda: coordinator._transcript_writer.info_locked(runtime).state
+            is PersistenceState.UP_TO_DATE
+        )
+        session_read = await application.state.transcript_reader.get_session_transcript(
+            created.run_id,
+            session.session_id,
+            ReadView.AUTO,
+        )
+        evidence_items = tuple(
+            item
+            for item in session_read.items
+            if item.content_type.startswith("evidence_")
+        )
+        evidence_types = tuple(item.content_type for item in evidence_items)
+        assert all(item.parse_status.value == "ok" for item in evidence_items)
+        assert evidence_types[0] == "evidence_tool_call"
+        assert evidence_types.index("evidence_source_records") < evidence_types.index(
+            "evidence_fragment"
+        )
+        assert evidence_types[-2:] == ("evidence_tool_result", "evidence_bundle")
+        assert bundle_ref.item_id == str(evidence_items[-1].item_id)
+        assert set(bundle.referenced_item_ids()) <= {
+            str(item.item_id) for item in (*session_read.items, *session_read.referenced_items)
+        }
+
+        source_item = next(
+            item for item in evidence_items if item.content_type == "evidence_source_records"
+        )
+        assert source_item.content.kind == "reference"
+        public_preview = source_item.content.preview_head + source_item.content.preview_tail
+        assert "private-value" not in public_preview
+        assert "api_key" not in public_preview
+        full = await application.state.transcript_reader.get_content(
+            created.run_id,
+            source_item.item_id,
+            ReadView.AUTO,
+        )
+        assert "private-value" not in full.text
+        assert "[REDACTED]" in full.text
+        parsed_full = json.loads(full.text)
+        assert len(parsed_full["records"]) == 2
+        inline_reader = TranscriptReader(
+            coordinator,
+            persistence,
+            create_production_registry(),
+            error_id_factory=uuid4,
+            inline_content_bytes=1_000_000,
+            preview_bytes=32,
+        )
+        inline_read = await inline_reader.get_session_transcript(
+            created.run_id,
+            session.session_id,
+            ReadView.AUTO,
+        )
+        inline_source = next(
+            item
+            for item in inline_read.items
+            if item.content_type == "evidence_source_records"
+        )
+        assert inline_source.content.kind == "inline"
+        assert inline_source.content.body["records"][0]["source_uri"] == (
+            "https://api.waterdata.usgs.gov/ogcapi/items/record-1"
+        )
+        assert inline_source.content.body["records"][1]["source_uri"] is None
+        full_evidence_bodies = []
+        for item in evidence_items:
+            content = await application.state.transcript_reader.get_content(
+                created.run_id,
+                item.item_id,
+                ReadView.AUTO,
+            )
+            full_evidence_bodies.append(content.text)
+        assert sum('"source_uri"' in body for body in full_evidence_bodies) == 1
+
+        source_item_id = artifacts.source_record_refs[0].item_id
+        strict_history = EvidenceTranscriptStore(
+            operations=coordinator,
+            reader=application.state.transcript_reader,
+            capability_registry=capabilities,
+            read_view=ReadView.HISTORY,
+        )
+        assert len(await strict_history.read_source_records(scope, source_item_id)) == 2
+        assert await strict_history.read_fragment(scope, artifacts.fragment_refs[0])
+        scopes = await strict_history.resolve_reference_scopes(
+            scope,
+            (str(context_identity.item_id), source_item_id, result_ref.item_id),
+        )
+        assert tuple(item.session_id for item in scopes) == (
+            None,
+            str(session.session_id),
+            str(session.session_id),
+        )
+
+        history_read = await application.state.transcript_reader.get_session_transcript(
+            created.run_id,
+            session.session_id,
+            ReadView.HISTORY,
+        )
+        assert tuple(
+            item.content_type
+            for item in history_read.items
+            if item.content_type.startswith("evidence_")
+        ) == evidence_types
+
+        stream = await coordinator.subscribe_session(
+            created.run_id,
+            session.session_id,
+        )
+        streamed_types = []
+        while "evidence_bundle" not in streamed_types:
+            record_or_keepalive = await anext(stream)
+            if isinstance(record_or_keepalive, TranscriptItemProcessRecord):
+                streamed_types.append(record_or_keepalive.item.content.content_type)
+        await stream.aclose()
+        assert tuple(item for item in streamed_types if item.startswith("evidence_")) == (
+            evidence_types
+        )
+
+        run_stream = await coordinator.subscribe_run(created.run_id)
+        run_snapshot = await anext(run_stream)
+        await run_stream.aclose()
+        run_payload = json.dumps(run_snapshot.model_dump(mode="json"))
+        assert "tool_call_id" not in run_payload
+        assert "source_uri" not in run_payload
+
+        await coordinator.complete_agent_session(created.run_id, session.session_id)
+        await wait_until(
+            lambda: coordinator._transcript_writer.info_locked(runtime).state
+            is PersistenceState.UP_TO_DATE
+        )
+        response = await create_session_event_response(
+            coordinator,
+            application.state.transcript_reader,
+            created.run_id,
+            session.session_id,
+        )
+        frames = decoded_frames(await collect_response(response))
+        assert {event for event, _ in frames} == {"transcript_item", "stream_end"}
+        source_event = next(
+            payload
+            for event, payload in frames
+            if event == "transcript_item"
+            and payload["payload"]["item"]["content_type"]
+            == "evidence_source_records"
+        )
+        serialized_source_event = json.dumps(source_event)
+        assert "private-value" not in serialized_source_event
+        assert '"kind": "reference"' in serialized_source_event
+
+        workflow.release.set()

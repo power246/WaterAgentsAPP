@@ -305,6 +305,35 @@ class TranscriptReader:
             issues=self._issues((item,), ()),
         )
 
+    async def read_registered_item(
+        self,
+        run_id: UUID,
+        item_id: UUID,
+        view: ReadView,
+        *,
+        session_id: UUID | None = None,
+    ) -> ReadTranscriptItem:
+        selected = await self._select(run_id, view)
+        if session_id is not None:
+            self._session(selected.stored, session_id)
+        item = next(
+            (
+                candidate
+                for candidate in self._parse_items(selected.stored)
+                if candidate.item.item_id == item_id
+            ),
+            None,
+        )
+        if (
+            item is None
+            or not self._is_visible(item, view)
+            or (session_id is not None and item.item.session_id != session_id)
+        ):
+            raise TranscriptItemNotFoundError(run_id, item_id)
+        if item.body is None:
+            raise TranscriptContentUnreadableError(run_id, item_id)
+        return item
+
     async def get_historical_status(self, run_id: UUID) -> RunStatusResponse:
         selected = await self._select(run_id, ReadView.HISTORY)
         run = selected.stored.run
@@ -323,6 +352,11 @@ class TranscriptReader:
     ) -> TranscriptItemView:
         location = locate_content(
             item.content.safe_body,
+            preview_body=self._registry.public_safe_body(
+                item.content.content_type,
+                item.content.content_schema_version,
+                item.content.safe_body,
+            ),
             inline_content_bytes=self._inline_content_bytes,
             preview_bytes=self._preview_bytes,
         )
@@ -646,6 +680,11 @@ class TranscriptReader:
             return item
         location = locate_content(
             safe_body,
+            preview_body=self._registry.public_safe_body(
+                item.content_type,
+                item.content_schema_version,
+                safe_body,
+            ),
             inline_content_bytes=self._inline_content_bytes,
             preview_bytes=self._preview_bytes,
         )
