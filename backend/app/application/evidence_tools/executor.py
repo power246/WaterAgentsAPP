@@ -130,6 +130,7 @@ class EvidenceToolExecutor:
         monotonic: Callable[[], float] | None = None,
         operation_id_factory: Callable[[], str] | None = None,
         single_flight: RunLocalSingleFlight[_CompletedOperation] | None = None,
+        scope_preparer: Callable[[EvidenceSessionScope], None] | None = None,
     ) -> None:
         self._registry = registry
         self._capabilities = capability_registry
@@ -147,6 +148,7 @@ class EvidenceToolExecutor:
             lambda: str(uuid4())
         )
         self._single_flight = single_flight or RunLocalSingleFlight()
+        self._scope_preparer = scope_preparer
         self._inspection = EvidenceInspectionService(
             reader,
             default_page_size=limits.inspection_default_page_size,
@@ -176,6 +178,8 @@ class EvidenceToolExecutor:
         operation_id = self._operation_id_factory()
         descriptor = self._registry.get(request.tool_name)
         try:
+            if self._scope_preparer is not None:
+                self._scope_preparer(scope)
             if descriptor is None:
                 raise EvidenceScopeViolationError()
             authorize_evidence_tool_request(

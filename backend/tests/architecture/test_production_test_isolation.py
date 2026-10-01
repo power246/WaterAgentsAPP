@@ -8,6 +8,7 @@ from app.main import create_app
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = BACKEND_ROOT / "app"
+FRONTEND_ROOT = BACKEND_ROOT.parent / "frontend"
 
 
 def _module_name(source_path: Path, app_root: Path) -> str:
@@ -156,3 +157,34 @@ def test_production_exposes_exactly_the_two_existing_sse_routes() -> None:
         "/api/analysis/runs/{run_id}/events",
         "/api/analysis/runs/{run_id}/sessions/{session_id}/events",
     }
+
+
+def test_production_openapi_has_no_tool_invocation_or_test_route() -> None:
+    application = create_app(AppSettings(_env_file=None))
+    paths = set(application.openapi()["paths"])
+
+    assert not any(
+        forbidden in path
+        for path in paths
+        for forbidden in ("/__test__", "/tools", "/evidence/collect")
+    )
+
+
+def test_frontend_does_not_consume_the_m5_test_route() -> None:
+    consumers = []
+    for source_path in FRONTEND_ROOT.rglob("*"):
+        if not source_path.is_file() or source_path.suffix not in {
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".vue",
+        }:
+            continue
+        if "/__test__/m5" in source_path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        ):
+            consumers.append(source_path.relative_to(FRONTEND_ROOT))
+
+    assert consumers == []

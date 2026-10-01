@@ -102,6 +102,7 @@ class ProviderHttpClient:
         timeout_seconds: float,
         max_response_bytes: int,
         retry_delay_seconds: float,
+        attempts: int = 2,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         if not isfinite(timeout_seconds) or timeout_seconds <= 0:
@@ -110,9 +111,12 @@ class ProviderHttpClient:
             raise ValueError("max_response_bytes must be positive")
         if not isfinite(retry_delay_seconds) or retry_delay_seconds < 0:
             raise ValueError("retry_delay_seconds must be finite and non-negative")
+        if type(attempts) is not int or not 1 <= attempts <= 2:
+            raise ValueError("provider attempts must be one or two")
         self._timeout_seconds = timeout_seconds
         self._max_response_bytes = max_response_bytes
         self._retry_delay_seconds = retry_delay_seconds
+        self._attempts = attempts
         self._transport = transport
         self._client: httpx.AsyncClient | None = None
 
@@ -312,8 +316,7 @@ class ProviderHttpClient:
         client = self._client
         if client is None:
             raise RuntimeError("provider HTTP client is not open")
-        attempts = 2
-        for attempt in range(attempts):
+        for attempt in range(self._attempts):
             await self._cancellation_checkpoint()
             self._remaining_timeout(deadline, provider, operation)
             if on_attempt is not None:
@@ -329,7 +332,7 @@ class ProviderHttpClient:
                     deadline=deadline,
                 )
             except PortError as error:
-                if attempt + 1 == attempts or not self._is_retryable(error):
+                if attempt + 1 == self._attempts or not self._is_retryable(error):
                     self._log_failure(error, attempt + 1)
                     raise
                 await self._wait_before_retry(
