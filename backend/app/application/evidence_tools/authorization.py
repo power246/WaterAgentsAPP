@@ -35,7 +35,6 @@ def authorize_evidence_tool_request(
     *,
     max_agent_record_limit: int = 200,
 ) -> AuthorizedEvidenceRequest:
-    scope.cancel_token.checkpoint()
     if request.session_id != scope.session_id:
         raise EvidenceScopeViolationError()
     requested_window_ids = set(request.window_ids)

@@ -1,14 +1,12 @@
-from datetime import timedelta
-
 from app.application.evidence_policy.models import (
     IndirectEvidenceContext,
     PolicyObservation,
 )
+from app.application.evidence_policy.temporal import temporal_relation_matches
 from app.domain.evidence.evidence_applicability import EvidenceApplicability
 from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
 from app.application.query_understanding import (
     EvidenceSpatialRelation,
-    EvidenceTemporalRelation,
 )
 from app.domain.hydrology.parameter_capability import ParameterCapability
 from app.domain.hydrology.parameter_capability_registry import (
@@ -70,23 +68,15 @@ def _indirect_relation_matches(
         return False
     if set(context.input_parameters) != set(rule.input_parameters):
         return False
-    temporal_matches = False
-    if rule.temporal_relation is EvidenceTemporalRelation.SAME_WINDOW:
-        temporal_matches = all(
-            source_window == target_window for source_window in context.input_windows
+    temporal_matches = all(
+        temporal_relation_matches(
+            rule.temporal_relation,
+            source_window,
+            target_window,
+            analysis_timezone=context.analysis_timezone,
         )
-    elif rule.temporal_relation is EvidenceTemporalRelation.OVERLAPPING_WINDOW:
-        temporal_matches = all(
-            source_window.overlaps(target_window)
-            for source_window in context.input_windows
-        )
-    elif rule.temporal_relation is EvidenceTemporalRelation.ADJACENT_LOCAL_DAY:
-        temporal_matches = all(
-            source_window != target_window
-            and source_window.start >= target_window.start - timedelta(days=1)
-            and source_window.end <= target_window.end + timedelta(days=1)
-            for source_window in context.input_windows
-        )
+        for source_window in context.input_windows
+    )
     if not temporal_matches:
         return False
     if rule.spatial_relation is EvidenceSpatialRelation.SAME_WATERBODY:

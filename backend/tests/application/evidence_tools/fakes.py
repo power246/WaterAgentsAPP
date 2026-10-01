@@ -7,6 +7,7 @@ from app.application.evidence_tools import (
     EvidenceScopeViolationError,
     StoredPolicyObservations,
 )
+from app.application.analysis_runs.models import SessionSummary
 from app.domain import (
     CollectionCompletionProof,
     CollectionCounts,
@@ -51,6 +52,13 @@ class MemoryEvidenceStore:
         self.observations: dict[
             tuple[SourceRecordReference, ...], StoredPolicyObservations
         ] = {}
+        self.sessions: dict[str, SessionSummary] = {}
+
+    async def read_agent_session(self, scope, session_id):
+        try:
+            return self.sessions[session_id]
+        except KeyError as error:
+            raise EvidenceScopeViolationError() from error
 
     async def write_call(self, scope, request, *, operation_id, policy):
         self.calls.append((scope.run_id, request, operation_id, policy))
@@ -139,6 +147,9 @@ class MemoryEvidenceStore:
             run_id=run_id,
             session_id=session_id,
         )
+
+    def seed_session(self, session):
+        self.sessions[str(session.session_id)] = session
 
     def seed_observations(self, references, observations, *, complete=True, cadence=3600):
         self.observations[tuple(references)] = StoredPolicyObservations(

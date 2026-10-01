@@ -1,17 +1,16 @@
-from datetime import timedelta
 from hashlib import sha256
 
 from app.application.evidence_policy import (
     IndirectEvidenceContext,
     apply_rag_policy,
     resolve_applicability,
+    temporal_relation_matches,
 )
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
 from app.application.evidence_tools.models import EvidenceToolReader, EvidenceToolWriter
 from app.application.evidence_tools.scope import EvidenceSessionScope, EvidenceWindow
 from app.application.query_understanding import (
     EvidenceSpatialRelation,
-    EvidenceTemporalRelation,
 )
 from app.domain import (
     CollectionFactPayload,
@@ -82,6 +81,7 @@ class EvidenceRelationMaterializer:
                             item[1].parameter_refs[0] for item in selected
                         ),
                         input_windows=tuple(item[1].time_range for item in selected),
+                        analysis_timezone=scope.analysis_timezone,
                         same_location=all(
                             _is_same_location(scope, item[1]) for item in selected
                         ),
@@ -136,7 +136,12 @@ class EvidenceRelationMaterializer:
                 is not EvidenceResultEligibility.EXPLANATORY_ONLY
                 and not isinstance(fragment.payload, CollectionFactPayload)
                 and fragment.relation_id != rule.rule_id
-                and _time_matches(rule.temporal_relation, fragment.time_range, window)
+                and temporal_relation_matches(
+                    rule.temporal_relation,
+                    fragment.time_range,
+                    window.time_range,
+                    analysis_timezone=scope.analysis_timezone,
+                )
                 and (
                     isinstance(fragment.payload, UpstreamResultPayload)
                     == (
@@ -240,19 +245,6 @@ def _is_same_location(scope, fragment):
             station.station_id == fragment.location.station_id
             for station in scope.station_refs
         )
-    )
-
-
-def _time_matches(relation, source, window):
-    target = window.time_range
-    if relation is EvidenceTemporalRelation.SAME_WINDOW:
-        return source == target
-    if relation is EvidenceTemporalRelation.OVERLAPPING_WINDOW:
-        return source.overlaps(target)
-    return (
-        source != target
-        and source.start >= target.start - timedelta(days=1)
-        and source.end <= target.end + timedelta(days=1)
     )
 
 

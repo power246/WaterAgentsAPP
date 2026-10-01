@@ -1,7 +1,7 @@
 import json
-from datetime import timedelta
 from hashlib import sha256
 
+from app.application.evidence_policy import temporal_relation_matches
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
 from app.application.evidence_tools.models import EvidenceToolReader, EvidenceToolWriter
 from app.application.evidence_tools.scope import EvidenceSessionScope
@@ -261,9 +261,10 @@ class EvidenceBundleBuilder:
                                 fragment.parameter_refs
                             )
                             and _rule_fragment_applies(
-                                rule.temporal_relation.value,
+                                rule.temporal_relation,
                                 fragment.time_range,
                                 window.time_range,
+                                analysis_timezone=scope.analysis_timezone,
                             )
                             for rule in applicable_rules
                         )
@@ -453,15 +454,18 @@ def _fragment_applies(fragment, window_id, window):
     return fragment.time_range.overlaps(window)
 
 
-def _rule_fragment_applies(relation, source, target):
-    if relation == "same_window":
-        return source == target
-    if relation == "overlapping_window":
-        return source.overlaps(target)
-    return (
-        source != target
-        and source.start >= target.start - timedelta(days=1)
-        and source.end <= target.end + timedelta(days=1)
+def _rule_fragment_applies(
+    relation,
+    source,
+    target,
+    *,
+    analysis_timezone,
+):
+    return temporal_relation_matches(
+        relation,
+        source,
+        target,
+        analysis_timezone=analysis_timezone,
     )
 
 

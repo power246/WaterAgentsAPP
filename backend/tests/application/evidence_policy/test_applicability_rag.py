@@ -201,6 +201,7 @@ def test_parser_owned_upstream_relation_is_indirect_but_not_direct() -> None:
         ),
         input_parameters=(current.key,),
         input_windows=(WINDOW,),
+        analysis_timezone="UTC",
         reference_complete=True,
         upstream_result_complete=True,
     )
@@ -235,6 +236,7 @@ def test_rule_output_and_temporal_conditions_cannot_be_overridden() -> None:
         rule=evidence_rule("00060", ("00065",)),
         input_parameters=(ParameterKey(code_system="usgs", code="00065"),),
         input_windows=(WINDOW,),
+        analysis_timezone="UTC",
         same_location=True,
         reference_complete=True,
     )
@@ -251,6 +253,7 @@ def test_rule_output_and_temporal_conditions_cannot_be_overridden() -> None:
                 end=WINDOW.end + timedelta(days=2, hours=6),
             ),
         ),
+        analysis_timezone="UTC",
         same_location=True,
         reference_complete=True,
     )
@@ -287,6 +290,7 @@ def test_generic_same_waterbody_relation_requires_same_location() -> None:
         ),
         input_parameters=(ParameterKey(code_system="usgs", code="00065"),),
         input_windows=(WINDOW,),
+        analysis_timezone="UTC",
         same_location=True,
         reference_complete=True,
     )
@@ -322,6 +326,7 @@ def test_parser_directional_relation_requires_all_same_window_inputs() -> None:
             ParameterKey(code_system="usgs", code="00060"),
         ),
         input_windows=(WINDOW, WINDOW),
+        analysis_timezone="UTC",
         same_location=True,
         reference_complete=True,
     )

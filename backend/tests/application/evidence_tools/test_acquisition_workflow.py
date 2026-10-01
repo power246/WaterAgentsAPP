@@ -1,8 +1,14 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
 import pytest
 
+from app.application.analysis_runs.models import (
+    AgentRole,
+    AgentSessionStatus,
+    SessionSummary,
+)
 from app.application.evidence_tools import (
     EvidenceAcquisitionService,
     EvidenceProducerStatus,
@@ -26,6 +32,7 @@ from app.domain import (
     EvidenceToolRequest,
     EvidenceToolExecutionStatus,
     ItemReference,
+    ParameterKey,
     Provenance,
     ProviderQuality,
     ResultSource,
@@ -161,7 +168,34 @@ def _optional_request(scope, tool_name, *, call_id, options=None):
     )
 
 
-def _upstream_port(scope, store, *, result_kind):
+def _upstream_port(
+    scope,
+    store,
+    *,
+    result_kind,
+    record_comid=None,
+    session_comid=None,
+    session_status=AgentSessionStatus.COMPLETED,
+    reference_session_id=None,
+    record_parameter=None,
+    record_window_id=None,
+    mismatched_time=False,
+    duplicate_closure=False,
+):
+    upstream_session_id = "00000000-0000-0000-0000-000000000200"
+    upstream_comid = scope.direct_upstream_comids[0]
+    reference_session_id = reference_session_id or upstream_session_id
+    store.seed_session(
+        SessionSummary(
+            session_id=UUID(upstream_session_id),
+            agent_role=AgentRole.WATERBODY,
+            target_comid=session_comid or upstream_comid,
+            status=session_status,
+            created_at=scope.query_envelope.start,
+            updated_at=scope.query_envelope.end,
+        )
+    )
+
     def factory(plan):
         records = []
         for window_id in plan.affected_window_ids:
@@ -173,12 +207,12 @@ def _upstream_port(scope, store, *, result_kind):
                 store.seed_scope(
                     result_ref.item_id,
                     run_id=scope.run_id,
-                    session_id="session-upstream",
+                    session_id=reference_session_id,
                 )
                 store.seed_scope(
                     closure_ref.item_id,
                     run_id=scope.run_id,
-                    session_id="session-upstream",
+                    session_id=reference_session_id,
                 )
                 records.append(
                     UpstreamResultRecord(
@@ -186,10 +220,14 @@ def _upstream_port(scope, store, *, result_kind):
                         channel="upstream_result",
                         source_uri=None,
                         retrieved_at=scope.query_envelope.end,
-                        valid_time_range=window.time_range,
+                        valid_time_range=(
+                            scope.query_envelope
+                            if mismatched_time
+                            else window.time_range
+                        ),
                         location=EvidenceLocation(
                             point=None,
-                            comid="200",
+                            comid=record_comid or upstream_comid,
                             station_id=None,
                             distance_to_target_km=1,
                         ),
@@ -199,14 +237,16 @@ def _upstream_port(scope, store, *, result_kind):
                             page_identity=f"page:{plan.operation_id}",
                             provider_record_id=f"upstream:{suffix}",
                         ),
-                        upstream_session_id="session-upstream",
+                        upstream_session_id=upstream_session_id,
                         result_ref=result_ref,
-                        parameter=parameter,
-                        window_id=window_id,
+                        parameter=record_parameter or parameter,
+                        window_id=record_window_id or window_id,
                         result_kind=result_kind,
                         result_source=ResultSource.INFERRED,
                         confidence=(0.7 if result_kind != "indeterminate" else None),
-                        evidence_closure_refs=(closure_ref,),
+                        evidence_closure_refs=(
+                            (result_ref,) if duplicate_closure else (closure_ref,)
+                        ),
                     )
                 )
         return complete_batch(plan, tuple(records))
@@ -528,6 +568,68 @@ def test_stationless_consumes_only_upstream_and_indeterminate_never_unlocks_gate
                 fragment.relation_id is None
                 for fragment in store.fragments.values()
             )
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("case", "overrides"),
+    (
+        ("unauthorized_comid", {"record_comid": "999"}),
+        ("session_comid", {"session_comid": "999"}),
+        (
+            "session_not_completed",
+            {"session_status": AgentSessionStatus.RUNNING},
+        ),
+        ("reference_session", {"reference_session_id": "other-session"}),
+        (
+            "parameter",
+            {
+                "record_parameter": ParameterKey(
+                    code_system="usgs",
+                    code="00065",
+                )
+            },
+        ),
+        ("window", {"record_window_id": "window-not-authorized"}),
+        ("time_range", {"mismatched_time": True}),
+        ("closure", {"duplicate_closure": True}),
+    ),
+)
+def test_upstream_output_is_authorized_before_it_can_support_cells(
+    scope_factory,
+    case,
+    overrides,
+) -> None:
+    async def exercise() -> None:
+        scope = scope_factory(
+            run_id=f"run-invalid-upstream-{case}",
+            session_id=f"session-invalid-upstream-{case}",
+            with_station=False,
+            with_upstream=True,
+        )
+        store = MemoryEvidenceStore()
+        handoff = await _runtime(
+            store,
+            upstream_port=_upstream_port(
+                scope,
+                store,
+                result_kind="quantified",
+                **overrides,
+            ),
+            upstream_ready=True,
+        ).acquire(scope)
+
+        assert len(store.calls) == 1
+        assert len(store.results) == 1
+        assert store.results[0][1].safe_error.code == (
+            "evidence_provider_response_invalid"
+        )
+        assert store.records == {}
+        assert all(
+            item.status is not EvidenceCellStatus.SUPPORTED
+            for item in handoff.cell_gates
+        )
 
     asyncio.run(exercise())
 

@@ -20,6 +20,7 @@ from app.domain.hydrology.parameter_provider import ParameterProvider
 from app.application.query_understanding import EvidenceRule
 from app.domain.hydrology.value_semantics import ValueSemantics
 from app.domain.time.time_range import TimeRange
+from app.domain.time.timezone import get_iana_timezone
 
 
 class UnitConversionResult(DomainModel):
@@ -78,9 +79,16 @@ class IndirectEvidenceContext(DomainModel):
     rule: EvidenceRule
     input_parameters: tuple[ParameterKey, ...]
     input_windows: tuple[TimeRange, ...]
+    analysis_timezone: NonEmptyString
     same_location: StrictBool = False
     reference_complete: StrictBool
     upstream_result_complete: StrictBool = False
+
+    @field_validator("analysis_timezone")
+    @classmethod
+    def validate_analysis_timezone(cls, value: str) -> str:
+        get_iana_timezone(value)
+        return value
 
     @model_validator(mode="after")
     def validate_inputs(self) -> Self:

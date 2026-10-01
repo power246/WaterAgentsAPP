@@ -1,6 +1,7 @@
 from collections import defaultdict
 from uuid import UUID
 
+from app.application.analysis_runs.models import SessionSummary
 from app.application.analysis_runs.workflow import WorkflowOperations
 from app.application.evidence_tools.collection_service import build_policy_observation
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
@@ -15,6 +16,8 @@ from app.application.transcripts.reader import (
     TranscriptContentUnreadableError,
     TranscriptItemNotFoundError,
     TranscriptReader,
+    TranscriptRunNotFoundError,
+    TranscriptSessionNotFoundError,
 )
 from app.domain import (
     CollectionManifest,
@@ -48,6 +51,25 @@ class EvidenceTranscriptStore:
         self._reader = reader
         self._capabilities = capability_registry
         self._read_view = read_view
+
+    async def read_agent_session(
+        self,
+        scope: EvidenceSessionScope,
+        session_id: str,
+    ) -> SessionSummary:
+        try:
+            detail = await self._reader.get_session(
+                UUID(scope.run_id),
+                UUID(session_id),
+                self._read_view,
+            )
+        except (
+            ValueError,
+            TranscriptRunNotFoundError,
+            TranscriptSessionNotFoundError,
+        ) as error:
+            raise EvidenceScopeViolationError() from error
+        return detail.session
 
     async def write_call(
         self,

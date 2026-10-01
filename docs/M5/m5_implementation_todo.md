@@ -401,7 +401,7 @@
 
 - [x] 实现八个固定 tool descriptors：collection 三项、M7/M8 producer slots、conversion、aggregation、inspection；descriptor 包含 typed request/result、policy class、scope requirements、limits 和 producer status。
 - [x] 按 session scope 生成 roster：stationless 不注册 local observation；stateless 不注册 transcript search；M7/M8 producer unavailable 时 production 不暴露不可执行工具，contract test 仍可验证 slot schema。
-- [x] 实现唯一 `EvidenceToolExecutor.execute(scope, request)`：authorize → budget → canonical key/single-flight → port/policy → writer → typed result。
+- [x] 实现唯一 `EvidenceToolExecutor.execute(scope, request)`：descriptor/scope preflight → call writer → budget → canonical key/single-flight → port/policy → typed result；未知工具和越权请求在合法 call 形成前拒绝，不写孤立 result。
 - [x] canonical request key 使用 run_id、agent_comid、tool、normalized options、sorted windows 和 manifest/policy digest；相同 run/scope/key 共享 in-flight operation。
 - [x] 每次调用仍生成自己的 call/result；success reuse 标记 `deduplicated=true` 并引用原 operation/result，不复制 source/fragment；failed/cancelled 不进入 success cache，不跨 run 复用。
 - [x] budget 分开计算 external collection 与 deterministic transforms；同义拆分仍归入 canonical accounting，deadline/cancel 在新请求、下一页、retry、transform、bundle 和 downstream handoff 前检查。
@@ -417,6 +417,7 @@
 - [x] collection/transform call budget、deadline、pages/records/bytes/preview/inspection limits 的边界与错误确定。
 - [x] cancel 胜出后不发新页/retry/transform、不写 final bundle、不向下游交付晚到响应。
 - [x] inspection 的 ownership、offset/limit、稳定排序、full-content read 和无 provider I/O 可证明。
+- [x] 未知工具与越权 scope 为 `0 call / 0 result`；已形成合法 call 的 unavailable/budget/timeout/cancel 保持 call/result 成对。
 
 ### Verify
 
@@ -522,6 +523,7 @@
 - [x] provider unavailable/invalid/incomplete/cancelled 不走自然全空 completed 路径；返回技术结果并保留已确认事实。
 - [x] stationless roster 不含 local observation tool，也不发送注定 empty 的 USGS 请求；初始输入只消费 M7 direct-upstream slot 并允许 bounded optional tools。
 - [x] `get_upstream_results` 未接 M7 时明确 unavailable/not registered；正常上游全 indeterminate 只传递 result/bundle/缺口 refs，不满足任何 `upstream_to_downstream` 动态规则。
+- [x] M7 output 在持久化前由 application validator 复核直接上游 COMID、同 run waterbody session 的 COMID/completed 状态、参数、窗口时间及 result/evidence closure refs；无效输出不能进入 materializer 或解锁 cell。
 - [x] 每个 target/window 同时要求同窗 discharge direct/allowed cell；本地缺失时可消费 upstream 或已登记 discharge estimate relation，仍缺失时保持 indeterminate input。
 - [x] weather 始终 optional；只有 Agent 选择的已登记 relation 需要时才调用，前置证据不完整则 relation 不成立。
 - [x] 输出给 M6 的 contract 只包含 EvidenceBundleRef、cells、read ports、tool roster/executor 和 stop/block facts，不输出最终 InferenceResult。
@@ -533,6 +535,7 @@
 - [x] stationless 不调用 local observation；direct upstream usable、upstream indeterminate、upstream unavailable、optional weather/facility 的组合稳定。
 - [x] 每个窗口 target + discharge 的 supported/unsupported/blocked 组合和 `stop_before_model` 判断确定；未知 discharge 从不变 0。
 - [x] M4 availability 只影响 plan，不成为 actual record/fragment；下游不能直接查询上游 station。
+- [x] 授权请求返回其他 COMID、session COMID 不符/未完成、参数/窗口越权或 closure 跨 session 时均安全失败且 cell 不为 supported。
 - [x] weather 未调用不算技术失败；选用天气 relation 后缺天气/流量前置时不能通过。
 
 ### Verify
@@ -633,6 +636,7 @@
 - 验证：workflow smoke `29 passed`，official provider/geometry/policy/typed/docs 离线审计 `119 passed`，architecture + 文档契约 `108 passed`；Docker Desktop 4.93.0 / Engine 29.8.1 与 PostgreSQL 17 healthy。仅以进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 运行 persistence `58 passed`、完整 backend `1510 passed`，SSE completed/cancelled 与 history/独立进程重启/startup repair 均通过；`compileall`、旧字段/feature flag/production test import 扫描和 `git diff --check` 通过。
 - 外部边界：USGS `usgs_waterdata_ogc_v1` 因缺 station 配置、NWS `nws_api_linked_data_v1` 因联系信息仍为 `.invalid`、EPA `epa_echo_cwa_v1` 因缺 LineString 配置，均为 `0 requests / 0 pages / 0 records / not run`；Ubuntu/macOS/Windows 三平台 CI 为 `not run`，因此中心 deferred contract 不登记 `implemented`。
 - 提交：M13 集成 smoke、审计与 API 契约修正为本地提交 `1f9f7d9`；未 push。
+- 复审修正：`adjacent_local_day` 统一按 IANA 当地自然日判断并覆盖 DST；M7 upstream output 在写入前复核直接上游 COMID、同 run session/COMID/completed、参数、窗口与引用归属；未知工具及 scope 越权在 call 前拒绝为 `0 call / 0 result`，合法 call 的取消仍保留 cancelled result。首轮完整回归因取消与 test API 仍沿用旧预检语义出现 `2 failed / 1528 passed`，分离预检与运行期取消并将 test API preflight 映射为 422 后，预检/API focused `12 passed`、当地自然日 focused `3 passed`、隔离 PostgreSQL 完整 backend `1531 passed`，health/history 与独立进程 restart/repair smoke 通过。
 
 ## 契约覆盖矩阵（实施时填写）
 
@@ -648,7 +652,7 @@
 | M5-C16 / M5-A04 | 本机已验证 | transcript registry/store、既有 M3 writer/reader/SSE | typed registry、PostgreSQL reload/repair、SSE/OpenAPI | 五类 content 与全文引用通过专用 PostgreSQL；production 无 tool route。 |
 | M5-C18 | 本机已验证 | `runtime/m5.py`；独立 `runtime/m5_test.py` | runtime import guard、test app/OpenAPI | production import graph 不含 test composition；frontend 未接入。 |
 | M5-C19 / M5-C20 / M5-A07 | 本机已验证 | applicability/RAG policy；registry producer slots | candidate gates、roster、runtime composition | candidate 只是 M8 输入；M7/M8 production producer 保持 unavailable，无 hidden fake。 |
-| M5-A08 / GLOBAL-C01–C11 | partial | M1–M5 当前 `backend/` 与 project contracts | 完整 backend `1510 passed`、architecture `108 passed`、PostgreSQL/history | Windows 本机与专用 PostgreSQL已验证；真实 providers 和 Ubuntu/macOS/Windows 同提交 CI 为 `not run`。 |
+| M5-A08 / GLOBAL-C01–C11 | partial | M1–M5 当前 `backend/` 与 project contracts | 完整 backend `1531 passed`、architecture `108 passed`、PostgreSQL/history | Windows 本机与专用 PostgreSQL已验证；真实 providers 和 Ubuntu/macOS/Windows 同提交 CI 为 `not run`。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码或 fixture 存在填写已验证；本机、PostgreSQL、外部 provider 和三平台 CI 证据分开记录。
 

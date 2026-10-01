@@ -209,11 +209,7 @@ def test_request_rejects_unknown_fixture_tool_window_parameter_and_option() -> N
                 "/__test__/m5/evidence-tools:execute",
                 json={**_payload(application), **override},
             )
-            assert response.status_code == 200
-            assert response.json()["result"]["execution_status"] == "failed"
-            assert response.json()["result"]["safe_error"]["code"] == (
-                "evidence_scope_violation"
-            )
+            assert response.status_code == 422
 
         option = _payload(application)
         option["options"] = {"base_url": "https://attacker.example"}

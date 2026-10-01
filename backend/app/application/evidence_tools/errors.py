@@ -84,6 +84,11 @@ class EvidenceProducerUnavailableError(EvidenceToolError):
     public_message = "The requested evidence producer is unavailable."
 
 
+class EvidenceProviderOutputInvalidError(EvidenceToolError):
+    code = "evidence_provider_response_invalid"
+    public_message = "The evidence provider response was invalid."
+
+
 def map_evidence_error(error: BaseException) -> SafeEvidenceError:
     if isinstance(error, (asyncio.CancelledError, WorkflowStopped)):
         raise error

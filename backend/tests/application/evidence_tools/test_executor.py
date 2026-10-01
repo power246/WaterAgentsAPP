@@ -1,9 +1,12 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.application.evidence_policy import PolicyObservation, QualityAssessment
 from app.application.evidence_tools import (
     EvidenceProducerStatus,
+    EvidenceScopeViolationError,
     EvidenceToolExecutor,
     EvidenceToolLimits,
     create_evidence_tool_registry,
@@ -50,6 +53,42 @@ def request(scope, tool_name, call_id, *, options=None, parameter_keys=None):
         parameter_keys=parameter_keys or (scope.requested_parameters[0],),
         options=options or EvidenceToolOptions(),
     )
+
+
+def test_unknown_tool_is_rejected_before_audit_records(evidence_scope) -> None:
+    async def exercise() -> None:
+        store = MemoryEvidenceStore()
+        runtime = executor(store)
+
+        with pytest.raises(EvidenceScopeViolationError):
+            await runtime.execute(
+                evidence_scope,
+                request(evidence_scope, "unknown_tool", "call-unknown"),
+            )
+
+        assert store.calls == []
+        assert store.results == []
+
+    asyncio.run(exercise())
+
+
+def test_scope_violation_is_rejected_before_audit_records(evidence_scope) -> None:
+    async def exercise() -> None:
+        store = MemoryEvidenceStore()
+        runtime = executor(store)
+        invalid_request = request(
+            evidence_scope,
+            "collect_water_observations",
+            "call-invalid-window",
+        ).model_copy(update={"window_ids": ("window-not-authorized",)})
+
+        with pytest.raises(EvidenceScopeViolationError):
+            await runtime.execute(evidence_scope, invalid_request)
+
+        assert store.calls == []
+        assert store.results == []
+
+    asyncio.run(exercise())
 
 
 def executor(

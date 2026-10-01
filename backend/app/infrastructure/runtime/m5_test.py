@@ -21,6 +21,7 @@ from app.application.evidence_tools import (
     EvidenceToolExecution,
     assemble_evidence_session_scope,
 )
+from app.application.evidence_tools.errors import EvidenceScopeViolationError
 from app.application.query_understanding import (
     AnalysisContext,
     DateResolver,
@@ -299,6 +300,11 @@ def create_m5_test_app() -> FastAPI:
             fixture, execution, inspection = await composition.execute(payload)
         except KeyError as error:
             raise HTTPException(status_code=404, detail="unknown fixture scope") from error
+        except EvidenceScopeViolationError as error:
+            raise HTTPException(
+                status_code=422,
+                detail="evidence request failed preflight authorization",
+            ) from error
         return {
             "fixture_scope_id": fixture.scope_id,
             "run_id": fixture.scope.run_id,

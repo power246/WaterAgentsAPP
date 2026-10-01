@@ -11,6 +11,7 @@ from app.application.evidence_policy.models import (
 )
 from app.application.evidence_policy.quality import assess_provider_quality
 from app.application.evidence_policy.rag import apply_rag_policy, is_rag_candidate
+from app.application.evidence_policy.temporal import temporal_relation_matches
 from app.application.evidence_policy.unit_conversion import convert_value
 
 __all__ = [
@@ -27,4 +28,5 @@ __all__ = [
     "convert_value",
     "is_rag_candidate",
     "resolve_applicability",
+    "temporal_relation_matches",
 ]

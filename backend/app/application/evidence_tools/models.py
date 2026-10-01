@@ -3,6 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Protocol
 
+from app.application.analysis_runs.models import SessionSummary
 from app.application.evidence_policy import PolicyObservation
 from app.application.evidence_tools.scope import EvidenceSessionScope
 from app.domain import (
@@ -180,6 +181,12 @@ class EvidenceToolWriter(Protocol):
 
 
 class EvidenceToolReader(Protocol):
+    async def read_agent_session(
+        self,
+        scope: EvidenceSessionScope,
+        session_id: str,
+    ) -> SessionSummary: ...
+
     async def read_fragment(
         self,
         scope: EvidenceSessionScope,

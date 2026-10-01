@@ -49,6 +49,9 @@ from app.application.evidence_tools.models import (
     EvidenceToolExecution,
     EvidenceToolWriter,
 )
+from app.application.evidence_tools.provider_output_validator import (
+    ProviderOutputValidator,
+)
 from app.application.evidence_tools.registry import EvidenceToolRegistry
 from app.application.evidence_tools.scope import EvidenceSessionScope
 from app.application.evidence_tools.evidence_sources import (
@@ -162,6 +165,7 @@ class EvidenceToolExecutor:
             writer=writer,
             limits=limits,
         )
+        self._provider_output_validator = ProviderOutputValidator(reader)
         self._budgets: dict[tuple[str, str], EvidenceBudgetLedger] = {}
         self._deadlines: dict[tuple[str, str], float] = {}
         self._inspection_pages: dict[tuple[str, str], EvidenceInspectionPage] = {}
@@ -178,24 +182,24 @@ class EvidenceToolExecutor:
         scope: EvidenceSessionScope,
         request: EvidenceToolRequest,
     ) -> EvidenceToolExecution:
-        operation_id = self._operation_id_factory()
         descriptor = self._registry.get(request.tool_name)
+        if descriptor is None:
+            raise EvidenceScopeViolationError()
+        if self._scope_preparer is not None:
+            self._scope_preparer(scope)
+        authorize_evidence_tool_request(
+            scope,
+            request,
+            max_agent_record_limit=self._limits.inspection_max_page_size,
+        )
+        operation_id = self._operation_id_factory()
+        await self._writer.write_call(
+            scope,
+            request,
+            operation_id=operation_id,
+            policy=descriptor.policy_class,
+        )
         try:
-            if self._scope_preparer is not None:
-                self._scope_preparer(scope)
-            if descriptor is None:
-                raise EvidenceScopeViolationError()
-            authorize_evidence_tool_request(
-                scope,
-                request,
-                max_agent_record_limit=self._limits.inspection_max_page_size,
-            )
-            await self._writer.write_call(
-                scope,
-                request,
-                operation_id=operation_id,
-                policy=descriptor.policy_class,
-            )
             self._authorize_descriptor(scope, request, descriptor)
             scope.cancel_token.checkpoint()
             canonical_key = canonical_request_key(
@@ -610,31 +614,34 @@ class EvidenceToolExecutor:
                     deadline=self._check_deadline(scope),
                 ),
             )
+            collection = await self._validated_collection(
+                scope,
+                EvidenceCollectionInput(
+                    provider="analysis_run",
+                    channel="upstream_result",
+                    request_range=scope.query_envelope,
+                    requested_series=tuple(
+                        sorted(
+                            (
+                                *plan.direct_upstream_comids,
+                                *(
+                                    f"{item.code_system}:{item.code}"
+                                    for item in plan.parameter_keys
+                                ),
+                            )
+                        )
+                    ),
+                    parameter_keys=plan.parameter_keys,
+                    affected_window_ids=plan.affected_window_ids,
+                    batch=batch,
+                    completion_applies_to_all_windows=True,
+                ),
+                expected_operation_id=plan.operation_id,
+            )
             return await self._finish_collection(
                 scope,
                 operation_id,
-                (
-                    EvidenceCollectionInput(
-                        provider="analysis_run",
-                        channel="upstream_result",
-                        request_range=scope.query_envelope,
-                        requested_series=tuple(
-                            sorted(
-                                (
-                                    *plan.direct_upstream_comids,
-                                    *(
-                                        f"{item.code_system}:{item.code}"
-                                        for item in plan.parameter_keys
-                                    ),
-                                )
-                            )
-                        ),
-                        parameter_keys=plan.parameter_keys,
-                        affected_window_ids=plan.affected_window_ids,
-                        batch=batch,
-                        completion_applies_to_all_windows=True,
-                    ),
-                ),
+                (collection,),
             )
 
         if request.tool_name == "search_transcript_evidence":
@@ -728,6 +735,21 @@ class EvidenceToolExecutor:
                 cancellation_task,
                 return_exceptions=True,
             )
+
+    async def _validated_collection(
+        self,
+        scope: EvidenceSessionScope,
+        collection: EvidenceCollectionInput,
+        *,
+        expected_operation_id: str,
+    ) -> EvidenceCollectionInput:
+        self._validate_collected_batches((collection.batch,))
+        await self._provider_output_validator.validate(
+            scope,
+            collection,
+            expected_operation_id=expected_operation_id,
+        )
+        return collection
 
     async def _finish_collection(
         self,

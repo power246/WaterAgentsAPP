@@ -96,7 +96,7 @@ provider batch 可以覆盖多个最终窗口，但请求边界只能是：
  analysis_end   + 1 local calendar day]
 ```
 
-“一天”按 session IANA timezone 的当地日期计算后转换为 UTC，不能简单减加 24 小时。扩展记录只用于已登记的 adjacent-time、baseline、aggregation boundary 或 provider statistic 解释；不能因此创建额外结果窗口。
+“一天”按 session IANA timezone 的当地日期计算后转换为 UTC，不能简单减加 24 小时。`same_window`、`overlapping_window` 与 `adjacent_local_day` 由唯一 timezone-aware policy 判断；其中 adjacent 要求 source 与 target 分别落在相差恰好一天的当地自然日，同一当地日期内的其他窗口不算 adjacent。扩展记录只用于已登记的 adjacent-time、baseline、aggregation boundary 或 provider statistic 解释；不能因此创建额外结果窗口。
 
 ## 3. 模块与依赖方向
 
@@ -396,6 +396,8 @@ ECHO point-radius 能力由 corridor planner 调用：
 
 第一版每类证据只有上述 official provider。任一 adapter 失败都不静默切换来源、不使用旧 cache、不把失败改写为空。真实 provider smoke 必须显式 opt-in；没有请求或缺少必要配置时报告 `not run`。
 
+provider output 在写 source records 前统一经过 application validator。M7 upstream output 必须复核 record COMID 属于服务端 topology 的直接上游、waterbody session 属于同一 run/COMID 且已 completed、参数与窗口完全受请求授权，并且 result/evidence closure refs 全部存在且属于该 upstream session；失败统一为安全的 invalid provider response，不能进入 materializer 或解锁 cell。
+
 ## 7. Geometry 扩展
 
 M5 原子扩展当前 V1：
@@ -484,7 +486,7 @@ run_id + agent_comid + tool_name + normalized parameters
 4. `evidence_tool_result v1`
 5. `evidence_bundle v1`
 
-正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
+正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。未知工具或 session/window/parameter 越权属于尚未形成合法调用的 preflight rejection，不写 call/result；合法 call 持久化成功后，包含已请求取消在内的运行期结局才写 completed/failed/cancelled result。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
 
 dispatch 已确认写入 manifest/source/fragment 后，即使紧接着发生 deadline 或取消，失败/取消 result 也必须携带这些已确认 references；不得回退为空 value，也不得把该 operation 放入成功 dedup cache。
 

@@ -117,6 +117,7 @@ def test_unregistered_weather_relation_remains_contextual() -> None:
             ParameterKey(code_system="usgs", code="00060"),
         ),
         input_windows=(WINDOW, WINDOW),
+        analysis_timezone="UTC",
         same_location=True,
         reference_complete=True,
     )
