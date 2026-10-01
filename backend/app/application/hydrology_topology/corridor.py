@@ -138,18 +138,25 @@ def build_facility_corridor_plan(
     graph: HydrologyGraph,
     *,
     agent_radius_miles: str | int | float | Decimal,
+    center_budget: int = FACILITY_CENTER_BUDGET,
 ) -> FacilityCorridorPlan:
+    if (
+        isinstance(center_budget, bool)
+        or not isinstance(center_budget, int)
+        or not 1 <= center_budget <= FACILITY_CENTER_BUDGET
+    ):
+        raise ValueError("facility center budget must be between 1 and 32")
     geometry = _target_geometry(graph)
     exact_radius = _validate_agent_radius(agent_radius_miles)
     provider_radius = _provider_radius(exact_radius)
     center_count = _estimated_center_count(geometry, provider_radius)
-    if center_count > FACILITY_CENTER_BUDGET:
+    if center_count > center_budget:
         feasible = next(
             (
                 candidate
                 for candidate in FACILITY_PROVIDER_RADII_MILES
                 if _estimated_center_count(geometry, candidate)
-                <= FACILITY_CENTER_BUDGET
+                <= center_budget
             ),
             None,
         )

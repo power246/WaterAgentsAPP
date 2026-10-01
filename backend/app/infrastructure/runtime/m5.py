@@ -225,7 +225,7 @@ async def build_m5_runtime(
             provider_http,
             geometry_resolver=geometry_catalog.resolve,
             response_set=min(settings.provider_http_page_size, 1000),
-            max_pages_per_center=settings.evidence_max_pages,
+            max_pages=settings.evidence_max_pages,
             max_records=settings.evidence_max_records,
             clock=clock.now,
         )

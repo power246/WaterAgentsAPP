@@ -173,7 +173,7 @@ def test_page_and_record_limits_fail_before_silent_truncation() -> None:
                 http,
                 geometry_resolver=lambda value: current_geometry,
                 response_set=1000,
-                max_pages_per_center=2,
+                max_pages=2,
                 max_records=10_000,
                 clock=lambda: NOW,
             )
@@ -181,6 +181,52 @@ def test_page_and_record_limits_fail_before_silent_truncation() -> None:
                 await adapter.collect(facility_request())
 
     run(exercise())
+
+
+def test_page_limit_is_global_across_centers_and_blocks_extra_io() -> None:
+    current_geometry = geometry()
+    provider_requests: list[httpx.Request] = []
+    request = facility_request().model_copy(
+        update={
+            "sample_centers": (
+                GeoPoint(latitude=0.0, longitude=0.0),
+                GeoPoint(latitude=0.0, longitude=0.005),
+                GeoPoint(latitude=0.0, longitude=0.01),
+            )
+        }
+    )
+
+    def handler(provider_request: httpx.Request) -> httpx.Response:
+        provider_requests.append(provider_request)
+        return httpx.Response(
+            200,
+            json={
+                "Results": {
+                    "Message": "Success",
+                    "Version": "v2026",
+                    "QueryRows": "0",
+                    "QueryID": f"qid-{len(provider_requests)}",
+                    "PageNo": "1",
+                    "Facilities": [],
+                }
+            },
+            request=provider_request,
+        )
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await EpaEchoFacilityAdapter(
+                http,
+                geometry_resolver=lambda value: current_geometry,
+                max_pages=2,
+                clock=lambda: NOW,
+            ).collect(request)
+        assert batch.completion_proof.complete is False
+        assert batch.incomplete_reason == "evidence_provider_response_too_large"
+        assert batch.counts.pages == 2
+
+    run(exercise())
+    assert len(provider_requests) == 2
 
 
 def test_missing_trusted_geometry_fails_before_provider_request() -> None:

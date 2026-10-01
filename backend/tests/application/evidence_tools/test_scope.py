@@ -185,13 +185,19 @@ def test_authorizer_and_plan_reject_cross_scope_station_channel_time_and_geometr
         registry=registry,
     )
     assert plans
-    assert len(plans) == 1
+    assert len(plans) == 2
     assert {plan.request_range for plan in plans} == {evidence_scope.query_envelope}
     assert {plan.station_id for plan in plans} == {"USGS-123"}
-    plan = plans[0]
-    assert plan.parameter_keys == (ParameterKey(code_system="usgs", code="00060"),)
-    assert plan.channel == "continuous"
-    assert plan.series_refs == ("series-123",)
+    assert {
+        (plan.parameter_keys[0].code, plan.channel, plan.series_refs)
+        for plan in plans
+    } == {
+        ("00060", "continuous", ("series-123-00060",)),
+        ("00300", "continuous", ("series-123-00300",)),
+    }
+    plan = next(
+        item for item in plans if item.parameter_keys[0].code == "00060"
+    )
 
     with pytest.raises(EvidenceStationNotAuthorizedError):
         authorize_provider_request(

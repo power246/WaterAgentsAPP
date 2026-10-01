@@ -485,6 +485,8 @@ run_id + agent_comid + tool_name + normalized parameters
 
 正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
 
+dispatch 已确认写入 manifest/source/fragment 后，即使紧接着发生 deadline 或取消，失败/取消 result 也必须携带这些已确认 references；不得回退为空 value，也不得把该 operation 放入成功 dedup cache。
+
 每类内容提供：model、deserializer、reference extractor、public projection、redaction、visibility、size policy 和 corruption issue。API/SSE 不新造 `evidence_collected` 事件名；仍通过 session 的 `transcript_item` 交付 typed content，生命周期事件只表达执行状态。
 
 ## 11. 预算、取消与错误
@@ -506,6 +508,8 @@ run_id + agent_comid + tool_name + normalized parameters
 | facility sample centers / call | 32 |
 
 如果官方 provider 的安全上限更低则使用更低值。budget exceeded 是技术 blocker，不是 empty；Agent 不能通过拆分同义调用绕过 canonical budget accounting。
+
+`pages / operation` 是跨全部 facility sample centers 的总预算，不是每中心预算。facility corridor 在 provider I/O 前使用 `min(facility sample centers, pages / operation)` 作为有效中心上限；EPA adapter 在每次逻辑页请求前再次检查同一个 operation 总页数，executor 仍保留聚合后的防御性校验。
 
 取消在新请求、下一页、retry、policy transform、写 bundle 和向下游交付前检查。cancel 胜出后不开始新工作；在途响应只进入 M3 取消审计路径，不补入当前 bundle。
 

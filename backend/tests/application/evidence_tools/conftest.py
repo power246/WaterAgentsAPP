@@ -148,7 +148,10 @@ def make_graph(
         if geometry is not None
         else GeoPoint(latitude=39.0, longitude=-77.0)
     )
-    unit = CoverageUnit(parameter=SUPPORT_PARAMETER, segment_index=0)
+    units = (
+        CoverageUnit(parameter=SUPPORT_PARAMETER, segment_index=0),
+        CoverageUnit(parameter=TARGET_PARAMETER, segment_index=0),
+    )
     station_refs = (
         (
             TopologyStationRef(
@@ -156,8 +159,14 @@ def make_graph(
                 station_id="USGS-123",
                 series_refs=(
                     TopologySeriesRef(
-                        series_identity="series-123",
+                        series_identity="series-123-00060",
                         parameter=SUPPORT_PARAMETER,
+                        channel="continuous",
+                        covered_segment_indexes=(0,),
+                    ),
+                    TopologySeriesRef(
+                        series_identity="series-123-00300",
+                        parameter=TARGET_PARAMETER,
                         channel="continuous",
                         covered_segment_indexes=(0,),
                     ),
@@ -177,7 +186,7 @@ def make_graph(
         is_target=True,
         is_inlet=with_station,
         participation=HydrologyParticipation.ACTIVE,
-        qualified_units=(unit,) if with_station else (),
+        qualified_units=units if with_station else (),
         station_refs=station_refs,
     )
     upstream = HydrologyNode(
@@ -188,15 +197,21 @@ def make_graph(
         is_target=False,
         is_inlet=True,
         participation=HydrologyParticipation.ACTIVE,
-        qualified_units=(unit,),
+        qualified_units=units,
         station_refs=(
             TopologyStationRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id="USGS-200",
                 series_refs=(
                     TopologySeriesRef(
-                        series_identity="series-200",
+                        series_identity="series-200-00060",
                         parameter=SUPPORT_PARAMETER,
+                        channel="continuous",
+                        covered_segment_indexes=(0,),
+                    ),
+                    TopologySeriesRef(
+                        series_identity="series-200-00300",
+                        parameter=TARGET_PARAMETER,
                         channel="continuous",
                         covered_segment_indexes=(0,),
                     ),
@@ -206,7 +221,7 @@ def make_graph(
     )
     outcomes = []
     if with_station:
-        outcomes.append(
+        outcomes.extend(
             BranchOutcome(
                 branch_root_comid="123",
                 coverage_unit=unit,
@@ -215,9 +230,10 @@ def make_graph(
                 path_to_target=("123",),
                 reason=BranchOutcomeReason.TARGET_STATION_QUALIFIED,
             )
+            for unit in units
         )
     if with_upstream:
-        outcomes.append(
+        outcomes.extend(
             BranchOutcome(
                 branch_root_comid="200",
                 coverage_unit=unit,
@@ -226,9 +242,10 @@ def make_graph(
                 path_to_target=("200", "123"),
                 reason=BranchOutcomeReason.STATION_QUALIFIED,
             )
+            for unit in units
         )
     if not outcomes:
-        outcomes.append(
+        outcomes.extend(
             BranchOutcome(
                 branch_root_comid="123",
                 coverage_unit=unit,
@@ -237,6 +254,7 @@ def make_graph(
                 path_to_target=("123",),
                 reason=BranchOutcomeReason.NATURAL_HEADWATER,
             )
+            for unit in units
         )
     return HydrologyGraph(
         target_comid="123",
@@ -261,7 +279,17 @@ def make_graph(
             if with_upstream
             else ()
         ),
-        branch_outcomes=tuple(outcomes),
+        branch_outcomes=tuple(
+            sorted(
+                outcomes,
+                key=lambda item: (
+                    item.coverage_unit.segment_index,
+                    item.coverage_unit.parameter.code_system,
+                    item.coverage_unit.parameter.code,
+                    int(item.branch_root_comid),
+                ),
+            )
+        ),
         execution_layers=(
             (ComidLayer(("200",)), ComidLayer(("123",)))
             if with_upstream

@@ -209,7 +209,10 @@ class EvidenceToolExecutor:
                     request,
                     operation_id=operation_id,
                 )
-                self._check_deadline(scope)
+                try:
+                    self._check_deadline(scope)
+                except (Exception, asyncio.CancelledError) as error:
+                    raise _PartialDispatchError(error, value) from error
                 result = self._result_from_value(
                     request,
                     operation_id=operation_id,
@@ -529,6 +532,10 @@ class EvidenceToolExecutor:
                 plan = build_facility_corridor_plan(
                     scope.topology,
                     agent_radius_miles=request.options.facility_radius_miles,
+                    center_budget=min(
+                        self._limits.facility_max_centers,
+                        self._limits.pages_per_operation,
+                    ),
                 )
             except CorridorGeometryUnavailableError as error:
                 raise WaterbodyGeometryUnavailableError() from error

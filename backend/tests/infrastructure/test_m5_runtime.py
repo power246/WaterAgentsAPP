@@ -76,7 +76,11 @@ def test_composition_fails_closed_when_required_component_is_missing() -> None:
 def test_production_builder_wires_real_adapters_and_keeps_future_producers_off() -> None:
     async def exercise() -> None:
         async with build_m5_runtime(
-            AppSettings(_env_file=None, evidence_provider_attempts=1),
+            AppSettings(
+                _env_file=None,
+                evidence_provider_attempts=1,
+                evidence_max_pages=3,
+            ),
             operations=object(),  # type: ignore[arg-type]
             transcript_reader=object(),  # type: ignore[arg-type]
             capability_registry=load_parameter_capability_registry(),
@@ -90,6 +94,7 @@ def test_production_builder_wires_real_adapters_and_keeps_future_producers_off()
             assert isinstance(runtime.executor._weather_port, NwsWeatherAdapter)
             assert isinstance(runtime.executor._facility_port, EpaEchoFacilityAdapter)
             assert runtime.executor._water_port._http._attempts == 1
+            assert runtime.executor._facility_port._max_pages == 3
             assert runtime.executor._single_flight is not None
             assert (
                 runtime.registry.get("get_upstream_results").producer_status

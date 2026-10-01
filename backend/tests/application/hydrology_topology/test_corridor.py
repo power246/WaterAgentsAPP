@@ -223,6 +223,20 @@ def test_center_budget_boundary_and_minimum_feasible_radius_are_exact() -> None:
     assert maximum.provider_radius_miles == 20
     assert len(maximum.centers) <= 32
 
+    with pytest.raises(FacilityRadiusTooSmallForBudgetError) as constrained:
+        build_facility_corridor_plan(
+            boundary_graph,
+            agent_radius_miles=1,
+            center_budget=10,
+        )
+    assert constrained.value.estimated_provider_requests == 32
+    constrained_plan = build_facility_corridor_plan(
+        boundary_graph,
+        agent_radius_miles=constrained.value.minimum_feasible_radius_miles,
+        center_budget=10,
+    )
+    assert len(constrained_plan.centers) <= 10
+
 
 def test_geometry_unavailable_has_stable_error_without_point_fallback() -> None:
     with pytest.raises(WaterbodyGeometryUnavailableError) as captured:

@@ -53,13 +53,13 @@ class EpaEchoFacilityAdapter:
         geometry_resolver: Callable[[str], WaterbodyGeometry | None],
         base_url: str = DEFAULT_BASE_URL,
         response_set: int = 500,
-        max_pages_per_center: int = 10,
+        max_pages: int = 10,
         max_records: int = 10_000,
         clock=None,
     ) -> None:
         if not 1 <= response_set <= 1000:
             raise ValueError("EPA ECHO responseset must be between 1 and 1000")
-        if max_pages_per_center <= 0 or max_records <= 0:
+        if max_pages <= 0 or max_records <= 0:
             raise ValueError("EPA ECHO collection limits must be positive")
         parsed = urlsplit(base_url.rstrip("/"))
         if (
@@ -78,7 +78,7 @@ class EpaEchoFacilityAdapter:
         self._geometry_resolver = geometry_resolver
         self._base_url = base_url.rstrip("/")
         self._response_set = response_set
-        self._max_pages_per_center = max_pages_per_center
+        self._max_pages = max_pages
         self._max_records = max_records
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
@@ -108,6 +108,7 @@ class EpaEchoFacilityAdapter:
 
         try:
             for center in request.sample_centers:
+                self._ensure_page_budget(len(pages), request.operation_id)
                 center_start = len(raw_records)
                 params: Mapping[str, object] = {
                     "output": "JSON",
@@ -145,7 +146,7 @@ class EpaEchoFacilityAdapter:
                         operation=request.operation_id,
                     )
                 expected_pages = max(1, ceil(total / self._response_set))
-                if expected_pages > self._max_pages_per_center:
+                if len(pages) + expected_pages > self._max_pages:
                     raise PortResponseLimitError(
                         "EPA ECHO query exceeded the configured page limit.",
                         provider=PROVIDER,
@@ -175,6 +176,7 @@ class EpaEchoFacilityAdapter:
                     )
                 )
                 for page_number in range(2, expected_pages + 1):
+                    self._ensure_page_budget(len(pages), request.operation_id)
                     page_url = f"{self._base_url}/cwa_rest_services.get_qid"
                     page_params: Mapping[str, object] = {
                         "output": "JSON",
@@ -264,6 +266,14 @@ class EpaEchoFacilityAdapter:
             completed_ranges=(),
             contract=CollectionCompletionContract.OFFICIAL_NEXT_CHAIN,
         )
+
+    def _ensure_page_budget(self, completed_pages: int, operation: str) -> None:
+        if completed_pages >= self._max_pages:
+            raise PortResponseLimitError(
+                "EPA ECHO query exceeded the configured page limit.",
+                provider=PROVIDER,
+                operation=operation,
+            )
 
     def _facility_records(
         self,

@@ -40,14 +40,14 @@ from tests.application.evidence_tools.fakes import (
 )
 
 
-def request(scope, tool_name, call_id, *, options=None):
+def request(scope, tool_name, call_id, *, options=None, parameter_keys=None):
     return EvidenceToolRequest(
         tool_call_id=call_id,
         session_id=scope.session_id,
         tool_name=tool_name,
         purpose=f"test {tool_name}",
         window_ids=(scope.time_windows[0].window_id,),
-        parameter_keys=(scope.requested_parameters[0],),
+        parameter_keys=parameter_keys or (scope.requested_parameters[0],),
         options=options or EvidenceToolOptions(),
     )
 
@@ -205,7 +205,12 @@ def test_all_five_collection_and_producer_slots_use_one_executor_interface(
             transcript_port=ports["transcript"],
         )
         calls = (
-            request(scope, "collect_water_observations", "call-water"),
+            request(
+                scope,
+                "collect_water_observations",
+                "call-water",
+                parameter_keys=scope.supporting_parameters,
+            ),
             request(scope, "collect_weather_evidence", "call-weather"),
             request(
                 scope,
@@ -353,7 +358,12 @@ def test_unavailable_producer_budget_and_response_limits_return_safe_results(
         )
         first = await limited.execute(
             evidence_scope,
-            request(evidence_scope, "collect_water_observations", "call-first"),
+            request(
+                evidence_scope,
+                "collect_water_observations",
+                "call-first",
+                parameter_keys=evidence_scope.supporting_parameters,
+            ),
         )
         second = await limited.execute(
             evidence_scope,
@@ -373,10 +383,77 @@ def test_unavailable_producer_budget_and_response_limits_return_safe_results(
         )
         too_large = await oversized.execute(
             evidence_scope,
-            request(evidence_scope, "collect_water_observations", "call-large"),
+            request(
+                evidence_scope,
+                "collect_water_observations",
+                "call-large",
+                parameter_keys=evidence_scope.supporting_parameters,
+            ),
         )
         assert too_large.safe_error.code == "evidence_provider_response_too_large"
         assert too_large.source_record_refs == ()
+
+    asyncio.run(exercise())
+
+
+def test_deadline_after_dispatch_preserves_persisted_fragment_references(
+    evidence_scope,
+) -> None:
+    monotonic_value = [0.0]
+
+    class ExpiringStore(MemoryEvidenceStore):
+        async def write_fragment(self, scope, *, operation_id, fragment):
+            reference = await super().write_fragment(
+                scope,
+                operation_id=operation_id,
+                fragment=fragment,
+            )
+            monotonic_value[0] = 2.0
+            return reference
+
+    async def exercise() -> None:
+        store = ExpiringStore()
+        fragment_ref = EvidenceFragmentReference(
+            item_id="fragment-item",
+            evidence_id="evidence-direct",
+        )
+        source_ref = SourceRecordReference(
+            item_id="source-item",
+            record_id="record-001",
+        )
+        store.seed_fragment(
+            fragment_ref,
+            direct_fragment(evidence_scope, fragment_ref, source_ref),
+        )
+        capability = load_parameter_capability_registry().get(
+            evidence_scope.requested_parameters[0]
+        )
+        assert capability is not None
+        runtime = executor(
+            store,
+            limits=EvidenceToolLimits(total_deadline_seconds=1),
+            monotonic=lambda: monotonic_value[0],
+        )
+
+        result = await runtime.execute(
+            evidence_scope,
+            request(
+                evidence_scope,
+                "convert_evidence_unit",
+                "deadline-after-dispatch",
+                options=EvidenceToolOptions(
+                    fragment_refs=(fragment_ref,),
+                    target_unit_id=capability.unit_policy_id,
+                ),
+            ),
+        )
+
+        assert result.execution_status is EvidenceToolExecutionStatus.FAILED
+        assert result.safe_error.code == "evidence_provider_timeout"
+        assert len(result.fragment_refs) == 1
+        assert result.counts.fragments == 1
+        persisted = result.fragment_refs[0]
+        assert (persisted.item_id, persisted.evidence_id) in store.fragments
 
     asyncio.run(exercise())
 
