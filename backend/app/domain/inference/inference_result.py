@@ -65,6 +65,7 @@ class InferenceResult(DomainModel):
         self._validate_time_segments()
         self._validate_series()
         self._validate_assessments()
+        self._validate_result_references()
         self._validate_evidence_references()
         return self
 
@@ -303,3 +304,17 @@ class InferenceResult(DomainModel):
                     f"{owner} references evidence outside evidence_chain: "
                     f"{sorted(unknown)}"
                 )
+
+    def _validate_result_references(self) -> None:
+        known_cells = {
+            point.cell_id for item in self.series for point in item.points
+        }
+        referenced_by = (
+            *(step.result_cell_refs for step in self.analysis_detail.steps),
+            *(
+                factor.result_cell_refs
+                for factor in self.attribution_summary.primary_factors
+            ),
+        )
+        if any(not set(refs) <= known_cells for refs in referenced_by):
+            raise ValueError("analysis or attribution references unknown result cells")

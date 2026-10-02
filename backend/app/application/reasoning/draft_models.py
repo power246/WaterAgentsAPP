@@ -188,10 +188,7 @@ class SynthesisOverallDraft(DomainModel):
         tuple[NonEmptyString, ...],
         Field(min_length=1),
     ]
-    contributing_cell_refs: Annotated[
-        tuple[NonEmptyString, ...],
-        Field(min_length=1),
-    ]
+    contributing_cell_refs: tuple[NonEmptyString, ...]
     evidence_refs: Annotated[tuple[NonEmptyString, ...], Field(min_length=1)]
 
     @field_validator("risk_rationale", "confidence_rationale")

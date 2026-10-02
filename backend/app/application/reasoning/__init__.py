@@ -1,6 +1,7 @@
 from app.application.reasoning.errors import (
     AllCellsBlockedError,
     DraftValidationError,
+    InferenceAssemblyError,
     PlanningLoopError,
     ReasoningBoundaryError,
     ReasoningPlanError,
@@ -23,6 +24,7 @@ from app.application.reasoning.batch_planner import (
     SynthesisInputPlan,
 )
 from app.application.reasoning.planning_loop import (
+    build_reasoning_working_context,
     EvidencePlanningLoop,
     EvidencePlanningOutcome,
     EvidencePlanningStageCounts,
@@ -91,6 +93,12 @@ from app.application.reasoning.validation_repair import (
     ValidationExchangeAudit,
     to_validation_repair_public_error,
 )
+from app.application.reasoning.result_assembler import assemble_inference_result
+from app.application.reasoning.runner import (
+    RunSingleWaterbodyAgent,
+    WaterbodyAgentRunOutcome,
+    WaterbodyAgentRunStatus,
+)
 
 __all__ = [
     "AgentReasoningCellScope",
@@ -109,7 +117,9 @@ __all__ = [
     "EvidenceRuleProposal",
     "EvidenceValidationFact",
     "FixedSkeletonCell",
+    "InferenceAssemblyError",
     "ReasoningBoundaryError",
+    "RunSingleWaterbodyAgent",
     "ReasoningBatch",
     "ReasoningBatchDraft",
     "ReasoningBatchPlan",
@@ -152,12 +162,16 @@ __all__ = [
     "ValidatedSynthesisExchange",
     "ValidatedWaterbodyAgentTask",
     "WaterbodyAgentTask",
+    "WaterbodyAgentRunOutcome",
+    "WaterbodyAgentRunStatus",
     "WaterbodyReasoningStage",
     "WaterbodyTaskValidationError",
     "ValidationExchange",
     "ValidationExchangeAudit",
     "ValidationRepairFailedError",
     "build_reasoning_evidence_catalog",
+    "build_reasoning_working_context",
+    "assemble_inference_result",
     "build_result_skeleton",
     "seal_evidence_input",
     "overall_synthesis_response_schema",

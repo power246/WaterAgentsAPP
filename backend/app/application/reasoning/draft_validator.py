@@ -418,6 +418,22 @@ class DraftValidator:
         fixed_by_id = {
             cell.result.cell_id: cell for cell in skeleton.fixed_cells
         }
+        assessed_cells = {
+            cell_id
+            for cell_id, cell in validated_cells.items()
+            if cell.outcome_status is not OutcomeStatus.INDETERMINATE
+        }
+        noncontributing_evidence = {
+            **{
+                cell_id: fixed.result.evidence_refs
+                for cell_id, fixed in fixed_by_id.items()
+            },
+            **{
+                cell_id: cell.evidence_refs
+                for cell_id, cell in validated_cells.items()
+                if cell_id not in assessed_cells
+            },
+        }
         all_cell_ids = set(skeleton.cell_order)
         known_evidence = set(skeleton.evidence_allowlist)
         for index, series in enumerate(draft.series_assessments):
@@ -430,14 +446,14 @@ class DraftValidator:
                     f"cell:{series.parameter.code_system}:{series.parameter.code}:"
                 )
             }
-            allowed_cells = parameter_cells & set(validated_cells)
+            allowed_cells = parameter_cells & assessed_cells
             self._validate_synthesis_refs(
                 series.contributing_cell_refs,
                 series.evidence_refs,
                 allowed_cells=allowed_cells,
-                fixed_cells=parameter_cells & set(fixed_by_id),
+                noncontributing_cells=parameter_cells & set(noncontributing_evidence),
                 validated_cells=validated_cells,
-                fixed_by_id=fixed_by_id,
+                noncontributing_evidence=noncontributing_evidence,
                 known_evidence=known_evidence,
                 path=f"$.series_assessments[{index}]",
                 issues=issues,
@@ -456,14 +472,14 @@ class DraftValidator:
             window_cells = {
                 cell_id for cell_id in skeleton.cell_order if cell_id.endswith(suffix)
             }
-            allowed_cells = window_cells & set(validated_cells)
+            allowed_cells = window_cells & assessed_cells
             self._validate_synthesis_refs(
                 window.contributing_cell_refs,
                 window.evidence_refs,
                 allowed_cells=allowed_cells,
-                fixed_cells=window_cells & set(fixed_by_id),
+                noncontributing_cells=window_cells & set(noncontributing_evidence),
                 validated_cells=validated_cells,
-                fixed_by_id=fixed_by_id,
+                noncontributing_evidence=noncontributing_evidence,
                 known_evidence=known_evidence,
                 path=f"$.window_assessments[{index}]",
                 issues=issues,
@@ -490,10 +506,10 @@ class DraftValidator:
         self._validate_synthesis_refs(
             draft.overall.contributing_cell_refs,
             draft.overall.evidence_refs,
-            allowed_cells=set(validated_cells),
-            fixed_cells=set(fixed_by_id),
+            allowed_cells=assessed_cells,
+            noncontributing_cells=set(noncontributing_evidence),
             validated_cells=validated_cells,
-            fixed_by_id=fixed_by_id,
+            noncontributing_evidence=noncontributing_evidence,
             known_evidence=known_evidence,
             path="$.overall",
             issues=issues,
@@ -503,6 +519,15 @@ class DraftValidator:
             or not draft.overall.evidence_refs
         ):
             _issue(issues, "none_risk_without_evidence", "$.overall.risk_level")
+        if not assessed_cells and (
+            draft.overall.risk_level is not RiskLevel.INDETERMINATE
+            or draft.overall.confidence != 0
+        ):
+            _issue(
+                issues,
+                "indeterminate_overall_required",
+                "$.overall",
+            )
 
         for index, step in enumerate(draft.analysis_detail.steps):
             self._validate_open_refs(
@@ -745,9 +770,9 @@ class DraftValidator:
         evidence_refs: tuple[str, ...],
         *,
         allowed_cells: set[str],
-        fixed_cells: set[str],
+        noncontributing_cells: set[str],
         validated_cells: dict[str, ReasoningCellDraft],
-        fixed_by_id: dict[str, object],
+        noncontributing_evidence: dict[str, tuple[str, ...]],
         known_evidence: set[str],
         path: str,
         issues: list[DraftValidationIssue],
@@ -776,8 +801,8 @@ class DraftValidator:
             for ref in validated_cells[cell_id].evidence_refs
         } | {
             ref
-            for cell_id in fixed_cells
-            for ref in fixed_by_id[cell_id].result.evidence_refs
+            for cell_id in noncontributing_cells
+            for ref in noncontributing_evidence[cell_id]
         }
         if not set(evidence_refs) <= known_evidence:
             _issue(
@@ -791,7 +816,7 @@ class DraftValidator:
                 "evidence_reference_not_contributing",
                 f"{path}.evidence_refs",
             )
-        elif allowed_evidence and not evidence_refs:
+        elif allowed_cells and allowed_evidence and not evidence_refs:
             _issue(
                 issues,
                 "evidence_references_missing",

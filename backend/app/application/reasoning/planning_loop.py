@@ -59,6 +59,7 @@ from app.domain import (
     EvidenceToolOptions,
     EvidenceToolRequest,
     ItemReference,
+    ModelUsageSummary,
     NonEmptyString,
     ParameterCapabilityRegistry,
     ParameterKey,
@@ -108,6 +109,7 @@ class EvidencePlanningStageCounts:
     final_reasoning_eligible_cells: int
     reasoning_batch_calls: int = 0
     synthesis_calls: int = 0
+    usage: ModelUsageSummary | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +209,9 @@ class EvidencePlanningLoop:
         planning_calls = 0
         agent_tool_calls = 0
         rule_proposals = 0
+        usage_input_tokens = 0
+        usage_output_tokens = 0
+        usage_reported = False
         convergence: PlanningConvergenceReason | None = None
 
         if handoff.stop_before_model:
@@ -268,6 +273,10 @@ class EvidencePlanningLoop:
                 cancellation=scope.cancel_token,
             )
             planning_calls += 1
+            if response.usage is not None:
+                usage_reported = True
+                usage_input_tokens += response.usage.input_tokens or 0
+                usage_output_tokens += response.usage.output_tokens or 0
             tool_events = tuple(
                 event for event in response.events if isinstance(event, ToolCallCompleted)
             )
@@ -360,8 +369,29 @@ class EvidencePlanningLoop:
                     gate.decision is ReasoningGateDecision.SUPPORTED
                     for gate in sealed.gates
                 ),
+                usage=(
+                    ModelUsageSummary(
+                        input_tokens=usage_input_tokens,
+                        output_tokens=usage_output_tokens,
+                    )
+                    if usage_reported
+                    else None
+                ),
             ),
         )
+
+
+async def build_reasoning_working_context(
+    task: ValidatedWaterbodyAgentTask,
+    outcome: EvidencePlanningOutcome,
+) -> WorkingContextProjection:
+    """Build the one sealed context reused by batch planning in the runner."""
+
+    return await _working_context(
+        task,
+        outcome.handoff,
+        outcome.sealed_input,
+    )
 
 
 def _parse_decision(

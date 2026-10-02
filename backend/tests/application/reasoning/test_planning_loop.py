@@ -118,6 +118,8 @@ async def _fixture(
     with_station=True,
     with_upstream=False,
     weather_port=None,
+    upstream_port=None,
+    upstream_ready=False,
     cancel_event=None,
     limits=PlanningLoopLimits(),
 ):
@@ -150,6 +152,8 @@ async def _fixture(
             _water_port(scope, mode=water_mode) if with_station else None
         ),
         weather_port=weather_port,
+        upstream_port=upstream_port,
+        upstream_ready=upstream_ready,
     )
     operation_ids = iter(OPS)
     loop = EvidencePlanningLoop(

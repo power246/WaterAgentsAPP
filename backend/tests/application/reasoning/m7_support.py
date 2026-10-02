@@ -33,12 +33,16 @@ from tests.application.reasoning.test_batch_planner import (
 def m7_fixture(
     *,
     max_cells: int = 32,
+    parameter_count: int = 1,
+    supported=lambda _parameter_index, _window_index: True,
+    blocked=lambda _parameter_index, _window_index: False,
     multi_series_first: bool = False,
     prediction: bool = False,
     attribution_context: bool = False,
     conversion_first: bool = False,
 ):
     original = _make_skeleton(
+        parameter_count=parameter_count,
         segment_specs=(
             (
                 _range_for_windows(4),
@@ -48,7 +52,9 @@ def m7_fixture(
                     else InferenceMode.GAP_FILLING
                 ),
             ),
-        )
+        ),
+        supported=supported,
+        blocked=blocked,
     )
     supported = tuple(
         scope.model_copy(
@@ -323,6 +329,9 @@ def synthesis_payload(
         for batch in reasoning.batches
         for cell in batch.cells
     }
+    fixed = {
+        cell.result.cell_id: cell.result for cell in skeleton.fixed_cells
+    }
     parameter_cells = {
         parameter: tuple(
             cell_id
@@ -335,14 +344,32 @@ def synthesis_payload(
     series = []
     for parameter in skeleton.requested_parameters:
         refs = parameter_cells[parameter]
+        fixed_refs = tuple(
+            cell_id
+            for cell_id in skeleton.cell_order
+            if cell_id.startswith(f"cell:{parameter.code_system}:{parameter.code}:")
+            and cell_id in fixed
+        )
         series.append(
             {
                 "parameter": parameter.model_dump(mode="json"),
-                "confidence": 0.75,
-                "confidence_rationale": "The series uses the cited validated cells.",
+                "confidence": 0.75 if refs else 0.0,
+                "confidence_rationale": (
+                    "The series uses the cited validated cells."
+                    if refs
+                    else "No supported cell is available for this series."
+                ),
                 "contributing_cell_refs": list(refs),
                 "evidence_refs": sorted(
-                    {ref for cell_id in refs for ref in cells[cell_id].evidence_refs}
+                    {
+                        ref
+                        for cell_id in (*refs, *fixed_refs)
+                        for ref in (
+                            cells[cell_id].evidence_refs
+                            if cell_id in cells
+                            else fixed[cell_id].evidence_refs
+                        )
+                    }
                 ),
             }
         )
@@ -353,22 +380,47 @@ def synthesis_payload(
             for cell_id in skeleton.cell_order
             if cell_id.endswith(f":{window.window_id}") and cell_id in cells
         )
+        fixed_refs = tuple(
+            cell_id
+            for cell_id in skeleton.cell_order
+            if cell_id.endswith(f":{window.window_id}") and cell_id in fixed
+        )
         windows.append(
             {
                 "window_id": window.window_id,
-                "risk_level": "low",
-                "risk_rationale": "The validated cells indicate a limited risk signal.",
-                "confidence": 0.7,
-                "confidence_rationale": "The window is backed by cited cell evidence.",
+                "risk_level": "low" if refs else "indeterminate",
+                "risk_rationale": (
+                    "The validated cells indicate a limited risk signal."
+                    if refs
+                    else "No supported cell is available for this window."
+                ),
+                "confidence": 0.7 if refs else 0.0,
+                "confidence_rationale": (
+                    "The window is backed by cited cell evidence."
+                    if refs
+                    else "No supported water-quality judgment is available."
+                ),
                 "contributing_cell_refs": list(refs),
                 "evidence_refs": sorted(
-                    {ref for cell_id in refs for ref in cells[cell_id].evidence_refs}
+                    {
+                        ref
+                        for cell_id in (*refs, *fixed_refs)
+                        for ref in (
+                            cells[cell_id].evidence_refs
+                            if cell_id in cells
+                            else fixed[cell_id].evidence_refs
+                        )
+                    }
                 ),
             }
         )
     all_cells = tuple(cells)
     all_evidence = sorted(
-        {ref for cell in cells.values() for ref in cell.evidence_refs}
+        {
+            ref
+            for cell in (*cells.values(), *fixed.values())
+            for ref in cell.evidence_refs
+        }
     )
     first_cell = all_cells[0]
     first_evidence = cells[first_cell].evidence_refs[0]

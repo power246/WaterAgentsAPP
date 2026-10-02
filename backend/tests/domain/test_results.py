@@ -1637,9 +1637,29 @@ def test_attribution_and_analysis_timeline_round_trip() -> None:
         "title",
         "content",
         "evidence_refs",
+        "result_cell_refs",
         "transcript_item_refs",
     }
     assert_json_round_trip(result)
+
+
+def test_analysis_and_attribution_result_refs_must_resolve_to_result_cells() -> None:
+    baseline = make_result()
+    payload = baseline.model_dump(mode="python")
+    payload["analysis_detail"] = AnalysisDetail(
+        summary="Invalid result reference fixture",
+        steps=(
+            AnalysisStep(
+                type="review",
+                title="Review result",
+                content="The reference must resolve within this result.",
+                result_cell_refs=("cell:unknown",),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValidationError, match="unknown result cells"):
+        InferenceResult.model_validate(payload)
 
 
 def test_attribution_allows_no_factors_but_each_factor_requires_evidence() -> None:

@@ -54,6 +54,11 @@ class ValidationRepairFailedError(ReasoningBoundaryError):
         super().__init__("waterbody_model_repair_failed")
 
 
+class InferenceAssemblyError(ReasoningBoundaryError):
+    def __init__(self) -> None:
+        super().__init__("inference_assembly_failed")
+
+
 class AllCellsBlockedError(ResultSkeletonValidationError):
     def __init__(self) -> None:
         super().__init__("all_reasoning_cells_blocked")
