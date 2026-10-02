@@ -46,6 +46,10 @@ from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime import compose_m4_workflow
 from app.main import create_app
 from app.ports import PortUnavailableError
+try:
+    from scripts.m6_fixture_runtime import build_fixture_m6_runtime
+except ModuleNotFoundError:  # Direct `python scripts/m4_workflow_smoke.py` execution.
+    from m6_fixture_runtime import build_fixture_m6_runtime
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
 TARGET_POINT = GeoPoint(latitude=38.9, longitude=-77.0)
@@ -393,6 +397,7 @@ def build_runtime(profile: FixtureProfile, *, query_fallback: bool):
         transcript_store=store,
         model_catalog=MODEL_CATALOG,
         parameter_capability_registry=registry,
+        m6_runtime_builder=build_fixture_m6_runtime,
     )
     return application, store, parser, geocoder, nldi, metadata
 

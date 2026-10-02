@@ -287,7 +287,7 @@ def seal_evidence_input(
     task = validated_task.task
     scope = task.evidence_scope
     bundle = handoff.bundle
-    _require(bundle.bundle_id == handoff.bundle.bundle_id, "bundle_identity_mismatch")
+    _require(handoff.has_valid_bundle_binding(), "bundle_identity_mismatch")
     _require(bundle.cells == handoff.cells, "handoff_cells_mismatch")
     _require(bundle.requested_parameters == scope.requested_parameters, "bundle_targets_mismatch")
     _require(bundle.supporting_parameters == scope.supporting_parameters, "bundle_support_mismatch")

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -82,6 +83,7 @@ class EvidenceAcquisitionHandoff:
     session_id: str
     bundle_ref: ItemReference
     bundle: EvidenceBundle
+    bundle_binding_digest: str
     rule_plan: EvidenceRulePlan
     rule_plan_digest: str
     capability_registry_digest: str
@@ -99,6 +101,12 @@ class EvidenceAcquisitionHandoff:
     stop_before_model: bool
     stop_facts: tuple[str, ...]
     block_facts: tuple[str, ...]
+
+    def has_valid_bundle_binding(self) -> bool:
+        return self.bundle_binding_digest == _bundle_binding_digest(
+            self.bundle_ref,
+            self.bundle,
+        )
 
 
 class EvidenceAcquisitionService:
@@ -230,6 +238,7 @@ class EvidenceAcquisitionService:
                 result_refs=result_refs,
                 block_facts=block_facts,
                 materialize_technical_facts=False,
+                agent_selected=True,
             )
             if (
                 execution.result.execution_status
@@ -367,6 +376,7 @@ class EvidenceAcquisitionService:
             session_id=scope.session_id,
             bundle_ref=bundle_ref,
             bundle=bundle,
+            bundle_binding_digest=_bundle_binding_digest(bundle_ref, bundle),
             rule_plan=scope.evidence_rule_plan,
             rule_plan_digest=scope.evidence_rule_plan.plan_digest,
             capability_registry_digest=self._capability_registry_digest,
@@ -425,6 +435,7 @@ class EvidenceAcquisitionService:
             )
             or handoff.capability_registry_digest
             != self._capability_registry_digest
+            or not handoff.has_valid_bundle_binding()
             or handoff.bundle.agent_comid != scope.agent_comid
             or handoff.bundle.context_ref.item_id
             != scope.analysis_context_ref.item_id
@@ -524,8 +535,13 @@ class EvidenceAcquisitionService:
         result_refs: list[ItemReference],
         block_facts: list[str],
         materialize_technical_facts: bool,
+        agent_selected: bool = False,
     ) -> EvidenceToolExecution:
-        execution = await self._executor.execute_tracked(scope, request)
+        execution = await (
+            self._executor.execute_agent_tracked(scope, request)
+            if agent_selected
+            else self._executor.execute_tracked(scope, request)
+        )
         result = execution.result
         result_refs.append(execution.result_ref)
         fragment_refs.extend(result.fragment_refs)
@@ -723,6 +739,22 @@ class EvidenceAcquisitionService:
             or request.tool_name not in legal
         ):
             raise EvidenceScopeViolationError()
+
+
+def _bundle_binding_digest(
+    reference: ItemReference,
+    bundle: EvidenceBundle,
+) -> str:
+    encoded = json.dumps(
+        {
+            "bundle_id": bundle.bundle_id,
+            "item_id": reference.item_id,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return f"sha256:{sha256(encoded).hexdigest()}"
 
 
 def _cell_gates(

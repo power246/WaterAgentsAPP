@@ -24,8 +24,10 @@ from app.main import create_app
 from health_smoke import available_loopback_port, stop_process
 try:
     from scripts.m4_request import smoke_request
+    from scripts.m6_fixture_runtime import build_fixture_m6_runtime
 except ModuleNotFoundError:  # Direct `python scripts/run_history_smoke.py` execution.
     from m4_request import smoke_request
+    from m6_fixture_runtime import build_fixture_m6_runtime
 from run_sse_smoke import SMOKE_SETTINGS, read_event, stream_headers
 from test_database import temporary_migrated_schema
 from transcript_fixtures import FixtureMessageV1, fixture_message_registration
@@ -107,6 +109,7 @@ def create_smoke_app() -> FastAPI:
         transcript_registry=registry,
         shutdown_grace_period=0,
         keepalive_interval=0.05,
+        m6_runtime_builder=build_fixture_m6_runtime,
     )
     workflow.bind(application)
     return application

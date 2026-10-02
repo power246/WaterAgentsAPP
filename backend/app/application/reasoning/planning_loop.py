@@ -12,6 +12,7 @@ from pydantic import Field, TypeAdapter, field_validator
 from app.application.evidence_tools import (
     EvidenceAcquisitionHandoff,
     EvidenceAcquisitionService,
+    EvidenceScopeViolationError,
 )
 from app.application.query_understanding import (
     EvidenceInferenceStrength,
@@ -73,6 +74,7 @@ if TYPE_CHECKING:
 
 _MAX_CONTEXT_FACTS = 120
 _MAX_CONTEXT_SUMMARIES = 64
+_MAX_CONTEXT_BLOCKERS = 16
 _MAX_RULE_PROPOSALS_PER_TURN = 4
 
 
@@ -341,11 +343,14 @@ class EvidencePlanningLoop:
                 except ValueError as error:
                     raise PlanningLoopError("invalid_planning_response") from error
                 previous_count = len(handoff.rule_plan.appended_rules)
-                handoff = await self._acquisition.append_rules(
-                    scope,
-                    rules,
-                    handoff,
-                )
+                try:
+                    handoff = await self._acquisition.append_rules(
+                        scope,
+                        rules,
+                        handoff,
+                    )
+                except EvidenceScopeViolationError as error:
+                    raise PlanningLoopError("invalid_planning_response") from error
                 rule_proposals += (
                     len(handoff.rule_plan.appended_rules) - previous_count
                 )
@@ -521,7 +526,18 @@ async def _working_context(
     sealed: SealedEvidenceInput,
 ):
     facts: list[WorkingContextFact] = []
-    for gate in sealed.gates[:_MAX_CONTEXT_FACTS]:
+    for index, code in enumerate(
+        tuple(dict.fromkeys(handoff.block_facts))[:_MAX_CONTEXT_BLOCKERS]
+    ):
+        facts.append(
+            WorkingContextFact(
+                fact_id=f"tool_error:{index:03d}",
+                kind=WorkingContextFactKind.BLOCKER,
+                summary=f"Evidence operation failed safely with code {code}.",
+            )
+        )
+    remaining_fact_slots = _MAX_CONTEXT_FACTS - len(facts)
+    for gate in sealed.gates[:remaining_fact_slots]:
         kind = (
             WorkingContextFactKind.BLOCKER
             if gate.decision is ReasoningGateDecision.BLOCKED

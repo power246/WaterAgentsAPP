@@ -405,6 +405,43 @@ def test_production_builder_routes_openai_without_issuing_a_request() -> None:
     assert metadata["adapter_providers"] == ("openai",)
 
 
+@pytest.mark.parametrize(
+    "capabilities",
+    [
+        (
+            capability(
+                ModelSelection(provider="unsupported", model="waterbody-v1"),
+                ModelRole.WATERBODY,
+            ),
+        ),
+        (
+            capability(OPENAI_MODEL, ModelRole.WATERBODY),
+            capability(
+                ModelSelection(provider="unsupported", model="waterbody-v1"),
+                ModelRole.WATERBODY,
+            ),
+        ),
+    ],
+)
+def test_production_builder_rejects_unsupported_waterbody_providers(
+    capabilities,
+) -> None:
+    settings = AppSettings(_env_file=None, openai_api_key="test-only-key")
+    arguments = composition_arguments()
+    arguments.pop("registrations")
+    arguments["model_catalog"] = catalog(*capabilities)
+
+    async def exercise() -> None:
+        with pytest.raises(
+            SettingsConfigurationError,
+            match="unsupported waterbody model provider",
+        ):
+            async with build_m6_runtime(settings, **arguments):
+                raise AssertionError("runtime started with an unsupported provider")
+
+    run(exercise())
+
+
 def test_production_builder_rejects_missing_openai_credential_without_leaking() -> None:
     settings = AppSettings(_env_file=None)
     arguments = composition_arguments()

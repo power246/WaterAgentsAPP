@@ -403,21 +403,12 @@ async def build_m6_runtime(
         raise SettingsConfigurationError(
             "model_catalog must configure at least one waterbody model"
         )
-    if "openai" not in providers:
-        yield compose_m6_runtime(
-            settings,
-            operations=operations,
-            transcript_reader=transcript_reader,
-            m5_runtime=m5_runtime,
-            capability_registry=capability_registry,
-            model_catalog=model_catalog,
-            registrations=(),
-            clock=clock,
-            operation_id_factory=operation_id_factory,
-            result_id_factory=result_id_factory,
-            error_id_factory=error_id_factory,
+    unsupported = providers - {"openai"}
+    if unsupported:
+        raise SettingsConfigurationError(
+            "unsupported waterbody model provider: "
+            + ", ".join(sorted(unsupported))
         )
-        return
     if settings.openai_api_key is None:
         raise SettingsConfigurationError("openai_api_key is required")
     api_key = settings.openai_api_key.get_secret_value()

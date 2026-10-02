@@ -5,7 +5,6 @@ from uuid import UUID
 
 import pytest
 
-from app.application.evidence_tools import EvidenceScopeViolationError
 from app.application.reasoning import (
     EvidencePlanningLoop,
     PlanningConvergenceReason,
@@ -331,6 +330,55 @@ def test_appended_weather_rule_without_weather_cannot_unlock_gate():
     asyncio.run(exercise())
 
 
+def test_out_of_scope_rule_proposal_is_typed_invalid_planning_response():
+    async def exercise():
+        context = make_context()
+        precipitation = load_parameter_capability_registry().exact_matches(
+            "precipitation"
+        )[0].key
+        proposal = {
+            "decision": "evidence_rules_proposed",
+            "rules": [
+                {
+                    "output_parameter": precipitation.model_dump(mode="json"),
+                    "input_parameters": [
+                        context.supporting_params[0].key.model_dump(mode="json")
+                    ],
+                    "temporal_relation": "same_window",
+                    "spatial_relation": "same_waterbody",
+                    "maximum_inference_strength": "directional",
+                    "required_collection_attempt": False,
+                    "rationale": "Attempt to add an output outside the saved scope.",
+                }
+            ],
+        }
+        model = DeterministicWaterbodyModelPort(
+            (
+                StructuredOutputCompleted(
+                    **_event_values(OPS[0]),
+                    output_id="rules-outside-scope",
+                    value=json.dumps(proposal, separators=(",", ":")),
+                ),
+                Terminal(
+                    **_event_values(OPS[0]),
+                    provider_response_id="response-rules-outside-scope",
+                    finish_reason=WaterbodyFinishReason.COMPLETED,
+                ),
+            )
+        )
+        _, _, loop, validated = await _fixture(model, context=context)
+
+        with pytest.raises(PlanningLoopError) as raised:
+            await loop.run(
+                validated,
+                deadline=FixedClock().now() + timedelta(minutes=5),
+            )
+
+        assert raised.value.code == "invalid_planning_response"
+
+    asyncio.run(exercise())
+
+
 def test_rule_then_weather_tool_materializes_support_in_later_bundle():
     async def exercise():
         context = make_context()
@@ -514,18 +562,31 @@ def test_scope_violation_max_turn_deadline_and_cancel_boundaries():
                 call_id="outside-window",
                 window_ids=("window-outside",),
                 parameter_keys=(context.params_used[0].key,),
-            )
+            ),
+            _ready_script(OPS[1]),
         )
         _, invalid_store, invalid_loop, invalid_validated = await _fixture(
             invalid_model,
             weather_port=FakeCollectionPort(lambda plan: complete_batch(plan)),
         )
-        with pytest.raises(EvidenceScopeViolationError):
-            await invalid_loop.run(
-                invalid_validated,
-                deadline=FixedClock().now() + timedelta(minutes=5),
-            )
-        assert len(invalid_store.calls) == 1
+        invalid = await invalid_loop.run(
+            invalid_validated,
+            deadline=FixedClock().now() + timedelta(minutes=5),
+        )
+        assert invalid.counts.convergence_reason is (
+            PlanningConvergenceReason.EVIDENCE_READY
+        )
+        assert invalid.counts.planning_model_calls == 2
+        assert invalid.counts.agent_tool_calls == 1
+        assert invalid.handoff.budget_usage.collection_used == 2
+        assert len(invalid_store.calls) == 2
+        assert (
+            invalid_store.results[-1][1].safe_error.code
+            == "evidence_scope_violation"
+        )
+        assert "evidence_scope_violation" in "\n".join(
+            message.text for message in invalid_model.calls[1].messages
+        )
 
         max_model = DeterministicWaterbodyModelPort(
             _tool_script(

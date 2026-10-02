@@ -15,6 +15,7 @@ from app.application.query_understanding import (
 )
 from app.application.reasoning import (
     ReasoningGateDecision,
+    SealedEvidenceValidationError,
     SealedEvidenceInput,
     seal_evidence_input,
     validate_sealed_evidence_input,
@@ -334,6 +335,16 @@ async def test_sealed_snapshot_is_canonical_across_input_order_and_has_complete_
 async def test_sealed_input_rejects_tampered_identity_ref_digest_and_count():
     validated, handoff, registry = await _validated_fixture(mode="full")
     sealed = seal_evidence_input(validated, handoff, registry)
+
+    forged_handoff = replace(
+        handoff,
+        bundle_ref=ItemReference(item_id="bundle-tampered"),
+    )
+    with pytest.raises(
+        SealedEvidenceValidationError,
+        match="bundle_identity_mismatch",
+    ):
+        seal_evidence_input(validated, forged_handoff, registry)
 
     mutations = (
         ("run_id", UUID("00000000-0000-0000-0000-000000000099")),

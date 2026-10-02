@@ -178,6 +178,28 @@ class EvidenceToolExecutor:
     ) -> EvidenceToolResult:
         return (await self.execute_tracked(scope, request)).result
 
+    async def execute_agent_tracked(
+        self,
+        scope: EvidenceSessionScope,
+        request: EvidenceToolRequest,
+    ) -> EvidenceToolExecution:
+        descriptor = self._registry.get(request.tool_name)
+        if descriptor is None or not self._registry.is_scope_authorized(
+            scope,
+            descriptor,
+        ):
+            raise EvidenceScopeViolationError()
+        try:
+            authorize_evidence_tool_request(
+                scope,
+                request,
+                max_agent_record_limit=self._limits.inspection_max_page_size,
+            )
+            self._authorize_request_preflight(request, descriptor)
+        except EvidenceScopeViolationError:
+            return await self._reject_agent_scope_violation(scope, request)
+        return await self.execute_tracked(scope, request)
+
     async def execute_tracked(
         self,
         scope: EvidenceSessionScope,
@@ -310,6 +332,62 @@ class EvidenceToolExecutor:
                 operation_id=operation_id,
                 error=safe_error,
             )
+
+    async def _reject_agent_scope_violation(
+        self,
+        scope: EvidenceSessionScope,
+        request: EvidenceToolRequest,
+    ) -> EvidenceToolExecution:
+        """Persist one Agent-selected scope rejection and charge its budget."""
+
+        descriptor = self._registry.get(request.tool_name)
+        if descriptor is None or not self._registry.is_scope_authorized(
+            scope,
+            descriptor,
+        ):
+            raise EvidenceScopeViolationError()
+        if self._scope_preparer is not None:
+            self._scope_preparer(scope)
+        operation_id = self._operation_id_factory()
+        await self._writer.write_call(
+            scope,
+            request,
+            operation_id=operation_id,
+            policy=descriptor.policy_class,
+        )
+        try:
+            scope.cancel_token.checkpoint()
+            canonical_key = canonical_request_key(
+                scope,
+                request,
+                policy_manifest_digest=self._capabilities.manifest_digest,
+            )
+            self._reserve_budget(scope, descriptor.policy_class, canonical_key)
+        except (WorkflowStopped, asyncio.CancelledError):
+            return await self._write_failure_result(
+                scope,
+                request,
+                operation_id=operation_id,
+                cancelled=True,
+                error=SafeEvidenceError(
+                    code="evidence_cancelled",
+                    message="The evidence operation was cancelled.",
+                    retryable=False,
+                ),
+            )
+        except Exception as error:
+            return await self._write_failure_result(
+                scope,
+                request,
+                operation_id=operation_id,
+                error=map_evidence_error(error),
+            )
+        return await self._write_failure_result(
+            scope,
+            request,
+            operation_id=operation_id,
+            error=map_evidence_error(EvidenceScopeViolationError()),
+        )
 
     async def cleanup_run(self, run_id: str) -> None:
         await self._single_flight.cleanup_run(run_id)

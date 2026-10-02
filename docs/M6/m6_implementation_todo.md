@@ -664,10 +664,10 @@
 
 #### Milestone 13 完成记录（2026-10-02）
 
-- 实现：审计提交 `2ce10cd` 新增 M6 文档协议/契约矩阵/OpenAPI/registry/status gate 和唯一 runner/adapter、无 V2/feature flag/第三条 SSE 架构门禁；同步现有 M6 与项目级文档。未发现 production 功能缺口，未修改生产代码、前端、归档、`backend/.env` 或业务数据库。
-- 验证：Windows、Python 3.12.14、Docker Engine 29.8.1、PostgreSQL 17.11；离线审计 `88 passed`，完整 backend `1831 passed, 1 warning`，专用 `wateragents_test` persistence `60 passed`，M6 workflow smoke `20 passed`，SSE completed/cancelled 与 history/independent-process-restart/startup-repair 均通过；`compileall` 和 staged `git diff --check` 通过。首次 docs gate 按测试先行暴露旧状态与 grouped matrix，完成同步后通过；受限沙箱 pytest 临时目录 ACL 失败在仓库内隔离 basetemp、相同测试配置下重跑通过。
+- 实现：审计提交 `2ce10cd` 新增 M6 文档协议/契约矩阵/OpenAPI/registry/status gate 和唯一 runner/adapter、无 V2/feature flag/第三条 SSE 架构门禁；同步现有 M6 与项目级文档。后续复审以失败回归确认并修复三项 production 缺口：Agent 越界 tool call 现在持久化安全错误、消耗预算并继续 planning，evidence bundle reference 与 bundle identity 建立 seal-time 绑定，production M6 启动拒绝 unsupported/mixed provider；fixture smoke 显式注入 test runtime，未放宽生产边界。未修改前端、归档、`backend/.env` 或业务数据库。
+- 验证：Windows、Python 3.12.14、Docker Engine 29.8.1、PostgreSQL 17.11；复审修复后定向 smoke/runtime `45 passed`，完整 backend（含专用 `wateragents_test` PostgreSQL cases）`1834 passed, 1 warning`，M6 workflow smoke `20 passed`，SSE completed/cancelled 与 history/independent-process-restart/startup-repair 均通过；`compileall` 和 `git diff --check` 通过。原离线审计 `88 passed` 与 persistence `60 passed` 证据保持有效；受限沙箱 pytest 临时目录 ACL 失败均在沙箱外以相同解释器、配置和隔离 basetemp 重跑通过。
 - 风险：真实 OpenAI waterbody provider preflight 为 `not_run`，`requests=0`、`events=0`、`responses=0`，未获本阶段显式计费请求授权；仅有 Windows 本机证据，Ubuntu/macOS 同提交 CI 未运行，所以 `GLOBAL-C08`、`GLOBAL-C11` 保持 `partial`。M7 DAG、M8 transcript search producer、M9 frontend/settings/admin 仍按接力边界后续实现。
-- 提交：本地审计提交 `2ce10cd`；本完成记录随紧随其后的本地文档提交保存，均未 push。
+- 提交：本地审计提交 `2ce10cd`；本完成记录及复审修复均随对应本地提交保存，均未 push。
 
 ## 契约覆盖矩阵（实施时填写）
 
