@@ -1,0 +1,27 @@
+{
+  "unknown_event": [{"type": "response.future_event", "private": "fixture-private-envelope"}],
+  "unknown_item": [
+    {"type": "response.output_item.added", "item": {"id": "unknown-1", "type": "future_item", "private": "fixture-private-envelope"}}
+  ],
+  "unknown_content": [
+    {"type": "response.completed", "response": {"id": "resp-content", "model": "waterbody-test", "status": "completed", "output": [{"id": "message-content", "type": "message", "role": "assistant", "content": [{"type": "future_content", "private": "fixture-private-envelope"}]}]}}
+  ],
+  "built_in_tool": [
+    {"type": "response.output_item.added", "item": {"id": "web-1", "type": "web_search_call", "arguments": "fixture-private-tool-arguments"}}
+  ],
+  "model_drift": [
+    {"type": "response.created", "response": {"id": "resp-drift", "model": "different-model", "status": "in_progress"}}
+  ],
+  "response_id_drift": [
+    {"type": "response.created", "response": {"id": "resp-first", "model": "waterbody-test", "status": "in_progress"}},
+    {"type": "response.in_progress", "response": {"id": "resp-second", "model": "waterbody-test", "status": "in_progress"}}
+  ],
+  "schema_mismatch": [
+    {"type": "response.completed", "response": {"id": "resp-schema", "model": "waterbody-test", "status": "completed", "output": [{"id": "output-schema", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "{\"decision\":\"not_authorized\"}"}]}]}}
+  ],
+  "duplicate_structured_key": [
+    {"type": "response.completed", "response": {"id": "resp-duplicate-json", "model": "waterbody-test", "status": "completed", "output": [{"id": "output-duplicate-json", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "{\"decision\":\"not_authorized\",\"decision\":\"evidence_ready\"}"}]}]}}
+  ],
+  "malformed_json_sse": "event: response.completed\ndata: {not-json}\n\n",
+  "incomplete_sse": "event: response.completed\ndata: {\"type\":\"response.completed\"}"
+}

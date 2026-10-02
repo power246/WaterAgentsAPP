@@ -1,0 +1,112 @@
+[
+  {
+    "type": "response.created",
+    "response": {"id": "resp-safe-1", "model": "waterbody-test", "status": "in_progress"}
+  },
+  {
+    "type": "response.output_item.added",
+    "item": {"id": "reasoning-hidden-1", "type": "reasoning", "encrypted_content": "fixture-hidden-content"}
+  },
+  {
+    "type": "response.reasoning_summary_text.delta",
+    "item_id": "reasoning-hidden-1",
+    "delta": "fixture-hidden-summary"
+  },
+  {
+    "type": "response.output_item.done",
+    "item": {"id": "reasoning-hidden-1", "type": "reasoning", "encrypted_content": "fixture-hidden-content"}
+  },
+  {
+    "type": "response.output_item.added",
+    "item": {"id": "message-visible-1", "type": "message", "role": "assistant", "content": []}
+  },
+  {
+    "type": "response.output_text.delta",
+    "item_id": "message-visible-1",
+    "delta": "检查已授权证据。"
+  },
+  {
+    "type": "response.output_text.done",
+    "item_id": "message-visible-1",
+    "text": "检查已授权证据。"
+  },
+  {
+    "type": "response.output_item.done",
+    "item": {
+      "id": "message-visible-1",
+      "type": "message",
+      "role": "assistant",
+      "content": [{"type": "output_text", "text": "检查已授权证据。"}]
+    }
+  },
+  {
+    "type": "response.output_item.added",
+    "item": {"id": "function-item-1", "type": "function_call", "call_id": "call-safe-1", "name": "inspect_evidence"}
+  },
+  {
+    "type": "response.function_call_arguments.delta",
+    "item_id": "function-item-1",
+    "delta": "{\"item_id\":\"evidence-1\"}"
+  },
+  {
+    "type": "response.function_call_arguments.done",
+    "item_id": "function-item-1",
+    "arguments": "{\"item_id\":\"evidence-1\"}"
+  },
+  {
+    "type": "response.output_item.done",
+    "item": {"id": "function-item-1", "type": "function_call", "call_id": "call-safe-1", "name": "inspect_evidence", "arguments": "{\"item_id\":\"evidence-1\"}"}
+  },
+  {
+    "type": "response.output_item.added",
+    "item": {"id": "function-item-2", "type": "function_call", "call_id": "call-safe-2", "name": "inspect_evidence"}
+  },
+  {
+    "type": "response.function_call_arguments.done",
+    "item_id": "function-item-2",
+    "arguments": "{\"item_id\":\"evidence-2\"}"
+  },
+  {
+    "type": "response.output_item.done",
+    "item": {"id": "function-item-2", "type": "function_call", "call_id": "call-safe-2", "name": "inspect_evidence", "arguments": "{\"item_id\":\"evidence-2\"}"}
+  },
+  {
+    "type": "response.output_item.added",
+    "item": {"id": "message-structured-1", "type": "message", "role": "assistant", "content": []}
+  },
+  {
+    "type": "response.output_text.delta",
+    "item_id": "message-structured-1",
+    "delta": "{\"decision\":\"evidence_ready\"}"
+  },
+  {
+    "type": "response.output_text.done",
+    "item_id": "message-structured-1",
+    "text": "{\"decision\":\"evidence_ready\"}"
+  },
+  {
+    "type": "response.output_item.done",
+    "item": {
+      "id": "message-structured-1",
+      "type": "message",
+      "role": "assistant",
+      "content": [{"type": "output_text", "text": "{\"decision\":\"evidence_ready\"}"}]
+    }
+  },
+  {
+    "type": "response.completed",
+    "response": {
+      "id": "resp-safe-1",
+      "model": "waterbody-test",
+      "status": "completed",
+      "output": [
+        {"id": "reasoning-hidden-1", "type": "reasoning", "encrypted_content": "fixture-hidden-content"},
+        {"id": "message-visible-1", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "检查已授权证据。"}]},
+        {"id": "function-item-1", "type": "function_call", "call_id": "call-safe-1", "name": "inspect_evidence", "arguments": "{\"item_id\":\"evidence-1\"}"},
+        {"id": "function-item-2", "type": "function_call", "call_id": "call-safe-2", "name": "inspect_evidence", "arguments": "{\"item_id\":\"evidence-2\"}"},
+        {"id": "message-structured-1", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "{\"decision\":\"evidence_ready\"}"}]}
+      ],
+      "usage": {"input_tokens": 41, "output_tokens": 17}
+    }
+  }
+]
