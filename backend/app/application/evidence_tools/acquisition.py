@@ -7,7 +7,9 @@ from app.application.evidence_tools.errors import EvidenceScopeViolationError
 from app.application.evidence_tools.executor import EvidenceToolExecutor
 from app.application.evidence_tools.models import (
     EvidenceClock,
+    EvidenceBudgetUsage,
     EvidencePolicyClass,
+    EvidenceProducerFact,
     EvidenceToolDescriptor,
     EvidenceToolExecution,
     EvidenceToolReader,
@@ -26,6 +28,7 @@ from app.domain import (
     CollectionStatus,
     CoverageStatus,
     EvidenceApplicability,
+    EvidenceBundle,
     EvidenceCell,
     EvidenceCellRole,
     EvidenceCellStatus,
@@ -67,7 +70,16 @@ class EvidenceAcquisitionCellGate:
 @dataclass(frozen=True, slots=True)
 class EvidenceAcquisitionHandoff:
     bundle_ref: ItemReference
+    bundle: EvidenceBundle
+    rule_plan_digest: str
+    capability_registry_digest: str
     cells: tuple[EvidenceCell, ...]
+    collection_fact_refs: tuple[EvidenceFragmentReference, ...]
+    fragment_allowlist: tuple[EvidenceFragmentReference, ...]
+    source_record_allowlist: tuple[str, ...]
+    tool_result_refs: tuple[ItemReference, ...]
+    budget_usage: EvidenceBudgetUsage
+    producer_facts: tuple[EvidenceProducerFact, ...]
     read_port: EvidenceToolReader
     tool_roster: tuple[EvidenceToolDescriptor, ...]
     executor: EvidenceToolExecutor
@@ -95,6 +107,7 @@ class EvidenceAcquisitionService:
         self._reader = reader
         self._writer = writer
         self._clock = clock or _UtcClock()
+        self._capability_registry_digest = capability_registry.manifest_digest
         self._bundle_builder = EvidenceBundleBuilder(reader=reader, writer=writer)
         self._relation_materializer = EvidenceRelationMaterializer(
             registry=capability_registry,
@@ -174,6 +187,12 @@ class EvidenceAcquisitionService:
                 operation_id=f"m5:materialize-relations:{scope.session_id}",
             )
         )
+        fragment_refs.extend(
+            await self._write_missing_cell_facts(
+                scope,
+                _unique_fragment_refs(fragment_refs),
+            )
+        )
         if (
             scope.station_refs
             and not stop_before_model
@@ -192,7 +211,36 @@ class EvidenceAcquisitionService:
         )
         return EvidenceAcquisitionHandoff(
             bundle_ref=bundle_ref,
+            bundle=bundle,
+            rule_plan_digest=scope.evidence_rule_plan.plan_digest,
+            capability_registry_digest=self._capability_registry_digest,
             cells=bundle.cells,
+            collection_fact_refs=tuple(
+                reference
+                for reference in bundle.fragment_refs
+                if reference.evidence_id
+                in {
+                    evidence_id
+                    for cell in bundle.cells
+                    for evidence_id in cell.collection_fact_refs
+                }
+            ),
+            fragment_allowlist=bundle.fragment_refs,
+            source_record_allowlist=bundle.source_record_item_refs,
+            tool_result_refs=bundle.tool_result_refs,
+            budget_usage=self._executor.budget_usage(scope),
+            producer_facts=tuple(
+                EvidenceProducerFact(
+                    name=descriptor.name,
+                    status=descriptor.producer_status,
+                    authorized_for_scope=self._registry.is_scope_authorized(
+                        scope,
+                        descriptor,
+                    ),
+                )
+                for descriptor in self._registry.descriptors
+                if descriptor.policy_class is EvidencePolicyClass.PRODUCER_SLOT
+            ),
             read_port=self._reader,
             tool_roster=self._registry.roster(scope),
             executor=self._executor,
@@ -205,6 +253,84 @@ class EvidenceAcquisitionService:
             ),
             block_facts=tuple(dict.fromkeys(block_facts)),
         )
+
+    async def _write_missing_cell_facts(
+        self,
+        scope: EvidenceSessionScope,
+        existing_refs: tuple[EvidenceFragmentReference, ...],
+    ) -> tuple[EvidenceFragmentReference, ...]:
+        fragments = tuple(
+            [
+                await self._reader.read_fragment(scope, reference)
+                for reference in existing_refs
+            ]
+        )
+        references = []
+        for window in scope.time_windows:
+            seconds = int(
+                (window.time_range.end - window.time_range.start).total_seconds()
+            )
+            for parameter in (*scope.requested_parameters, *scope.supporting_parameters):
+                has_fact = any(
+                    parameter in fragment.parameter_refs
+                    and (
+                        window.window_id in fragment.payload.affected_window_ids
+                        if isinstance(fragment.payload, CollectionFactPayload)
+                        else fragment.time_range.overlaps(window.time_range)
+                    )
+                    for fragment in fragments
+                )
+                if has_fact:
+                    continue
+                identity = (
+                    f"{scope.run_id}:{scope.session_id}:{parameter.code_system}:"
+                    f"{parameter.code}:{window.window_id}:no_applicable_evidence"
+                )
+                operation_id = (
+                    f"m5:seal-fact:{parameter.code_system}:{parameter.code}:"
+                    f"{window.window_id}"
+                )
+                fragment = EvidenceFragment(
+                    evidence_id=f"evidence:sha256:{sha256(identity.encode()).hexdigest()}",
+                    source="m5_acquisition",
+                    collection_status=CollectionStatus.EMPTY,
+                    target_comid=scope.agent_comid,
+                    location=EvidenceLocation(
+                        point=scope.target_node.point,
+                        comid=scope.agent_comid,
+                        station_id=None,
+                        distance_to_target_km=0,
+                    ),
+                    time_range=window.time_range,
+                    parameter_refs=(parameter,),
+                    data_type="collection_fact",
+                    applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
+                    series_identity=(
+                        f"seal:{parameter.code_system}:{parameter.code}"
+                    ),
+                    quality_class=None,
+                    coverage=EvidenceCoverage(
+                        status=CoverageStatus.INSUFFICIENT,
+                        observed_count=0,
+                        covered_duration_seconds=0,
+                        window_duration_seconds=seconds,
+                    ),
+                    payload=CollectionFactPayload(
+                        status=CollectionStatus.EMPTY,
+                        reason="no_applicable_evidence",
+                        affected_window_ids=(window.window_id,),
+                    ),
+                    provenance=Provenance(operation_id=operation_id),
+                    result_eligibility=EvidenceResultEligibility.EXPLANATORY_ONLY,
+                )
+                references.append(
+                    await self._writer.write_fragment(
+                        scope,
+                        operation_id=operation_id,
+                        fragment=fragment,
+                    )
+                )
+        return tuple(references)
 
     async def _execute(
         self,

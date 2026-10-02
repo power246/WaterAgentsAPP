@@ -38,6 +38,7 @@ from app.application.evidence_tools.inspection_service import (
 from app.application.evidence_tools.collection_service import EvidenceCollectionService
 from app.application.evidence_tools.models import (
     EvidenceClock,
+    EvidenceBudgetUsage,
     EvidenceCollectionArtifacts,
     EvidenceCollectionInput,
     EvidenceInspectionPage,
@@ -333,6 +334,15 @@ class EvidenceToolExecutor:
 
     def live_dedup_counts(self, run_id: str) -> tuple[int, int]:
         return self._single_flight.live_counts(run_id)
+
+    def budget_usage(self, scope: EvidenceSessionScope) -> EvidenceBudgetUsage:
+        ledger = self._budgets.get((scope.run_id, scope.session_id))
+        return EvidenceBudgetUsage(
+            collection_used=ledger.used("collection") if ledger is not None else 0,
+            collection_limit=self._limits.collection_calls,
+            transform_used=ledger.used("transform") if ledger is not None else 0,
+            transform_limit=self._limits.transform_calls,
+        )
 
     def _authorize_request_preflight(self, request, descriptor) -> None:
         supplied = set(

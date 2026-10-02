@@ -35,6 +35,7 @@ class EvidenceWindow:
 class EvidenceSessionScope:
     run_id: str
     session_id: str
+    session_ref: ReferenceScope
     agent_comid: str
     query: str
     analysis_context_ref: ReferenceScope
@@ -61,6 +62,7 @@ class EvidenceSessionScope:
         *,
         run_id: str,
         session_id: str,
+        session_ref: ReferenceScope,
         agent_comid: str,
         query: str,
         analysis_context_ref: ReferenceScope,
@@ -91,6 +93,7 @@ class EvidenceSessionScope:
         values = {
             "run_id": run_id,
             "session_id": session_id,
+            "session_ref": session_ref,
             "agent_comid": agent_comid,
             "query": query,
             "analysis_context_ref": analysis_context_ref,
@@ -174,6 +177,7 @@ def assemble_evidence_session_scope(
     return EvidenceSessionScope(
         run_id=run_id,
         session_id=session_id,
+        session_ref=session_fact,
         agent_comid=agent_comid,
         query=context.query,
         analysis_context_ref=analysis_context_ref,

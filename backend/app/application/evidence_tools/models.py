@@ -74,6 +74,41 @@ class EvidenceToolLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class EvidenceBudgetUsage:
+    collection_used: int
+    collection_limit: int
+    transform_used: int
+    transform_limit: int
+
+    def __post_init__(self) -> None:
+        values = (
+            self.collection_used,
+            self.collection_limit,
+            self.transform_used,
+            self.transform_limit,
+        )
+        if any(type(value) is not int or value < 0 for value in values):
+            raise ValueError("evidence budget values must be non-negative integers")
+        if self.collection_used > self.collection_limit:
+            raise ValueError("collection usage cannot exceed its limit")
+        if self.transform_used > self.transform_limit:
+            raise ValueError("transform usage cannot exceed its limit")
+
+
+@dataclass(frozen=True, slots=True)
+class EvidenceProducerFact:
+    name: str
+    status: EvidenceProducerStatus
+    authorized_for_scope: bool
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("producer name must not be empty")
+        if type(self.authorized_for_scope) is not bool:
+            raise ValueError("producer authorization must be boolean")
+
+
+@dataclass(frozen=True, slots=True)
 class EvidenceToolDescriptor:
     name: str
     purpose: str
