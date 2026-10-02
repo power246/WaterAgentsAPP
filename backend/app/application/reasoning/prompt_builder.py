@@ -255,6 +255,7 @@ class PromptValidationIssue(DomainModel):
 
 
 class SchemaRepairPromptInput(_PromptInput):
+    repair_of_operation_id: UUID
     original_phase: WaterbodyModelPhase
     batch_id: NonEmptyString | None = None
     original_visible_response: NonBlankText
@@ -381,9 +382,6 @@ class PromptBuilder:
         self,
         prompt: OverallSynthesisPromptInput,
     ) -> WaterbodyModelRequest:
-        evidence_refs = {
-            ref for cell in prompt.validated_cells for ref in cell.evidence_refs
-        }
         body = {
             "phase": WaterbodyModelPhase.OVERALL_SYNTHESIS,
             "scope_digest": prompt.context.scope_digest,
@@ -402,11 +400,10 @@ class PromptBuilder:
                     WorkingContextFactKind.BLOCKER,
                 }
             ),
-            "bounded_reference_summaries": tuple(
-                summary
-                for summary in prompt.context.evidence_summaries
-                if summary.evidence_ref in evidence_refs
-            ),
+            # The synthesis context is already server-bounded to this skeleton.
+            # Keeping its contextual summaries lets the Agent propose an explicitly
+            # hypothesized attribution without allowing those refs to unlock a cell.
+            "bounded_reference_summaries": prompt.context.evidence_summaries,
         }
         return self._request(
             phase=WaterbodyModelPhase.OVERALL_SYNTHESIS,
@@ -420,6 +417,7 @@ class PromptBuilder:
     ) -> WaterbodyModelRequest:
         body = {
             "phase": WaterbodyModelPhase.SCHEMA_REPAIR,
+            "repair_of_operation_id": prompt.repair_of_operation_id,
             "original_phase": prompt.original_phase,
             "batch_id": prompt.batch_id,
             "scope_digest": prompt.context.scope_digest,

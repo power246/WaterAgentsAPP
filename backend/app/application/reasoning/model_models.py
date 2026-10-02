@@ -319,6 +319,7 @@ class WaterbodyModelErrorCode(DomainEnum):
     CONTENT_FILTERED = "waterbody_model_content_filtered"
     REFUSED = "waterbody_model_refused"
     RESPONSE_INVALID = "waterbody_model_response_invalid"
+    REPAIR_FAILED = "waterbody_model_repair_failed"
     TRUNCATED = "waterbody_model_truncated"
     INCOMPLETE = "waterbody_model_incomplete"
     CANCELLED = "waterbody_model_cancelled"

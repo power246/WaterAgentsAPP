@@ -236,6 +236,9 @@ def build_all_requests():
     repair = builder.build_schema_repair(
         SchemaRepairPromptInput(
             **common(WaterbodyModelPhase.SCHEMA_REPAIR, "reasoning_cell_batch"),
+            repair_of_operation_id=OPERATION_IDS[
+                WaterbodyModelPhase.REASONING_BATCH
+            ],
             original_phase=WaterbodyModelPhase.REASONING_BATCH,
             batch_id="batch-1",
             original_visible_response='{"decision_type":"batch","items":[]}',
@@ -359,6 +362,34 @@ def test_batch_synthesis_and_repair_inputs_are_phase_bounded() -> None:
     assert "evidence_summaries" not in repair_text
     assert "validated_cells" not in repair_text
     assert "switch model" not in repair.system_prompt.lower()
+
+
+def test_synthesis_keeps_server_bounded_contextual_summary_for_attribution() -> None:
+    payload = common(WaterbodyModelPhase.OVERALL_SYNTHESIS, "overall_synthesis")
+    payload["context"] = working_context(outside_summary=True)
+    request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_overall_synthesis(
+        OverallSynthesisPromptInput(
+            **payload,
+            validated_cells=(
+                ValidatedCellPromptSummary(
+                    cell_id="cell-1",
+                    window_id="window-1",
+                    outcome_status=OutcomeStatus.QUANTIFIED,
+                    risk_level=RiskLevel.LOW,
+                    risk_rationale="The evidence indicates a limited risk signal.",
+                    confidence=0.8,
+                    confidence_rationale="Direct evidence has usable coverage.",
+                    evidence_refs=("evidence-1",),
+                ),
+            ),
+            fixed_cells=(),
+        )
+    )
+
+    body = json.loads(request.messages[-1].text)
+    assert body["bounded_reference_summaries"][0]["evidence_ref"] == (
+        "outside-evidence"
+    )
 
 
 def test_reasoning_batch_rejects_scope_external_evidence_before_rendering() -> None:
