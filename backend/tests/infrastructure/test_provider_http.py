@@ -114,6 +114,7 @@ def test_invalid_json_and_response_size_are_distinct() -> None:
 
 def test_exhausted_deadline_starts_no_request() -> None:
     calls = 0
+    observed = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
         nonlocal calls
@@ -121,6 +122,10 @@ def test_exhausted_deadline_starts_no_request() -> None:
         return httpx.Response(200, request=request)
 
     async def exercise() -> None:
+        def observe() -> None:
+            nonlocal observed
+            observed += 1
+
         async with client(handler) as http:
             with pytest.raises(PortTimeoutError):
                 await http.get_bytes(
@@ -128,10 +133,12 @@ def test_exhausted_deadline_starts_no_request() -> None:
                     provider="fixture",
                     operation="metadata",
                     deadline=asyncio.get_running_loop().time() - 1,
+                    on_attempt=observe,
                 )
 
     run(exercise())
     assert calls == 0
+    assert observed == 0
 
 
 def test_cancellation_propagates_without_a_retry() -> None:
@@ -162,6 +169,52 @@ def test_cancellation_propagates_without_a_retry() -> None:
 
     run(exercise())
     assert calls == 1
+
+
+def test_cancellation_checkpoint_prevents_retry_from_starting() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        asyncio.current_task().cancel()
+        return httpx.Response(503, request=request)
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(asyncio.CancelledError):
+                await http.get_bytes(
+                    "https://provider.test/data",
+                    provider="fixture",
+                    operation="metadata",
+                )
+
+    run(exercise())
+    assert calls == 1
+
+
+def test_attempt_observer_counts_every_real_retry() -> None:
+    observed = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, request=request)
+
+    def observe() -> None:
+        nonlocal observed
+        observed += 1
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            with pytest.raises(PortHttpError):
+                await http.get_bytes(
+                    "https://provider.test/data",
+                    provider="fixture",
+                    operation="metadata",
+                    on_attempt=observe,
+                )
+
+    run(exercise())
+    assert observed == 2
 
 
 def test_provider_errors_and_logs_do_not_expose_url_or_secret(caplog) -> None:

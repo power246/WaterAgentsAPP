@@ -88,6 +88,38 @@ class AppSettings(BaseSettings):
         le=10,
         allow_inf_nan=False,
     )
+    evidence_provider_timeout_seconds: float = Field(
+        default=20,
+        gt=0,
+        le=20,
+        allow_inf_nan=False,
+    )
+    evidence_provider_attempts: int = Field(default=2, ge=1, le=2)
+    evidence_total_deadline_seconds: float = Field(
+        default=90,
+        gt=0,
+        le=90,
+        allow_inf_nan=False,
+    )
+    evidence_max_collection_calls: int = Field(default=12, ge=1, le=12)
+    evidence_max_transform_calls: int = Field(default=24, ge=1, le=24)
+    evidence_max_pages: int = Field(default=10, ge=1, le=10)
+    evidence_max_records: int = Field(default=10_000, ge=1, le=10_000)
+    evidence_max_response_bytes: int = Field(
+        default=8_388_608,
+        ge=1024,
+        le=8_388_608,
+    )
+    evidence_inspection_page_size: int = Field(default=50, ge=1, le=200)
+    evidence_inspection_max_page_size: int = Field(default=200, ge=1, le=200)
+    evidence_preview_max_records: int = Field(default=32, ge=1, le=32)
+    evidence_preview_max_bytes: int = Field(default=16_384, ge=1024, le=16_384)
+    evidence_facility_max_centers: int = Field(default=32, ge=1, le=32)
+    nws_user_agent_project: str = Field(default="WaterAgents", min_length=1)
+    nws_user_agent_contact: str = Field(
+        default="wateragents@example.invalid",
+        min_length=1,
+    )
     google_geocoding_api_key: SecretStr | None = None
     usgs_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None
@@ -164,6 +196,17 @@ class AppSettings(BaseSettings):
         "provider_http_page_size",
         "provider_http_max_pages",
         "provider_http_max_records",
+        "evidence_provider_attempts",
+        "evidence_max_collection_calls",
+        "evidence_max_transform_calls",
+        "evidence_max_pages",
+        "evidence_max_records",
+        "evidence_max_response_bytes",
+        "evidence_inspection_page_size",
+        "evidence_inspection_max_page_size",
+        "evidence_preview_max_records",
+        "evidence_preview_max_bytes",
+        "evidence_facility_max_centers",
         mode="before",
     )
     @classmethod
@@ -178,6 +221,8 @@ class AppSettings(BaseSettings):
         "geocoding_timeout_seconds",
         "metadata_timeout_seconds",
         "provider_http_retry_delay_seconds",
+        "evidence_provider_timeout_seconds",
+        "evidence_total_deadline_seconds",
         "topology_stage_timeout_seconds",
         mode="before",
     )
@@ -219,6 +264,13 @@ class AppSettings(BaseSettings):
             raise ValueError("openai_base_url must be an HTTP(S) URL")
         return normalized
 
+    @field_validator("nws_user_agent_project", "nws_user_agent_contact")
+    @classmethod
+    def validate_nws_user_agent_part(cls, value: str) -> str:
+        if "\r" in value or "\n" in value:
+            raise ValueError("NWS User-Agent values must be single-line text")
+        return value
+
     @field_validator("log_level", mode="before")
     @classmethod
     def normalize_log_level(cls, value: object) -> object:
@@ -246,6 +298,11 @@ class AppSettings(BaseSettings):
         if self.provider_http_page_size > self.provider_http_max_records:
             raise ValueError(
                 "provider_http_page_size must not exceed provider_http_max_records"
+            )
+        if self.evidence_inspection_page_size > self.evidence_inspection_max_page_size:
+            raise ValueError(
+                "evidence_inspection_page_size must not exceed "
+                "evidence_inspection_max_page_size"
             )
         return self
 

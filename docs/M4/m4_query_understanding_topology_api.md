@@ -204,7 +204,7 @@ parser-session-owned、可流式：
 
 ```json
 {
-  "text": "{\"location_mention\":null,\"coordinate_mention\":null,\"start_date\":null,\"end_date\":null,\"parameters\":[{\"concept\":\"dissolved oxygen\",\"rationale\":\"Dissolved oxygen is explicitly requested.\",\"explicitly_named\":true}],\"ambiguities\":[]}",
+  "text": "{\"location_mention\":null,\"coordinate_mention\":null,\"start_date\":null,\"end_date\":null,\"parameters\":[{\"concept\":\"dissolved oxygen\",\"rationale\":\"Dissolved oxygen is explicitly requested.\",\"explicitly_named\":true}],\"evidence_rules\":[],\"ambiguities\":[]}",
   "generation_status": "completed",
   "end_reason": "completed"
 }
@@ -285,11 +285,16 @@ parser-session-owned，正文是唯一 `AnalysisContext`：
     "provider": "openai",
     "model": "waterbody-model-id"
   },
-  "memory_mode": "stateless"
+  "memory_mode": "stateless",
+  "evidence_rule_plan": {
+    "baseline_rules": [],
+    "appended_rules": [],
+    "plan_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
 }
 ```
 
-前端可以在收到该 `transcript_item` 后立即显示“系统理解”：目标、日期、实际粒度、`params_used`、每项目标的简短 rationale，以及系统自动加入的 `supporting_params`。discharge 已经是用户目标时不在 supporting 列表复制。解析成功后自动继续 topology，不等待用户确认。
+前端可以在收到该 `transcript_item` 后立即显示“系统理解”：目标、日期、实际粒度、`params_used`、每项目标的简短 rationale、系统自动加入的 `supporting_params`，以及问题解析 Agent 给出的 `evidence_rule_plan.baseline_rules`。规则只声明输出/输入参数、时空关系、最大方向性强度、是否必须尝试采集和理由，不携带 provider、station、URL、channel、unit 或目标数值。`appended_rules` 初始为空；后续水体 Agent 只能追加，不能删除或替换基线，`plan_digest` 随有效规则全集确定性变化。discharge 已经是用户目标时不在 supporting 列表复制。解析成功后自动继续 topology，不等待用户确认。
 
 ### 4.6 `topology_ready v1`
 
@@ -306,6 +311,17 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
       "point": {
         "latitude": 38.8719,
         "longitude": -77.0479
+      },
+      "geometry_ref": "geometry:12345678",
+      "geometry_summary": {
+        "geometry_type": "linestring",
+        "length_km": "1.731420888",
+        "bbox": [-77.0579, 38.8719, -77.0379, 38.8719],
+        "simplified_coordinates": [
+          [-77.0579, 38.8719],
+          [-77.0379, 38.8719]
+        ],
+        "simplification_tolerance_m": "25"
       },
       "depth": 0,
       "cumulative_distance_km": 0.0,
@@ -332,12 +348,43 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
         {
           "provider": "wdfn_time_series",
           "station_id": "USGS-01234567",
-          "series_refs": ["series-safe-identifier"]
+          "series_refs": [
+            {
+              "series_identity": "series-safe-identifier",
+              "parameter": {"code_system": "usgs", "code": "00060"},
+              "channel": "continuous",
+              "covered_segment_indexes": [0]
+            }
+          ]
         }
       ],
       "excluded_reasons": []
     }
   ],
+  "geometries": {
+    "geometry:12345678": {
+      "geometry_ref": "geometry:12345678",
+      "geometry_type": "linestring",
+      "full_coordinates": [
+        [-77.0579, 38.8719],
+        [-77.0479, 38.8719],
+        [-77.0379, 38.8719]
+      ],
+      "simplified_coordinates": [
+        [-77.0579, 38.8719],
+        [-77.0379, 38.8719]
+      ],
+      "representative_point": {
+        "latitude": 38.8719,
+        "longitude": -77.0479
+      },
+      "bbox": [-77.0579, 38.8719, -77.0379, 38.8719],
+      "length_km": "1.731420888",
+      "source": "nldi",
+      "source_comid": "12345678",
+      "simplification_tolerance_m": "25"
+    }
+  },
   "edges": [],
   "branch_outcomes": [
     {

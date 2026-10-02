@@ -4,7 +4,7 @@ import csv
 from collections.abc import Mapping
 from datetime import date, datetime
 from io import StringIO
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 
 from app.domain.hydrology import (
     GeoPoint,
@@ -196,8 +196,6 @@ class UsgsWaterDataAdapter:
         station = self._identifiers((station_id,), field_name="station_id")[0]
         operation = "get_sample_periods"
         params: dict[str, str] = {"mimeType": "text/csv"}
-        if self._api_key:
-            params["api_key"] = self._api_key
         content = await self._http.get_bytes(
             (
                 f"{self._samples_base_url}/summary/"
@@ -206,7 +204,7 @@ class UsgsWaterDataAdapter:
             provider=SAMPLES_PROVIDER,
             operation=operation,
             params=params,
-            headers={"Accept": "text/csv"},
+            headers=self._headers("text/csv"),
             deadline=deadline,
         )
         try:
@@ -300,8 +298,6 @@ class UsgsWaterDataAdapter:
             "f": "json",
             "limit": self._page_size,
         }
-        if self._api_key:
-            params["api_key"] = self._api_key
         features: list[Mapping[str, object]] = []
         visited: set[str] = set()
 
@@ -314,6 +310,7 @@ class UsgsWaterDataAdapter:
                 provider=PROVIDER,
                 operation=operation,
                 params=params,
+                headers=self._headers("application/geo+json"),
                 deadline=deadline,
             )
             root = require_mapping(payload, provider=PROVIDER, operation=operation)
@@ -338,7 +335,7 @@ class UsgsWaterDataAdapter:
             if next_url is None:
                 return features
             self._require_safe_next_url(next_url, operation)
-            url = self._with_api_key(next_url)
+            url = next_url
             params = {}
 
         raise PortResponseLimitError(
@@ -379,32 +376,21 @@ class UsgsWaterDataAdapter:
     def _require_safe_next_url(self, url: str, operation: str) -> None:
         base = urlsplit(self._ogc_base_url)
         target = urlsplit(url)
+        query_names = {name.casefold() for name, _ in parse_qsl(target.query)}
         if (
-            target.scheme != base.scheme
+            target.scheme != "https"
             or target.netloc != base.netloc
             or not target.path.startswith(base.path.rstrip("/") + "/")
+            or target.fragment
+            or {"api_key", "apikey", "key", "token"} & query_names
         ):
             raise invalid_response(PROVIDER, operation)
 
-    def _with_api_key(self, url: str) -> str:
-        if not self._api_key:
-            return url
-        parsed = urlsplit(url)
-        query = [
-            (name, value)
-            for name, value in parse_qsl(parsed.query, keep_blank_values=True)
-            if name != "api_key"
-        ]
-        query.append(("api_key", self._api_key))
-        return urlunsplit(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                parsed.path,
-                urlencode(query),
-                parsed.fragment,
-            )
-        )
+    def _headers(self, accept: str) -> dict[str, str]:
+        headers = {"Accept": accept}
+        if self._api_key:
+            headers["X-Api-Key"] = self._api_key
+        return headers
 
     def _parameter_metadata(
         self,

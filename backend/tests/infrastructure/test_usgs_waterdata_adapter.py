@@ -82,7 +82,8 @@ def test_wdfn_parameter_location_and_paginated_series_metadata() -> None:
             assert all(item.begin <= item.end for item in series)
 
     run(exercise())
-    assert all(request.url.params["api_key"] == "secret" for request in requests)
+    assert all(request.headers["X-Api-Key"] == "secret" for request in requests)
+    assert all("api_key" not in request.url.params for request in requests)
     first_series = next(
         request for request in requests
         if "time-series-metadata" in request.url.path
@@ -170,7 +171,8 @@ def test_samples_csv_summary_parses_discrete_periods() -> None:
         "/samples-data/summary/USGS-01646500"
     )
     assert requests[0].url.params["mimeType"] == "text/csv"
-    assert requests[0].url.params["api_key"] == "secret"
+    assert requests[0].headers["X-Api-Key"] == "secret"
+    assert "api_key" not in requests[0].url.params
 
 
 def test_successful_empty_metadata_is_not_an_error() -> None:

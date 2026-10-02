@@ -8,6 +8,7 @@ from app.domain.hydrology import (
     MonitoringStation,
     ParameterKey,
     RiverSegment,
+    WaterbodyGeometry,
     WaterQualityParameter,
 )
 
@@ -63,6 +64,22 @@ def test_river_segment_accepts_missing_location_and_round_trips() -> None:
     )
 
     assert segment.location is None
+    assert_json_round_trip(segment)
+
+
+def test_river_segment_with_geometry_round_trips() -> None:
+    geometry = WaterbodyGeometry.from_coordinates(
+        source_comid="1234",
+        coordinates=((-77.1, 38.8), (-77.0, 38.9)),
+    )
+    segment = RiverSegment(
+        comid="1234",
+        location=geometry.representative_point,
+        geometry_ref=geometry.geometry_ref,
+        geometry_summary=geometry.summary(),
+        geometry=geometry,
+    )
+
     assert_json_round_trip(segment)
 
 

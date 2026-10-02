@@ -42,6 +42,21 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "provider_http_max_pages": 10,
         "provider_http_max_records": 10000,
         "provider_http_retry_delay_seconds": 0.25,
+        "evidence_provider_timeout_seconds": 20.0,
+        "evidence_provider_attempts": 2,
+        "evidence_total_deadline_seconds": 90.0,
+        "evidence_max_collection_calls": 12,
+        "evidence_max_transform_calls": 24,
+        "evidence_max_pages": 10,
+        "evidence_max_records": 10000,
+        "evidence_max_response_bytes": 8388608,
+        "evidence_inspection_page_size": 50,
+        "evidence_inspection_max_page_size": 200,
+        "evidence_preview_max_records": 32,
+        "evidence_preview_max_bytes": 16384,
+        "evidence_facility_max_centers": 32,
+        "nws_user_agent_project": "WaterAgents",
+        "nws_user_agent_contact": "wateragents@example.invalid",
         "google_geocoding_api_key": None,
         "usgs_api_key": None,
         "openai_api_key": None,
@@ -221,6 +236,15 @@ def test_timezone_can_load_without_system_zoneinfo() -> None:
     finally:
         ZoneInfo.clear_cache()
         reset_tzpath(original_tzpath)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("nws_user_agent_project", "nws_user_agent_contact"),
+)
+def test_nws_user_agent_settings_reject_header_injection(field_name: str) -> None:
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None, **{field_name: "value\r\nX-Secret: no"})
 
 
 def test_health_returns_exact_response() -> None:

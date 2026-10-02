@@ -1,0 +1,12 @@
+{
+  "type": "Feature",
+  "properties": {
+    "gridId": "LWX",
+    "gridX": 96,
+    "gridY": 70,
+    "forecast": "https://api.weather.gov/gridpoints/LWX/96,70/forecast",
+    "forecastHourly": "https://api.weather.gov/gridpoints/LWX/96,70/forecast/hourly",
+    "forecastGridData": "https://api.weather.gov/gridpoints/LWX/96,70",
+    "observationStations": "https://api.weather.gov/gridpoints/LWX/96,70/stations"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "https://api.weather.gov/stations/KDCA/observations/2026-09-30T10:00:00+00:00",
+      "type": "Feature",
+      "geometry": {"type": "Point", "coordinates": [-77.0377, 38.8521]},
+      "properties": {
+        "timestamp": "2026-09-30T10:00:00Z",
+        "temperature": {"value": 20.5, "unitCode": "wmoUnit:degC", "qualityControl": "V"},
+        "precipitationLastHour": {"value": null, "unitCode": "wmoUnit:mm", "qualityControl": "Z"}
+      }
+    }
+  ],
+  "pagination": {
+    "next": "https://api.weather.gov/stations/KDCA/observations?cursor=next-page"
+  }
+}

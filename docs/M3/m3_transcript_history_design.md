@@ -489,11 +489,11 @@ LLM、tool、skill、hook、真实分析 context 和 final result 的内容类�
 | `confidence` | 有真实业务置信度时保留原值，按既有领域约束校验 `[0,1]`；不适用或未知时为 null，不用 0 或 1 作为默认判断，M3 不额外打分。 |
 | `provenance` | 有真实来源时保留可追溯的原信息；没有适用来源时为 null，不伪造 provider、来源 URL 或检索时间。 |
 
-元信息不替代业务 content 内已有的结果、证据和来源事实。正文已有 confidence/provenance 时，由该类型的统一解析/提取规则提供返回值；仅出现明确筛选、排序或检索需求才增加派生列，并从同一事实生成。不能让调用方分别填写正文和元信息，也不能把 overall_confidence、参数置信度、时间窗 confidence 或 evidence confidence_hint 混为同一层级。无适用的单一值时公共字段保留 null，正文中的各层级真实信息仍完整保存。具体来源结构、多来源映射由对应业务类型明确。
+元信息不替代业务 content 内已有的结果、证据和来源事实。正文已有 confidence/provenance 时，由该类型的统一解析/提取规则提供返回值；仅出现明确筛选、排序或检索需求才增加派生列，并从同一事实生成。不能让调用方分别填写正文和元信息，也不能把 overall_confidence、参数置信度、时间窗 confidence 或 evidence quality/coverage 混为同一层级。无适用的单一值时公共字段保留 null，正文中的各层级真实信息仍完整保存。具体来源结构、多来源映射由对应业务类型明确。
 
 tags 默认空、rag_eligible 默认 false 的语义继续保留，作为适用的 item 元信息保存；实际业务类型已有同义资格字段时须明确唯一来源，不能双向独立维护。`rag_eligible=false` 仅表示该记录不作为 eligible item 进入 RAG，不限制用户正常读取历史或按水体查看过程。
 
-本项目 EvidenceFragment 已采用 rag_eligible 默认 false 和可空 confidence_hint，可沿用其默认值思路；证据 provenance 仍按领域规则保留。
+本项目 EvidenceFragment 的 `rag_eligible` 默认 false；quality/coverage 与 M6 最终 confidence 分层，证据 provenance 仍按领域规则保留。
 
 适用：`GLOBAL-C06`、`GLOBAL-C09`、`M3-C02`、`M3-C07`、`M3-A02`、`M5-C02`、`M6-C10`、`M8-C01`、`M8-C04`、`M8-A01`。本决策确认字段默认值与填充原则，具体 RAG 资格算法仍由相关业务阶段定型。
 

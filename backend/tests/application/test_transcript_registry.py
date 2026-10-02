@@ -78,6 +78,11 @@ def test_production_registry_has_only_real_writable_types() -> None:
         ("query_parser_message", 1),
         ("query_understood", 1),
         ("topology_ready", 1),
+        ("evidence_tool_call", 1),
+        ("evidence_source_records", 1),
+        ("evidence_fragment", 1),
+        ("evidence_tool_result", 1),
+        ("evidence_bundle", 1),
     )
     assert ("fixture_message", 1) not in registry.registered_keys
     with pytest.raises(UnsupportedTranscriptContentError):
@@ -272,6 +277,37 @@ def test_unknown_and_corrupt_history_are_distinct_and_keep_neighbors() -> None:
     assert results[1].parse_error.code == "transcript_content_unsupported"
     assert results[2].parse_error.code == "transcript_content_corrupt"
     assert results[0].body.query == "lake"
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "evidence_tool_call",
+        "evidence_source_records",
+        "evidence_fragment",
+        "evidence_tool_result",
+        "evidence_bundle",
+    ],
+)
+def test_m5_content_reports_unknown_schema_and_corrupt_body(
+    content_type: str,
+) -> None:
+    registry = create_production_registry()
+    unknown = registry.parse(
+        _stored(ITEM_ID, content_type=content_type, version=99),
+        "{}",
+        error_id_factory=lambda: UUID(int=1),
+    )
+    corrupt = registry.parse(
+        _stored(OTHER_ITEM_ID, content_type=content_type),
+        "{}",
+        error_id_factory=lambda: UUID(int=2),
+    )
+
+    assert unknown.parse_status is ParseStatus.UNSUPPORTED
+    assert unknown.parse_error.code == "transcript_content_unsupported"
+    assert corrupt.parse_status is ParseStatus.CORRUPT
+    assert corrupt.parse_error.code == "transcript_content_corrupt"
 
 
 def test_read_detects_body_byte_count_corruption() -> None:

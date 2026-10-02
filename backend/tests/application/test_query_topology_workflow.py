@@ -231,6 +231,12 @@ class RecordingTopology:
     def __init__(self, *, gate: Gate | None = None) -> None:
         self.gate = gate
         self.calls: list[str] = []
+        self.segment_calls: list[str] = []
+
+    async def get_segment(self, comid, *, deadline=None):
+        del deadline
+        self.segment_calls.append(comid)
+        return None
 
     async def get_direct_upstreams(
         self,
@@ -278,6 +284,7 @@ class RecordingInventory:
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id=f"USGS-{request.comid}",
                 parameter=unit.parameter,
+                channel="continuous",
                 series_identity=(
                     f"series-{request.comid}-{unit.parameter.code}-{unit.segment_index}"
                 ),

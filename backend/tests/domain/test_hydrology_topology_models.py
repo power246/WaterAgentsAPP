@@ -18,6 +18,8 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    TopologySeriesRef,
+    WaterbodyGeometry,
 )
 
 UNIT = CoverageUnit(
@@ -40,7 +42,14 @@ def target_node() -> HydrologyNode:
             TopologyStationRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id="USGS-123",
-                series_refs=("series-123",),
+                series_refs=(
+                    TopologySeriesRef(
+                        series_identity="series-123",
+                        parameter=UNIT.parameter,
+                        channel="continuous",
+                        covered_segment_indexes=(0,),
+                    ),
+                ),
             ),
         ),
     )
@@ -178,3 +187,51 @@ def test_node_requires_inlet_metadata_and_excluded_reason() -> None:
             is_inlet=False,
             participation=HydrologyParticipation.EXCLUDED,
         )
+
+
+def test_graph_stores_full_geometry_once_and_resolves_node_summary() -> None:
+    geometry = WaterbodyGeometry.from_coordinates(
+        source_comid="123",
+        coordinates=((-77.2, 38.8), (-77.1, 38.9), (-77.0, 39.0)),
+    )
+    node = target_node().model_copy(
+        update={
+            "point": geometry.representative_point,
+            "geometry_ref": geometry.geometry_ref,
+            "geometry_summary": geometry.summary(),
+        }
+    )
+    graph = rebuild(
+        valid_graph(),
+        nodes=(node,),
+        geometries={geometry.geometry_ref: geometry},
+    )
+
+    serialized = graph.model_dump_json()
+    restored = HydrologyGraph.model_validate_json(serialized)
+
+    assert restored == graph
+    assert serialized.count('"full_coordinates"') == 1
+    assert "full_coordinates" not in restored.nodes[0].model_dump()
+
+
+def test_graph_rejects_missing_or_mismatched_geometry_references() -> None:
+    geometry = WaterbodyGeometry.from_coordinates(
+        source_comid="123",
+        coordinates=((-77.2, 38.8), (-77.0, 39.0)),
+    )
+    node = target_node().model_copy(
+        update={
+            "point": geometry.representative_point,
+            "geometry_ref": geometry.geometry_ref,
+            "geometry_summary": geometry.summary(),
+        }
+    )
+
+    with pytest.raises(ValidationError, match="geometry references"):
+        rebuild(valid_graph(), nodes=(node,), geometries={})
+
+    values = geometry.model_dump(mode="python")
+    values["bbox"] = (-77.3, 38.8, -77.0, 39.0)
+    with pytest.raises(ValidationError, match="bbox"):
+        WaterbodyGeometry.model_validate(values)

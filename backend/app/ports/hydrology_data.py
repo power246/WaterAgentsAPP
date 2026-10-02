@@ -1,13 +1,10 @@
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from app.domain.hydrology import (
     GeoPoint,
     MonitoringStation,
     RiverSegment,
 )
-
-RequestT = TypeVar("RequestT", contravariant=True)
-RecordT = TypeVar("RecordT", covariant=True)
 
 
 class ComidLookupPort(Protocol):
@@ -45,9 +42,3 @@ class TopologyDataPort(Protocol):
         *,
         deadline: float | None = None,
     ) -> tuple[MonitoringStation, ...]: ...
-
-
-class WaterObservationPort(Protocol[RequestT, RecordT]):
-    """An empty tuple means a successful fetch had no records, not unavailable."""
-
-    async def fetch(self, request: RequestT) -> tuple[RecordT, ...]: ...

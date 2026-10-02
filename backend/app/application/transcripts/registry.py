@@ -1,6 +1,7 @@
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter, ValidationError
@@ -42,6 +43,11 @@ from app.application.transcripts.redaction import redact, redact_tags
 from app.domain.attribution.analysis_detail import AnalysisDetail
 from app.domain.common import JsonValue
 from app.domain.domain_model import DomainModel
+from app.domain.evidence.evidence_bundle import EvidenceBundle
+from app.domain.evidence.evidence_fragment import EvidenceFragment
+from app.domain.evidence.evidence_source_records import EvidenceSourceRecords
+from app.domain.evidence.evidence_tool_call import EvidenceToolCall
+from app.domain.evidence.evidence_tool_result import EvidenceToolResult
 from app.domain.hydrology import HydrologyGraph
 
 
@@ -55,6 +61,7 @@ VisibilityExtractor = Callable[[object], ContentVisibility]
 MessageAdapter = Callable[[object], MessageProjection]
 MessageFinalizer = Callable[[str, GenerationStatus, MessageEndReason | None], object]
 ErrorExtractor = Callable[[object], tuple[UUID, ...]]
+PublicProjection = Callable[[object], JsonValue]
 
 
 def _serialize_safe_json(
@@ -95,6 +102,7 @@ class ContentRegistration:
     message_adapter: MessageAdapter | None = None
     message_finalizer: MessageFinalizer | None = None
     errors: ErrorExtractor = _no_references
+    public_projection: PublicProjection | None = None
     history_only_possible: bool = False
     writable: bool = True
     preserve_unset: bool = False
@@ -354,11 +362,28 @@ class TranscriptRegistry:
             raise UnsupportedTranscriptContentError(
                 "unparsed transcript content has no public typed body"
             )
-        return registration.adapter.dump_python(
+        body = registration.adapter.dump_python(
             item.body,
             mode="json",
             exclude_unset=registration.preserve_unset,
         )
+        if registration.public_projection is None:
+            return body
+        return registration.public_projection(item.body)
+
+    def public_safe_body(
+        self,
+        content_type: str,
+        content_schema_version: int,
+        safe_body: str,
+    ) -> str:
+        registration = self._registrations.get(
+            (content_type, content_schema_version)
+        )
+        if registration is None or registration.public_projection is None:
+            return safe_body
+        body = registration.adapter.validate_json(safe_body)
+        return _serialize_safe_json(registration.public_projection(body))
 
     def references_from_read(self, item: ReadTranscriptItem) -> tuple[UUID, ...]:
         registration = self._registrations.get(
@@ -434,6 +459,88 @@ def _standalone_error(body: object) -> tuple[UUID, ...]:
     return (body.error_id,)
 
 
+def _evidence_references(body: object) -> tuple[UUID, ...]:
+    if not isinstance(
+        body,
+        (EvidenceToolCall, EvidenceFragment, EvidenceToolResult, EvidenceBundle),
+    ):
+        raise TypeError("evidence reference extractor received another content type")
+    return tuple(UUID(item_id) for item_id in body.referenced_item_ids())
+
+
+def _evidence_fragment_metadata(body: object) -> TranscriptMetadata:
+    if not isinstance(body, EvidenceFragment):
+        raise TypeError("evidence metadata extractor received another content type")
+    return TranscriptMetadata(rag_eligible=body.rag_eligible)
+
+
+_PUBLIC_SOURCE_HOST_SUFFIXES = (
+    ".epa.gov",
+    ".usgs.gov",
+    ".weather.gov",
+    ".canada.ca",
+)
+_PUBLIC_SOURCE_PREVIEW_RECORDS = 32
+_PUBLIC_SOURCE_PREVIEW_BYTES = 16 * 1024
+
+
+def _public_source_uri(value: str | None) -> str | None:
+    if value is None:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme != "https" or not any(
+        host == suffix[1:] or host.endswith(suffix)
+        for suffix in _PUBLIC_SOURCE_HOST_SUFFIXES
+    ):
+        return None
+    return urlunsplit(("https", host, parsed.path, "", ""))
+
+
+def _public_source_record(record) -> JsonValue:
+    projected = record.model_dump(mode="json")
+    projected["source_uri"] = _public_source_uri(record.source_uri)
+    provenance = dict(projected["provenance"])
+    provenance.pop("facility_sample_centers", None)
+    provenance.pop("facility_request_identities", None)
+    projected["provenance"] = provenance
+    return projected
+
+
+def _evidence_source_records_projection(body: object) -> JsonValue:
+    if not isinstance(body, EvidenceSourceRecords):
+        raise TypeError("source-record projection received another content type")
+    records: list[JsonValue] = []
+    for record in body.records[:_PUBLIC_SOURCE_PREVIEW_RECORDS]:
+        candidate = [*records, _public_source_record(record)]
+        projection = {
+            "schema_version": body.schema_version,
+            "operation_id": body.operation_id,
+            "batch_id": body.batch_id,
+            "manifest": body.manifest.model_dump(mode="json"),
+            "record_count": len(body.records),
+            "records": candidate,
+            "records_truncated": len(candidate) < len(body.records),
+        }
+        if len(_serialize_safe_json(projection).encode("utf-8")) > (
+            _PUBLIC_SOURCE_PREVIEW_BYTES
+        ):
+            break
+        records = candidate
+    return {
+        "schema_version": body.schema_version,
+        "operation_id": body.operation_id,
+        "batch_id": body.batch_id,
+        "manifest": body.manifest.model_dump(mode="json"),
+        "record_count": len(body.records),
+        "records": records,
+        "records_truncated": len(records) < len(body.records),
+    }
+
+
 def create_production_registry() -> TranscriptRegistry:
     registry = TranscriptRegistry()
     registry.register(ContentRegistration(
@@ -483,6 +590,37 @@ def create_production_registry() -> TranscriptRegistry:
         content_type="topology_ready",
         content_schema_version=1,
         adapter=TypeAdapter(HydrologyGraph),
+    ))
+    registry.register(ContentRegistration(
+        content_type="evidence_tool_call",
+        content_schema_version=1,
+        adapter=TypeAdapter(EvidenceToolCall),
+        references=_evidence_references,
+    ))
+    registry.register(ContentRegistration(
+        content_type="evidence_source_records",
+        content_schema_version=1,
+        adapter=TypeAdapter(EvidenceSourceRecords),
+        public_projection=_evidence_source_records_projection,
+    ))
+    registry.register(ContentRegistration(
+        content_type="evidence_fragment",
+        content_schema_version=1,
+        adapter=TypeAdapter(EvidenceFragment),
+        references=_evidence_references,
+        metadata=_evidence_fragment_metadata,
+    ))
+    registry.register(ContentRegistration(
+        content_type="evidence_tool_result",
+        content_schema_version=1,
+        adapter=TypeAdapter(EvidenceToolResult),
+        references=_evidence_references,
+    ))
+    registry.register(ContentRegistration(
+        content_type="evidence_bundle",
+        content_schema_version=1,
+        adapter=TypeAdapter(EvidenceBundle),
+        references=_evidence_references,
     ))
     registry.register(ContentRegistration(
         content_type="lifecycle_event",

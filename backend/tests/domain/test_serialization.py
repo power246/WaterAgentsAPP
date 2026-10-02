@@ -4,6 +4,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from pydantic import ValidationError
 
+from app.domain import (
+    DirectRecordPayload,
+    EvidenceContentError,
+    SourceRecordReference,
+    canonical_model_bytes,
+    load_evidence_payload_json,
+    load_source_record_json,
+)
 from app.domain.common import DomainEnum, DomainModel, JsonValue, UtcDatetime
 from app.domain.hydrology import ParameterKey
 
@@ -148,3 +156,60 @@ def test_domain_enum_uses_lowercase_string_values_and_round_trips() -> None:
 
         class InvalidType(DomainEnum):
             INVALID = 1
+
+
+def test_canonical_evidence_serialization_normalizes_decimal_and_utc() -> None:
+    payload = DirectRecordPayload(
+        record_ref=SourceRecordReference(item_id="item-1", record_id="record-1"),
+        displayed_value="001.2300",
+        displayed_unit="mg/L",
+    )
+    timestamp = TimestampModel(
+        timestamp=datetime(
+            2026,
+            1,
+            1,
+            12,
+            tzinfo=timezone(timedelta(hours=-6)),
+        )
+    )
+
+    assert canonical_model_bytes(payload) == (
+        b'{"displayed_unit":"mg/L","displayed_value":"1.23",'
+        b'"payload_type":"direct_record","record_ref":'
+        b'{"item_id":"item-1","record_id":"record-1"}}'
+    )
+    assert canonical_model_bytes(timestamp) == b'{"timestamp":"2026-01-01T18:00:00Z"}'
+    assert load_evidence_payload_json(canonical_model_bytes(payload)) == payload
+
+
+@pytest.mark.parametrize(
+    ("loader", "raw", "expected_code"),
+    [
+        (
+            load_evidence_payload_json,
+            b'{"payload_type":"unknown"}',
+            "unknown_discriminator",
+        ),
+        (
+            load_evidence_payload_json,
+            b'{"payload_type":"direct_record"}',
+            "corrupt_content",
+        ),
+        (
+            load_source_record_json,
+            b'{"record_type":"unknown"}',
+            "unknown_discriminator",
+        ),
+    ],
+)
+def test_evidence_loaders_return_stable_unknown_or_corrupt_errors(
+    loader,
+    raw: bytes,
+    expected_code: str,
+) -> None:
+    with pytest.raises(EvidenceContentError) as exc_info:
+        loader(raw)
+
+    assert exc_info.value.code == expected_code
+    assert str(exc_info.value) == "Evidence content failed schema validation."

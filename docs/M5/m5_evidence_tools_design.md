@@ -1,8 +1,8 @@
 # M5 Evidence Tools + EvidenceBundle 设计决策记录
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
-> 状态：设计方向与实施模式已完成对齐。本文记录已确认的业务与架构决策；精确类型、provider、policy、API 和验收接缝已整理到同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。TODO 当前全部未开始，不表示 M5 已实现。
+> 状态：设计方向与实施模式已完成对齐，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收证据和未运行边界见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 本文承接：
 
@@ -117,7 +117,7 @@ provider wire response
 
 - provider wire model 与 SDK/HTTP 字段留在对应 infrastructure adapter 内，不进入 port、domain、transcript 或 reasoning；
 - observation、weather、forecast、facility、upstream result 和 historical inference 分别使用强类型 Request/Record DTO，port 不返回裸 `dict`、`Any` 或 provider SDK 对象；
-- 当前 `EvidenceFragment.value_or_summary` 的宽松 `JsonValue` 直接收紧为带稳定 `payload_type` discriminator 的强类型 evidence payload union，不并存旧 payload 读取分支；
+- `EvidenceFragment.payload` 是带稳定 `payload_type` discriminator 的强类型 evidence payload union，不存在宽松 JSON payload 或并行读取分支；
 - 每个 `EvidenceFragment` 保存为唯一 typed transcript item；`EvidenceBundle.fragment_refs` 保存去重后的原 item references，不在 bundle 中复制 fragment payload；
 - 窗口级 `EvidenceCell` 使用“agent COMID × 目标 ParameterKey × 最终 TimeWindow”身份，并分别引用 direct evidence、capability 允许的 indirect evidence、必需 discharge evidence 和 collection/quality blockers；
 - indirect reference 必须同时保存 capability registry 中的 relation identity，不能只保存一个无语义 evidence ID；
@@ -371,25 +371,25 @@ direct_measurement
   -> 当前水体、目标 ParameterKey、适用时间/介质/方法的直接观测
 
 allowed_indirect
-  -> capability registry 明确登记的 relation identity，且其全部前置证据成立
+  -> 当前 append-only EvidenceRulePlan 中的动态 rule identity，且其全部前置证据、时空关系与引用闭包成立
 
 contextual_only
   -> 可用于解释或提出假设，但不能满足目标参数或 required discharge 的 sufficiency cell
 ```
 
-Agent、prompt、tool caller 和 provider adapter 都不能自行提升 applicability。EvidenceCell 只把 `direct_measurement` 或命中当前 capability 的 `allowed_indirect` 计入 gate；`contextual_only` refs 可以随 bundle 提供给后续归因，但不得把 `insufficient` 改为 sufficient。
+Agent、prompt、tool caller 和 provider adapter 都不能直接提升 applicability。问题解析 Agent 负责基线规则，水体 Agent 只能追加规则；通用 materializer 是唯一可以据此生成新 `allowed_indirect` fragment 的组件。EvidenceCell 只把 `direct_measurement` 或命中当前 plan 的 `allowed_indirect` 计入 gate；`contextual_only` refs 可以随 bundle 提供给后续归因，但不得把 `insufficient` 改为 sufficient。
 
 同一 series 的本地 direct records 经过允许的确定性聚合后，derived fragment 可以继续以 `direct_measurement` applicability 进入 gate，因为其依据仍是当前水体直接观测；但它不再是一条原始读数。M6 最终结果只要引用多条 records 或 aggregate，就必须标 `inferred`，不能利用 applicability 名称绕过 D14 的一对一 observed 规则。
 
 facility 事实默认是 `contextual_only`。设施存在、permit/compliance 状态、行业类别或与 LineString 的空间距离只证明该事实本身，不证明设施与当前河段水文连通、向当前窗口排放或导致目标参数变化。仅凭 proximity 的 attribution basis 上限是 `hypothesized`，不得输出确定因果措辞。
 
-未来若 provider 返回真实 facility discharge/effluent measurement，该记录可以是“设施处的 observed source fact”，但它对目标水体的影响仍不是 `direct_measurement`。只有 capability/evidence registry 原子登记参数对应、时间关系、水文关系、允许的结果强度和测试后，才能作为对应 relation 的 `allowed_indirect`；否则仍为 contextual。不得因名称或单位相似自动关联。
+未来若 provider 返回真实 facility discharge/effluent measurement，该记录可以是“设施处的 observed source fact”，但它对目标水体的影响仍不是 `direct_measurement`。只有当前 `EvidenceRulePlan` 明确参数对应、时间关系、水文关系和最大结果强度，且 materializer 验证输入闭包后，才能另行生成对应 `allowed_indirect`；否则仍为 contextual。不得因名称或单位相似自动关联。
 
-天气观测/预报同样先保留其自身事实身份，不自动成为水质观测。初始只有已登记的 `turbidity_precipitation_discharge_directional` 等规则可进入 indirect cell；该规则必须同时引用适用窗口的 precipitation 与 discharge，并最多支持 directional/inferred 判断，不能直接生成目标参数 quantified observed value。未登记的天气—参数关系保持 contextual。
+天气观测/预报同样先保留其自身事实身份，不自动成为水质观测。例如问题解析 Agent 可声明 precipitation + discharge 对 turbidity 的同窗方向性支持；该规则必须同时引用适用窗口的 precipitation 与 discharge，并最多支持 directional/inferred 判断，不能直接生成目标参数 quantified observed value。当前 plan 没有声明或输入不完整的天气—参数关系保持 contextual。
 
-上游 Agent result 经 `same_parameter_upstream` relation 进入下游时始终是 `allowed_indirect`，不是下游本地 observed。它必须引用直接上游 session 的原结果及其 evidence closure；下游的加权、传播或综合值继续标记 inferred/predicted，不得因上游链包含观测而提升为下游 observed。
+上游 Agent result 先作为 contextual raw input 保存。只有当前 plan 存在相应 `upstream_to_downstream` 规则，且它引用直接上游 session 的原结果及完整 evidence closure 时，materializer 才生成 `allowed_indirect` relation support；它仍不是下游本地 observed。下游的加权、传播或综合值继续标记 inferred/predicted，不得因上游链包含观测而提升为下游 observed。
 
-`search_transcript_evidence` 返回的历史推理必须保留 `historical_inference` 事实和原 run/session provenance。M5 slot 默认将其标为 contextual，不能替代本次 collection、required discharge 或 M6 gate；M8 若扩大用途，必须在当前唯一 registry/model 中原子登记关系、时效和优先级，且当前 session 的合格实际观测始终优先。
+`search_transcript_evidence` 返回的历史推理必须保留 `historical_inference` 事实和原 run/session provenance。M5 slot 默认将其标为 contextual，不能替代本次 collection、required discharge 或 M6 gate；M8 若扩大用途，必须通过同一 append-only rule plan 明确关系、时效和优先级，并经过确定性物化，且当前 session 的合格实际观测始终优先。
 
 现有 `AttributionBasis(observed/correlated/inferred/hypothesized)` 表达结论的归因依据，不替代 evidence applicability。M6 validator 必须交叉校验 result source、attribution basis、applicability、relation identity 和 evidence refs：目标水体 observed 只能来自适用且能够一对一追溯的本地具体直接观测；相关、聚合、综合、推断或假设不得通过措辞或 confidence 值伪装成 observed/causal。
 
@@ -433,11 +433,11 @@ M5/M6/M7 必须按当前 HydrologyNode 是否具有合格本地 station/series r
 discharge 是每个实际执行水体、每个最终时间窗口的 mandatory supporting parameter，不因为用户未显式请求或当前节点无监测站而省略：
 
 - station-backed waterbody 必须先尝试取得本地 discharge direct records；
-- stationless 或本地 discharge 缺失时，必须读取直接上游传递的 discharge result/evidence，并可使用 registry 已登记的 `discharge_gage_height_estimate`、`discharge_basin_estimate` 或后续原子登记的关系；
+- stationless 或本地 discharge 缺失时，必须读取直接上游传递的 discharge result/evidence；只有当前 plan 的 discharge 规则输入完整时才能形成方向性 allowed-indirect support；
 - 任一 discharge 聚合、传播、换算为估算流量或跨水体结果均标记 inferred，只有一对一采用当前水体具体 discharge direct record 才可 observed；
 - 每个目标 ParameterKey/window 的 gate 同时要求该目标与 discharge 各自具有 direct 或 allowed-indirect evidence；最终仍无法得到 discharge 的窗口必须是 `indeterminate/insufficient_evidence`，不得生成该窗口的 quantified/directional 目标水质判断。
 
-天气 observation/forecast 始终是 optional tool，不因 prediction mode 自动变成 mandatory。Agent 是否调用由当前任务、上游结果、证据缺口和 capability relation 决定；一旦某个 allowed-indirect relation 选择依赖天气，该次调用及其所需前置证据必须完成，否则对应 relation 不成立。
+天气 observation/forecast 不因 prediction mode 自动执行；是否调用由当前任务、上游结果、证据缺口和 `EvidenceRulePlan` 决定。若 parser 基线规则把天气输入标为 `required_collection_attempt`，确定性 acquisition 必须先尝试该有界调用；Agent 后加的可选规则可由 Agent 触发。无论哪种来源，所需前置证据未完成时 relation 都不成立。
 
 mandatory/conditional-mandatory/optional 仍由同一 registry、executor、transcript schema 和 error mapping 实现。确定性 tool policy 只负责 station-backed preflight 与直接上游结果注入；水体 Agent 负责 optional 调用。任何阶段都不得退化为 topology 完成后对整图预取。
 
@@ -454,7 +454,7 @@ station-backed waterbody 在准备执行时创建真实 waterbody session，随�
 
 M7 必须将每个直接上游节点的终态视为 DAG 依赖已收敛，包括正常有结果、正常全 indeterminate、failed 和 cancelled；汇流节点等待全部直接依赖收敛后再决定执行，不能因一条分支无 evidence 就忽略其存在或提前启动。
 
-`get_upstream_results` 对正常无 evidence 分支返回其确定性 result/bundle references 和结构化不足事实，但这些 refs 不构成 `same_parameter_upstream` allowed-indirect evidence。下游 Agent/context 必须知道该自然缺口；只允许其余 direct/allowed-indirect evidence 进入 gate，并在适用结果中保留 branch coverage 不完整事实。
+`get_upstream_results` 对正常无 evidence 分支返回其确定性 result/bundle references 和结构化不足事实，但这些 refs 不满足任何 `upstream_to_downstream` 动态规则。下游 Agent/context 必须知道该自然缺口；只允许其余 direct/allowed-indirect evidence 进入 gate，并在适用结果中保留 branch coverage 不完整事实。
 
 汇流处只要其他上游分支或本地/允许侧面 evidence 仍能支持部分 cell，就可以继续；缺失分支不使其他 cell 自动失败。单链或全部分支均无 usable evidence 时，下游无站节点仍可按 D15 执行有界 optional evidence acquisition，但 contextual-only 内容不能解锁 gate，最终不足则同样确定性收敛。
 

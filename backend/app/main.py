@@ -41,7 +41,11 @@ from app.infrastructure.persistence.database import (
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
-from app.infrastructure.runtime import RuntimeComponents, build_m4_runtime
+from app.infrastructure.runtime import (
+    RuntimeComponents,
+    build_m4_runtime,
+    build_m5_runtime,
+)
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
@@ -153,10 +157,23 @@ def create_app(
                     inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
                     preview_bytes=resolved_settings.transcript_preview_bytes // 2,
                 )
-                application.state.run_coordinator = coordinator
-                application.state.transcript_reader = transcript_reader
-                application.state.transcript_store = active_store
-                yield
+                async with build_m5_runtime(
+                    resolved_settings,
+                    operations=coordinator,
+                    transcript_reader=transcript_reader,
+                    capability_registry=resolved_parameter_capabilities,
+                    clock=resolved_clock,
+                ) as m5_runtime:
+                    coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
+                    application.state.run_coordinator = coordinator
+                    application.state.transcript_reader = transcript_reader
+                    application.state.transcript_store = active_store
+                    application.state.m5_runtime = m5_runtime
+                    try:
+                        yield
+                    finally:
+                        await coordinator.shutdown()
+                        coordinator = None
             finally:
                 if coordinator is not None:
                     await coordinator.shutdown()

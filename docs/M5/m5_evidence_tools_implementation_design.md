@@ -1,8 +1,8 @@
 # M5 Evidence Tools + EvidenceBundle 实施设计
 
-更新日期：2026-09-29
+更新日期：2026-10-01
 
-> 状态：设计已冻结，供后续实现使用。本文不表示 M5 已实现或已验收；实施步骤、验证门禁和完成记录见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)，当前全部未开始。
+> 状态：设计已冻结，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。真实 USGS/NWS/EPA 请求和 Ubuntu/macOS/Windows 三平台 CI 仍为 `not run`；实施步骤、验证证据和剩余风险见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
 本文把 [M5 设计决策](m5_evidence_tools_design.md) 落到模块、类型、provider、执行链、持久化与测试接缝。确定性单位、质量、聚合和 applicability 规则见 [M5 Policy Catalog](m5_evidence_policy_catalog.md)，公开读取与 typed content 示例见 [M5 API 文档](m5_evidence_tools_api.md)。
 
@@ -96,7 +96,7 @@ provider batch 可以覆盖多个最终窗口，但请求边界只能是：
  analysis_end   + 1 local calendar day]
 ```
 
-“一天”按 session IANA timezone 的当地日期计算后转换为 UTC，不能简单减加 24 小时。扩展记录只用于已登记的 adjacent-time、baseline、aggregation boundary 或 provider statistic 解释；不能因此创建额外结果窗口。
+“一天”按 session IANA timezone 的当地日期计算后转换为 UTC，不能简单减加 24 小时。`same_window`、`overlapping_window` 与 `adjacent_local_day` 由唯一 timezone-aware policy 判断；其中 adjacent 要求 source 与 target 分别落在相差恰好一天的当地自然日，同一当地日期内的其他窗口不算 adjacent。扩展记录只用于已登记的 adjacent-time、baseline、aggregation boundary 或 provider statistic 解释；不能因此创建额外结果窗口。
 
 ## 3. 模块与依赖方向
 
@@ -189,15 +189,16 @@ provider envelope 不进入 DTO。原始响应只在 adapter contract fixture �
 
 ### 4.2 EvidencePayload
 
-删除 `EvidenceFragment.value_or_summary: JsonValue`，改为 `payload` 判别联合：
+`EvidenceFragment.payload` 是当前唯一 V1 的判别联合：
 
 ```text
 DirectRecordPayload(record_ref, displayed_value, displayed_unit)
-AggregatePayload(value, unit, method, input_record_refs, coverage)
+AggregatePayload(value, unit, method, input_record_refs, input quality counts)
 ConversionPayload(value, unit, input_evidence_ref, conversion_id)
 ContextPayload(summary_fields, record_refs)
 CollectionFactPayload(status, reason, affected_window_ids, record_refs)
-UpstreamResultPayload(result_ref, closure_refs)
+UpstreamResultPayload(upstream_session_id, result_ref, closure_refs)
+RelationSupportPayload(rule_id, plan_digest, input_evidence_refs, inference_strength, rationale)
 HistoricalInferencePayload(original_item_ref, projection)
 ```
 
@@ -206,7 +207,7 @@ HistoricalInferencePayload(original_item_ref, projection)
 ```text
 payload
 applicability: direct_measurement | allowed_indirect | contextual_only
-relation_id: EvidenceRuleId | null
+relation_id: NonEmptyString | null       # 动态规则的稳定 rule_id
 series_identity
 coverage
 quality_class: valid | suspicious | invalid | null  # collection fact 为 null
@@ -249,7 +250,7 @@ topology_ref
 window_refs[]
 requested_parameters[]
 supporting_parameters[]
-cell_manifest[]
+cells[]
 fragment_refs[]
 source_record_item_refs[]
 tool_result_refs[]
@@ -258,7 +259,7 @@ collection_summary
 created_at
 ```
 
-bundle validator 校验引用去重、scope 一致、每个 parameter/window/role 恰有一个 cell、fragment/reference closure 完整，以及每个目标 cell 都能找到同窗 discharge cell。
+bundle validator 校验引用去重、每个 parameter/window/role 恰有一个 cell、fragment/reference closure 完整，以及每个目标 cell 都能找到同窗 discharge cell；`RelationSupportPayload` 的每个 input ref 必须精确指向 bundle 内相应 ParameterKey 的 fragment，依赖图不得成环，且 `plan_digest/rule_id` 必须命中 sealed scope 的 `EvidenceRulePlan`。规则输入片段作为目标 cell 的 contextual 辅助引用，不因输入缺失把已经成立的 direct 证据降级。item 由统一 reader 解析后，再用 `ReferenceScope` 校验同 run/current session（context/topology 可为同 run 的 run-global item）。
 
 ## 5. Tool registry 与执行契约
 
@@ -297,13 +298,14 @@ tool_call_id
 operation_id
 execution_status: completed | failed | cancelled
 collection_status: available | empty | unavailable | invalid | null
-manifest_ref
+manifest_refs[]
 fragment_refs[]
 collection_fact_refs[]
-request_count
-page_count
-record_count
+source_record_refs[]
+counts: {requests, pages, records, fragments}
 deduplicated
+deduplicated_from_operation_id
+deduplicated_from_result_ref
 safe_error: null | {code, message, retryable}
 ```
 
@@ -327,7 +329,7 @@ max_result_preview_bytes
 producer_status
 ```
 
-tool roster 由 server 按 session scope 生成：stationless 节点不注册本地 observation tool；`memory_mode=stateless` 不注册 transcript search；M7/M8 producer 未接入时保留 descriptor 供 contract test，但 production roster 不向 Agent 暴露不可执行工具。
+tool roster 由 server 按 session scope 生成：stationless 节点不注册本地 observation tool；`memory_mode=stateless` 不注册 transcript search；M7/M8 producer 未接入时保留 descriptor 供 contract test，但 production roster 不向 Agent 暴露不可执行工具。roster 与 executor 共用同一个 scope authorization predicate；producer readiness 与 scope authorization 分离，合法内部调用仍可得到 producer-unavailable typed result。
 
 ## 6. Provider 实现
 
@@ -356,7 +358,7 @@ GET https://api.waterdata.usgs.gov/samples-data/results/narrow
 
 ### 6.3 Discharge
 
-直接 discharge 使用与 water observation 相同 USGS adapter，并固定 ParameterKey `usgs:00060`；若 capability 为其他已登记 discharge 通道，必须保留原 parameter/statistic，不能改名冒充 00060。站点缺失后的 upstream/估算由 evidence relation 承接，不由 USGS adapter生成推理值。
+直接 discharge 使用与 water observation 相同 USGS adapter，并固定 ParameterKey `usgs:00060`；若 capability 为其他已登记 discharge 通道，必须保留原 parameter/statistic，不能改名冒充 00060。站点缺失后的 upstream/估算先保存为 contextual 输入，只有当前 `EvidenceRulePlan` 的规则被 materializer 满足后才产生方向性 support；USGS adapter 不生成推理值。
 
 ### 6.4 NWS weather
 
@@ -388,11 +390,13 @@ ECHO point-radius 能力由 corridor planner 调用：
 6. 用原始 facility point 对完整 LineString 计算最终最短距离，并按 Agent 选择的精确半径过滤；provider 查询使用的向上取整半径不能扩大最终结果；
 7. 保留 Agent radius、provider radius、采样中心、去重和最终 distance provenance。
 
-设施位置始终是 `contextual_only`；只有后续明确登记且具有真实排放/受纳水关系的数据才能成为 allowed-indirect。
+设施位置始终是 `contextual_only`；只有问题解析 Agent 或后续水体 Agent 明确追加关系，且真实排放/受纳水、时间与引用输入全部满足时，materializer 才能另行生成 allowed-indirect support。
 
 ### 6.6 单一来源与失败
 
 第一版每类证据只有上述 official provider。任一 adapter 失败都不静默切换来源、不使用旧 cache、不把失败改写为空。真实 provider smoke 必须显式 opt-in；没有请求或缺少必要配置时报告 `not run`。
+
+provider output 在写 source records 前统一经过 application validator。M7 upstream output 必须复核 record COMID 属于服务端 topology 的直接上游、waterbody session 属于同一 run/COMID 且已 completed、参数与窗口完全受请求授权，并且 result/evidence closure refs 全部存在且属于该 upstream session；失败统一为安全的 invalid provider response，不能进入 materializer 或解锁 cell。
 
 ## 7. Geometry 扩展
 
@@ -427,12 +431,12 @@ geometry 缺失时，observation station 查询仍可按 M4 refs 运行；facili
 
 ## 8. 单位、质量、聚合与 applicability
 
-四类 policy 都由 [M5 Policy Catalog](m5_evidence_policy_catalog.md) 的 schema 驱动，并与 154 项 capability 位于同一 manifest：
+前三类确定性执行 policy 由 [M5 Policy Catalog](m5_evidence_policy_catalog.md) 的 schema 驱动并与 154 项 capability 位于同一 manifest；第四类 relation policy 位于每次分析的 append-only `EvidenceRulePlan`：
 
 - unit definition 表只登记单位维度、别名和确定性变换；
 - capability-channel policy 决定某参数可接受哪些 source unit、value semantics 与 aggregation；
 - provider quality mapping 把 approval/qualifier 映射为 valid/suspicious/invalid；
-- evidence relation 决定 direct/allowed-indirect/contextual。
+- `EvidenceRulePlan` 与通用 materializer 决定 contextual 输入何时产生新的 allowed-indirect support；capability manifest 不保存人类写死的因果规则。
 
 Agent 只能从 registry 给出的 aggregation methods 中选择；executor 再校验 series identity、value semantics、coverage 和单位。`suspicious` 可参与聚合，但 derived fragment 必须继承 flags、输入计数和 suspicious 计数；`invalid` 只供审计。
 
@@ -468,7 +472,7 @@ run_id + agent_comid + tool_name + normalized parameters
 + sorted window IDs + policy/manifest digest
 ```
 
-同 run 相同 key 的并发调用共享一个 in-flight future；成功完成后保留到 run workflow quiesced，再随 run live cleanup 移除。failed/cancelled 不进入成功复用。不同 run 永不复用，避免当前数据被旧 cache 替代。
+同 run 相同 key 的并发调用共享一个 in-flight future；成功完成后保留到 run workflow quiesced，再随 run live cleanup 移除。production composition 必须在首个 run 创建前把 `M5Runtime.cleanup_run` 注册为 coordinator 的唯一 run-resource cleanup hook；live cleanup 只有在 hook 成功后才移除 run，失败沿既有 cleanup monitor 重试。应用 shutdown 也必须在 M5 provider context 关闭前对剩余 run 执行同一幂等 hook。failed/cancelled 不进入成功复用。不同 run 永不复用，避免当前数据被旧 cache 替代。
 
 每个调用仍写自己的 `evidence_tool_call v1`；复用者的 `evidence_tool_result v1` 写 `deduplicated=true` 并引用原 operation/result，不复制 records/fragments。
 
@@ -482,7 +486,9 @@ run_id + agent_comid + tool_name + normalized parameters
 4. `evidence_tool_result v1`
 5. `evidence_bundle v1`
 
-正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
+正常顺序是 call → zero or more source-record batches → fragments/facts → result → final bundle。未知工具，以及 roster、session/window/parameter、跨工具 options 或缺少 descriptor 必需 request shape，属于尚未形成合法调用的 preflight rejection；它们不得触发 scope preparer，也不写 call/result。合法 call 持久化成功后，producer unavailable、budget、provider failure 和已请求取消等运行期结局才写 completed/failed/cancelled result。写入失败沿 M3 pending/retry 语义处理；未确认必需事实不能被 bundle 引用为已持久化完成。
+
+dispatch 已确认写入 manifest/source/fragment 后，即使紧接着发生 deadline 或取消，失败/取消 result 也必须携带这些已确认 references；不得回退为空 value，也不得把该 operation 放入成功 dedup cache。
 
 每类内容提供：model、deserializer、reference extractor、public projection、redaction、visibility、size policy 和 corruption issue。API/SSE 不新造 `evidence_collected` 事件名；仍通过 session 的 `transcript_item` 交付 typed content，生命周期事件只表达执行状态。
 
@@ -505,6 +511,8 @@ run_id + agent_comid + tool_name + normalized parameters
 | facility sample centers / call | 32 |
 
 如果官方 provider 的安全上限更低则使用更低值。budget exceeded 是技术 blocker，不是 empty；Agent 不能通过拆分同义调用绕过 canonical budget accounting。
+
+`pages / operation` 是跨全部 facility sample centers 的总预算，不是每中心预算。facility corridor 在 provider I/O 前使用 `min(facility sample centers, pages / operation)` 作为有效中心上限；EPA adapter 在每次逻辑页请求前再次检查同一个 operation 总页数，executor 仍保留聚合后的防御性校验。
 
 取消在新请求、下一页、retry、policy transform、写 bundle 和向下游交付前检查。cancel 胜出后不开始新工作；在途响应只进入 M3 取消审计路径，不补入当前 bundle。
 

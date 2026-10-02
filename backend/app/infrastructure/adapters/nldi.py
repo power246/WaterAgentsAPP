@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from math import asin, cos, isfinite, radians, sin, sqrt
+from math import isfinite
 from urllib.parse import quote
 
-from app.domain.hydrology import GeoPoint, MonitoringStation, RiverSegment
+from app.domain.hydrology import (
+    GeoPoint,
+    MonitoringStation,
+    RiverSegment,
+    WaterbodyGeometry,
+)
 from app.infrastructure.adapters._parsing import (
     invalid_response,
     require_list,
@@ -82,9 +87,13 @@ class NldiAdapter:
         if feature_comid != comid:
             raise invalid_response(PROVIDER, operation)
         coordinates = self._line_coordinates(feature, operation)
+        geometry = self._waterbody_geometry(feature_comid, coordinates, operation)
         return RiverSegment(
             comid=feature_comid,
-            location=self._representative_point(coordinates),
+            location=geometry.representative_point,
+            geometry_ref=geometry.geometry_ref,
+            geometry_summary=geometry.summary(),
+            geometry=geometry,
         )
 
     async def get_direct_upstreams(
@@ -114,6 +123,7 @@ class NldiAdapter:
         if self._feature_comid(origin_features[0], operation) != comid:
             raise invalid_response(PROVIDER, operation)
         origin_coordinates = self._line_coordinates(origin_features[0], operation)
+        self._waterbody_geometry(comid, origin_coordinates, operation)
         origin_endpoints = self._endpoint_keys(origin_coordinates)
         navigation = await self._features(
             f"/comid/{quote(comid, safe='')}/navigation/UT/flowlines",
@@ -140,14 +150,11 @@ class NldiAdapter:
             candidates[candidate_comid] = coordinates
 
         return tuple(
-            RiverSegment(
-                comid=candidate_comid,
-                location=self._representative_point(coordinates),
-                distance_to_downstream_km=self._polyline_length_km(
-                    coordinates,
-                    operation,
-                ),
-                downstream_comids=(comid,),
+            self._upstream_segment(
+                candidate_comid,
+                coordinates,
+                downstream_comid=comid,
+                operation=operation,
             )
             for candidate_comid, coordinates in sorted(
                 candidates.items(),
@@ -220,9 +227,42 @@ class NldiAdapter:
         return await self._features(
             f"/comid/{quote(comid, safe='')}",
             operation=operation,
-            params={"f": "json"},
+            params={"excludeGeometry": False, "f": "json"},
             deadline=deadline,
         )
+
+    def _upstream_segment(
+        self,
+        comid: str,
+        coordinates: tuple[tuple[float, float], ...],
+        *,
+        downstream_comid: str,
+        operation: str,
+    ) -> RiverSegment:
+        geometry = self._waterbody_geometry(comid, coordinates, operation)
+        return RiverSegment(
+            comid=comid,
+            location=geometry.representative_point,
+            geometry_ref=geometry.geometry_ref,
+            geometry_summary=geometry.summary(),
+            geometry=geometry,
+            distance_to_downstream_km=float(geometry.length_km),
+            downstream_comids=(downstream_comid,),
+        )
+
+    @staticmethod
+    def _waterbody_geometry(
+        comid: str,
+        coordinates: tuple[tuple[float, float], ...],
+        operation: str,
+    ) -> WaterbodyGeometry:
+        try:
+            return WaterbodyGeometry.from_coordinates(
+                source_comid=comid,
+                coordinates=coordinates,
+            )
+        except ValueError:
+            raise invalid_response(PROVIDER, operation) from None
 
     async def _features(
         self,
@@ -349,15 +389,11 @@ class NldiAdapter:
             provider=PROVIDER,
             operation=operation,
         )
-        GeoPoint(latitude=latitude, longitude=longitude)
+        try:
+            GeoPoint(latitude=latitude, longitude=longitude)
+        except ValueError:
+            raise invalid_response(PROVIDER, operation) from None
         return longitude, latitude
-
-    @staticmethod
-    def _representative_point(
-        coordinates: tuple[tuple[float, float], ...],
-    ) -> GeoPoint:
-        longitude, latitude = coordinates[len(coordinates) // 2]
-        return GeoPoint(latitude=latitude, longitude=longitude)
 
     @staticmethod
     def _endpoint_keys(
@@ -367,29 +403,3 @@ class NldiAdapter:
             (round(coordinates[0][0], 7), round(coordinates[0][1], 7)),
             (round(coordinates[-1][0], 7), round(coordinates[-1][1], 7)),
         }
-
-    @staticmethod
-    def _polyline_length_km(
-        coordinates: tuple[tuple[float, float], ...],
-        operation: str,
-    ) -> float:
-        earth_radius_km = 6371.0088
-        total = 0.0
-        for (start_lon, start_lat), (end_lon, end_lat) in zip(
-            coordinates,
-            coordinates[1:],
-        ):
-            start_lat_radians = radians(start_lat)
-            end_lat_radians = radians(end_lat)
-            latitude_delta = end_lat_radians - start_lat_radians
-            longitude_delta = radians(end_lon - start_lon)
-            haversine = (
-                sin(latitude_delta / 2) ** 2
-                + cos(start_lat_radians)
-                * cos(end_lat_radians)
-                * sin(longitude_delta / 2) ** 2
-            )
-            total += 2 * earth_radius_km * asin(sqrt(haversine))
-        if not isfinite(total) or total <= 0:
-            raise invalid_response(PROVIDER, operation)
-        return total

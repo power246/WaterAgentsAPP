@@ -15,6 +15,7 @@ class SeriesRef(DomainModel):
     provider: ParameterProvider
     station_id: NonEmptyString
     parameter: ParameterKey
+    channel: NonEmptyString
     series_identity: NonEmptyString
     coverage_source: AvailabilityCoverageSource
     covered_units: tuple[CoverageUnit, ...]
@@ -39,4 +40,10 @@ class SeriesRef(DomainModel):
             self.provider is ParameterProvider.WDFN_TIME_SERIES
         ):
             raise ValueError("coverage source must match the series provider")
+        if self.provider is ParameterProvider.WDFN_TIME_SERIES:
+            if self.channel not in {"continuous", "daily"}:
+                raise ValueError("time-series channel must match provider metadata")
+        elif self.provider is ParameterProvider.USGS_SAMPLES:
+            if self.channel != "discrete_samples":
+                raise ValueError("sample channel must be discrete_samples")
         return self

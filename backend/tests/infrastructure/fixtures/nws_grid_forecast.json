@@ -1,0 +1,19 @@
+{
+  "type": "Feature",
+  "properties": {
+    "updateTime": "2026-09-30T09:30:00Z",
+    "temperature": {
+      "uom": "wmoUnit:degC",
+      "values": [
+        {"validTime": "2026-09-30T10:00:00+00:00/PT1H", "value": 22.0},
+        {"validTime": "2026-09-30T11:00:00+00:00/PT1H", "value": null}
+      ]
+    },
+    "quantitativePrecipitation": {
+      "uom": "wmoUnit:mm",
+      "values": [
+        {"validTime": "2026-09-30T10:00:00+00:00/PT6H", "value": 4.5}
+      ]
+    }
+  }
+}

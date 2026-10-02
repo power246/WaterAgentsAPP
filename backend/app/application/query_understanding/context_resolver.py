@@ -6,11 +6,14 @@ from app.application.query_understanding.context_models import (
     AnalysisContext,
     AnalysisContextResolution,
     AnalysisContextResolutionStatus,
+    EvidenceRuleOrigin,
     ParameterIntentSource,
     ParsedIntentV1,
     ResolvedParameterIntent,
     SupportingIntentReason,
     SupportingParameterIntent,
+    create_evidence_rule,
+    create_evidence_rule_plan,
 )
 from app.application.query_understanding.date_resolver import DateResolver
 from app.application.query_understanding.location_resolver import LocationResolver
@@ -159,7 +162,60 @@ class AnalysisContextResolver:
             )
             for item in parameters.supporting_parameters
         )
+        output_keys = {
+            *(item.key for item in resolved_parameters),
+            *(item.key for item in supporting_parameters),
+        }
+        baseline_rules = []
+        for parsed_rule in parsed_intent.evidence_rules:
+            output_matches = self._capability_registry.exact_matches(
+                parsed_rule.output_parameter
+            )
+            if len(output_matches) != 1:
+                return self._failure(
+                    AnalysisContextResolutionStatus.PARAMETER_AMBIGUOUS
+                    if output_matches
+                    else AnalysisContextResolutionStatus.PARAMETER_UNSUPPORTED
+                )
+            output_parameter = output_matches[0].key
+            if output_parameter not in output_keys:
+                return self._failure(
+                    AnalysisContextResolutionStatus.PARAMETER_UNSUPPORTED
+                )
+
+            input_parameters = []
+            for concept in parsed_rule.input_parameters:
+                input_matches = self._capability_registry.exact_matches(concept)
+                if len(input_matches) != 1:
+                    return self._failure(
+                        AnalysisContextResolutionStatus.PARAMETER_AMBIGUOUS
+                        if input_matches
+                        else AnalysisContextResolutionStatus.PARAMETER_UNSUPPORTED
+                    )
+                input_parameters.append(input_matches[0].key)
+            baseline_rules.append(
+                create_evidence_rule(
+                    output_parameter=output_parameter,
+                    input_parameters=tuple(input_parameters),
+                    temporal_relation=parsed_rule.temporal_relation,
+                    spatial_relation=parsed_rule.spatial_relation,
+                    maximum_inference_strength=(
+                        parsed_rule.maximum_inference_strength
+                    ),
+                    required_collection_attempt=(
+                        parsed_rule.required_collection_attempt
+                    ),
+                    rationale=parsed_rule.rationale,
+                    origin=EvidenceRuleOrigin.QUERY_PARSER,
+                )
+            )
         facts = temporal.temporal
+        try:
+            evidence_rule_plan = create_evidence_rule_plan(tuple(baseline_rules))
+        except ValueError:
+            return self._failure(
+                AnalysisContextResolutionStatus.QUERY_CLARIFICATION_REQUIRED
+            )
         context = AnalysisContext(
             query=request.query,
             decision_instant=decision_instant,
@@ -176,6 +232,7 @@ class AnalysisContextResolver:
             parser_model=request.parser_model,
             waterbody_model=request.waterbody_model,
             memory_mode=request.memory_mode,
+            evidence_rule_plan=evidence_rule_plan,
         )
         context.validate_capability_registry(self._capability_registry)
         context.validate_configuration(configuration)

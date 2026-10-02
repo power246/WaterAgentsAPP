@@ -79,3 +79,32 @@ docker compose --env-file .env -f compose.yaml down
 ```
 
 普通 `down` 会保留数据卷。除非明确要永久删除全部本地数据库数据，否则不要使用 `down --volumes`。
+
+### Docker Desktop 在 `dockerInference` 处启动失败
+
+若 Windows 上出现下面这类错误，故障位于 Docker Desktop 的 Model Runner 运行时 socket，不是 PostgreSQL 数据卷：
+
+```text
+starting services: initializing Inference manager: ...\Docker\run\dockerInference:
+The file cannot be accessed by the system.
+```
+
+本项目不依赖 Docker Model Runner。先检查版本；旧版 Docker Desktop（本机曾在 4.46.0 复现）应优先升级，并保持 Model Runner 关闭：
+
+```powershell
+docker desktop update --check-only
+docker desktop update --quiet
+docker desktop disable model-runner
+docker desktop restart
+docker desktop status
+docker info
+```
+
+若 Desktop 已在启动阶段崩溃，导致上述关闭或升级命令无法连接后端，只恢复运行时目录，不要执行 Factory Reset、`docker system prune` 或删除卷：
+
+1. 完全退出 Docker Desktop，确认 `Docker Desktop`、`com.docker.backend`、`com.docker.build` 和 `docker-model` 进程均已停止，`com.docker.service` 与 `docker-desktop` WSL 实例也不在运行。
+2. 将整个 `%LOCALAPPDATA%\Docker\run` 移动为带时间戳的备份，再创建空的 `run` 目录。不要单独删除失效的 `dockerInference` reparse point，也不要触碰 `%LOCALAPPDATA%\Docker\wsl`。
+3. 启动 Docker Desktop，升级并关闭 Model Runner，然后至少执行一次 `docker desktop restart` 验证可连续启动。
+4. 用 `docker ps -a` 和 `docker volume ls` 确认容器与卷仍在，再重新执行本指南的 Compose 启动命令。
+
+本机已验证 Docker Desktop 4.93.0、Engine 29.8.1 在 `EnableInference=false` 下可连续重启；失效的旧 `run` 目录应先保留用于回滚，确认后续运行稳定后再人工清理。

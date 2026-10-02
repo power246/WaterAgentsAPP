@@ -1558,6 +1558,336 @@ def test_m4_context_history_projection_survives_real_postgres_restart() -> None:
         asyncio.run(exercise(settings))
 
 
+def test_m5_typed_content_reloads_from_postgres_and_startup_repair_keeps_closure(
+) -> None:
+    from app.domain import (
+        CollectionCompletionProof,
+        CollectionCounts,
+        CollectionFactPayload,
+        CollectionManifest,
+        CollectionPageManifest,
+        CollectionStatus,
+        CollectionSummary,
+        CoverageStatus,
+        EvidenceApplicability,
+        EvidenceBundle,
+        EvidenceCell,
+        EvidenceCellRole,
+        EvidenceCellStatus,
+        EvidenceCoverage,
+        EvidenceFragment,
+        EvidenceFragmentReference,
+        EvidenceLocation,
+        EvidenceResultEligibility,
+        EvidenceSourceRecords,
+        EvidenceToolCall,
+        EvidenceToolCounts,
+        EvidenceToolExecutionStatus,
+        EvidenceToolResult,
+        ItemReference,
+        Provenance,
+        QualitySummary,
+        WindowCompleteness,
+    )
+    from tests.application.evidence_tools.conftest import make_context, make_graph
+
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise(postgres_settings: AppSettings) -> None:
+        workflow = Workflow()
+        settings = postgres_settings.model_copy(update={
+            "transcript_inline_max_bytes": 256,
+            "transcript_preview_bytes": 40,
+        })
+        first_app = create_app(
+            settings,
+            workflow=workflow,
+            shutdown_grace_period=0,
+        )
+        async with first_app.router.lifespan_context(first_app):
+            coordinator = first_app.state.run_coordinator
+            created = await coordinator.create_run(create_request_bytes("M5 evidence"))
+            await workflow.calls.get()
+            parser = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                parser.session_id,
+            )
+            context = make_context()
+            context_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=parser.session_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                context_item.item_id,
+                "query_understood",
+                1,
+                context,
+            )
+            graph = make_graph()
+            topology_item = await coordinator.reserve_transcript_item(created.run_id)
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                topology_item.item_id,
+                "topology_ready",
+                1,
+                graph,
+            )
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="123",
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            operation_id = str(uuid4())
+            call_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+                operation_id=operation_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                call_item.item_id,
+                "evidence_tool_call",
+                1,
+                EvidenceToolCall(
+                    tool_call_id="call-pg-1",
+                    session_id=str(session.session_id),
+                    tool_name="collect_water_observations",
+                    purpose="local_station_preflight",
+                    window_ids=("window-000",),
+                    parameter_keys=(
+                        context.params_used[0].key,
+                        context.supporting_params[0].key,
+                    ),
+                    policy="conditional_mandatory",
+                    requested_at=call_item.created_at,
+                ),
+            )
+            window = context.time_segments[0].time_range
+            manifest = CollectionManifest(
+                manifest_id="manifest-pg-1",
+                operation_id=operation_id,
+                provider="wdfn_time_series",
+                channel="continuous",
+                collection_status=CollectionStatus.EMPTY,
+                request_range=window,
+                requested_series=("series-pg-1",),
+                page_or_chunk_manifests=(CollectionPageManifest(
+                    page_identity="page-pg-1",
+                    record_count=0,
+                    response_bytes=1,
+                    page_complete=True,
+                ),),
+                completed_ranges=(window,),
+                affected_window_ids=("window-000",),
+                window_completeness=(WindowCompleteness(
+                    window_id="window-000",
+                    complete=True,
+                    status=CollectionStatus.EMPTY,
+                ),),
+                counts=CollectionCounts(
+                    requests=1,
+                    pages=1,
+                    records=0,
+                    response_bytes=1,
+                ),
+                completion_proof=CollectionCompletionProof(
+                    contract="single_response",
+                    complete=True,
+                    terminal_identity="page-pg-1",
+                    digest="sha256:pg-proof",
+                ),
+            )
+            source_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+                operation_id=operation_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                source_item.item_id,
+                "evidence_source_records",
+                1,
+                EvidenceSourceRecords(
+                    operation_id=operation_id,
+                    batch_id=manifest.manifest_id,
+                    manifest=manifest,
+                ),
+            )
+            fragment = EvidenceFragment(
+                evidence_id="evidence-pg-empty",
+                source="wdfn_time_series",
+                collection_status=CollectionStatus.EMPTY,
+                target_comid="123",
+                location=EvidenceLocation(
+                    point=None,
+                    comid="123",
+                    station_id="USGS-123",
+                    distance_to_target_km=0,
+                ),
+                time_range=window,
+                parameter_refs=(
+                    context.params_used[0].key,
+                    context.supporting_params[0].key,
+                ),
+                data_type="collection_fact",
+                applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
+                series_identity="sha256:pg-series",
+                quality_class=None,
+                coverage=EvidenceCoverage(
+                    status=CoverageStatus.INSUFFICIENT,
+                    observed_count=0,
+                    expected_count=None,
+                    ratio=None,
+                    covered_duration_seconds=0,
+                    window_duration_seconds=int(
+                        (window.end - window.start).total_seconds()
+                    ),
+                    largest_gap_seconds=None,
+                ),
+                payload=CollectionFactPayload(
+                    status=CollectionStatus.EMPTY,
+                    reason="no_records_in_completed_query",
+                    affected_window_ids=("window-000",),
+                ),
+                provenance=Provenance(operation_id=operation_id),
+                result_eligibility=EvidenceResultEligibility.EXPLANATORY_ONLY,
+            )
+            fragment_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+                operation_id=operation_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                fragment_item.item_id,
+                "evidence_fragment",
+                1,
+                fragment,
+            )
+            fragment_ref = EvidenceFragmentReference(
+                item_id=str(fragment_item.item_id),
+                evidence_id=fragment.evidence_id,
+            )
+            result = EvidenceToolResult(
+                tool_call_id="call-pg-1",
+                operation_id=operation_id,
+                tool_name="collect_water_observations",
+                execution_status=EvidenceToolExecutionStatus.COMPLETED,
+                collection_status=CollectionStatus.EMPTY,
+                manifest_refs=(ItemReference(item_id=str(source_item.item_id)),),
+                collection_fact_refs=(fragment_ref,),
+                counts=EvidenceToolCounts(requests=1, pages=1, fragments=1),
+                completed_at=datetime.now(UTC),
+            )
+            result_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+                operation_id=operation_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                result_item.item_id,
+                "evidence_tool_result",
+                1,
+                result,
+            )
+            cells = tuple(
+                EvidenceCell(
+                    parameter=parameter,
+                    window_id="window-000",
+                    role=role,
+                    collection_fact_refs=(fragment.evidence_id,),
+                    status=EvidenceCellStatus.UNSUPPORTED,
+                    reasons=("no_usable_evidence",),
+                )
+                for parameter, role in (
+                    (context.params_used[0].key, EvidenceCellRole.TARGET),
+                    (
+                        context.supporting_params[0].key,
+                        EvidenceCellRole.REQUIRED_SUPPORT,
+                    ),
+                )
+            )
+            bundle = EvidenceBundle(
+                bundle_id="bundle-pg-1",
+                agent_comid="123",
+                context_ref=ItemReference(item_id=str(context_item.item_id)),
+                topology_ref=ItemReference(item_id=str(topology_item.item_id)),
+                time_range=window,
+                analysis_timezone=context.analysis_timezone,
+                time_resolution=context.time_resolution,
+                time_resolution_source=context.time_resolution_source,
+                requested_parameters=(context.params_used[0].key,),
+                supporting_parameters=(context.supporting_params[0].key,),
+                window_refs=("window-000",),
+                cells=cells,
+                fragment_refs=(fragment_ref,),
+                source_record_item_refs=(str(source_item.item_id),),
+                tool_result_refs=(ItemReference(item_id=str(result_item.item_id)),),
+                quality_summary=QualitySummary(),
+                collection_summary=CollectionSummary(empty=1),
+                created_at=datetime.now(UTC),
+            )
+            bundle_item = await coordinator.reserve_transcript_item(
+                created.run_id,
+                session_id=session.session_id,
+            )
+            await coordinator.finalize_transcript_item(
+                created.run_id,
+                bundle_item.item_id,
+                "evidence_bundle",
+                1,
+                bundle,
+            )
+            await _wait_persistence(coordinator, created.run_id)
+            workflow.release.set()
+
+        second_app = create_app(settings, shutdown_grace_period=0)
+        async with second_app.router.lifespan_context(second_app):
+            history = await second_app.state.transcript_reader.get_session_transcript(
+                created.run_id,
+                session.session_id,
+                ReadView.HISTORY,
+            )
+            evidence = tuple(
+                item
+                for item in history.items
+                if item.content_type.startswith("evidence_")
+            )
+            assert tuple(item.content_type for item in evidence) == (
+                "evidence_tool_call",
+                "evidence_source_records",
+                "evidence_fragment",
+                "evidence_tool_result",
+                "evidence_bundle",
+            )
+            assert all(item.parse_status.value == "ok" for item in evidence)
+            assert not any(
+                issue.error.code == "transcript_reference_unreadable"
+                for issue in history.issues
+            )
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
 async def _count_items(engine: AsyncEngine, item_ids: tuple[UUID, ...]) -> int:
     async with engine.connect() as connection:
         result = await connection.scalar(

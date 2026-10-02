@@ -44,7 +44,7 @@ def test_application_composition_reuses_the_validated_registry() -> None:
     ("field", "value"),
     [
         ("availability_providers", ["unknown_provider"]),
-        ("allowed_indirect_evidence_rules", ["unknown_rule"]),
+        ("observation_providers", ["unknown_provider"]),
     ],
 )
 def test_loader_fails_closed_for_unknown_manifest_references(

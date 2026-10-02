@@ -16,19 +16,32 @@ from app.domain import (
     MonitoringLocationMetadata,
     ParameterCatalogCandidate,
     ParameterKey,
+    FacilityEvidenceRequest,
+    HistoricalTranscriptRecord,
+    ProviderCollectionBatch,
     RiverSegment,
     SamplePeriodOfRecord,
     StationAvailability,
     StationAvailabilityRequest,
     TimeSeriesMetadata,
+    TranscriptEvidenceRequest,
+    UpstreamResultRecord,
+    UpstreamResultRequest,
     UsgsParameterMetadata,
+    WaterObservationRequest,
+    WeatherEvidenceRequest,
+    WeatherForecastRecord,
+    WeatherObservationRecord,
+    WaterObservationRecord,
+    DischargeObservationRecord,
+    FacilityRecord,
 )
 from app.ports import (
     CachePort,
     ClockPort,
     ComidLookupPort,
     EventPublisherPort,
-    FacilitySearchPort,
+    FacilityEvidencePort,
     GeocodingPort,
     InvalidPortResponseError,
     KeyStorePort,
@@ -47,10 +60,11 @@ from app.ports import (
     StationInventoryPort,
     TopologyDataPort,
     TranscriptReadStorePort,
+    TranscriptEvidencePort,
     TranscriptStorePort,
+    UpstreamResultPort,
     WaterObservationPort,
-    WeatherForecastPort,
-    WeatherObservationPort,
+    WeatherEvidencePort,
     UnsupportedPortVersionError,
 )
 
@@ -63,7 +77,7 @@ def test_all_port_contracts_are_public_protocols() -> None:
         ClockPort,
         ComidLookupPort,
         EventPublisherPort,
-        FacilitySearchPort,
+        FacilityEvidencePort,
         GeocodingPort,
         KeyStorePort,
         LLMPort,
@@ -74,9 +88,10 @@ def test_all_port_contracts_are_public_protocols() -> None:
         TopologyDataPort,
         TranscriptReadStorePort,
         TranscriptStorePort,
+        TranscriptEvidencePort,
+        UpstreamResultPort,
         WaterObservationPort,
-        WeatherForecastPort,
-        WeatherObservationPort,
+        WeatherEvidencePort,
     )
 
     assert all(getattr(protocol, "_is_protocol", False) for protocol in protocols)
@@ -97,10 +112,11 @@ def test_port_method_sync_and_async_semantics() -> None:
         StationMetadataPort.get_time_series_metadata,
         StationMetadataPort.get_sample_periods,
         StationInventoryPort.check_availability,
-        WaterObservationPort.fetch,
-        WeatherObservationPort.fetch,
-        WeatherForecastPort.fetch,
-        FacilitySearchPort.search,
+        WaterObservationPort.collect,
+        WeatherEvidencePort.collect,
+        FacilityEvidencePort.collect,
+        UpstreamResultPort.collect,
+        TranscriptEvidencePort.collect,
         LLMPort.generate,
         TranscriptStorePort.get_creation,
         TranscriptStorePort.create_run,
@@ -161,6 +177,11 @@ def test_port_method_sync_and_async_semantics() -> None:
             StationInventoryPort.check_availability,
             ("self", "request", "deadline"),
         ),
+        (WaterObservationPort.collect, ("self", "request", "deadline")),
+        (WeatherEvidencePort.collect, ("self", "request", "deadline")),
+        (FacilityEvidencePort.collect, ("self", "request", "deadline")),
+        (UpstreamResultPort.collect, ("self", "request", "deadline")),
+        (TranscriptEvidencePort.collect, ("self", "request", "deadline")),
         (TranscriptStorePort.get_creation, ("self", "idempotency_key")),
         (TranscriptStorePort.create_run, ("self", "candidate")),
         (TranscriptStorePort.verify_creation, ("self", "candidate")),
@@ -196,6 +217,11 @@ def test_stable_ports_use_domain_types() -> None:
     series = inspect.signature(StationMetadataPort.get_time_series_metadata)
     samples = inspect.signature(StationMetadataPort.get_sample_periods)
     availability = inspect.signature(StationInventoryPort.check_availability)
+    water = inspect.signature(WaterObservationPort.collect)
+    weather = inspect.signature(WeatherEvidencePort.collect)
+    facility = inspect.signature(FacilityEvidencePort.collect)
+    upstream = inspect.signature(UpstreamResultPort.collect)
+    transcript = inspect.signature(TranscriptEvidencePort.collect)
 
     assert geocoding.parameters["location_text"].annotation is str
     assert geocoding.return_annotation == tuple[GeocodingCandidate, ...]
@@ -214,14 +240,26 @@ def test_stable_ports_use_domain_types() -> None:
     assert samples.return_annotation == tuple[SamplePeriodOfRecord, ...]
     assert availability.parameters["request"].annotation is StationAvailabilityRequest
     assert availability.return_annotation == tuple[StationAvailability, ...]
+    assert water.parameters["request"].annotation is WaterObservationRequest
+    assert water.return_annotation == ProviderCollectionBatch[
+        WaterObservationRecord | DischargeObservationRecord
+    ]
+    assert weather.parameters["request"].annotation is WeatherEvidenceRequest
+    assert weather.return_annotation == ProviderCollectionBatch[
+        WeatherObservationRecord | WeatherForecastRecord
+    ]
+    assert facility.parameters["request"].annotation is FacilityEvidenceRequest
+    assert facility.return_annotation == ProviderCollectionBatch[FacilityRecord]
+    assert upstream.parameters["request"].annotation is UpstreamResultRequest
+    assert upstream.return_annotation == ProviderCollectionBatch[UpstreamResultRecord]
+    assert transcript.parameters["request"].annotation is TranscriptEvidenceRequest
+    assert transcript.return_annotation == ProviderCollectionBatch[
+        HistoricalTranscriptRecord
+    ]
 
 
 def test_deferred_ports_are_generic_without_guessing_dtos() -> None:
     generic_ports = (
-        WaterObservationPort[int, str],
-        WeatherObservationPort[int, str],
-        WeatherForecastPort[int, str],
-        FacilitySearchPort[int, str],
         LLMPort[int, str],
         TranscriptStorePort[str, int, float, bytes],
         TranscriptReadStorePort[str, int],
@@ -253,26 +291,6 @@ def test_port_errors_share_a_stable_base(error_type: type[PortError]) -> None:
 
     assert isinstance(error, PortError)
     assert str(error) == "provider failed"
-
-
-def test_successful_empty_results_are_distinct_from_unavailability() -> None:
-    class EmptyWaterProvider:
-        async def fetch(self, request: int) -> tuple[str, ...]:
-            return ()
-
-    class UnavailableWaterProvider:
-        async def fetch(self, request: int) -> tuple[str, ...]:
-            raise PortUnavailableError("water provider unavailable")
-
-    async def exercise() -> None:
-        empty: WaterObservationPort[int, str] = EmptyWaterProvider()
-        unavailable: WaterObservationPort[int, str] = UnavailableWaterProvider()
-
-        assert await empty.fetch(1) == ()
-        with pytest.raises(PortUnavailableError):
-            await unavailable.fetch(1)
-
-    asyncio.run(exercise())
 
 
 def test_not_found_contracts_use_none_or_empty_tuple() -> None:
@@ -335,9 +353,10 @@ def test_query_protocols_document_empty_and_unavailable_as_distinct() -> None:
         StationInventoryPort,
         ParameterCatalogPort,
         WaterObservationPort,
-        WeatherObservationPort,
-        WeatherForecastPort,
-        FacilitySearchPort,
+        WeatherEvidencePort,
+        FacilityEvidencePort,
+        UpstreamResultPort,
+        TranscriptEvidencePort,
     )
 
     for protocol in protocols:

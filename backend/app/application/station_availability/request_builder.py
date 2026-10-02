@@ -18,6 +18,7 @@ def build_station_availability_request(
     comid: str,
     target_parameters: tuple[ParameterKey, ...],
     supporting_parameters: tuple[ParameterKey, ...],
+    evidence_parameters: tuple[ParameterKey, ...] = (),
     time_segments: tuple[AnalysisTimeSegment, ...],
     prediction_baseline_hours: int = 48,
 ) -> StationAvailabilityRequest:
@@ -40,7 +41,7 @@ def build_station_availability_request(
 
     parameters = tuple(
         sorted(
-            {*target_parameters, *supporting_parameters},
+            {*target_parameters, *supporting_parameters, *evidence_parameters},
             key=lambda parameter: (parameter.code_system, parameter.code),
         )
     )

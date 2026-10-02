@@ -32,6 +32,8 @@ from app.domain import (
     TopologyLimits,
     TopologySearchStats,
     TopologyStationRef,
+    TopologySeriesRef,
+    WaterbodyGeometry,
 )
 from app.ports import (
     InvalidPortResponseError,
@@ -58,6 +60,7 @@ class _PathState:
 @dataclass
 class _NodeRecord:
     point: GeoPoint | None
+    geometry: WaterbodyGeometry | None
     depth: int
     cumulative_distance_km: float
 
@@ -130,13 +133,38 @@ class HydrologyGraphBuilder:
             comid=context.target.comid,
             target_parameters=tuple(item.key for item in context.params_used),
             supporting_parameters=tuple(item.key for item in context.supporting_params),
+            evidence_parameters=context.evidence_rule_parameters,
             time_segments=context.time_segments,
             prediction_baseline_hours=self._prediction_baseline_hours,
         )
         target_comid = context.target.comid
+        target_segment = await self._external_call(
+            lambda: self._topology.get_segment(
+                target_comid,
+                deadline=effective_deadline,
+            ),
+            semaphore=semaphore,
+            deadline=effective_deadline,
+            operation="get_segment",
+        )
+        if target_segment is not None and target_segment.comid != target_comid:
+            raise InvalidPortResponseError(
+                "Target segment response referenced a different COMID.",
+                provider=PROVIDER,
+                operation="get_segment",
+            )
         nodes: dict[str, _NodeRecord] = {
             target_comid: _NodeRecord(
-                point=context.target.point,
+                point=(
+                    target_segment.location
+                    if target_segment is not None
+                    else context.target.point
+                ),
+                geometry=(
+                    target_segment.geometry
+                    if target_segment is not None
+                    else None
+                ),
                 depth=0,
                 cumulative_distance_km=0.0,
             )
@@ -515,6 +543,7 @@ class HydrologyGraphBuilder:
         if previous is None:
             nodes[comid] = _NodeRecord(
                 point=expansion.segment.location,
+                geometry=expansion.segment.geometry,
                 depth=expansion.depth,
                 cumulative_distance_km=expansion.cumulative_distance_km,
             )
@@ -522,6 +551,10 @@ class HydrologyGraphBuilder:
         if previous.point != expansion.segment.location:
             raise TopologyInvariantError(
                 "topology returned inconsistent metadata for a shared COMID"
+            )
+        if previous.geometry != expansion.segment.geometry:
+            raise TopologyInvariantError(
+                "topology returned inconsistent geometry for a shared COMID"
             )
         previous_key = (
             previous.depth,
@@ -661,6 +694,16 @@ class HydrologyGraphBuilder:
                 HydrologyNode(
                     comid=comid,
                     point=record.point,
+                    geometry_ref=(
+                        record.geometry.geometry_ref
+                        if record.geometry is not None
+                        else None
+                    ),
+                    geometry_summary=(
+                        record.geometry.summary()
+                        if record.geometry is not None
+                        else None
+                    ),
                     depth=record.depth,
                     cumulative_distance_km=record.cumulative_distance_km,
                     is_target=comid == context.target.comid,
@@ -724,6 +767,11 @@ class HydrologyGraphBuilder:
                 target_comid=context.target.comid,
                 coverage=coverage,
                 nodes=ordered_nodes,
+                geometries={
+                    record.geometry.geometry_ref: record.geometry
+                    for record in nodes.values()
+                    if record.geometry is not None
+                },
                 edges=ordered_edges,
                 branch_outcomes=ordered_outcomes,
                 execution_layers=layers,
@@ -739,19 +787,53 @@ class HydrologyGraphBuilder:
         qualified_units: tuple[CoverageUnit, ...],
     ) -> tuple[TopologyStationRef, ...]:
         selected = set(qualified_units)
-        grouped: dict[tuple[ParameterProvider, str], set[str]] = {}
+        grouped: dict[
+            tuple[ParameterProvider, str],
+            dict[tuple[str, ParameterKey, str], set[int]],
+        ] = {}
         for item in availability:
             for reference in item.series_refs:
-                if selected.intersection(reference.covered_units):
-                    grouped.setdefault(
+                covered = selected.intersection(reference.covered_units)
+                if covered:
+                    station_series = grouped.setdefault(
                         (reference.provider, item.station.station_id),
-                        set(),
-                    ).add(reference.series_identity)
+                        {},
+                    )
+                    key = (
+                        reference.series_identity,
+                        reference.parameter,
+                        reference.channel,
+                    )
+                    station_series.setdefault(key, set()).update(
+                        unit.segment_index for unit in covered
+                    )
         return tuple(
             TopologyStationRef(
                 provider=provider,
                 station_id=station_id,
-                series_refs=tuple(sorted(series_refs)),
+                series_refs=tuple(
+                    sorted(
+                        (
+                            TopologySeriesRef(
+                                series_identity=series_identity,
+                                parameter=parameter,
+                                channel=channel,
+                                covered_segment_indexes=tuple(sorted(indexes)),
+                            )
+                            for (
+                                series_identity,
+                                parameter,
+                                channel,
+                            ), indexes in series_refs.items()
+                        ),
+                        key=lambda reference: (
+                            reference.parameter.code_system,
+                            reference.parameter.code,
+                            reference.channel,
+                            reference.series_identity,
+                        ),
+                    )
+                ),
             )
             for (provider, station_id), series_refs in sorted(
                 grouped.items(),

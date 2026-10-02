@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 
@@ -7,6 +8,7 @@ from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.http import ProviderHttpClient
 from scripts.audit_parameter_capabilities import (
     audit_parameter_capabilities,
+    audit_parameter_capabilities_bytes,
     compare_official_parameter_catalog,
 )
 
@@ -68,6 +70,14 @@ def test_offline_audit_and_official_refresh_match_all_154_capabilities() -> None
     assert offline["capability_count"] == 154
     assert offline["unique_key_count"] == 154
     assert offline["required_support_count"] == 1
+    assert offline["capability_coverage"] == "154/154"
+    assert offline["policy_complete_count"] == 154
+    assert offline["policy_reference_status"] == "valid"
+    assert offline["unit_definition_count"] == 45
+    assert offline["quality_profile_count"] == 2
+    assert offline["aggregation_profile_count"] == 10
+    assert offline["coverage_profile_count"] == 5
+    assert len(offline["manifest_digest_sha256"]) == 64
     assert official == {
         "api_version": "USGS Water Data OGC API v1",
         "status": "no_drift",
@@ -97,3 +107,18 @@ def test_official_refresh_reports_drift_without_updating_manifest() -> None:
     ]
     assert official["manifest_updated"] is False
     assert before == after
+
+
+def test_audit_report_bytes_are_stable_across_repeated_runs_and_cwd(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    first = audit_parameter_capabilities_bytes()
+    monkeypatch.chdir(tmp_path)
+    load_parameter_capability_registry.cache_clear()
+    second = audit_parameter_capabilities_bytes()
+
+    assert first == second
+    assert first.endswith(b"\n")
+    assert b"\\\\" not in first
+    assert json.loads(first)["capability_coverage"] == "154/154"
