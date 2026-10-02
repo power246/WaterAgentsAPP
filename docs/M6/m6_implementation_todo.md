@@ -180,32 +180,38 @@
 
 ### 工作
 
-- [ ] 新增 `application/reasoning` 最小包与 `WaterbodyAgentTask` validator；证明 run/session/role/COMID/context/topology/scope/model selection 一致，取消已接受时不启动。
-- [ ] 定义 `WaterbodyReasoningStage` 诊断枚举，但不新增 lifecycle 状态或 transport event。
-- [ ] 将 M5 handoff 转为不可变 `SealedEvidenceInput`：bundle/rule/capability digest、cells、gates、collection facts、allowed refs、budget usage 和 producer facts 完整。
-- [ ] 最终 gate 只从 sealed M5 facts 计算 `supported / unsupported / blocked`；target 与同窗 discharge 都通过才 supported，contextual-only/未物化 rule 不能解锁。
-- [ ] 构造唯一 `ResultSkeleton`：run/session/result identity、COMID、mode/timezone/range/segments/resolution、parameter/window 顺序、fixed cells、supported scopes、source/unit/aggregation 资格与 evidence allowlist。
-- [ ] fixed unsupported cell 使用 `indeterminate/insufficient_evidence/source=null/confidence=0`；partial technical blocked 使用明确技术 reason/blocker refs，不伪装自然 empty。
-- [ ] skeleton/gate serializer 使用稳定 canonical order/digest；Agent request 只获得所需投影，不获得可修改 identity 或 server-owned counts。
+- [x] 新增 `application/reasoning` 最小包与 `WaterbodyAgentTask` validator；证明 run/session/role/COMID/context/topology/scope/model selection 一致，取消已接受时不启动。
+- [x] 定义 `WaterbodyReasoningStage` 诊断枚举，但不新增 lifecycle 状态或 transport event。
+- [x] 将 M5 handoff 转为不可变 `SealedEvidenceInput`：bundle/rule/capability digest、cells、gates、collection facts、allowed refs、budget usage 和 producer facts 完整。
+- [x] 最终 gate 只从 sealed M5 facts 计算 `supported / unsupported / blocked`；target 与同窗 discharge 都通过才 supported，contextual-only/未物化 rule 不能解锁。
+- [x] 构造唯一 `ResultSkeleton`：run/session/result identity、COMID、mode/timezone/range/segments/resolution、parameter/window 顺序、fixed cells、supported scopes、source/unit/aggregation 资格与 evidence allowlist。
+- [x] fixed unsupported cell 使用 `indeterminate/insufficient_evidence/source=null/confidence=0`；partial technical blocked 使用明确技术 reason/blocker refs，不伪装自然 empty。
+- [x] skeleton/gate serializer 使用稳定 canonical order/digest；Agent request 只获得所需投影，不获得可修改 identity 或 server-owned counts。
 
 ### Tests
 
-- [ ] session 不存在、跨 run、非 waterbody、COMID/model/context/topology/scope 不一致、已取消均在任何 tool/model call 前失败。
-- [ ] target/discharge 的 supported/unsupported/blocked 矩阵、direct/allowed-indirect/contextual、technical incomplete 和 mixed windows 均有 fixture。
-- [ ] 恶意 draft 预备 fixture 不能新增 parameter/window、覆盖 fixed cell、引用 allowlist 外 evidence 或改 server-owned identity/counts。
-- [ ] same input 的 skeleton/gates/digest 字节稳定；parameter/window 顺序不受 set/dict/hash seed 影响。
-- [ ] 全 unsupported 无 technical blocker 可构造完整 fixed skeleton；全 blocked 只形成 failure input，不生成 business-completed result。
+- [x] session 不存在、跨 run、非 waterbody、COMID/model/context/topology/scope 不一致、已取消均在任何 tool/model call 前失败。
+- [x] target/discharge 的 supported/unsupported/blocked 矩阵、direct/allowed-indirect/contextual、technical incomplete 和 mixed windows 均有 fixture。
+- [x] 恶意 draft 预备 fixture 不能新增 parameter/window、覆盖 fixed cell、引用 allowlist 外 evidence 或改 server-owned identity/counts。
+- [x] same input 的 skeleton/gates/digest 字节稳定；parameter/window 顺序不受 set/dict/hash seed 影响。
+- [x] 全 unsupported 无 technical blocker 可构造完整 fixed skeleton；全 blocked 只形成 failure input，不生成 business-completed result。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_task_and_skeleton.py backend/tests/application/reasoning/test_sufficiency.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_acquisition_workflow.py backend/tests/domain/test_results.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_task_and_skeleton.py backend/tests/application/reasoning/test_sufficiency.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_acquisition_workflow.py backend/tests/domain/test_results.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `git diff --check`
 
 阶段出口：在不调用水体模型的情况下，可从合法 M5 handoff 得到封口 gates、完整 skeleton、fixed cells 和 supported scopes；越权输入在边界前失败。
 
 提交边界：task、sealed input、sufficiency、skeleton DTO/validator 及 focused tests；不得实现 Agent planning、batch model calls、final assembler 或 M7 调度。
+
+#### Milestone 2 完成记录（2026-10-02）
+
+- 实现：新增 immutable `WaterbodyAgentTask`/validator、诊断阶段枚举、`SealedEvidenceInput`、target + 同窗 discharge 三态 gate、`ResultSkeleton`/fixed cells/supported scopes 和窄 Agent projection；M5 handoff 同步封口 bundle/rule/capability digest、完整 collection/allowlist、预算及 producer facts，并为没有任何采集路径的 cell 写入明确 `no_applicable_evidence` fact。未实现 model port、planning/batch call、final assembler、transcript/runtime 或 M7 调度。
+- 验证：M2 focused `18 passed`，M5 acquisition + result domain `127 passed`，全部 architecture `107 passed`；以进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 和 PostgreSQL 17.11 执行完整 backend 为 `1625 passed, 1 warning`。`compileall` 与 `git diff --check` 通过；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `164f84d`；本完成记录随紧随其后的本地文档提交保存，均未 push。M3–M13 尚未开始。
 
 ## Milestone 3：provider-neutral waterbody model port
 
