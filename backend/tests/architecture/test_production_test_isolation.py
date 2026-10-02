@@ -166,7 +166,14 @@ def test_production_openapi_has_no_tool_invocation_or_test_route() -> None:
     assert not any(
         forbidden in path
         for path in paths
-        for forbidden in ("/__test__", "/tools", "/evidence/collect")
+        for forbidden in (
+            "/__test__",
+            "/tools",
+            "/evidence/collect",
+            "/reasoning",
+            "/agents/run",
+            "/models/complete",
+        )
     )
 
 

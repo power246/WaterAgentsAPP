@@ -35,6 +35,11 @@ from app.domain import (
     WaterObservationRecord,
     DischargeObservationRecord,
     FacilityRecord,
+    ModelSelection,
+)
+from app.application.query_understanding import (
+    ParserPromptMessage,
+    QueryParserInputV1,
 )
 from app.ports import (
     CachePort,
@@ -68,7 +73,34 @@ from app.ports import (
     UnsupportedPortVersionError,
 )
 
-PORTS_ROOT = Path(__file__).resolve().parents[2] / "app" / "ports"
+APP_ROOT = Path(__file__).resolve().parents[2] / "app"
+PORTS_ROOT = APP_ROOT / "ports"
+
+
+def _is_allowed_port_import(source_path: Path, import_name: str) -> bool:
+    root = import_name.split(".", maxsplit=1)[0]
+    return (
+        root in sys.stdlib_module_names
+        or import_name == "app.domain"
+        or import_name.startswith("app.domain.")
+        or import_name == "app.ports"
+        or import_name.startswith("app.ports.")
+        or (
+            source_path.name == "waterbody_model.py"
+            and import_name == "app.application.reasoning.model_models"
+        )
+    )
+
+
+def _imported_modules(source_path: Path) -> tuple[str, ...]:
+    tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=source_path)
+    modules: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            modules.append(node.module)
+    return tuple(modules)
 
 
 def test_all_port_contracts_are_public_protocols() -> None:
@@ -374,15 +406,10 @@ def test_port_modules_have_no_forbidden_dependencies_or_placeholder_payloads() -
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    if alias.name.split(".", maxsplit=1)[0] not in sys.stdlib_module_names:
+                    if not _is_allowed_port_import(source_path, alias.name):
                         violations.append(f"{source_path.name}: imports {alias.name}")
             elif isinstance(node, ast.ImportFrom) and node.module:
-                root = node.module.split(".", maxsplit=1)[0]
-                if (
-                    root not in sys.stdlib_module_names
-                    and not node.module.startswith("app.domain")
-                    and not node.module.startswith("app.ports")
-                ):
+                if not _is_allowed_port_import(source_path, node.module):
                     violations.append(f"{source_path.name}: imports {node.module}")
             elif isinstance(node, ast.Name) and node.id in forbidden_names:
                 violations.append(f"{source_path.name}: uses {node.id}")
@@ -394,6 +421,65 @@ def test_port_modules_have_no_forbidden_dependencies_or_placeholder_payloads() -
                 violations.append(f"{source_path.name}: uses a raw dict type")
 
     assert not violations, "\n".join(violations)
+
+
+def test_waterbody_port_application_dto_exception_is_narrow() -> None:
+    waterbody_port = PORTS_ROOT / "waterbody_model.py"
+    another_port = PORTS_ROOT / "llm.py"
+
+    assert _is_allowed_port_import(
+        waterbody_port,
+        "app.application.reasoning.model_models",
+    )
+    assert not _is_allowed_port_import(
+        waterbody_port,
+        "app.application.query_understanding.parser_models",
+    )
+    assert not _is_allowed_port_import(
+        another_port,
+        "app.application.reasoning.model_models",
+    )
+    assert not _is_allowed_port_import(waterbody_port, "app.infrastructure.http")
+
+
+def test_query_parser_and_waterbody_model_boundaries_remain_separate() -> None:
+    parser_root = APP_ROOT / "application" / "query_understanding"
+    violations = [
+        f"{source_path.relative_to(APP_ROOT)} imports {module}"
+        for source_path in sorted(parser_root.rglob("*.py"))
+        for module in _imported_modules(source_path)
+        if module == "app.application.reasoning"
+        or module.startswith("app.application.reasoning.")
+        or module == "app.ports.waterbody_model"
+        or module.startswith("app.ports.waterbody_model.")
+    ]
+
+    waterbody_port = PORTS_ROOT / "waterbody_model.py"
+    if waterbody_port.is_file():
+        violations.extend(
+            f"{waterbody_port.relative_to(APP_ROOT)} imports {module}"
+            for module in _imported_modules(waterbody_port)
+            if module == "app.application.query_understanding"
+            or module.startswith("app.application.query_understanding.")
+        )
+
+    assert not violations, "\n".join(violations)
+
+
+def test_query_parser_contract_remains_tool_free() -> None:
+    messages = (
+        ParserPromptMessage(role="system", text="instructions"),
+        ParserPromptMessage(role="user", text="request"),
+    )
+    model = ModelSelection(provider="openai", model="parser")
+
+    assert QueryParserInputV1(model=model, messages=messages).tools == ()
+    with pytest.raises(ValueError, match="tools must be empty"):
+        QueryParserInputV1(
+            model=model,
+            messages=messages,
+            tools=("collect_water_observations",),
+        )
 
 
 def test_port_package_contains_only_protocols_and_errors() -> None:
