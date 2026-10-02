@@ -181,7 +181,7 @@
 ### 工作
 
 - [x] 新增 `application/reasoning` 最小包与 `WaterbodyAgentTask` validator；证明 run/session/role/COMID/context/topology/scope/model selection 一致，取消已接受时不启动。
-- [x] 定义 `WaterbodyReasoningStage` 诊断枚举，但不新增 lifecycle 状态或 transport event。
+- [x] 不维护独立 reasoning stage 枚举；模型阶段、失败位置和 session lifecycle 分别复用现有类型，不新增 transport event。
 - [x] 将 M5 handoff 转为不可变 `SealedEvidenceInput`：bundle/rule/capability digest、cells、gates、collection facts、allowed refs、budget usage 和 producer facts 完整。
 - [x] 最终 gate 只从 sealed M5 facts 计算 `supported / unsupported / blocked`；target 与同窗 discharge 都通过才 supported，contextual-only/未物化 rule 不能解锁。
 - [x] 构造唯一 `ResultSkeleton`：run/session/result identity、COMID、mode/timezone/range/segments/resolution、parameter/window 顺序、fixed cells、supported scopes、source/unit/aggregation 资格与 evidence allowlist。
@@ -338,7 +338,7 @@
 - [x] 定义不可变 `ReasoningBatchPlan`/`ReasoningBatch`，只包含 supported cells；identity 绑定 run/session/result、scope digest、bundle/rule/capability digest 和 batch index。
 - [x] 稳定排序为 requested ParameterKey 顺序、time segment 顺序、连续 final windows；不得按 hash/set/provider output order 形成 batch。
 - [x] 同一 batch 不跨 ParameterKey 或 inference segment；连续 windows 尽量合并，但同时受 `reasoning_batch_max_cells=32`、总 batches=24、序列化输入和预计输出/model limit 约束。
-- [x] model-fit 估算使用 model catalog/adapter capability 与实际 schema/context bytes；不能只用字符数或在 provider 截断后再猜测。
+- [x] model-fit 估算使用 model catalog 中精确 `ModelSelection` 的 token limits、adapter estimator 与实际 schema/context bytes；不能把容量按 provider 写死，也不能在 provider 截断后再猜测。
 - [x] 每个 supported cell 恰好出现一次；unsupported/blocked/fixed cells 永不进入 batch。无法在硬上限内完整覆盖时，在任何 batch call 前失败为 `reasoning_plan_too_large`。
 - [x] batches 仍属于同一 waterbody session/model，不创建子 session、同义 agent identity 或 per-cell lifecycle。
 - [x] 生成 synthesis input plan：validated results、fixed cells、coverage/blocker facts 和 bounded summaries/refs；不重复内联全部 raw evidence。
@@ -546,8 +546,8 @@
 
 - [x] 在 `AppSettings` 与 `.env.example` 原子增加六项 M6 limits：planning turns=6、tool calls/turn=4、batch cells=32、batches=24、model timeout=90s、session deadline=600s；strict int/float、bool/NaN/Infinity/extra env 继续 fail startup。
 - [x] repair hard limit 固定为一次，不提供普通 settings 提高；M5 tool budgets 继续独立且更严格者优先，M6 不复制/放宽。
-- [x] 构造 `M6Runtime`：runner、model router、prompt builder、planning loop、sufficiency、batch planner、validator、assembler、transcript store 和 limits；依赖只来自 M3/M4/M5 当前 runtime/ports。
-- [x] router 按 run 固化 `ModelSelection` 选择 role-compatible adapter；selected provider 无 adapter、credential 缺失、model 不在 catalog 或 role 不匹配时，在 session 新操作前安全失败。
+- [x] 构造窄 `M6Runtime`：只公开 runner、model router 和 limits；其余 planning/validator/assembler/transcript 组件封装在 runner composition 内，依赖只来自 M3/M4/M5 当前 runtime/ports。
+- [x] router 按 run 固化的完整 `ModelSelection` 读取 role-compatible token limits，再选择 provider adapter；selected provider 无 adapter、credential 缺失、容量缺失、model 不在 catalog 或 role 不匹配时，在 session 新操作前安全失败。
 - [x] production lifespan 只装配内部 M6 service，不注册 direct reasoning/model/tool/result/test route，不改变现有十条 run-root API，也不提前让 M4 workflow 创建水体 session。
 - [x] 默认建立 direct application test harness / `build_m6_test_runtime`，用 fake model/M5 ports/fixed clock/UUID/usage 调真实 runner/validator/assembler/writer；不默认增加 test HTTP route。
 - [x] 若自动化确需独立 test app，必须单独 composition、production import graph 不可达、无环境开关启用，并复用同一 production chain；先在清单完成记录中说明必要性。
@@ -664,8 +664,8 @@
 
 #### Milestone 13 完成记录（2026-10-02）
 
-- 实现：审计提交 `2ce10cd` 新增 M6 文档协议/契约矩阵/OpenAPI/registry/status gate 和唯一 runner/adapter、无 V2/feature flag/第三条 SSE 架构门禁；同步现有 M6 与项目级文档。后续复审以失败回归确认并修复三项 production 缺口：Agent 越界 tool call 现在持久化安全错误、消耗预算并继续 planning，evidence bundle reference 与 bundle identity 建立 seal-time 绑定，production M6 启动拒绝 unsupported/mixed provider；fixture smoke 显式注入 test runtime，未放宽生产边界。未修改前端、归档、`backend/.env` 或业务数据库。
-- 验证：Windows、Python 3.12.14、Docker Engine 29.8.1、PostgreSQL 17.11；复审修复后定向 smoke/runtime `45 passed`，完整 backend（含专用 `wateragents_test` PostgreSQL cases）`1834 passed, 1 warning`，M6 workflow smoke `20 passed`，SSE completed/cancelled 与 history/independent-process-restart/startup-repair 均通过；`compileall` 和 `git diff --check` 通过。原离线审计 `88 passed` 与 persistence `60 passed` 证据保持有效；受限沙箱 pytest 临时目录 ACL 失败均在沙箱外以相同解释器、配置和隔离 basetemp 重跑通过。
+- 实现：审计提交 `2ce10cd` 新增 M6 文档协议/契约矩阵/OpenAPI/registry/status gate 和唯一 runner/adapter、无 V2/feature flag/第三条 SSE 架构门禁；同步现有 M6 与项目级文档。后续复审以失败回归修复 Agent 越界 tool call、evidence bundle identity 绑定、unsupported/mixed provider 启动拒绝，以及两项新增缺口：runner 现在以 coordinator 已提交的 `SessionSummary` 为终态权威，cancel 胜出后不传播未持久化 completed/failed outcome；token limits 绑定到精确 `ModelSelection`，同 provider 不再共享容量。同步收窄 `M6Runtime`、合并安全 metadata 构造并删除无 production caller 的重复 stage/public-error 类型。未修改前端、归档、`backend/.env` 或业务数据库。
+- 验证：Windows、Python 3.12.14、Docker Engine 29.8.1、PostgreSQL 17.11；第二次复审先以四个失败回归复现 cancel 终态竞态与 provider 级容量缺口，修复后 cancel races `2 passed`、文档/架构/settings/model/runtime contracts `205 passed`，完整 backend（含专用 `wateragents_test` PostgreSQL cases）`1837 passed, 1 warning`，M6 workflow smoke `22 passed`，health、SSE completed/cancelled 与 history/independent-process-restart/startup-repair 均通过；`compileall` 和 `git diff --check` 通过。原离线审计 `88 passed` 与 persistence `60 passed` 证据保持有效；受限沙箱 pytest 临时目录 ACL 失败均在沙箱外以相同解释器、配置和隔离 basetemp 重跑通过。
 - 风险：真实 OpenAI waterbody provider preflight 为 `not_run`，`requests=0`、`events=0`、`responses=0`，未获本阶段显式计费请求授权；仅有 Windows 本机证据，Ubuntu/macOS 同提交 CI 未运行，所以 `GLOBAL-C08`、`GLOBAL-C11` 保持 `partial`。M7 DAG、M8 transcript search producer、M9 frontend/settings/admin 仍按接力边界后续实现。
 - 提交：本地审计提交 `2ce10cd`；本完成记录及复审修复均随对应本地提交保存，均未 push。
 

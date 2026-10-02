@@ -26,8 +26,6 @@ async def build_fixture_m6_runtime(settings, **kwargs):
             WaterbodyAdapterRegistration(
                 provider="fixture",
                 port=_UnscriptedFixtureWaterbodyModelPort(),
-                context_window_tokens=128_000,
-                max_output_tokens=32_768,
                 size_estimator=OpenAIResponsesSizeEstimator(),
             ),
         ),

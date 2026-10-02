@@ -24,7 +24,6 @@ from app.application.reasoning import (
     ResultSkeleton,
     ResultSkeletonValidationError,
     WaterbodyAgentTask,
-    WaterbodyReasoningStage,
     WaterbodyTaskValidationError,
     build_result_skeleton,
     seal_evidence_input,
@@ -115,6 +114,14 @@ def _catalog(model=MODEL, *, role=ModelRole.WATERBODY):
                 provider=model.provider,
                 model=model.model,
                 roles=(role,),
+                **(
+                    {
+                        "context_window_tokens": 128_000,
+                        "max_output_tokens": 32_768,
+                    }
+                    if role is ModelRole.WATERBODY
+                    else {}
+                ),
             ),
         )
     )
@@ -192,18 +199,6 @@ async def test_task_validator_accepts_only_the_saved_waterbody_boundary():
 
     assert validated.task.evidence_scope is scope
     assert validated.session.status is AgentSessionStatus.PENDING
-    assert tuple(stage.value for stage in WaterbodyReasoningStage) == (
-        "preflight",
-        "evidence_planning",
-        "evidence_sealed",
-        "reasoning_batches",
-        "overall_synthesis",
-        "assembling_result",
-        "terminal",
-    )
-    assert not set(WaterbodyReasoningStage) & set(AgentSessionStatus)
-
-
 @_async_test
 async def test_task_validator_rejects_identity_scope_model_and_session_drift():
     context = make_context()

@@ -41,3 +41,39 @@ def test_model_capability_rejects_secret_or_transport_fields(secret_field: str) 
                 secret_field: "must-not-be-stored",
             }
         )
+
+
+def test_waterbody_capability_requires_model_specific_limits() -> None:
+    capability = ModelCapability(
+        provider="provider",
+        model="waterbody-large",
+        roles=(ModelRole.WATERBODY,),
+        context_window_tokens=128_000,
+        max_output_tokens=32_768,
+    )
+
+    assert capability.context_window_tokens == 128_000
+    assert capability.max_output_tokens == 32_768
+
+    for values in (
+        {},
+        {"context_window_tokens": 128_000},
+        {"max_output_tokens": 32_768},
+        {"context_window_tokens": 1_000, "max_output_tokens": 1_001},
+    ):
+        with pytest.raises(ValidationError):
+            ModelCapability(
+                provider="provider",
+                model="waterbody-invalid",
+                roles=(ModelRole.WATERBODY,),
+                **values,
+            )
+
+    with pytest.raises(ValidationError, match="only valid for waterbody"):
+        ModelCapability(
+            provider="provider",
+            model="parser-with-irrelevant-limits",
+            roles=(ModelRole.QUERY_PARSER,),
+            context_window_tokens=8_192,
+            max_output_tokens=2_048,
+        )

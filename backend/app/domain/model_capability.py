@@ -1,4 +1,6 @@
-from pydantic import model_validator
+from typing import Annotated
+
+from pydantic import Field, model_validator
 
 from app.domain.model_role import ModelRole
 from app.domain.model_selection import ModelSelection
@@ -6,6 +8,8 @@ from app.domain.model_selection import ModelSelection
 
 class ModelCapability(ModelSelection):
     roles: tuple[ModelRole, ...]
+    context_window_tokens: Annotated[int, Field(strict=True, ge=1)] | None = None
+    max_output_tokens: Annotated[int, Field(strict=True, ge=1)] | None = None
 
     @model_validator(mode="after")
     def validate_roles(self) -> "ModelCapability":
@@ -13,4 +17,12 @@ class ModelCapability(ModelSelection):
             raise ValueError("roles must not be empty")
         if len(self.roles) != len(set(self.roles)):
             raise ValueError("roles must not contain duplicates")
+        limits = (self.context_window_tokens, self.max_output_tokens)
+        if ModelRole.WATERBODY in self.roles:
+            if any(value is None for value in limits):
+                raise ValueError("waterbody models require explicit token limits")
+            if self.max_output_tokens > self.context_window_tokens:
+                raise ValueError("max_output_tokens must not exceed context_window_tokens")
+        elif any(value is not None for value in limits):
+            raise ValueError("token limits are only valid for waterbody models")
         return self

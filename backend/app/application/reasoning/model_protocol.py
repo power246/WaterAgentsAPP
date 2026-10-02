@@ -1,6 +1,5 @@
 import asyncio
 from typing import Protocol
-from uuid import UUID
 
 from pydantic import ValidationError
 
@@ -13,8 +12,6 @@ from app.application.reasoning.model_models import (
     WaterbodyFinishReason,
     WaterbodyModelCompletedResponse,
     WaterbodyModelContentEvent,
-    WaterbodyModelErrorCode,
-    WaterbodyModelPublicError,
     WaterbodyModelRequest,
     WaterbodyModelUsage,
     parse_waterbody_model_event,
@@ -124,24 +121,6 @@ async def consume_waterbody_model_stream(
     if terminal.finish_reason is WaterbodyFinishReason.INCOMPLETE:
         raise _port_error(WaterbodyModelIncompleteError, request)
     raise _port_error(WaterbodyModelCancelledError, request)
-
-
-def to_waterbody_model_public_error(
-    error: WaterbodyModelPortError,
-    request: WaterbodyModelRequest,
-    *,
-    error_id: UUID,
-) -> WaterbodyModelPublicError:
-    if not _error_matches_request(error, request):
-        error = _port_error(WaterbodyModelProtocolError, request)
-    return WaterbodyModelPublicError(
-        error_id=error_id,
-        provider=request.model.provider,
-        model=request.model.model,
-        code=WaterbodyModelErrorCode(error.code),
-        failed_stage=request.phase,
-        retryable=error.retryable,
-    )
 
 
 def _port_error(

@@ -2570,7 +2570,11 @@ class RunCoordinator:
                 )
             if (
                 session_runtime.summary.status is AgentSessionStatus.CANCELLED
-                and target is AgentSessionStatus.CANCELLED
+                and target in {
+                    AgentSessionStatus.COMPLETED,
+                    AgentSessionStatus.FAILED,
+                    AgentSessionStatus.CANCELLED,
+                }
             ):
                 return session_runtime.summary
             if (

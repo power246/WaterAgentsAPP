@@ -66,6 +66,8 @@ MODEL_CATALOG = ModelCatalog(
         ModelCapability(
             **WATERBODY_MODEL.model_dump(),
             roles=(ModelRole.WATERBODY,),
+            context_window_tokens=128_000,
+            max_output_tokens=32_768,
         ),
     )
 )

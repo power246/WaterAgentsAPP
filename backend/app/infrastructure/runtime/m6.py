@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 
 from app.application.analysis_runs.workflow import WorkflowOperations
 from app.application.reasoning import (
-    DraftValidator,
     EvidencePlanningLoop,
     ModelFitCapability,
     ModelSizeEstimate,
@@ -21,8 +20,6 @@ from app.application.reasoning import (
     RunSingleWaterbodyAgent,
     ValidatedWaterbodyAgentTask,
     WaterbodyAgentRunOutcome,
-    assemble_inference_result,
-    seal_evidence_input,
 )
 from app.application.reasoning.model_models import (
     WaterbodyModelEvent,
@@ -41,8 +38,6 @@ from app.infrastructure.runtime.m5 import M5Runtime
 from app.ports.clock import ClockPort
 from app.ports.waterbody_model import WaterbodyModelPort
 
-_OPENAI_CONTEXT_WINDOW_TOKENS = 128_000
-_OPENAI_MAX_OUTPUT_TOKENS = 32_768
 _ESTIMATED_OUTPUT_TOKENS_PER_CELL = 256
 _ESTIMATED_OUTPUT_BYTES_PER_CELL = 1024
 
@@ -66,21 +61,11 @@ class M6RuntimeLimits:
 class WaterbodyAdapterRegistration:
     provider: str
     port: WaterbodyModelPort
-    context_window_tokens: int
-    max_output_tokens: int
     size_estimator: ModelSizeEstimator
 
     def __post_init__(self) -> None:
         if not self.provider.strip():
             raise ValueError("waterbody adapter provider must not be empty")
-        if (
-            type(self.context_window_tokens) is not int
-            or type(self.max_output_tokens) is not int
-            or self.context_window_tokens <= 0
-            or self.max_output_tokens <= 0
-            or self.max_output_tokens > self.context_window_tokens
-        ):
-            raise ValueError("waterbody adapter token limits are invalid")
         if not callable(getattr(self.size_estimator, "estimate", None)):
             raise ValueError("waterbody adapter requires a size estimator")
 
@@ -157,11 +142,25 @@ class WaterbodyModelRouter:
         return registration
 
     def model_fit(self, selection: ModelSelection) -> ModelFitCapability:
-        registration = self.require(selection)
+        self.require(selection)
+        capability = self._catalog.capability_for(selection, ModelRole.WATERBODY)
+        if capability is None:
+            raise SettingsConfigurationError(
+                "waterbody model is not authorized for the waterbody role "
+                f"(provider={selection.provider}, model={selection.model})"
+            )
+        if (
+            capability.context_window_tokens is None
+            or capability.max_output_tokens is None
+        ):
+            raise SettingsConfigurationError(
+                "waterbody model token limits are unavailable "
+                f"(provider={selection.provider}, model={selection.model})"
+            )
         return ModelFitCapability(
             model=selection,
-            context_window_tokens=registration.context_window_tokens,
-            max_output_tokens=registration.max_output_tokens,
+            context_window_tokens=capability.context_window_tokens,
+            max_output_tokens=capability.max_output_tokens,
         )
 
     def estimate(
@@ -280,32 +279,13 @@ class M6RunnerService:
 class M6Runtime:
     runner: M6RunnerService
     model_port_router: WaterbodyModelRouter
-    prompt_builder: PromptBuilder
-    acquisition_loop: object
-    sufficiency_policy: object
-    batch_planner: ReasoningBatchPlanner
-    draft_validator: object
-    result_assembler: object
-    transcript_store: object
     limits: M6RuntimeLimits
-    m5_runtime: M5Runtime
-    operations: WorkflowOperations
-    transcript_reader: TranscriptReader
 
     def safe_metadata(self) -> dict[str, object]:
-        return {
-            "limits": {
-                "planning_turns": self.limits.planning_turns,
-                "tool_calls_per_turn": self.limits.tool_calls_per_turn,
-                "cells_per_batch": self.limits.cells_per_batch,
-                "batches": self.limits.batches,
-                "model_timeout_seconds": self.limits.model_timeout_seconds,
-                "session_deadline_seconds": self.limits.session_deadline_seconds,
-                "repairs_per_exchange": self.limits.repairs_per_exchange,
-                "maximum_model_calls": self.limits.maximum_model_calls,
-            },
-            "adapter_providers": self.model_port_router.providers,
-        }
+        return _build_safe_m6_metadata(
+            self.limits,
+            self.model_port_router.providers,
+        )
 
 
 def m6_runtime_limits(settings: AppSettings) -> M6RuntimeLimits:
@@ -366,17 +346,7 @@ def compose_m6_runtime(
     return M6Runtime(
         runner=runner,
         model_port_router=router,
-        prompt_builder=prompt_builder,
-        acquisition_loop=m5_runtime.acquisition,
-        sufficiency_policy=seal_evidence_input,
-        batch_planner=batch_planner,
-        draft_validator=DraftValidator,
-        result_assembler=assemble_inference_result,
-        transcript_store=ReasoningTranscriptStore,
         limits=limits,
-        m5_runtime=m5_runtime,
-        operations=operations,
-        transcript_reader=transcript_reader,
     )
 
 
@@ -437,8 +407,6 @@ async def build_m6_runtime(
                 WaterbodyAdapterRegistration(
                     provider="openai",
                     port=adapter,
-                    context_window_tokens=_OPENAI_CONTEXT_WINDOW_TOKENS,
-                    max_output_tokens=_OPENAI_MAX_OUTPUT_TOKENS,
                     size_estimator=OpenAIResponsesSizeEstimator(),
                 ),
             ),
@@ -470,6 +438,13 @@ def safe_m6_metadata(
             }
         )
     )
+    return _build_safe_m6_metadata(limits, providers)
+
+
+def _build_safe_m6_metadata(
+    limits: M6RuntimeLimits,
+    providers: tuple[str, ...],
+) -> dict[str, object]:
     return {
         "limits": {
             "planning_turns": limits.planning_turns,

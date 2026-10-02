@@ -27,6 +27,8 @@ MODEL_CAPABILITIES = (
     ModelCapability(
         **WATERBODY_MODEL.model_dump(),
         roles=(ModelRole.WATERBODY,),
+        context_window_tokens=10_000_000,
+        max_output_tokens=1_000_000,
     ),
 )
 MODEL_CATALOG = ModelCatalog(MODEL_CAPABILITIES)
@@ -55,8 +57,6 @@ async def _build_test_m6_runtime(settings, **kwargs):
             WaterbodyAdapterRegistration(
                 provider="test-provider",
                 port=_UnscriptedWaterbodyModelPort(),
-                context_window_tokens=128_000,
-                max_output_tokens=32_768,
                 size_estimator=OpenAIResponsesSizeEstimator(),
             ),
         ),

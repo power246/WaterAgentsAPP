@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from enum import Enum
 from uuid import UUID
 
 from app.application.analysis_runs.models import (
@@ -26,16 +25,6 @@ from app.domain import (
     ModelSelection,
     build_time_windows,
 )
-
-
-class WaterbodyReasoningStage(str, Enum):
-    PREFLIGHT = "preflight"
-    EVIDENCE_PLANNING = "evidence_planning"
-    EVIDENCE_SEALED = "evidence_sealed"
-    REASONING_BATCHES = "reasoning_batches"
-    OVERALL_SYNTHESIS = "overall_synthesis"
-    ASSEMBLING_RESULT = "assembling_result"
-    TERMINAL = "terminal"
 
 
 @dataclass(frozen=True, slots=True)

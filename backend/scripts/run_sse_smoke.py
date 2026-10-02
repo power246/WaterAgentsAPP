@@ -37,6 +37,8 @@ SMOKE_SETTINGS = AppSettings(
             "provider": "fixture",
             "model": "waterbody-v1",
             "roles": ["waterbody"],
+            "context_window_tokens": 128_000,
+            "max_output_tokens": 32_768,
         },
     ),
 )

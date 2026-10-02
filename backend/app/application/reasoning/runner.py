@@ -6,7 +6,11 @@ from enum import Enum
 from typing import TYPE_CHECKING, Callable
 from uuid import UUID, uuid4
 
-from app.application.analysis_runs.models import PublicError
+from app.application.analysis_runs.models import (
+    AgentSessionStatus,
+    PublicError,
+    SessionSummary,
+)
 from app.application.reasoning.batch_planner import (
     ModelFitCapability,
     ReasoningBatchPlanner,
@@ -125,12 +129,15 @@ class RunSingleWaterbodyAgent:
         if self._transcript_store is not None:
             if outcome.status is WaterbodyAgentRunStatus.COMPLETED:
                 assert outcome.result is not None
-                await self._transcript_store.complete_with_result(outcome.result)
+                summary = await self._transcript_store.complete_with_result(
+                    outcome.result
+                )
             elif outcome.status is WaterbodyAgentRunStatus.FAILED:
                 assert outcome.error is not None
-                await self._transcript_store.fail(outcome.error)
+                summary = await self._transcript_store.fail(outcome.error)
             else:
-                await self._transcript_store.cancel()
+                summary = await self._transcript_store.cancel()
+            return _committed_outcome(outcome, summary)
         return outcome
 
     async def _run_reasoning(
@@ -441,6 +448,27 @@ class _RunCancelled(Exception):
 class _RunDeadline(Exception):
     def __init__(self, stage: str) -> None:
         self.stage = stage
+
+
+def _committed_outcome(
+    calculated: WaterbodyAgentRunOutcome,
+    committed: SessionSummary,
+) -> WaterbodyAgentRunOutcome:
+    if committed.status is AgentSessionStatus.CANCELLED:
+        return replace(
+            calculated,
+            status=WaterbodyAgentRunStatus.CANCELLED,
+            result=None,
+            error=None,
+        )
+    expected = {
+        WaterbodyAgentRunStatus.COMPLETED: AgentSessionStatus.COMPLETED,
+        WaterbodyAgentRunStatus.FAILED: AgentSessionStatus.FAILED,
+        WaterbodyAgentRunStatus.CANCELLED: AgentSessionStatus.CANCELLED,
+    }[calculated.status]
+    if committed.status is not expected:
+        raise RuntimeError("committed Agent session outcome does not match the runner")
+    return calculated
 
 
 def _parameter_definitions(keys, registry: ParameterCapabilityRegistry):

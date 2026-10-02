@@ -53,19 +53,7 @@ validator 必须证明：
 
 ### 2.2 内部阶段
 
-`WaterbodyReasoningStage` 只用于 typed process/diagnostic，不是 lifecycle：
-
-```text
-preflight
-evidence_planning
-evidence_sealed
-reasoning_batches
-overall_synthesis
-assembling_result
-terminal
-```
-
-session lifecycle 仍只有 pending/running/completed/failed/cancelled。阶段变化写 typed decision/process item，并通过既有 session SSE `transcript_item` 通知，不增加 lifecycle event type。
+不维护第二套 reasoning stage 枚举。模型交互阶段使用 `WaterbodyModelPhase`，失败位置使用 `PublicError.failed_stage`，session lifecycle 仍只有 pending/running/completed/failed/cancelled；过程记录继续通过既有 session SSE `transcript_item` 通知，不增加 lifecycle event type。
 
 ## 3. 模块与依赖方向
 
@@ -632,7 +620,7 @@ WATERAGENTS_REASONING_SESSION_DEADLINE_SECONDS=600
 - 每个 structured exchange 最多一个 repair，硬约束不可调大；
 - 最大模型调用数可由 `planning + 2*batches + 2` 推导，默认最坏为 56；实际 usage 写 transcript；
 - deadline 到达后不启动新 operation，在当前 operation 返回/取消边界收敛；
-- model/provider token limits 从 model catalog/adapter 能力取得，不写死到 prompt；batch planner 必须在调用前验证预计 request/response fit。
+- token limits 从 model catalog 中精确匹配的 `ModelSelection(provider, model)` 能力取得，adapter 只提供 transport 与 size estimator；batch planner 必须在调用前验证预计 request/response fit。
 
 M9 settings API 可以公开安全 metadata，但不能让普通请求提高 hard limits 或覆盖本次 run 已固化模型。
 
@@ -644,17 +632,10 @@ M9 settings API 可以公开安全 metadata，但不能让普通请求提高 har
 M6Runtime
   runner
   model_port_router
-  prompt_builder
-  acquisition_loop
-  sufficiency_policy
-  batch_planner
-  draft_validator
-  result_assembler
-  transcript_store
   limits
 ```
 
-router 按 `ModelSelection.provider` 选择已配置且 role-compatible adapter；无 adapter、无 credential 或 model 不可选在真正 session 启动前安全失败。错误只能包含 provider/model identity 和安全 code，不能回显 credential。
+router 按完整 `ModelSelection(provider, model)` 读取 model catalog 中的 role 与 token limits，再选择 provider adapter；同 provider 的不同模型可以具有不同容量。无 adapter、无 credential、缺少容量或 model 不可选均在真正 session 启动前安全失败。错误只能包含 provider/model identity 和安全 code，不能回显 credential。
 
 production app 不增加 M6 direct route。test composition 可以直接注入 fake ports 调用 runner，不通过 query/header 开关改变 production behavior。
 

@@ -144,8 +144,6 @@ def create_reasoning_test_app(
                 WaterbodyAdapterRegistration(
                     provider=WATERBODY_MODEL.provider,
                     port=model_port,
-                    context_window_tokens=10_000_000,
-                    max_output_tokens=1_000_000,
                     size_estimator=OpenAIResponsesSizeEstimator(),
                 ),
             ),

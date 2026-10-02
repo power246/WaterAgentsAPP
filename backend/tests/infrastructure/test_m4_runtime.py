@@ -62,6 +62,8 @@ def catalog(provider: str = "openai") -> tuple[ModelCapability, ...]:
             provider="openai",
             model="waterbody-v1",
             roles=(ModelRole.WATERBODY,),
+            context_window_tokens=128_000,
+            max_output_tokens=32_768,
         ),
     )
 

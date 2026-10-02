@@ -268,6 +268,112 @@ def test_station_empty_and_late_model_failure_never_publish_partial_result(
     asyncio.run(scenarios())
 
 
+def test_cancel_after_final_checkpoint_wins_before_result_commit(monkeypatch) -> None:
+    async def exercise() -> None:
+        application, workflow, water = create_reasoning_test_app(
+            monkeypatch,
+            model_port=VisibleAdaptiveWaterbodyModelPort(),
+            water_mode="empty",
+        )
+        async with application.router.lifespan_context(application):
+            prepared = await prepare_waterbody(application, workflow, water)
+            coordinator = application.state.run_coordinator
+            commit_started = asyncio.Event()
+            allow_commit = asyncio.Event()
+            complete = coordinator.complete_waterbody_agent_session
+
+            async def gated_complete(*args, **kwargs):
+                commit_started.set()
+                await allow_commit.wait()
+                return await complete(*args, **kwargs)
+
+            monkeypatch.setattr(
+                coordinator,
+                "complete_waterbody_agent_session",
+                gated_complete,
+            )
+            runner = asyncio.create_task(run_prepared(application, prepared))
+            await commit_started.wait()
+            cancelled = await coordinator.cancel_agent_session(
+                prepared.run_id,
+                prepared.session_id,
+            )
+            allow_commit.set()
+            outcome = await runner
+
+            assert cancelled.status is AgentSessionStatus.CANCELLED
+            assert outcome.status is WaterbodyAgentRunStatus.CANCELLED
+            assert outcome.result is None
+            assert outcome.error is None
+            session = await coordinator.get_session(
+                prepared.run_id,
+                prepared.session_id,
+            )
+            assert session.status is AgentSessionStatus.CANCELLED
+            assert session.result_ref is None
+            assert session.result_summary is None
+            transcript = await application.state.transcript_reader.get_session_transcript(
+                prepared.run_id,
+                prepared.session_id,
+                ReadView.AUTO,
+            )
+            assert all(
+                item.content_type != "inference_result"
+                for item in transcript.items
+            )
+            await cancel_run(application, prepared.run_id)
+
+    asyncio.run(exercise())
+
+
+def test_cancel_wins_before_failure_commit_without_transition_error(
+    monkeypatch,
+) -> None:
+    async def exercise() -> None:
+        application, workflow, water = create_reasoning_test_app(
+            monkeypatch,
+            model_port=VisibleAdaptiveWaterbodyModelPort(
+                fail_phase=WaterbodyModelPhase.EVIDENCE_PLANNING,
+            ),
+        )
+        async with application.router.lifespan_context(application):
+            prepared = await prepare_waterbody(application, workflow, water)
+            coordinator = application.state.run_coordinator
+            commit_started = asyncio.Event()
+            allow_commit = asyncio.Event()
+            fail = coordinator.fail_agent_session
+
+            async def gated_fail(*args, **kwargs):
+                commit_started.set()
+                await allow_commit.wait()
+                return await fail(*args, **kwargs)
+
+            monkeypatch.setattr(coordinator, "fail_agent_session", gated_fail)
+            runner = asyncio.create_task(run_prepared(application, prepared))
+            await commit_started.wait()
+            cancelled = await coordinator.cancel_agent_session(
+                prepared.run_id,
+                prepared.session_id,
+            )
+            allow_commit.set()
+            outcome = await runner
+
+            assert cancelled.status is AgentSessionStatus.CANCELLED
+            assert outcome.status is WaterbodyAgentRunStatus.CANCELLED
+            assert outcome.result is None
+            assert outcome.error is None
+            session = await coordinator.get_session(
+                prepared.run_id,
+                prepared.session_id,
+            )
+            assert session.status is AgentSessionStatus.CANCELLED
+            assert session.result_ref is None
+            assert session.result_summary is None
+            await cancel_run(application, prepared.run_id)
+
+    asyncio.run(exercise())
+
+
 def test_session_sse_replay_reconnect_and_disconnect_do_not_cancel_runner(
     monkeypatch,
 ) -> None:

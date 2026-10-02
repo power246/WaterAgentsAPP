@@ -28,9 +28,7 @@ from app.application.reasoning.model_models import (
     ToolCallCompleted,
     VisibleTextDelta,
     WaterbodyModelCompletedResponse,
-    WaterbodyModelErrorCode,
     WaterbodyModelPhase,
-    WaterbodyModelPublicError,
     WaterbodyModelRequest,
 )
 from app.application.reasoning.model_protocol import (
@@ -389,25 +387,6 @@ class ValidationExchange:
         if self._decision_store is not None:
             await self._decision_store.write_validated_exchange(audit)
         return validated, audit
-
-
-def to_validation_repair_public_error(
-    error: ValidationRepairFailedError,
-    *,
-    error_id: UUID,
-) -> WaterbodyModelPublicError:
-    audit = error.audit
-    if not isinstance(audit, ValidationExchangeAudit):
-        raise TypeError("validation repair error has no typed audit")
-    request = audit.initial_request
-    return WaterbodyModelPublicError(
-        error_id=error_id,
-        provider=request.model.provider,
-        model=request.model.model,
-        code=WaterbodyModelErrorCode.REPAIR_FAILED,
-        failed_stage=WaterbodyModelPhase.SCHEMA_REPAIR,
-        retryable=False,
-    )
 
 
 def _structured_output(

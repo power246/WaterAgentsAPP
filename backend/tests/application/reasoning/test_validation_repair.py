@@ -1,7 +1,7 @@
 import asyncio
 import copy
 import json
-from uuid import NAMESPACE_URL, UUID, uuid5
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
 
@@ -10,7 +10,6 @@ from app.application.reasoning import (
     DraftValidationError,
     ValidationExchange,
     ValidationRepairFailedError,
-    to_validation_repair_public_error,
 )
 from app.application.reasoning.model_models import (
     StructuredOutputCompleted,
@@ -31,7 +30,6 @@ from tests.application.reasoning.m7_support import (
 )
 
 
-ERROR_ID = UUID("90000000-0000-4000-8000-000000000077")
 
 
 def _repair_id(operation_id):
@@ -184,7 +182,7 @@ def test_legal_risk_and_confidence_never_trigger_semantic_repair(
     assert outcome.audit.repair_request is None
 
 
-def test_invalid_repair_fails_whole_exchange_and_public_error_has_no_body() -> None:
+def test_invalid_repair_fails_whole_exchange_without_copying_private_body() -> None:
     _skeleton, plan, catalog, validator = m7_fixture()
     batch = plan.batch_plan.batches[0]
     invalid = batch_payload(batch, catalog)
@@ -214,12 +212,6 @@ def test_invalid_repair_fails_whole_exchange_and_public_error_has_no_body() -> N
     assert "https://private.invalid" in error.audit.initial_response.events[0].value
     assert "https://private.invalid" not in fake.calls[1].messages[0].text
     assert error.audit.repair_issues
-    public = to_validation_repair_public_error(error, error_id=ERROR_ID)
-    public_json = json.dumps(public.model_dump(mode="json"), sort_keys=True)
-    assert public.code.value == "waterbody_model_repair_failed"
-    assert public.failed_stage is WaterbodyModelPhase.SCHEMA_REPAIR
-    assert "private.invalid" not in public_json
-    assert "scope_digest_mismatch" not in public_json
 
 
 @pytest.mark.parametrize("failure_kind", ("protocol", "timeout", "content_filter"))

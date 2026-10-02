@@ -80,6 +80,8 @@ CATALOG = ModelCatalogSnapshot(
             provider=MODEL.provider,
             model=MODEL.model,
             roles=(ModelRole.WATERBODY,),
+            context_window_tokens=10_000_000,
+            max_output_tokens=1_000_000,
         ),
     )
 )
@@ -468,6 +470,8 @@ def test_real_m5_sealed_handoff_plans_every_supported_cell_once() -> None:
                 provider=selected.provider,
                 model=selected.model,
                 roles=(ModelRole.WATERBODY,),
+                context_window_tokens=10_000_000,
+                max_output_tokens=1_000_000,
             ),
         )
     )

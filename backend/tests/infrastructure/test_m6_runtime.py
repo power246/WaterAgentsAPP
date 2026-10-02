@@ -103,16 +103,26 @@ def catalog(*capabilities: ModelCapability) -> ModelCatalogSnapshot:
 def capability(
     selection: ModelSelection,
     *roles: ModelRole,
+    context_window_tokens: int | None = None,
+    max_output_tokens: int | None = None,
 ) -> ModelCapability:
-    return ModelCapability(**selection.model_dump(), roles=roles)
+    if ModelRole.WATERBODY in roles:
+        if context_window_tokens is None:
+            context_window_tokens = 128_000
+        if max_output_tokens is None:
+            max_output_tokens = 32_768
+    values = {**selection.model_dump(), "roles": roles}
+    if context_window_tokens is not None:
+        values["context_window_tokens"] = context_window_tokens
+    if max_output_tokens is not None:
+        values["max_output_tokens"] = max_output_tokens
+    return ModelCapability(**values)
 
 
 def registration(provider: str, port=None) -> WaterbodyAdapterRegistration:
     return WaterbodyAdapterRegistration(
         provider=provider,
         port=port or RecordingPort(),
-        context_window_tokens=128_000,
-        max_output_tokens=32_768,
         size_estimator=FixedEstimator(),
     )
 
@@ -274,6 +284,40 @@ def test_router_uses_only_catalog_authorized_selected_adapter() -> None:
     assert router.model_fit(OPENAI_MODEL).model == OPENAI_MODEL
 
 
+def test_router_uses_model_specific_limits_for_same_provider() -> None:
+    small = ModelSelection(provider="openai", model="waterbody-small")
+    large = ModelSelection(provider="openai", model="waterbody-large")
+    router = WaterbodyModelRouter(
+        catalog(
+            capability(
+                small,
+                ModelRole.WATERBODY,
+                context_window_tokens=8_192,
+                max_output_tokens=2_048,
+            ),
+            capability(
+                large,
+                ModelRole.WATERBODY,
+                context_window_tokens=128_000,
+                max_output_tokens=32_768,
+            ),
+        ),
+        (registration("openai"),),
+    )
+
+    small_fit = router.model_fit(small)
+    large_fit = router.model_fit(large)
+
+    assert (small_fit.context_window_tokens, small_fit.max_output_tokens) == (
+        8_192,
+        2_048,
+    )
+    assert (large_fit.context_window_tokens, large_fit.max_output_tokens) == (
+        128_000,
+        32_768,
+    )
+
+
 async def _collect(router: WaterbodyModelRouter, model_request):
     return [event async for event in router.stream(model_request)]
 
@@ -327,13 +371,12 @@ def test_runtime_composes_the_real_chain_and_reuses_m5_m3_instances() -> None:
 
     runtime = compose_m6_runtime(settings, **arguments)
 
-    assert runtime.operations is arguments["operations"]
-    assert runtime.transcript_reader is arguments["transcript_reader"]
-    assert runtime.m5_runtime is arguments["m5_runtime"]
-    assert runtime.acquisition_loop is arguments["m5_runtime"].acquisition
-    assert runtime.runner._m5_runtime is runtime.m5_runtime
-    assert runtime.runner._operations is runtime.operations
-    assert runtime.batch_planner._prompt_builder is runtime.prompt_builder
+    assert runtime.runner._operations is arguments["operations"]
+    assert runtime.runner._m5_runtime is arguments["m5_runtime"]
+    assert (
+        runtime.runner._batch_planner._prompt_builder
+        is runtime.runner._prompt_builder
+    )
     assert runtime.safe_metadata() == {
         "limits": {
             "planning_turns": 6,
@@ -466,10 +509,6 @@ def test_application_lifespan_exposes_internal_m6_with_single_shared_runtime_cha
     async def exercise() -> None:
         async with application.router.lifespan_context(application):
             m6 = application.state.m6_runtime
-            assert m6.m5_runtime is application.state.m5_runtime
-            assert m6.operations is application.state.run_coordinator
-            assert m6.transcript_reader is application.state.transcript_reader
-            assert m6.acquisition_loop is application.state.m5_runtime.acquisition
             assert m6.runner._operations is application.state.run_coordinator
             assert m6.runner._m5_runtime.executor is application.state.m5_runtime.executor
 

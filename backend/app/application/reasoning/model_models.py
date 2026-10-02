@@ -313,27 +313,6 @@ class WaterbodyModelCompletedResponse(DomainModel):
     usage: WaterbodyModelUsage | None = None
 
 
-class WaterbodyModelErrorCode(DomainEnum):
-    UNAVAILABLE = "waterbody_model_unavailable"
-    TIMEOUT = "waterbody_model_timeout"
-    CONTENT_FILTERED = "waterbody_model_content_filtered"
-    REFUSED = "waterbody_model_refused"
-    RESPONSE_INVALID = "waterbody_model_response_invalid"
-    REPAIR_FAILED = "waterbody_model_repair_failed"
-    TRUNCATED = "waterbody_model_truncated"
-    INCOMPLETE = "waterbody_model_incomplete"
-    CANCELLED = "waterbody_model_cancelled"
-
-
-class WaterbodyModelPublicError(DomainModel):
-    error_id: UUID
-    provider: NonEmptyString
-    model: NonEmptyString
-    code: WaterbodyModelErrorCode
-    failed_stage: WaterbodyModelPhase
-    retryable: StrictBool
-
-
 _EVENT_ADAPTER = TypeAdapter(WaterbodyModelEvent)
 
 

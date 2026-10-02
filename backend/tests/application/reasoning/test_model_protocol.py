@@ -24,7 +24,6 @@ from app.application.reasoning.model_models import (
 )
 from app.application.reasoning.model_protocol import (
     consume_waterbody_model_stream,
-    to_waterbody_model_public_error,
 )
 from app.domain import ItemReference, ModelSelection
 from app.ports import (
@@ -42,7 +41,6 @@ from tests.application.reasoning.fakes import (
 )
 
 OPERATION_ID = UUID("30000000-0000-4000-8000-000000000001")
-ERROR_ID = UUID("90000000-0000-4000-8000-000000000001")
 MODEL = ModelSelection(provider="openai", model="waterbody-test")
 OTHER_MODEL = ModelSelection(provider="openai", model="other-model")
 
@@ -485,38 +483,6 @@ def test_scripted_typed_error_preserves_safe_identity() -> None:
         )
 
     assert raised.value is error
-
-
-def test_public_error_contains_only_safe_identity_and_classification() -> None:
-    model_request = request()
-    error = WaterbodyModelTimeoutError(
-        provider=MODEL.provider,
-        model=MODEL.model,
-        operation_id=str(OPERATION_ID),
-    )
-
-    public = to_waterbody_model_public_error(
-        error,
-        model_request,
-        error_id=ERROR_ID,
-    )
-
-    assert public.model_dump(mode="json") == {
-        "error_id": str(ERROR_ID),
-        "provider": "openai",
-        "model": "waterbody-test",
-        "code": "waterbody_model_timeout",
-        "failed_stage": "reasoning_batch",
-        "retryable": True,
-    }
-    assert set(type(public).model_fields) == {
-        "error_id",
-        "provider",
-        "model",
-        "code",
-        "failed_stage",
-        "retryable",
-    }
 
 
 def test_request_rejects_extra_secret_fields_and_non_strict_schema() -> None:

@@ -219,6 +219,8 @@ def test_model_catalog_is_parsed_once_as_safe_role_metadata(
                     "provider": "configured-provider",
                     "model": "configured-model",
                     "roles": ["query_parser", "waterbody"],
+                    "context_window_tokens": 64_000,
+                    "max_output_tokens": 8_192,
                 }
             ]
         ),
@@ -229,6 +231,8 @@ def test_model_catalog_is_parsed_once_as_safe_role_metadata(
         "provider": "configured-provider",
         "model": "configured-model",
         "roles": ["query_parser", "waterbody"],
+        "context_window_tokens": 64_000,
+        "max_output_tokens": 8_192,
     }
 
 

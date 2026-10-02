@@ -58,7 +58,6 @@ from app.application.reasoning.sufficiency import (
 from app.application.reasoning.task import (
     ValidatedWaterbodyAgentTask,
     WaterbodyAgentTask,
-    WaterbodyReasoningStage,
     validate_waterbody_agent_task,
 )
 from app.application.reasoning.draft_models import (
@@ -91,7 +90,6 @@ from app.application.reasoning.validation_repair import (
     ValidatedSynthesisExchange,
     ValidationExchange,
     ValidationExchangeAudit,
-    to_validation_repair_public_error,
 )
 from app.application.reasoning.result_assembler import assemble_inference_result
 from app.application.reasoning.runner import (
@@ -164,7 +162,6 @@ __all__ = [
     "WaterbodyAgentTask",
     "WaterbodyAgentRunOutcome",
     "WaterbodyAgentRunStatus",
-    "WaterbodyReasoningStage",
     "WaterbodyTaskValidationError",
     "ValidationExchange",
     "ValidationExchangeAudit",
@@ -176,7 +173,6 @@ __all__ = [
     "seal_evidence_input",
     "overall_synthesis_response_schema",
     "reasoning_batch_response_schema",
-    "to_validation_repair_public_error",
     "validate_agent_cell_claims",
     "validate_result_skeleton",
     "validate_sealed_evidence_input",
