@@ -414,38 +414,47 @@
 
 ### 工作
 
-- [ ] 完成 `RunSingleWaterbodyAgent` orchestration：validated task → initial/planning → seal/gates/skeleton → batches → synthesis → assembly；所有操作保持同一 session/model，阶段边界检查 cancellation/deadline。
-- [ ] all unsupported 且无 technical blocker 时跳过 batch/synthesis，由后端从 skeleton 生成完整 fixed result；stationless 此前 planning calls 如实写 execution summary。
-- [ ] partial supported 只执行 planned batches；全部 batches validated 后才发起一次同模型 synthesis。任一 batch/synthesis/repair failure 终止 whole session。
-- [ ] assembler 只接受 skeleton、validated drafts/synthesis 和 fixed facts；生成完整 parameter series、window composites、range overall、AnalysisDetail、AttributionSummary、EvidenceChain 和 execution summary。
-- [ ] Agent 决定 supported cell/series/window/range 的 risk/confidence/rationales；后端只装配、校验和固定无证据语义，不进行 max/average/阈值/0–100 分重算。
-- [ ] availability、assessed/total counts、missing/blocker refs 由 assembler 从完整计划与结果机械计算；`high + partial`、`none/low + partial` 和全 indeterminate 均保持独立字段。
-- [ ] attribution basis/refs、analysis step refs、evidence chain 和 result refs 完整闭包；`hypothesized` 可解释但不能单独解锁 gate 或 quantified result。
-- [ ] 实现失败矩阵：自然无证据 completed；部分 technical blocked + supported 可 completed/partial；all required blocked、model failure、invalid after repair、assembly failure 为 failed；cancel 胜出为 cancelled 且无 result。
-- [ ] 按 API 契约实现稳定 public error codes、failed stage 与 retryable：model unavailable/timeout/content filtered/response invalid/repair failed、plan too large、budget/deadline exceeded、assembly failed；公开消息不含内部 validation input。
-- [ ] execution summary 只含安全 model identity、planning/tool/batch/repair/synthesis counts、usage 和 skipped cells；不含 prompt secret、raw envelope 或 hidden reasoning。
+- [x] 完成 `RunSingleWaterbodyAgent` orchestration：validated task → initial/planning → seal/gates/skeleton → batches → synthesis → assembly；所有操作保持同一 session/model，阶段边界检查 cancellation/deadline。
+- [x] all unsupported 且无 technical blocker 时跳过 batch/synthesis，由后端从 skeleton 生成完整 fixed result；stationless 此前 planning calls 如实写 execution summary。
+- [x] partial supported 只执行 planned batches；全部 batches validated 后才发起一次同模型 synthesis。任一 batch/synthesis/repair failure 终止 whole session。
+- [x] assembler 只接受 skeleton、validated drafts/synthesis 和 fixed facts；生成完整 parameter series、window composites、range overall、AnalysisDetail、AttributionSummary、EvidenceChain 和 execution summary。
+- [x] Agent 决定 supported cell/series/window/range 的 risk/confidence/rationales；后端只装配、校验和固定无证据语义，不进行 max/average/阈值/0–100 分重算。
+- [x] availability、assessed/total counts、missing/blocker refs 由 assembler 从完整计划与结果机械计算；`high + partial`、`none/low + partial` 和全 indeterminate 均保持独立字段。
+- [x] attribution basis/refs、analysis step refs、evidence chain 和 result refs 完整闭包；`hypothesized` 可解释但不能单独解锁 gate 或 quantified result。
+- [x] 实现失败矩阵：自然无证据 completed；部分 technical blocked + supported 可 completed/partial；all required blocked、model failure、invalid after repair、assembly failure 为 failed；cancel 胜出为 cancelled 且无 result。
+- [x] 按 API 契约实现稳定 public error codes、failed stage 与 retryable：model unavailable/timeout/content filtered/response invalid/repair failed、plan too large、budget/deadline exceeded、assembly failed；公开消息不含内部 validation input。
+- [x] execution summary 只含安全 model identity、planning/tool/batch/repair/synthesis counts、usage 和 skipped cells；不含 prompt secret、raw envelope 或 hidden reasoning。
 
 ### Tests
 
-- [ ] fake E2E 覆盖 quantified、directional、Agent-selected indeterminate、fixed indeterminate、station-backed full empty、stationless final unsupported 和 mixed outcome。
-- [ ] 每个 parameter/window 恰好一 point；series/window/range risk/confidence/rationales 与 refs 完整；全 fixed 路径 0 batch/0 synthesis。
-- [ ] risk 完全来自 validated Agent output；fixture 证明后端不因数值、其他参数或 availability 改写等级。
-- [ ] `high + partial`、`low/none + partial`、complete、全 indeterminate、partial technical blocker 的 counts/refs/summary 正确。
-- [ ] 后续 batch/repair/synthesis/assembly 失败均不返回 partial `InferenceResult`；先前 validated items 仍可审计。
-- [ ] 每个稳定 error code 的 stage/retryable/public message 与 transcript detail 分层正确；同一 error_id 可关联日志、lifecycle 和安全 transcript。
-- [ ] cancel 在 planning/tool/message/batch/repair/synthesis/assembly 边界胜出时，不启动后续 operation、不发布 result；late output 不改变 working context。
-- [ ] 同输入、fixed clock/UUID/fake stream 产生 byte-stable domain result，除明确时间/identity 外无非确定性字段。
+- [x] fake E2E 覆盖 quantified、directional、Agent-selected indeterminate、fixed indeterminate、station-backed full empty、stationless final unsupported 和 mixed outcome。
+- [x] 每个 parameter/window 恰好一 point；series/window/range risk/confidence/rationales 与 refs 完整；全 fixed 路径 0 batch/0 synthesis。
+- [x] risk 完全来自 validated Agent output；fixture 证明后端不因数值、其他参数或 availability 改写等级。
+- [x] `high + partial`、`low/none + partial`、complete、全 indeterminate、partial technical blocker 的 counts/refs/summary 正确。
+- [x] 后续 batch/repair/synthesis/assembly 失败均不返回 partial `InferenceResult`；先前 validated items 仍可审计。
+- [x] 每个稳定 error code 的 stage/retryable/public message 与 transcript detail 分层正确；同一 error_id 可关联日志、lifecycle 和安全 transcript。
+- [x] cancel 在 planning/tool/message/batch/repair/synthesis/assembly 边界胜出时，不启动后续 operation、不发布 result；late output 不改变 working context。
+- [x] 同输入、fixed clock/UUID/fake stream 产生 byte-stable domain result，除明确时间/identity 外无非确定性字段。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_runner.py backend/tests/application/reasoning/test_result_assembler.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_results.py backend/tests/application/evidence_tools -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_runner.py backend/tests/application/reasoning/test_result_assembler.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_results.py backend/tests/application/evidence_tools -q`
+- [x] `git diff --check`
 
 阶段出口：使用 fake model/M5 runtime 可在 application 层跑通单 waterbody session 并得到完整、验证过的 domain result 或明确失败/cancel；尚未接入持久化 completion/history 或真实 adapter。
 
 提交边界：runner、synthesis orchestration、assembler、failure mapping 和 focused fake E2E；不得修改 production OpenAPI、实现 M7 DAG 或新增前端。
+
+#### Milestone 8 完成记录（2026-10-02）
+
+- 实现：新增单水体 `RunSingleWaterbodyAgent`，沿用唯一 M5 planning/handoff、M6 sealed skeleton/batch plan 和 M7 validator/单次 repair exchange，按同一 session/model 依次执行 batch 与一次 synthesis；每个新 operation 前后检查 cancel/deadline。全 fixed 自然无证据路径不调用 final reasoning/synthesis，但保留 stationless planning/tool/usage 计数。
+- 装配与闭包：新增 deterministic assembler，只合并 skeleton、validated cell/synthesis 与 sealed fixed facts，生成完整 parameter-window points、series、window/range assessments、availability/counts/missing/blockers、AnalysisDetail、AttributionSummary、EvidenceChain 和安全 execution summary。`AnalysisStep`/`AttributionFactor` 的 `result_cell_refs` 进入当前唯一 V1 并由 `InferenceResult` 校验；risk/confidence/rationales 保持 Agent validated 值，后端不做阈值或数值重算。
+- 失败与取消：自然 empty completed；partial supported/blocked 保持独立 availability；all required blocked、model unavailable/timeout/content filter/invalid、repair failed、plan/budget/deadline exceeded 和 assembly invariant failure 均安全 failed 且无 partial result。已完成 exchange audit 保留；cancel 在 operation/阶段边界胜出时返回 cancelled、停止后续 batch/synthesis/assembly 且无 result。公开错误仅含 error id、稳定 code/message/stage/retryable。
+- 验证：M8 focused `21 passed`，全部 reasoning `143 passed`，指定 domain/evidence regression `186 passed`，architecture `108 passed`；Docker Engine 29.8.1 的 PostgreSQL 17 容器 healthy，使用进程级隔离库 `wateragents_test` 的最终完整 backend 回归为 `1754 passed, 1 warning`。architecture 首次在受限 `%TEMP%` 下出现 22 个 tmp-path setup error，改用项目内专用 basetemp 并在允许的 Docker/测试权限下重跑后全部通过；`compileall` 与 staged `git diff --check` 通过。
+- 边界：未实现 M9 typed transcript/persistence/history/SSE、真实 provider adapter、production composition、M7 DAG 或 frontend；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `f2bffe7`；本完成记录随紧随其后的本地文档提交保存，均未 push。Milestone 9–13 尚未开始。
 
 ## Milestone 9：typed transcript、session SSE 与 history
 
