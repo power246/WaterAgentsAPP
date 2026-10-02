@@ -373,34 +373,42 @@
 
 ### 工作
 
-- [ ] 定义 strict `ReasoningCellDraft`、`ReasoningBatchDraft`、`OverallSynthesisDraft` 和 repair issue DTO；拒绝 extra/arbitrary fields。
-- [ ] cell validator 检查 exact batch/cell identity、三态 shape、value decimal、unit/aggregation/source 资格、risk/confidence/rationales、evidence refs、reason codes 和 quality facts。
-- [ ] only allowed-indirect cell 最多 directional；observed 只允许一对一当前水体/窗口 direct record 加登记的可逆展示换算；aggregate/跨 series/upstream/weather/facility/history 为 inferred，prediction 为 predicted。
-- [ ] validator 检查所有影响判断的 series refs、evidence allowlist、result/reference closure、scope digest 和 duplicate/missing/extra cells；不评价自然语言结论是否“正确”。
-- [ ] synthesis validator 检查每个 final window composite、range overall、series confidence/rationale、AnalysisDetail、AttributionSummary proposal 和 contributing refs；availability/counts 不接受 Agent body 提供。
-- [ ] 实现 exchange wrapper：initial response mechanical-invalid 时生成一次精简脱敏 repair request；repair 使用同 provider/model/scope/schema，不含 tools/new evidence，不改变 batch plan。
-- [ ] semantic disagreement、风险高低、confidence 大小或 rationale 观点不同不触发 repair。repair 仍 invalid 时返回 typed whole-session failure，不进入 assembler。
-- [ ] 保存 initial raw visible response、validation issues、repair request/response 和 validated draft 的 identity/correlation；public error 不泄露原 body。
+- [x] 定义 strict `ReasoningCellDraft`、`ReasoningBatchDraft`、`OverallSynthesisDraft` 和 repair issue DTO；拒绝 extra/arbitrary fields。
+- [x] cell validator 检查 exact batch/cell identity、三态 shape、value decimal、unit/aggregation/source 资格、risk/confidence/rationales、evidence refs、reason codes 和 quality facts。
+- [x] only allowed-indirect cell 最多 directional；observed 只允许一对一当前水体/窗口 direct record 加登记的可逆展示换算；aggregate/跨 series/upstream/weather/facility/history 为 inferred，prediction 为 predicted。
+- [x] validator 检查所有影响判断的 series refs、evidence allowlist、result/reference closure、scope digest 和 duplicate/missing/extra cells；不评价自然语言结论是否“正确”。
+- [x] synthesis validator 检查每个 final window composite、range overall、series confidence/rationale、AnalysisDetail、AttributionSummary proposal 和 contributing refs；availability/counts 不接受 Agent body 提供。
+- [x] 实现 exchange wrapper：initial response mechanical-invalid 时生成一次精简脱敏 repair request；repair 使用同 provider/model/scope/schema，不含 tools/new evidence，不改变 batch plan。
+- [x] semantic disagreement、风险高低、confidence 大小或 rationale 观点不同不触发 repair。repair 仍 invalid 时返回 typed whole-session failure，不进入 assembler。
+- [x] 保存 initial raw visible response、validation issues、repair request/response 和 validated draft 的 identity/correlation；public error 不泄露原 body。
 
 ### Tests
 
-- [ ] missing/duplicate/extra/错序 cell、未知 ref/unit/method/source/risk、非法 bool/NaN/Infinity/float drift、空 rationale 和 scope mismatch 均有失败 fixture。
-- [ ] quantified/directional/Agent indeterminate、multi-series 选择/保留不确定、observed/inferred/predicted 和 attribution basis 均有正反例。
-- [ ] initial invalid + repair valid 成功；initial invalid + repair invalid、repair protocol error、timeout/content filter 均 whole-session failed。
-- [ ] 每个 batch/synthesis 最多一次 repair；repair request 无 tools/new refs；fake call count 精确，无 provider/model failover。
-- [ ] 后端“不赞同”合法 `none/low/medium/high/indeterminate` 或 confidence 时不 repair、不改写；无证据 none 因 prompt/refs/mechanical invariant 被拒绝。
-- [ ] 前面已 validated batches 在后续失败时只留审计，不被 assembler 接受为 partial final result。
+- [x] missing/duplicate/extra/错序 cell、未知 ref/unit/method/source/risk、非法 bool/NaN/Infinity/float drift、空 rationale 和 scope mismatch 均有失败 fixture。
+- [x] quantified/directional/Agent indeterminate、multi-series 选择/保留不确定、observed/inferred/predicted 和 attribution basis 均有正反例。
+- [x] initial invalid + repair valid 成功；initial invalid + repair invalid、repair protocol error、timeout/content filter 均 whole-session failed。
+- [x] 每个 batch/synthesis 最多一次 repair；repair request 无 tools/new refs；fake call count 精确，无 provider/model failover。
+- [x] 后端“不赞同”合法 `none/low/medium/high/indeterminate` 或 confidence 时不 repair、不改写；无证据 none 因 prompt/refs/mechanical invariant 被拒绝。
+- [x] 前面已 validated batches 在后续失败时只留审计，不被 assembler 接受为 partial final result。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_draft_validator.py backend/tests/application/reasoning/test_validation_repair.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_results.py backend/tests/application/reasoning/test_model_protocol.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/application/reasoning`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_draft_validator.py backend/tests/application/reasoning/test_validation_repair.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_results.py backend/tests/application/reasoning/test_model_protocol.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/application/reasoning`
+- [x] `git diff --check`
 
 阶段出口：所有 model structured outputs 在进入正式结果前经过可机械证明的严格验证；每个 exchange 只允许一次同 scope repair，失败不产生 partial result。
 
 提交边界：draft/synthesis DTO、validator、repair wrapper、typed errors 与 focused tests；不得接入真实 provider、lifecycle completed、history projection 或 M7。
+
+#### Milestone 7 完成记录（2026-10-02）
+
+- 实现：新增 strict batch/cell/synthesis draft、sealed-evidence validation catalog、三态与 unit/aggregation/source/quality/reference 机械 validator，以及同 provider/model/scope/schema 的单次 repair exchange。observed 只接受一条当前 direct record 或与同 capability registry 绑定的可逆展示换算；aggregate、multi-series 与 allowed-indirect 保持 inferred，prediction 保持 predicted。synthesis 完整校验 series/window/range、AnalysisDetail、AttributionSummary basis/closure，并继续由后端拥有 availability/counts。
+- repair 与失败：初始 mechanical-invalid 才进入一次脱敏 repair；repair 不含 tools、bounded evidence summaries 或新 refs，不改变 batch plan，也不 failover。合法 risk/confidence/rationale 不触发 semantic repair；repair invalid、protocol、timeout 或 content-filter 均形成带完整内部 audit 的 typed whole-session failure，公开错误只保留安全 identity/code/stage。
+- 验证：M7 focused `22 passed`，指定 result/model-protocol regression `147 passed`，全部 architecture `108 passed`；Docker PostgreSQL 17 healthy，使用进程级隔离库 `wateragents_test` 的最终完整 backend 回归为 `1732 passed, 1 warning`。`PYTHONHASHSEED=1/999` 固定 digest 审计、strict schema/ownership audit、`compileall` 和 staged `git diff --check` 均通过。
+- 边界：未实现 M8 runner/assembler、真实 provider adapter、lifecycle completed、history projection、SSE 或 M7 DAG；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `d611825`；本完成记录随紧随其后的本地文档提交保存，均未 push。Milestone 8–13 尚未开始。
 
 ## Milestone 8：runner、overall synthesis 与结果装配
 
