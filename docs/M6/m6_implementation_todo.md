@@ -544,36 +544,42 @@
 
 ### 工作
 
-- [ ] 在 `AppSettings` 与 `.env.example` 原子增加六项 M6 limits：planning turns=6、tool calls/turn=4、batch cells=32、batches=24、model timeout=90s、session deadline=600s；strict int/float、bool/NaN/Infinity/extra env 继续 fail startup。
-- [ ] repair hard limit 固定为一次，不提供普通 settings 提高；M5 tool budgets 继续独立且更严格者优先，M6 不复制/放宽。
-- [ ] 构造 `M6Runtime`：runner、model router、prompt builder、planning loop、sufficiency、batch planner、validator、assembler、transcript store 和 limits；依赖只来自 M3/M4/M5 当前 runtime/ports。
-- [ ] router 按 run 固化 `ModelSelection` 选择 role-compatible adapter；selected provider 无 adapter、credential 缺失、model 不在 catalog 或 role 不匹配时，在 session 新操作前安全失败。
-- [ ] production lifespan 只装配内部 M6 service，不注册 direct reasoning/model/tool/result/test route，不改变现有十条 run-root API，也不提前让 M4 workflow 创建水体 session。
-- [ ] 默认建立 direct application test harness / `build_m6_test_runtime`，用 fake model/M5 ports/fixed clock/UUID/usage 调真实 runner/validator/assembler/writer；不默认增加 test HTTP route。
-- [ ] 若自动化确需独立 test app，必须单独 composition、production import graph 不可达、无环境开关启用，并复用同一 production chain；先在清单完成记录中说明必要性。
-- [ ] 增加 opt-in `m6_provider_smoke.py`：只验证最小合法 model contract，先检查 credential/model/network/明确授权，输出安全 request/response/usage 计数；默认不运行、不打印 prompt/secret。
-- [ ] settings metadata/health 只公开安全 limits 和 adapter availability；不回显 key、base URL credential、prompt 或 provider body。
+- [x] 在 `AppSettings` 与 `.env.example` 原子增加六项 M6 limits：planning turns=6、tool calls/turn=4、batch cells=32、batches=24、model timeout=90s、session deadline=600s；strict int/float、bool/NaN/Infinity/extra env 继续 fail startup。
+- [x] repair hard limit 固定为一次，不提供普通 settings 提高；M5 tool budgets 继续独立且更严格者优先，M6 不复制/放宽。
+- [x] 构造 `M6Runtime`：runner、model router、prompt builder、planning loop、sufficiency、batch planner、validator、assembler、transcript store 和 limits；依赖只来自 M3/M4/M5 当前 runtime/ports。
+- [x] router 按 run 固化 `ModelSelection` 选择 role-compatible adapter；selected provider 无 adapter、credential 缺失、model 不在 catalog 或 role 不匹配时，在 session 新操作前安全失败。
+- [x] production lifespan 只装配内部 M6 service，不注册 direct reasoning/model/tool/result/test route，不改变现有十条 run-root API，也不提前让 M4 workflow 创建水体 session。
+- [x] 默认建立 direct application test harness / `build_m6_test_runtime`，用 fake model/M5 ports/fixed clock/UUID/usage 调真实 runner/validator/assembler/writer；不默认增加 test HTTP route。
+- [x] 若自动化确需独立 test app，必须单独 composition、production import graph 不可达、无环境开关启用，并复用同一 production chain；先在清单完成记录中说明必要性。
+- [x] 增加 opt-in `m6_provider_smoke.py`：只验证最小合法 model contract，先检查 credential/model/network/明确授权，输出安全 request/response/usage 计数；默认不运行、不打印 prompt/secret。
+- [x] settings metadata/health 只公开安全 limits 和 adapter availability；不回显 key、base URL credential、prompt 或 provider body。
 
 ### Tests
 
-- [ ] 六项默认/边界/非法 env 和最坏模型调用上界 `planning + 2*batches + 2` 有测试；deadline 到达后不启动新 operation。
-- [ ] production runtime 的组件 identity、dependency direction、M5/M3 单一实例复用和 shutdown/cancel cleanup 正确；无第二 writer/reader/executor。
-- [ ] selected OpenAI waterbody model 正常路由；unsupported provider、缺 key、role/model mismatch 安全失败且错误脱敏，无 fallback。
-- [ ] production OpenAPI 精确不含 `/reasoning`、`/models/complete`、`/tools`、`/evidence/collect`、`/__test__` 或等价 path。
-- [ ] test harness 与 production composition 对同 fixture 产生相同 contract semantics；fake 只替换外部 ports/clock/identity，不跳过 scope/policy/writer。
-- [ ] production import test modules 的 architecture guard、frontend 无 M6 direct route consumer 和 parser/waterbody adapter isolation 通过。
+- [x] 六项默认/边界/非法 env 和最坏模型调用上界 `planning + 2*batches + 2` 有测试；deadline 到达后不启动新 operation。
+- [x] production runtime 的组件 identity、dependency direction、M5/M3 单一实例复用和 shutdown/cancel cleanup 正确；无第二 writer/reader/executor。
+- [x] selected OpenAI waterbody model 正常路由；unsupported provider、缺 key、role/model mismatch 安全失败且错误脱敏，无 fallback。
+- [x] production OpenAPI 精确不含 `/reasoning`、`/models/complete`、`/tools`、`/evidence/collect`、`/__test__` 或等价 path。
+- [x] test harness 与 production composition 对同 fixture 产生相同 contract semantics；fake 只替换外部 ports/clock/identity，不跳过 scope/policy/writer。
+- [x] production import test modules 的 architecture guard、frontend 无 M6 direct route consumer 和 parser/waterbody adapter isolation 通过。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m6_runtime.py backend/tests/api/test_health.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/api/test_analysis_runs.py -q`
-- [ ] 导出 production OpenAPI 并断言路由集合未增加 direct reasoning/tool/test surface。
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m6_runtime.py backend/tests/api/test_health.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/api/test_analysis_runs.py -q`
+- [x] 导出 production OpenAPI 并断言路由集合未增加 direct reasoning/tool/test surface。
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：production 可内部构造完整 M6 runner，test harness 可复用同一真实链；limits/secret/model 权限受 settings/catalog 控制，公开 API 未扩张。
 
 提交边界：settings/env example、runtime/router/lifespan、direct test composition、optional smoke script、OpenAPI/architecture tests；不得实现 M7 调度或 frontend。
+
+#### Milestone 11 完成记录（2026-10-02）
+
+- 实现提交 `2bce5cd`：增加六项 M6 hard limits、单次 repair/56 次最坏调用上界、catalog-authorized waterbody router、production `M6Runtime` lifespan 装配与 direct `build_m6_test_runtime`；复用同一 coordinator/reader/M5 acquisition，不新增 production/test HTTP route 或 M7 调度。
+- 增加默认零请求的 opt-in provider smoke 与安全 OpenAPI metadata；focused 72 项、architecture/API 189 项、Docker PostgreSQL 专用库 `wateragents_test` 全量 `1821 passed, 1 warning`，health 与独立进程 restart/history smoke 均通过，compileall、显式十路由审计与 `git diff --check` 通过。
+- 未建立独立 test app；test harness 直接注入 fake model capability 并复用 production composition。真实 OpenAI provider 请求未获本阶段明确授权，保持 `not run`，未产生 provider 流量或打印 credential/prompt/body。
 
 ## Milestone 12：单水体端到端与 PostgreSQL/SSE 验收
 
