@@ -253,33 +253,40 @@
 
 ### 工作
 
-- [ ] 将 Reasoning Policy Catalog 编码为 typed/immutable policy source 和 `PromptBuilder`；共享 base policy 只定义证据资格、风险/confidence、series、unit/source、引用、安全和禁止事项。
-- [ ] 分别构造 evidence planning、reasoning batch、overall synthesis、schema repair 四类 phase prompt；每个 phase 只暴露本阶段允许的 tools、schema、facts 和 actions。
-- [ ] planning prompt 明确 station 类型、当前 bundle/gates/missing/blockers、剩余预算和 server-authorized roster；不允许任意 provider request、COMID/station/URL 或自由 evidence ID。
-- [ ] reasoning batch prompt 只包含本 batch supported cells、bounded evidence summaries/refs、机械资格和 exact output schema；不允许 tools、scope 外 cells 或 server-owned fields。
-- [ ] synthesis prompt 只消费 validated cell results、fixed cells、coverage/blocker facts 和有界引用摘要；要求 window/range risk、四层 confidence/rationale、AnalysisDetail 与 AttributionSummary，不重新读取 raw evidence。
-- [ ] repair prompt 只含原可见 response、精简脱敏 mechanical issues、原 schema 和相同 scope；不含 tools、新 evidence、替代模型或开放式“重新分析”。
-- [ ] working context 由稳定 refs/digests 和实际发送 messages 构成；不每轮重放整个 transcript，不从 UI preview 反推，不内联无界 records。
-- [ ] 建立 executable prompt audit，逐项证明五级风险、`none != no evidence`、risk/confidence rationale、series 全量考虑、observed 资格、unit/tool、gate、secret、hidden reasoning 和 phase permission 规则存在且无冲突。
+- [x] 将 Reasoning Policy Catalog 编码为 typed/immutable policy source 和 `PromptBuilder`；共享 base policy 只定义证据资格、风险/confidence、series、unit/source、引用、安全和禁止事项。
+- [x] 分别构造 evidence planning、reasoning batch、overall synthesis、schema repair 四类 phase prompt；每个 phase 只暴露本阶段允许的 tools、schema、facts 和 actions。
+- [x] planning prompt 明确 station 类型、当前 bundle/gates/missing/blockers、剩余预算和 server-authorized roster；不允许任意 provider request、COMID/station/URL 或自由 evidence ID。
+- [x] reasoning batch prompt 只包含本 batch supported cells、bounded evidence summaries/refs、机械资格和 exact output schema；不允许 tools、scope 外 cells 或 server-owned fields。
+- [x] synthesis prompt 只消费 validated cell results、fixed cells、coverage/blocker facts 和有界引用摘要；要求 window/range risk、四层 confidence/rationale、AnalysisDetail 与 AttributionSummary，不重新读取 raw evidence。
+- [x] repair prompt 只含原可见 response、精简脱敏 mechanical issues、原 schema 和相同 scope；不含 tools、新 evidence、替代模型或开放式“重新分析”。
+- [x] working context 由稳定 refs/digests 和实际发送 messages 构成；不每轮重放整个 transcript，不从 UI preview 反推，不内联无界 records。
+- [x] 建立 executable prompt audit，逐项证明五级风险、`none != no evidence`、risk/confidence rationale、series 全量考虑、observed 资格、unit/tool、gate、secret、hidden reasoning 和 phase permission 规则存在且无冲突。
 
 ### Tests
 
-- [ ] 四类 prompt golden/semantic fixtures 使用同一 policy source，输入顺序与 canonical digest 稳定；换 dict 顺序不改变逻辑内容。
-- [ ] planning roster 仅包含 registry 当前授权 tools；batch/synthesis/repair 的 tool descriptors 精确为空。
-- [ ] prompt 不包含 API key/header/raw provider envelope、归档字段、完整无界 source arrays、scope 外 COMID/station/evidence 或 provider hidden-reasoning instruction。
-- [ ] risk policy 明确要求 Agent 说明证据、含义和选级理由；后端没有数值阈值、max/average/0–100 评分 prompt。
-- [ ] confidence、availability、outcome、risk 定义不互相替代；fixed facts 与 Agent fields 的所有权可由 fixture 审计。
+- [x] 四类 prompt golden/semantic fixtures 使用同一 policy source，输入顺序与 canonical digest 稳定；换 dict 顺序不改变逻辑内容。
+- [x] planning roster 仅包含 registry 当前授权 tools；batch/synthesis/repair 的 tool descriptors 精确为空。
+- [x] prompt 不包含 API key/header/raw provider envelope、归档字段、完整无界 source arrays、scope 外 COMID/station/evidence 或 provider hidden-reasoning instruction。
+- [x] risk policy 明确要求 Agent 说明证据、含义和选级理由；后端没有数值阈值、max/average/0–100 评分 prompt。
+- [x] confidence、availability、outcome、risk 定义不互相替代；fixed facts 与 Agent fields 的所有权可由 fixture 审计。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_prompt_policy.py backend/tests/application/reasoning/test_working_context.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_registry.py backend/tests/application/evidence_policy -q`
-- [ ] 运行 M6 prompt/policy 离线 audit，并保存规则数、phase roster/schema digest 与失败样例。
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_prompt_policy.py backend/tests/application/reasoning/test_working_context.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_registry.py backend/tests/application/evidence_policy -q`
+- [x] 运行 M6 prompt/policy 离线 audit，并保存规则数、phase roster/schema digest 与失败样例。
+- [x] `git diff --check`
 
 阶段出口：四阶段 model request 可由已验证类型确定性构造，权限只收窄不扩张；policy 规则来自单一 source 并可执行审计。
 
 提交边界：policy models、PromptBuilder、working-context projection、golden/audit tests；不得执行 tools、调用模型、保存 transcript 或组装 final result。
+
+完成记录（2026-10-02）：
+
+- 实现：新增 18 条 typed/immutable reasoning policy、四阶段 `PromptBuilder`、有界 canonical working-context projection、强制 `prompt_policy_digest` 与 canonical schema；planning tools 只由 M5 registry descriptor 投影，其他三阶段 roster 精确为空。实现停在 request 构造和离线审计边界，未执行 tools、调用模型、保存 transcript 或组装 final result。
+- 审计：离线 audit 的 policy digest 为 `sha256:85c45abd1da4cfecb031d863b648a185d8e4330ca948628f98ad9727efa499c5`；phase roster 为 planning=`collect_weather_evidence,convert_evidence_unit,aggregate_evidence,inspect_evidence_records`，batch/synthesis/repair=`[]`；四个 fixture schema digest 均为 `sha256:7d3d8fa7ddb327cfd629a02f17930416d02d5375664258fe6defb9aefba5b550`，通过样例无 failure，失败样例稳定得到 `prompt_policy_digest_mismatch`。
+- 验证：M4 focused `19 passed`，指定 M5 registry/evidence-policy regression `56 passed`，全部 architecture `108 passed`；使用健康的 Docker PostgreSQL 17 和进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 执行完整 backend 为 `1683 passed, 1 warning`，health smoke 与 history/restart smoke 均通过。`compileall`、staged `git diff --check` 通过；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `b37da56`；本完成记录随紧随其后的本地文档提交保存，均未 push。M5–M13 尚未开始。
 
 ## Milestone 5：evidence-planning Agent loop
 
