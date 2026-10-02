@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-01
+更新日期：2026-10-02
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -418,20 +418,25 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 8. M6: Single-Agent Reasoning
 
+状态：M6 大方向、实现模式和 Milestone 0–13 施工清单已完成设计确认，代码实现与验收尚未开始。详细契约见 [设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和 [Implementation TODO](M6/m6_implementation_todo.md)。
+
 目标：
 
-- 跑通单个 river segment agent 的推理闭环。
+- 跑通单个 waterbody Agent session 的 evidence planning、tool use、门禁、分批推理、总体汇总和结果装配闭环。
 - 先不要求多 agent 拓扑传播。
+- 复用 M3 session SSE，把 Agent 的实时消息、tool call/result 和结构化决定作为真实会话上下文交付，不另造“推理过程”流。
 
 主要产物：
 
-- `RiverSegmentAgent`
+- `WaterbodyAgentRunner`
+- `WaterbodyModelPort`
 - `EvidencePolicy`
 - `SufficiencyPolicy`
 - `PromptBuilder`
-- `StructuredOutputParser`
+- `ReasoningDraftValidator`
+- `InferenceResultAssembler`
 - `InferenceResult`
-- `agent_started` / `evidence_collected` / `agent_completed` SSE event
+- `waterbody_agent_input` / `waterbody_model_request` / `waterbody_agent_message` / `waterbody_model_response` / `reasoning_decision` / `inference_result` typed content
 
 主要能力：
 
@@ -441,25 +446,35 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - `time_resolution`
   - `mode`
 - station-backed session 先执行确定性本地 observation/discharge preflight；stationless session 不调用本地 observation tool。
-- agent 可根据任务和 evidence 缺口按需调用 weather/facility/inspection/aggregation 等 optional tools。
-- 调用水体模型前由确定性 gate 按“参数 × 时间段”判断 evidence sufficiency。
+- station-backed preflight 成功但全部 cell 自然无证据时，直接装配完整 indeterminate 结果，不启动 planning 或 final reasoning 模型；stationless 缺少本地读数是正常起点，仍可读取上游结果并在预算内由 Agent 规划 weather/facility/inspection/aggregation 等 optional tools。
+- 每轮取证后重建 reference-complete bundle；最终 seal 后由确定性 gate 按“目标参数 × 时间段”同时检查 target 与 required discharge。
+- 后端预建完整结果骨架和固定 indeterminate cells；Agent 只为通过门禁的 cells 输出受约束 draft，不能改窗口、身份、权限或固定结果。
+- 一个水体始终只有一个 Agent session；session 内按参数和连续窗口做有界 reasoning batches，全部通过后由同一模型做一次 overall synthesis。
 - 证据充分时输出 quantified result，并可附带风险/趋势。
-- 只有 capability 白名单侧面证据时可输出受限 directional result，并显式降低置信度。
-- 完全缺乏证据时不调用对应水体模型，由确定性逻辑输出 indeterminate，而不是省略时间窗口或消耗 token 生成措辞。
-- 结果包含 `analysis_detail`、`attribution_summary`、`evidence_chain`。
+- 只有 capability 白名单侧面证据时可输出受限 directional result，并显式说明证据限制；confidence 由 Agent 给出，后端不使用固定扣分公式。
+- 完全缺乏证据时不调用 final reasoning 模型，由确定性逻辑输出 `indeterminate/insufficient_evidence`；stationless 在最终门禁前可能已经发生有界 evidence-planning 模型调用，计数必须区分 planning 与 final reasoning。
+- 风险等级由 Agent 在 prompt 规则下选择 `none / low / medium / high / indeterminate`，每个等级必须附带简短理由和引用；后端只验证结构、scope 和引用，不计算或改写风险。
+- Agent 分别给出 cell、series、逐窗口综合和日期范围总体 confidence 及理由；后端固定无证据结果 confidence 为 0，不做算术平均。
+- 每个窗口都有跨参数综合风险，日期范围另有总体风险；后端独立计算 `complete / partial / indeterminate` availability，不能用 confidence 代替风险或覆盖完整性。
+- 结果包含 `analysis_detail`、`attribution_summary`、`evidence_chain`、逐窗口综合判断和日期范围总体判断。
+- 每个 structured batch/synthesis 最多使用同模型、同 scope 修复一次；仍无效则整个 waterbody session failed，不发布部分正式结果。
+- Agent 实时文字沿用 `message_started / message_delta / message_finalized`，tool/evidence/decision/result 沿用 `transcript_item`；不新增 transport event、第三条 SSE 或隐藏思维链摘要。
 
 阶段自测验收：
 
-- 用 fake evidence bundle 可以跑出一个完整 `InferenceResult`。
+- 用 fake evidence bundle 跑出完整 `InferenceResult`，覆盖 quantified、directional、Agent-selected indeterminate 和固定 indeterminate。
 - 当存在目标检测站读数时，只有一对一采用一条当前水体具体直接记录（可做可逆单位展示转换）才能标 observed；任何多记录聚合均为 inferred。
 - 当无直接检测站链路但存在 capability 允许的侧面证据时，不输出具体数值，只输出明确降级的趋势/风险判断；完全无证据时走下一条确定性 indeterminate，不能调用模型。
 - 完全无可用证据时仍为每个窗口输出带 reason code 的结构化空判断。
-- 通过模型调用计数验证全部无证据为 0 次，部分无证据只调用通过门禁的范围；unavailable/invalid 不走无证据降级。
-- 每个 time window 都有 source、confidence、evidence refs。
+- 通过分阶段调用计数验证 station-backed 全空为 0 planning/0 final reasoning；stationless 全不足允许有界 planning 但必须为 0 final reasoning；部分不足只把 supported cells 放入 final reasoning。unavailable/invalid 不走自然无证据降级。
+- 每个 time window 都有 outcome、risk、confidence、rationales 和 evidence refs；indeterminate 的 source 为 null，固定无证据 confidence 为 0。
+- 风险由 Agent 输出且说明“用了什么证据、证据说明什么、为什么选择这个等级”；validator fixture 证明后端不按阈值、最大值或平均值重算风险。
+- 逐窗口综合风险、日期范围总体风险和 availability 同时存在；`high + partial`、`low + partial`、全 indeterminate 等组合有稳定 fixture。
 - attribution factor 都能追溯到 evidence refs，并标记 `basis: observed | correlated | inferred | hypothesized`。
 - confidence 规则在本 milestone 设计，保留 Agent 自主判断，不与 outcome status 做 Domain 硬绑定。
 - M5 不自动判断多 series 是否冲突；system prompt 要求 Agent 检查 station/time/method/quality 等差异、引用所有影响判断的记录，并解释选择或保持不确定。任何多记录 aggregate、加权、折中或综合值标记为 inferred，只有一对一采用当前水体具体直接记录可标 observed。
-- prompt、raw LLM output、structured result 能写入 transcript。
+- prompt、provider 可见消息、tool call/result、raw structured output、validated decision、repair 和 final result 能写入同一 session transcript；session SSE 首次回放、实时增量、续传、取消和历史读取保持 M3 语义，run SSE 不复制完整会话。
+- malformed structured output 最多修复一次；第二次仍无效时 session failed，先前成功 batches 只留作审计，不发布部分结果。
 
 ## 9. M7: Topology-Driven Multi-Agent Workflow
 
