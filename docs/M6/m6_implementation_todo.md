@@ -37,43 +37,43 @@
 
 ## Coding agent 执行原则
 
-- [ ] 只以当前 `backend/`、`docs/M1`–`docs/M6` 和项目级当前契约为实现输入。`backend_bk/`、`frontend_bk/`、`docs/backend_refactor_contract.md` 是完全不相关、最终丢弃的归档；不得读取、导入、复制、适配、枚举、运行或把其中行为当测试 oracle。
-- [ ] 开始每个 Milestone 前记录当前 branch、HEAD、`origin/main`、merge-base、`git status` 和已有用户改动。不得清理、覆盖、回退或顺手提交不属于本阶段的文件。
-- [ ] 一个 Milestone 只交付表中一个可观察目标。先写或更新会失败的测试，再做最小 production 实现，再跑 focused gate；阶段出口未满足时不得进入下一阶段，也不得勾选项目。
-- [ ] 每个 Milestone 原则上形成一个可独立审查的提交。提交前运行适用 focused tests、architecture tests、`compileall` 和 `git diff --check`；未经用户要求不 push、不创建 PR、不改写历史。
-- [ ] 直接原子更新当前唯一 V1 的 inference domain、typed content、lifecycle payload、summary/history projection、fixtures 和全部消费者。不得新增 `InferenceResultV2`、旧新 read union、migration branch、milestone feature flag、双写或临时兼容入口。
-- [ ] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup。不得建立第二套 transcript、历史、重试队列、session 状态或第三条 SSE。
-- [ ] M6 只运行一个已经存在的 waterbody session。不得遍历 DAG、等待多个上游、创建多个水体 session 或形成 run-level result；这些由 M7 实现。M8 RAG producer、M9 frontend/settings/admin 也不得提前实现。
-- [ ] query parser 一次性 `generate()` port 继续禁止 tools。waterbody streaming port 独立新增；不得为复用代码而让 parser 获得 tool 权限，也不得把 provider SDK 类型泄漏进 Domain/Application。
-- [ ] station-backed 与 stationless 起点必须分开：前者全空成功时 0 planning/0 final reasoning；后者没有本地观测是正常事实，允许有界 planning，但最终全部不足时必须 0 final reasoning。测试和计数不得把两条路径混写成“所有无证据会话 0 模型调用”。
-- [ ] 每轮取证后都通过 M5 原 executor/writer/materializer/bundle builder 形成新 handoff；旧 bundle 不原地修改。Agent 不能传任意 COMID/station/URL、提高 budget、删除 baseline rule 或把 contextual evidence 自报为 allowed-indirect。
-- [ ] 最终 gate 由后端在 seal 后按 target ParameterKey × window 同时检查 target 与 required discharge。unsupported/blocked cells 不进入 reasoning batches；天气、设施邻近、历史推理或未物化 rule 不能单独解锁。
-- [ ] 后端先固定 identity、完整窗口骨架、fixed cells、evidence allowlist 与 source/unit/aggregation 资格。Agent draft 不得新增/删除窗口、覆盖 fixed result、引用 scope 外事实或伪造 observed/单位/计算。
-- [ ] 风险等级只允许 `none / low / medium / high / indeterminate`，由 Agent 按 prompt 判断并给出 `risk_rationale` 与 refs。后端不得使用阈值、最大值、平均值或自定义 0–100 分重算或改写风险；没有证据不能成为 `none`。
-- [ ] confidence 表示对水质判断的把握，由 Agent 在 cell、series、window overall、range overall 四层给出理由和 refs；后端只校验 `[0,1]`、scope 和引用。fixed `indeterminate/insufficient_evidence` confidence 固定为 0。
-- [ ] 风险、confidence、outcome 和 `complete / partial / indeterminate` availability 是独立事实。availability 的 counts/missing/blocker refs 只由后端计算；`none/low + partial` 不得表述为整个水体安全。
-- [ ] 一个水体只有一个 Agent/session。supported cells 按参数、segment 和连续窗口做稳定有界 batches；不得一 cell 一模型调用，也不得把数百 cells 塞进一个无界 response。全部 batches 成功后才执行同模型 overall synthesis。
-- [ ] 每个 reasoning batch 和 synthesis 只有一次正常调用与至多一次同模型、同 scope schema repair。repair 不得调用 tools、读取新 evidence、改变 batch plan 或 failover；后端不同意风险/confidence/理由不是 repair 条件。
-- [ ] repair 仍失败、模型不可用/超时/content filter 或 assembly invariant 失败时，整个 waterbody session failed。已成功 batches 只留审计，不发布 partial `InferenceResult`，不形成正常 upstream result。
-- [ ] 用户所见“推理过程”就是本 session 的真实 provider 可见消息、tool calls/results、evidence、decisions 和 result。文字沿用 `message_started / message_delta / message_finalized`，其他内容沿用 `transcript_item`；不得新增 `reasoning_delta`、第三条 SSE、合成思维摘要或隐藏思维链字段。
-- [ ] result item 与 waterbody `session_completed(result_ref + result_summary)` 必须在同一必需提交批次或等价原子边界成立。run snapshot/history 只投影同一持久化结果，不在读取时重新推理、重算风险或复制完整 series。
-- [ ] 外部 provider smoke 不是单元测试前置条件。先用 checked-in Responses fixtures 和 fakes 完成确定性覆盖；需凭据、联网或可能计费的 smoke 必须先 preflight，0 requests、缺凭据或网络不满足一律记录 `not run`，不能写成通过或零结果。
-- [ ] 实际完成记录必须写清改动路径、命令、环境、pass/fail/skip/not run 数、失败后的修复、剩余风险和 commit SHA。不得复制旧阶段 pass count，不得用 exit code 0、HTTP 200 或 stream 正常关闭代替业务断言。
+- [x] 只以当前 `backend/`、`docs/M1`–`docs/M6` 和项目级当前契约为实现输入。`backend_bk/`、`frontend_bk/`、`docs/backend_refactor_contract.md` 是完全不相关、最终丢弃的归档；不得读取、导入、复制、适配、枚举、运行或把其中行为当测试 oracle。
+- [x] 开始每个 Milestone 前记录当前 branch、HEAD、`origin/main`、merge-base、`git status` 和已有用户改动。不得清理、覆盖、回退或顺手提交不属于本阶段的文件。
+- [x] 一个 Milestone 只交付表中一个可观察目标。先写或更新会失败的测试，再做最小 production 实现，再跑 focused gate；阶段出口未满足时不得进入下一阶段，也不得勾选项目。
+- [x] 每个 Milestone 原则上形成一个可独立审查的提交。提交前运行适用 focused tests、architecture tests、`compileall` 和 `git diff --check`；未经用户要求不 push、不创建 PR、不改写历史。
+- [x] 直接原子更新当前唯一 V1 的 inference domain、typed content、lifecycle payload、summary/history projection、fixtures 和全部消费者。不得新增 `InferenceResultV2`、旧新 read union、migration branch、milestone feature flag、双写或临时兼容入口。
+- [x] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup。不得建立第二套 transcript、历史、重试队列、session 状态或第三条 SSE。
+- [x] M6 只运行一个已经存在的 waterbody session。不得遍历 DAG、等待多个上游、创建多个水体 session 或形成 run-level result；这些由 M7 实现。M8 RAG producer、M9 frontend/settings/admin 也不得提前实现。
+- [x] query parser 一次性 `generate()` port 继续禁止 tools。waterbody streaming port 独立新增；不得为复用代码而让 parser 获得 tool 权限，也不得把 provider SDK 类型泄漏进 Domain/Application。
+- [x] station-backed 与 stationless 起点必须分开：前者全空成功时 0 planning/0 final reasoning；后者没有本地观测是正常事实，允许有界 planning，但最终全部不足时必须 0 final reasoning。测试和计数不得把两条路径混写成“所有无证据会话 0 模型调用”。
+- [x] 每轮取证后都通过 M5 原 executor/writer/materializer/bundle builder 形成新 handoff；旧 bundle 不原地修改。Agent 不能传任意 COMID/station/URL、提高 budget、删除 baseline rule 或把 contextual evidence 自报为 allowed-indirect。
+- [x] 最终 gate 由后端在 seal 后按 target ParameterKey × window 同时检查 target 与 required discharge。unsupported/blocked cells 不进入 reasoning batches；天气、设施邻近、历史推理或未物化 rule 不能单独解锁。
+- [x] 后端先固定 identity、完整窗口骨架、fixed cells、evidence allowlist 与 source/unit/aggregation 资格。Agent draft 不得新增/删除窗口、覆盖 fixed result、引用 scope 外事实或伪造 observed/单位/计算。
+- [x] 风险等级只允许 `none / low / medium / high / indeterminate`，由 Agent 按 prompt 判断并给出 `risk_rationale` 与 refs。后端不得使用阈值、最大值、平均值或自定义 0–100 分重算或改写风险；没有证据不能成为 `none`。
+- [x] confidence 表示对水质判断的把握，由 Agent 在 cell、series、window overall、range overall 四层给出理由和 refs；后端只校验 `[0,1]`、scope 和引用。fixed `indeterminate/insufficient_evidence` confidence 固定为 0。
+- [x] 风险、confidence、outcome 和 `complete / partial / indeterminate` availability 是独立事实。availability 的 counts/missing/blocker refs 只由后端计算；`none/low + partial` 不得表述为整个水体安全。
+- [x] 一个水体只有一个 Agent/session。supported cells 按参数、segment 和连续窗口做稳定有界 batches；不得一 cell 一模型调用，也不得把数百 cells 塞进一个无界 response。全部 batches 成功后才执行同模型 overall synthesis。
+- [x] 每个 reasoning batch 和 synthesis 只有一次正常调用与至多一次同模型、同 scope schema repair。repair 不得调用 tools、读取新 evidence、改变 batch plan 或 failover；后端不同意风险/confidence/理由不是 repair 条件。
+- [x] repair 仍失败、模型不可用/超时/content filter 或 assembly invariant 失败时，整个 waterbody session failed。已成功 batches 只留审计，不发布 partial `InferenceResult`，不形成正常 upstream result。
+- [x] 用户所见“推理过程”就是本 session 的真实 provider 可见消息、tool calls/results、evidence、decisions 和 result。文字沿用 `message_started / message_delta / message_finalized`，其他内容沿用 `transcript_item`；不得新增 `reasoning_delta`、第三条 SSE、合成思维摘要或隐藏思维链字段。
+- [x] result item 与 waterbody `session_completed(result_ref + result_summary)` 必须在同一必需提交批次或等价原子边界成立。run snapshot/history 只投影同一持久化结果，不在读取时重新推理、重算风险或复制完整 series。
+- [x] 外部 provider smoke 不是单元测试前置条件。先用 checked-in Responses fixtures 和 fakes 完成确定性覆盖；需凭据、联网或可能计费的 smoke 必须先 preflight，0 requests、缺凭据或网络不满足一律记录 `not run`，不能写成通过或零结果。
+- [x] 实际完成记录必须写清改动路径、命令、环境、pass/fail/skip/not run 数、失败后的修复、剩余风险和 commit SHA。不得复制旧阶段 pass count，不得用 exit code 0、HTTP 200 或 stream 正常关闭代替业务断言。
 
 ## M6 完成标准
 
-- [ ] 当前唯一 V1 已包含五级 `RiskLevel`、三态 `TimeWindowResult`、nullable indeterminate source、decimal-string value、四层 confidence/rationale、window composite、range overall、availability 和完整 reference closure；不存在旧结果兼容读取。
-- [ ] `WaterbodyAgentTask`、sealed evidence input、final gates、result skeleton 和 evidence allowlist 均由后端构造并有越权正反测试；Agent 不能改变 identity 或 fixed cells。
-- [ ] 独立 `WaterbodyModelPort.stream()` 支持可见文字、tool call、structured output、usage、refusal 和 terminal；query parser 仍无 tools，未知/损坏/terminal 后 provider events 被拒绝。
-- [ ] station-backed full empty、station-backed partial、stationless upstream/optional、stationless final unsupported、technical blocked 和 cancel 六条主路径均有确定性 fixture，planning/final reasoning/tool 调用计数准确。
-- [ ] prompt audit 覆盖五级风险、risk/confidence rationale、absence-of-evidence、series、observed、unit、gate、secret 和四阶段 permission；实际发送 messages/schema/roster 可从 transcript 安全还原。
-- [ ] batch planner 对最多 6 参数、15 个当地日期、6h windows、mixed segment 与 DST 稳定排序，满足 cell/batch/model-fit 硬上限且无漏、无重、无 scope 漂移。
-- [ ] draft validator 覆盖三态 shape、value/unit/source/aggregation 资格、完整窗口、risk/confidence/rationale、evidence/result refs 和 attribution；每个 exchange 至多一次 repair，无 failover 或 semantic-repair。
-- [ ] fake end-to-end 可生成完整 `InferenceResult`，包括每个 parameter-window、series、逐窗口综合、日期范围总体、AnalysisDetail、AttributionSummary、EvidenceChain 和 execution summary；全 fixed 路径不调用 final reasoning/synthesis。
-- [ ] 六类 M6 typed content、现有 lifecycle v2 扩展、SessionSummary/run snapshot/history projection 可经真实 writer/reader、inline/reference、补写、PostgreSQL reload/startup repair 和 session SSE 回放；result/completed identity 原子闭包成立。
-- [ ] Agent 实时消息三事件身份、顺序、跨 chunk 脱敏、首次回放 + live handoff、Last-Event-ID、取消 incomplete、late audit 和 stream_end 全部沿用 M3；run SSE 不含完整正文/tool/result。
-- [ ] OpenAI Responses waterbody adapter 和 production runtime 使用 settings/model catalog/secret boundary，缺 provider/credential/model 安全失败；production OpenAPI 无 direct reasoning/model/tool/test route，frontend 未修改。
-- [ ] M1–M5 regression、M6 focused、architecture、OpenAPI、offline fixtures/docs audits、专用 PostgreSQL、`compileall` 和 `git diff --check` 有实际证据；真实 provider 与三平台未运行项如实记录。
+- [x] 当前唯一 V1 已包含五级 `RiskLevel`、三态 `TimeWindowResult`、nullable indeterminate source、decimal-string value、四层 confidence/rationale、window composite、range overall、availability 和完整 reference closure；不存在旧结果兼容读取。
+- [x] `WaterbodyAgentTask`、sealed evidence input、final gates、result skeleton 和 evidence allowlist 均由后端构造并有越权正反测试；Agent 不能改变 identity 或 fixed cells。
+- [x] 独立 `WaterbodyModelPort.stream()` 支持可见文字、tool call、structured output、usage、refusal 和 terminal；query parser 仍无 tools，未知/损坏/terminal 后 provider events 被拒绝。
+- [x] station-backed full empty、station-backed partial、stationless upstream/optional、stationless final unsupported、technical blocked 和 cancel 六条主路径均有确定性 fixture，planning/final reasoning/tool 调用计数准确。
+- [x] prompt audit 覆盖五级风险、risk/confidence rationale、absence-of-evidence、series、observed、unit、gate、secret 和四阶段 permission；实际发送 messages/schema/roster 可从 transcript 安全还原。
+- [x] batch planner 对最多 6 参数、15 个当地日期、6h windows、mixed segment 与 DST 稳定排序，满足 cell/batch/model-fit 硬上限且无漏、无重、无 scope 漂移。
+- [x] draft validator 覆盖三态 shape、value/unit/source/aggregation 资格、完整窗口、risk/confidence/rationale、evidence/result refs 和 attribution；每个 exchange 至多一次 repair，无 failover 或 semantic-repair。
+- [x] fake end-to-end 可生成完整 `InferenceResult`，包括每个 parameter-window、series、逐窗口综合、日期范围总体、AnalysisDetail、AttributionSummary、EvidenceChain 和 execution summary；全 fixed 路径不调用 final reasoning/synthesis。
+- [x] 六类 M6 typed content、现有 lifecycle v2 扩展、SessionSummary/run snapshot/history projection 可经真实 writer/reader、inline/reference、补写、PostgreSQL reload/startup repair 和 session SSE 回放；result/completed identity 原子闭包成立。
+- [x] Agent 实时消息三事件身份、顺序、跨 chunk 脱敏、首次回放 + live handoff、Last-Event-ID、取消 incomplete、late audit 和 stream_end 全部沿用 M3；run SSE 不含完整正文/tool/result。
+- [x] OpenAI Responses waterbody adapter 和 production runtime 使用 settings/model catalog/secret boundary，缺 provider/credential/model 安全失败；production OpenAPI 无 direct reasoning/model/tool/test route，frontend 未修改。
+- [x] M1–M5 regression、M6 focused、architecture、OpenAPI、offline fixtures/docs audits、专用 PostgreSQL、`compileall` 和 `git diff --check` 有实际证据；真实 provider 与三平台未运行项如实记录。
 
 ## Milestone 0：基线、边界与原子更新清单
 
@@ -627,40 +627,47 @@
 
 ### 工作
 
-- [ ] 运行完整 M1–M6 regression：domain、application、ports、infrastructure、API、persistence、observability、architecture、smoke、serialization、OpenAPI 和 docs contract。
-- [ ] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M6-C01`–`M6-C19`、`M6-A01`–`M6-A10`，逐项填写实现位置、focused test、集成证据、实际状态与剩余风险。
-- [ ] 搜索并清除旧 inference fields、四级风险假设、non-null indeterminate source、重复 policy/allowlist、orphan adapters/methods、M6 feature flags、兼容 read union、production test route import 和无 caller 代码；不清理无关历史代码。
-- [ ] 审计 phase/model/tool/result 调用计数、budget/deadline、repair 上限、no failover、secret redaction、scope authorization、reference closure 和 deterministic order；不能只审计 happy path。
-- [ ] 同步 M6 设计/实施/Policy/API/TODO、架构骨架、总 Milestones、延后契约和前端接入边界；只勾选有实际证据的任务，不把文档存在写成实现完成。
-- [ ] 分 provider 执行可选真实 waterbody model contract smoke；在请求前记录明确授权、credential/model/network preflight，之后记录实际 requests、visible events、tool calls、usage 和安全摘要。未执行保持 `not run`。
-- [ ] 在专用 PostgreSQL 执行完整 persistence/history/restart/startup-repair；记录 Docker/PostgreSQL/Python 版本、pass/fail/skip/not run。业务数据库和 `backend/.env` 不得被测试改写。
-- [ ] 写明 M7 接力：ready DAG node 创建/提供 session 与 direct upstream producer，调用同一 runner，处理 dependency outcomes 和 run-level result；不得复制 M6 runner 或改其 session 边界。
-- [ ] 写明 M8 接力：实现 transcript search producer，并继续把历史 evidence 保持 contextual；不得凭历史结论解锁 current gate。
-- [ ] 写明 M9 接力：消费 result summary/ref 和同一 session transcript/SSE；展示真实上下文、risk/confidence/availability，不新增 direct prompt/model/tool route 或第三条流。
+- [x] 运行完整 M1–M6 regression：domain、application、ports、infrastructure、API、persistence、observability、architecture、smoke、serialization、OpenAPI 和 docs contract。
+- [x] 审计 `GLOBAL-C01`–`GLOBAL-C11`、`M6-C01`–`M6-C19`、`M6-A01`–`M6-A10`，逐项填写实现位置、focused test、集成证据、实际状态与剩余风险。
+- [x] 搜索并清除旧 inference fields、四级风险假设、non-null indeterminate source、重复 policy/allowlist、orphan adapters/methods、M6 feature flags、兼容 read union、production test route import 和无 caller 代码；不清理无关历史代码。
+- [x] 审计 phase/model/tool/result 调用计数、budget/deadline、repair 上限、no failover、secret redaction、scope authorization、reference closure 和 deterministic order；不能只审计 happy path。
+- [x] 同步 M6 设计/实施/Policy/API/TODO、架构骨架、总 Milestones、延后契约和前端接入边界；只勾选有实际证据的任务，不把文档存在写成实现完成。
+- [x] 分 provider 执行可选真实 waterbody model contract smoke；在请求前记录明确授权、credential/model/network preflight，之后记录实际 requests、visible events、tool calls、usage 和安全摘要。未执行保持 `not run`。
+- [x] 在专用 PostgreSQL 执行完整 persistence/history/restart/startup-repair；记录 Docker/PostgreSQL/Python 版本、pass/fail/skip/not run。业务数据库和 `backend/.env` 不得被测试改写。
+- [x] 写明 M7 接力：ready DAG node 创建/提供 session 与 direct upstream producer，调用同一 runner，处理 dependency outcomes 和 run-level result；不得复制 M6 runner 或改其 session 边界。
+- [x] 写明 M8 接力：实现 transcript search producer，并继续把历史 evidence 保持 contextual；不得凭历史结论解锁 current gate。
+- [x] 写明 M9 接力：消费 result summary/ref 和同一 session transcript/SSE；展示真实上下文、risk/confidence/availability，不新增 direct prompt/model/tool route 或第三条流。
 
 ### Tests
 
-- [ ] fixed fake E2E 覆盖全部 station/outcome/failure/cancel/repair/budget/persistence 主路径，调用数和终态均有业务断言。
-- [ ] M6 policy、batch、validator、assembler、六类 typed content、lifecycle/history、provider fixtures、settings/runtime 和 SSE 均有独立可执行 gate。
-- [ ] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部异常、unbounded arrays 和 test controls 的 logs/API/SSE/history 全出口扫描通过。
-- [ ] current V1 producer/consumer/fixture/OpenAPI 同步，无 V2/read union/feature flag；production OpenAPI 无 direct reasoning/tool/test route。
-- [ ] contract ID 集合与覆盖矩阵双向一致；Markdown links、JSON examples、code fences、trailing whitespace、未勾选/有证据勾选状态和 `git diff --check` 通过。
-- [ ] Ubuntu/macOS/Windows 同一提交 CI、真实 provider 与专用 PostgreSQL 证据分别记录；一类通过不能替代另一类。
+- [x] fixed fake E2E 覆盖全部 station/outcome/failure/cancel/repair/budget/persistence 主路径，调用数和终态均有业务断言。
+- [x] M6 policy、batch、validator、assembler、六类 typed content、lifecycle/history、provider fixtures、settings/runtime 和 SSE 均有独立可执行 gate。
+- [x] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部异常、unbounded arrays 和 test controls 的 logs/API/SSE/history 全出口扫描通过。
+- [x] current V1 producer/consumer/fixture/OpenAPI 同步，无 V2/read union/feature flag；production OpenAPI 无 direct reasoning/tool/test route。
+- [x] contract ID 集合与覆盖矩阵双向一致；Markdown links、JSON examples、code fences、trailing whitespace、未勾选/有证据勾选状态和 `git diff --check` 通过。
+- [x] Ubuntu/macOS/Windows 同一提交 CI、真实 provider 与专用 PostgreSQL 证据分别记录；一类通过不能替代另一类。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`（仅专用 `wateragents_test`；未配置则 `not run`）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/m6_reasoning_workflow_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL安全门禁时）
-- [ ] 运行 M6 prompt/policy、provider fixture、typed registry、OpenAPI、contract matrix、docs/link/JSON 离线 audits。
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`（仅专用 `wateragents_test`；未配置则 `not run`）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/m6_reasoning_workflow_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL安全门禁时）
+- [x] 运行 M6 prompt/policy、provider fixture、typed registry、OpenAPI、contract matrix、docs/link/JSON 离线 audits。
+- [x] `git diff --check`
 
 阶段出口：M6 内部切片的代码、测试、协议和接力证据完整；没有把未运行的 provider/PostgreSQL/三平台项写成通过，也没有实现 M7–M9 或开始正式前端联调。
 
 提交边界：只包含集成修复、审计、smoke、文档同步和完成记录；发现实质功能缺口时必须回到对应 Milestone 修复并重跑其 focused gate，不能把大功能补丁藏在最终审计提交。
+
+#### Milestone 13 完成记录（2026-10-02）
+
+- 实现：审计提交 `2ce10cd` 新增 M6 文档协议/契约矩阵/OpenAPI/registry/status gate 和唯一 runner/adapter、无 V2/feature flag/第三条 SSE 架构门禁；同步现有 M6 与项目级文档。未发现 production 功能缺口，未修改生产代码、前端、归档、`backend/.env` 或业务数据库。
+- 验证：Windows、Python 3.12.14、Docker Engine 29.8.1、PostgreSQL 17.11；离线审计 `88 passed`，完整 backend `1831 passed, 1 warning`，专用 `wateragents_test` persistence `60 passed`，M6 workflow smoke `20 passed`，SSE completed/cancelled 与 history/independent-process-restart/startup-repair 均通过；`compileall` 和 staged `git diff --check` 通过。首次 docs gate 按测试先行暴露旧状态与 grouped matrix，完成同步后通过；受限沙箱 pytest 临时目录 ACL 失败在仓库内隔离 basetemp、相同测试配置下重跑通过。
+- 风险：真实 OpenAI waterbody provider preflight 为 `not_run`，`requests=0`、`events=0`、`responses=0`，未获本阶段显式计费请求授权；仅有 Windows 本机证据，Ubuntu/macOS 同提交 CI 未运行，所以 `GLOBAL-C08`、`GLOBAL-C11` 保持 `partial`。M7 DAG、M8 transcript search producer、M9 frontend/settings/admin 仍按接力边界后续实现。
+- 提交：本地审计提交 `2ce10cd`；本完成记录随紧随其后的本地文档提交保存，均未 push。
 
 ## 契约覆盖矩阵（实施时填写）
 
