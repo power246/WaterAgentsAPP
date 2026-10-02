@@ -585,37 +585,43 @@
 
 ### 工作
 
-- [ ] 建立固定 fake model/providers 的完整单水体 smoke，直接准备合法 run/waterbody session/context/topology/M5 scope 后调用 production `RunSingleWaterbodyAgent`；不得新增生产 HTTP invoke route。
-- [ ] 覆盖 station-backed usable/partial/full-empty/failure、stationless upstream/optional/final-unsupported、逐窗 discharge、multi-series、quantified/directional/indeterminate 和 window/range overall。
-- [ ] 覆盖多 batch、initial invalid + repair success、repair failed、model unavailable/timeout/content filter、plan too large、budget/deadline、cancel 各阶段和 persistence failure。
-- [ ] 通过真实 coordinator/writer/reader 验证六类 contents、message 增量、tool/decision/result 顺序、result/completed 原子 identity、SessionSummary/run snapshot/history projection。
-- [ ] 使用现有 session SSE HTTP path 验证首次回放 + live handoff、Last-Event-ID、跨网络分块、去重、message finalized、stream_end、410/history 和关闭连接不取消执行。
-- [ ] 在专用 PostgreSQL `wateragents_test` 验证 inline/reference、完整内容、补写、history reload、独立进程重启和 startup repair；只用进程级测试库变量，不写入 `backend/.env`。
-- [ ] 验证 result summary/headline 在 result 已发布后可见，run SSE 从不包含完整 Agent正文、tool payload、rationale、series 或 evidence。
-- [ ] 验证 failed/cancelled 无 result/upstream success，已产生 transcript 按可见性保存；successful batches 不因后续失败成为 partial final result。
+- [x] 建立固定 fake model/providers 的完整单水体 smoke，直接准备合法 run/waterbody session/context/topology/M5 scope 后调用 production `RunSingleWaterbodyAgent`；不得新增生产 HTTP invoke route。
+- [x] 覆盖 station-backed usable/partial/full-empty/failure、stationless upstream/optional/final-unsupported、逐窗 discharge、multi-series、quantified/directional/indeterminate 和 window/range overall。
+- [x] 覆盖多 batch、initial invalid + repair success、repair failed、model unavailable/timeout/content filter、plan too large、budget/deadline、cancel 各阶段和 persistence failure。
+- [x] 通过真实 coordinator/writer/reader 验证六类 contents、message 增量、tool/decision/result 顺序、result/completed 原子 identity、SessionSummary/run snapshot/history projection。
+- [x] 使用现有 session SSE HTTP path 验证首次回放 + live handoff、Last-Event-ID、跨网络分块、去重、message finalized、stream_end、410/history 和关闭连接不取消执行。
+- [x] 在专用 PostgreSQL `wateragents_test` 验证 inline/reference、完整内容、补写、history reload、独立进程重启和 startup repair；只用进程级测试库变量，不写入 `backend/.env`。
+- [x] 验证 result summary/headline 在 result 已发布后可见，run SSE 从不包含完整 Agent正文、tool payload、rationale、series 或 evidence。
+- [x] 验证 failed/cancelled 无 result/upstream success，已产生 transcript 按可见性保存；successful batches 不因后续失败成为 partial final result。
 
 ### Tests
 
-- [ ] fake smoke 对每条主路径断言业务字段、调用计数、operation/session/result identity、refs/availability/risk/confidence，而不只断言 exit code。
-- [ ] session SSE 的 messages/tools/decisions/result 与 GET transcript/history 同一事实、同一顺序和正文；重连不重复、不丢失。
-- [ ] result/completed 整批成功/失败/补写、数据库暂时失败、retry exhausted/manual recovery 和 live cleanup 门禁保持 M3 语义。
-- [ ] current/history/auto、large-content read、unknown/corrupt schema、公共 refs 和 persistence warning 没有 M6 特例分叉。
-- [ ] logs/API/SSE/history 全出口不含 credentials、provider envelope、raw URL query、隐藏 reasoning、scope 外 refs 或未验证 structured output。
-- [ ] M1–M5 focused regression 和 production OpenAPI/architecture 在端到端接入后仍通过。
+- [x] fake smoke 对每条主路径断言业务字段、调用计数、operation/session/result identity、refs/availability/risk/confidence，而不只断言 exit code。
+- [x] session SSE 的 messages/tools/decisions/result 与 GET transcript/history 同一事实、同一顺序和正文；重连不重复、不丢失。
+- [x] result/completed 整批成功/失败/补写、数据库暂时失败、retry exhausted/manual recovery 和 live cleanup 门禁保持 M3 语义。
+- [x] current/history/auto、large-content read、unknown/corrupt schema、公共 refs 和 persistence warning 没有 M6 特例分叉。
+- [x] logs/API/SSE/history 全出口不含 credentials、provider envelope、raw URL query、隐藏 reasoning、scope 外 refs 或未验证 structured output。
+- [x] M1–M5 focused regression 和 production OpenAPI/architecture 在端到端接入后仍通过。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m6_reasoning_workflow_smoke.py backend/tests/application/reasoning -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_run_sse_smoke.py backend/tests/api/test_analysis_history.py -q`
-- [ ] 按 [Docker PostgreSQL 快速指南](../docker_postgresql_quickstart.md)设置进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 后运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`。
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/m6_reasoning_workflow_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL 安全门禁时）
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m6_reasoning_workflow_smoke.py backend/tests/application/reasoning -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_run_sse_smoke.py backend/tests/api/test_analysis_history.py -q`
+- [x] 按 [Docker PostgreSQL 快速指南](../docker_postgresql_quickstart.md)设置进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 后运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`。
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/m6_reasoning_workflow_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL 安全门禁时）
+- [x] `git diff --check`
 
 阶段出口：在不依赖 M7 DAG 的情况下，单 waterbody session 的真实 application、persistence、session SSE 和 history 链路均由固定 fake 可重复验收；外部 provider 仍可为 `not run`。
 
 提交边界：E2E harness/smoke、PostgreSQL/SSE/history/cancel/persistence tests 和必要的集成修复；发现功能缺口必须回到所属 Milestone 修复，不把大功能补丁藏在 smoke 提交。
+
+#### Milestone 12 完成记录（2026-10-02）
+
+- 实现提交 `24535cd`：新增固定 fake 的合法 run/session/context/topology/M5 scope harness，直接调用 production M6 runner；以真实 coordinator/writer/reader 验证六类 typed content、结果原子完成、失败不发布 partial result、session SSE 重放/续传/断连与安全 run projection，并增加完整 M6→PostgreSQL→restart typed-content smoke。未新增 production invoke route、M7 DAG 或 frontend 接入。
+- focused reasoning `148 passed`、SSE/history `22 passed`、M6 smoke 脚本 `20 passed`；Docker PostgreSQL 专用库 `wateragents_test` persistence `60 passed`，独立进程 history/restart/startup-repair smoke 通过，最终全量 `1825 passed, 1 warning`，`git diff --check` 通过。首次 persistence 全目录运行受 Windows sandbox pytest 临时目录 ACL 阻断，按相同进程级测试库变量在沙箱外重跑通过；未修改 `backend/.env`。
+- 真实外部 waterbody provider 未获本阶段明确授权，保持 `not run`，未产生 provider 请求；本阶段只增加可重复验收 harness/tests/scripts，继续复用现有两层 SSE 与唯一 V1 contract。
 
 ## Milestone 13：集成审计与 M7–M9 接力
 
