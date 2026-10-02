@@ -505,34 +505,40 @@
 
 ### 工作
 
-- [ ] 新增 `OpenAIResponsesWaterbodyAdapter`，只实现 `WaterbodyModelPort`；复用安全 HTTP/config/credential/error primitives，但不复用 parser 的无-tool业务实现。
-- [ ] request 由 run 固化的 OpenAI waterbody model、system/messages、function tool descriptors、strict response schema 和 deadline 生成；`store=false`，endpoint/key 只来自 composition。
-- [ ] 只允许本次 server roster 的 function tools；拒绝 provider built-in web/file/MCP/computer/custom tools 和模型自报的新 tool/schema。
-- [ ] 按 provider event 顺序发出 visible text deltas、completed function calls、structured output、refusal、usage 和 terminal；保留安全 provider response/call identity。
-- [ ] unknown item/content/event、重复/缺失 terminal、terminal 后 output、损坏/空 arguments、response id/model 漂移和 output/schema 不匹配映射为 invalid port response。
-- [ ] completed/incomplete/failed/cancelled、refusal、content filter、timeout、network/protocol error 映射到 M6 typed errors；不 silent fallback、不 provider/model failover。
-- [ ] provider reasoning/summary/encrypted reasoning 事件不成为业务 evidence、Agent message 或结果；只处理 provider 实际交给应用的可见 message/tool/structured output。
-- [ ] checked-in contract fixtures 覆盖多 message、多 tool、structured terminal、usage 缺失、fragmented SSE/UTF-8、unknown/malformed 和所有 terminal outcomes；fixture 不含真实 secret。
+- [x] 新增 `OpenAIResponsesWaterbodyAdapter`，只实现 `WaterbodyModelPort`；复用安全 HTTP/config/credential/error primitives，但不复用 parser 的无-tool业务实现。
+- [x] request 由 run 固化的 OpenAI waterbody model、system/messages、function tool descriptors、strict response schema 和 deadline 生成；`store=false`，endpoint/key 只来自 composition。
+- [x] 只允许本次 server roster 的 function tools；拒绝 provider built-in web/file/MCP/computer/custom tools 和模型自报的新 tool/schema。
+- [x] 按 provider event 顺序发出 visible text deltas、completed function calls、structured output、refusal、usage 和 terminal；保留安全 provider response/call identity。
+- [x] unknown item/content/event、重复/缺失 terminal、terminal 后 output、损坏/空 arguments、response id/model 漂移和 output/schema 不匹配映射为 invalid port response。
+- [x] completed/incomplete/failed/cancelled、refusal、content filter、timeout、network/protocol error 映射到 M6 typed errors；不 silent fallback、不 provider/model failover。
+- [x] provider reasoning/summary/encrypted reasoning 事件不成为业务 evidence、Agent message 或结果；只处理 provider 实际交给应用的可见 message/tool/structured output。
+- [x] checked-in contract fixtures 覆盖多 message、多 tool、structured terminal、usage 缺失、fragmented SSE/UTF-8、unknown/malformed 和所有 terminal outcomes；fixture 不含真实 secret。
 
 ### Tests
 
-- [ ] planning request 能发送授权 tools，batch/synthesis/repair 精确发送空 tools；actual request schema/roster/model 与 application DTO 一致。
-- [ ] visible text delta 顺序、function call arguments、structured output、usage/response id 被 provider-neutral 化且无 envelope 泄漏。
-- [ ] provider reasoning events 即使出现也不进入 `waterbody_agent_message`、working context、decision 或 result；隐藏内容没有 API/transcript 字段。
-- [ ] malformed JSON/SSE、未知 event/item、重复 terminal、terminal 后 output、content filter/refusal/timeout/network/cancel 均有确定性失败 fixture。
-- [ ] Authorization/API key/base URL query/prompt/tool args/provider raw body 不出现在 public error、普通日志或不应公开的 projection。
-- [ ] parser adapter 全部既有 fixtures 继续通过，且仍拒绝 tool call item；两个 adapter 的权限不会因共享 helper 混合。
+- [x] planning request 能发送授权 tools，batch/synthesis/repair 精确发送空 tools；actual request schema/roster/model 与 application DTO 一致。
+- [x] visible text delta 顺序、function call arguments、structured output、usage/response id 被 provider-neutral 化且无 envelope 泄漏。
+- [x] provider reasoning events 即使出现也不进入 `waterbody_agent_message`、working context、decision 或 result；隐藏内容没有 API/transcript 字段。
+- [x] malformed JSON/SSE、未知 event/item、重复 terminal、terminal 后 output、content filter/refusal/timeout/network/cancel 均有确定性失败 fixture。
+- [x] Authorization/API key/base URL query/prompt/tool args/provider raw body 不出现在 public error、普通日志或不应公开的 projection。
+- [x] parser adapter 全部既有 fixtures 继续通过，且仍拒绝 tool call item；两个 adapter 的权限不会因共享 helper 混合。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_waterbody.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/infrastructure/test_provider_http.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/observability backend/tests/architecture -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_waterbody.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/infrastructure/test_provider_http.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/observability backend/tests/architecture -q`
+- [x] `git diff --check`
 
 阶段出口：OpenAI Responses 可通过独立、严格、可审计的 waterbody streaming adapter 驱动 M6 port；checked-in fixtures 完整，尚不要求真实 provider 请求。
 
 提交边界：waterbody adapter、必要的共享低层安全 helper、official contract fixtures 和 tests；不得改 parser 权限、注册 production route 或添加 failover。
+
+#### Milestone 10 完成记录（2026-10-02）
+
+- 实现提交 `d3bf766`：新增独立 OpenAI Responses waterbody streaming adapter；request 严格来自 M6 DTO，function roster、response/model/call identity、structured schema、deadline 与 typed error 边界均在 adapter 校验，parser 的无-tool权限保持不变。
+- checked-in fixtures 覆盖多 message/tool、structured/usage、reasoning 隔离、UTF-8 分块、未知/损坏事件及全部 terminal outcomes；focused 31 项、parser/HTTP 58 项、observability/architecture 174 项通过。
+- Docker PostgreSQL 专用库 `wateragents_test` 完整回归为 `1790 passed, 1 warning`；compileall 与 `git diff --check` 通过。真实 OpenAI provider 请求按本阶段出口记为 `not run`，未使用真实 credential 或产生 provider 流量。
 
 ## Milestone 11：settings 与 production/test composition
 
