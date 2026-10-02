@@ -2,7 +2,7 @@
 
 更新日期：2026-10-02
 
-> 当前状态：设计、policy、API/读取契约和本施工清单已确认，M6 代码实现与验收尚未开始。所有复选框保持未勾选；coding agent 只能凭本阶段实际实现和验证证据勾选。M6 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
+> 当前状态：Milestone 0–13 已完成本机实现、集成回归与契约审计。M6 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；真实 OpenAI waterbody provider 请求和 Ubuntu/macOS/Windows 同提交 CI 没有实际运行证据，继续记录为 `not run` / `partial`。
 
 本清单执行以下已确认文档：
 
@@ -666,15 +666,46 @@
 
 | 契约 | 状态 | 计划实现位置 | 重点测试 | 证据与剩余风险 |
 |---|---|---|---|---|
-| M6-C01 / M6-C12 | pending | `application/reasoning/model_models.py`；`ports/waterbody_model.py`；provider adapter | model protocol、identity/correlation、adapter fixtures | 尚未实现；parser 权限隔离和 provider-neutral stream 待验证。 |
-| M6-C02 / M6-C09 / M6-C15 / M6-A06 | pending | planning loop；M5 iterative acquisition seam；sufficiency | station-backed/stationless、planning/final call counts、target+discharge gates | 尚未实现；必须区分 stationless planning 与 final reasoning 0 calls。 |
-| M6-C03 / M6-C04 / M6-C06 / M6-C07 / M6-A01 / M6-A03 | pending | inference domain；draft validator；assembler | 三态、windows、series、unit/source/aggregation | 尚未实现；当前 V1 domain 仍需原子收敛。 |
-| M6-C05 / M6-C14 / M6-C18 / M6-A02 / M6-A05 | pending | prompt/policy；domain assessments；synthesis；assembler；session context | risk/confidence rationales、window/range overall、availability、真实 session SSE | 尚未实现；风险由 Agent 判断，后端不得重算。 |
-| M6-C08 | pending | synthesis/assembler；attribution domain/validator | basis、factor refs、EvidenceChain closure | 尚未实现；hypothesized 不能解锁 gate。 |
-| M6-C10 / M6-C11 / M6-C13 / M6-A04 / M6-A09 | pending | transcript registry/store；coordinator；lifecycle/summary/history projections | typed contents、result/completed atomicity、SSE replay、PostgreSQL reload | 尚未实现；只复用现有事件和两层 SSE。 |
-| M6-C16 / M6-C17 / M6-A07 | pending | skeleton、batch planner、validator、assembler | identity/allowlist、batch completeness、恶意 draft | 尚未实现；server-owned facts 不交给模型修改。 |
-| M6-C19 / M6-A08 / M6-A10 | pending | repair wrapper、runner failure matrix、settings/runtime | one repair、whole-session failure、budgets/deadline/no failover | 尚未实现；无 partial final result。 |
-| GLOBAL-C01–C11 | pending | 当前 M1–M6 backend、docs、CI 与运行环境 | full regression、architecture、PostgreSQL、三平台、secret scan | 各类证据必须分开记录，不因本机通过标 external verified。 |
+| GLOBAL-C01 | 本机已验证 | `tests/architecture/test_archive_isolation.py`；当前 `backend/` 与 docs | archive isolation、production import audit | 全量回归与 archive guard 通过；归档未作为实现或测试输入。 |
+| GLOBAL-C02 | 本机已验证 | 当前唯一 V1 domain/registry/lifecycle/OpenAPI；`test_production_test_isolation.py` | 无 V2/read union/feature flag/direct route | M6 原子更新已验证；最终产品冻结仍等 M9。 |
+| GLOBAL-C03 | 本机已验证 | `task.py`、M5 scope、`InferenceResult.target_comid` | `test_task_and_skeleton.py`、`test_results.py` | M6 业务身份只使用 COMID；非 COMID 水体仍无真实需求。 |
+| GLOBAL-C04 | 本机已验证 | `domain/time/`、`AnalysisContext`、result/session snapshots | `test_time.py`、`test_time_windows.py`、`test_results.py` | UTC identity 与 session IANA timezone 在本机/DST fixture 通过。 |
+| GLOBAL-C05 | 本机已验证 | `domain/time/window_builder.py`、batch/result skeleton | DST/window/domain/batch tests | 墙上时钟窗口、重复当地时间和完整边界由固定 timezone fixture 验证。 |
+| GLOBAL-C06 | 本机已验证 | sealed allowlist、`draft_validator.py`、`result_assembler.py`、`EvidenceChain` | sufficiency/validator/assembler/result tests | result、归因和 analysis detail 引用闭包均由后端校验。 |
+| GLOBAL-C07 | 本机已验证 | streaming redaction、provider adapter、reasoning transcript store、public projection | redaction/provider/transcript/API/log tests | fake/fixture/log/API/SSE/history 扫描通过；真实 provider 请求未运行。 |
+| GLOBAL-C08 | partial | `frontend_integration_contracts.md` 与 production OpenAPI/SSE | frontend direct-route guard、OpenAPI audit | M6 接力契约已同步且旧前端未消费；最终新前端由 M9 实现。 |
+| GLOBAL-C09 | 本机已验证 | typed domain/content/lifecycle models与统一 reader projection | serialization/registry/history/E2E tests | 同一 result/ref/summary 在 writer、API、SSE、history 保持 identity。 |
+| GLOBAL-C10 | 本机已验证 | 本清单 M7/M8/M9 接力出口；project-level contracts | M6 documented protocol audit | 归属、保留约束和可观察验收已写明；后续能力未提前实现。 |
+| GLOBAL-C11 | partial | `uv.lock`、Alembic、event-loop/path boundaries、cross-platform CI config | `test_cross_platform_ci.py`、Windows 全量/PostgreSQL smoke | Windows/Python 本机通过；同提交 Ubuntu/macOS 和同库跨系统迁移未运行。 |
+| M6-C01 | 本机已验证 | `model_models.py`、`model_protocol.py`、`ports/waterbody_model.py`、OpenAI waterbody adapter | model protocol、port、adapter fixture tests | provider-neutral strict stream 与 parser 隔离通过；真实 OpenAI 请求 `not run`。 |
+| M6-C02 | 本机已验证 | `planning_loop.py`、M5 acquisition/registry/executor | planning loop、acquisition workflow、runner path tests | station-backed/stationless 起点与 tool scope/call counts 通过；M7 producer 仍 unavailable。 |
+| M6-C03 | 本机已验证 | `InferenceResult`、`ParameterTimeSeries`、result skeleton/assembler | domain results、assembler、runner tests | 每个计划窗口完整且顺序稳定；多窗口 E2E 与序列化通过。 |
+| M6-C04 | 本机已验证 | `TimeWindowResult`、draft models/validator、fixed cells | domain results、draft validator、runner tests | quantified/directional/indeterminate 正反例通过；技术失败不伪装 empty。 |
+| M6-C05 | 本机已验证 | assessment domain、prompt policy、draft validator、assembler | prompt/validator/results/assembler tests | 四层 confidence/rationale/ref 与 fixed confidence=0 通过；后端不平均重算。 |
+| M6-C06 | 本机已验证 | prompt policy、working context、evidence catalog/validator | prompt policy、working context、draft validator tests | 多 series 差异、完整引用和 observed/inferred 资格由 fixture 验证。 |
+| M6-C07 | 本机已验证 | M5 deterministic unit tool、planning roster、validator资格 | evidence policy/executor/planning/validator tests | 模型不能自行换算或伪造 unit；无 direct tool HTTP surface。 |
+| M6-C08 | 本机已验证 | attribution domain/drafts、draft validator、result assembler | validator/assembler/domain result tests | basis、factor/evidence/result refs 闭包通过；hypothesized 不解锁 gate。 |
+| M6-C09 | 本机已验证 | prompt policy、sufficiency gate、producer-slot policy | prompt/sufficiency/planning tests | current evidence 优先；M8 历史 producer 未注册且 contextual 不能解锁。 |
+| M6-C10 | 本机已验证 | `transcript_models.py`、reasoning transcript store、production registry | M9 transcript store、SSE、PostgreSQL M6 E2E | 六类内容、message delta、repair/result 顺序和全文 reload 通过；未新增关联表。 |
+| M6-C11 | 本机已验证 | coordinator waterbody completion、lifecycle v2、SessionSummary | lifecycle/session/transcript/persistence tests | result item 与 completed result_ref/summary 同一原子 mutation group。 |
+| M6-C12 | 本机已验证 | task/model/transcript DTO correlation 与 coordinator identities | task、model protocol、transcript、E2E identity tests | run/session/operation/tool-call identities 保持独立且稳定。 |
+| M6-C13 | 本机已验证 | session summary、TranscriptReader、history/detail projections | M9 transcript、analysis history、PostgreSQL restart tests | 轻量 risk/availability/confidence 来自持久化 result，不在读取时重算。 |
+| M6-C14 | 本机已验证 | risk/assessment domain、prompt policy、synthesis validator/assembler | results、prompt、validator、assembler tests | 五级分类风险、window/range overall 与 availability 独立存在且不被后端重算。 |
+| M6-C15 | 本机已验证 | `sufficiency.py`、sealed handoff、fixed skeleton cells | sufficiency、planning loop、runner tests | target+同窗 discharge gate、allowed-indirect 限制和 0 final-call 路径通过。 |
+| M6-C16 | 本机已验证 | `result_models.py`、draft validator、result assembler | task/skeleton、draft validator、assembler tests | server-owned identity/fixed cells/allowlist/unit/source 权限闭合。 |
+| M6-C17 | 本机已验证 | `batch_planner.py`、validation exchange、runner synthesis orchestration | batch planner、repair、runner tests | 同 session 稳定分批、无漏无重、一次 synthesis 和全 fixed 零 batch 通过。 |
+| M6-C18 | 本机已验证 | reasoning transcript store、现有 session/run SSE 与 reader | M9 transcript、analysis events、M6/run SSE smoke | 真实会话上下文沿现有事件回放/续传；run SSE 不含正文/tool/result。 |
+| M6-C19 | 本机已验证 | validation repair、runner、settings/runtime hard limits | repair、runner failure matrix、M6 runtime tests | 单次同 scope repair、whole-session failure、budget/deadline/no failover 通过。 |
+| M6-A01 | 本机已验证 | domain result、skeleton、assembler、runner | `test_results.py`、`test_result_assembler.py`、`test_runner.py` | 三态、fixed/Agent indeterminate 与精确窗口覆盖均有正反例。 |
+| M6-A02 | 本机已验证 | assessment/draft/assembler reference closure | domain results、draft validator、assembler tests | cell/series/window/range/attribution 的字段与引用闭包通过。 |
+| M6-A03 | 本机已验证 | prompt policy、working context、draft validator | prompt/working-context/validator fixtures | 多 series、unknown unit、无证据不能静默猜测；自动 conflict detector 不存在。 |
+| M6-A04 | 本机已验证 | result/completed atomic writer、summary/history projections | M9 transcript、M6 PostgreSQL restart E2E | result identity/version 在 session/history/full content 一致且只读持久化事实。 |
+| M6-A05 | 本机已验证 | prompt policy、synthesis draft/validator、assembler | prompt/validator/assembler/domain availability tests | high+partial、low/none+partial 与全 indeterminate fixture 通过，无阈值重算。 |
+| M6-A06 | 本机已验证 | M5 iterative seam、planning counts、runner execution summary | planning loop、runner、M6 E2E tests | station-backed 全空 0/0、stationless 0 final、partial supported-only 计数通过。 |
+| M6-A07 | 本机已验证 | backend skeleton、evidence catalog、draft validator、assembler | skeleton/validator/assembler malicious fixtures | 新增窗口、越权 refs、fixed 覆盖、observed/unit/identity 伪造均被拒绝。 |
+| M6-A08 | 本机已验证 | deterministic batch planner、repair wrapper、runner terminal handling | batch/repair/runner failure tests | 大输入分批、单 repair、二次失败无 partial result/无 failover 通过。 |
+| M6-A09 | 本机已验证 | OpenAI visible events、reasoning message store、session SSE | adapter fixtures、M9 transcript、M6 network SSE smoke | 同 item 增量/定稿、首次回放、续传、断连/410 通过；真实 provider `not run`。 |
+| M6-A10 | 本机已验证 | planning/batch/runtime settings limits、router/OpenAPI | planning/batch/runner/runtime/OpenAPI tests | 各硬上限、预算耗尽、no retry expansion 与无 direct route 通过。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码、fixture 或文档存在填写已验证；本机、PostgreSQL、真实 provider 和三平台 CI 证据分开记录。
 

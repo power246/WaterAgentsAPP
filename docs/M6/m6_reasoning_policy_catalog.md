@@ -2,7 +2,7 @@
 
 更新日期：2026-10-02
 
-> 状态：设计已确认，尚未实现。本文件是 M6 system prompt、确定性 sufficiency/validation 和结果 assembly 的共同政策源；实现时应由 typed policy/config 生成 prompt 片段和测试审计，不能在多个模块复制不同规则。
+> 状态：当前唯一 V1 的 typed reasoning policy、四阶段 prompt、确定性 sufficiency/validation、result assembly 与离线 audit 已完成本机实现和验证。本文件是设计目录；运行时以 `application/reasoning/prompt_policy.py` 的 immutable typed policy 及其 digest 为事实源，不解析 Markdown，也不复制多套规则。
 
 ## 1. Policy 分层
 

@@ -2,7 +2,7 @@
 
 更新日期：2026-10-02
 
-> 状态：设计已确认，尚未实现。本文冻结 M6 typed transcript、session SSE 投影、真实 session completed payload、history summary 和 public error；不新增 production reasoning HTTP route。
+> 状态：M6 typed transcript、session SSE 投影、真实 waterbody session completed payload、history summary 和 public error 已完成本机实现与 PostgreSQL/SSE 验证；production 仍不新增 reasoning HTTP route。真实 provider 与三平台证据边界见 [Implementation TODO](m6_implementation_todo.md)。
 
 ## 1. Production 路由不新增 reasoning 入口
 

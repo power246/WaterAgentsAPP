@@ -2,7 +2,7 @@
 
 更新日期：2026-10-02
 
-> 状态：设计已确认，尚未实现。本文描述当前唯一 V1 的目标代码结构与可执行契约；分阶段施工、验证门禁和证据记录见 [M6 Implementation TODO](m6_implementation_todo.md)。本文和清单都不是实现完成记录。
+> 状态：当前唯一 V1 已完成 M6 Milestone 0–13 本机实现与集成审计。本文描述已落地的代码结构与可执行契约；分阶段提交、验证证据、外部 `not run` 项和剩余风险见 [M6 Implementation TODO](m6_implementation_todo.md)。
 
 ## 1. 核心结论与范围
 

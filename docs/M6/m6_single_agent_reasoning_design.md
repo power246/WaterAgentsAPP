@@ -2,7 +2,7 @@
 
 更新日期：2026-10-02
 
-> 状态：设计方向、实施模式和 Milestone 0–13 施工清单已完成对齐，尚未开始 M6 代码实现或验收。本文记录已确认的业务与架构决策；精确类型、执行链、prompt policy、API/读取形态、测试边界和 coding-agent 阶段门禁见同目录实施设计、Policy Catalog、API 文档与 Implementation TODO。
+> 状态：设计方向、实施模式和 Milestone 0–13 已完成本机实现与集成审计。固定 fake、official provider fixtures、现有两层 SSE、专用 PostgreSQL 和完整 backend regression 已通过；真实 OpenAI waterbody provider 请求与 Ubuntu/macOS/Windows 同提交 CI 仍为 `not run` / `partial`。精确实现证据和剩余风险见同目录 Implementation TODO。
 
 本文承接：
 

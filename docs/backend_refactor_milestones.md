@@ -418,7 +418,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 8. M6: Single-Agent Reasoning
 
-状态：M6 大方向、实现模式和 Milestone 0–13 施工清单已完成设计确认，代码实现与验收尚未开始。详细契约见 [设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和 [Implementation TODO](M6/m6_implementation_todo.md)。
+状态：Milestone 0–13 已完成本机实现与集成审计；固定 fake E2E、official provider fixtures、typed transcript/history、现有两层 SSE、专用 PostgreSQL 和完整 backend regression 已通过。真实 OpenAI waterbody provider 请求与 Ubuntu/macOS/Windows 同提交 CI 仍按实际证据保持 `not run` / `partial`；M6 未实现 M7 DAG、M8 transcript RAG、M9 frontend/settings/admin 或开始正式联调。详细契约见 [设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和 [Implementation TODO](M6/m6_implementation_todo.md)。
 
 目标：
 
@@ -428,7 +428,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 主要产物：
 
-- `WaterbodyAgentRunner`
+- `RunSingleWaterbodyAgent`
 - `WaterbodyModelPort`
 - `EvidencePolicy`
 - `SufficiencyPolicy`

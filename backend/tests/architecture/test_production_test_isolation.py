@@ -145,6 +145,34 @@ def test_transcript_has_one_writer_and_one_reader_implementation() -> None:
     )
 
 
+def test_m6_has_one_runner_one_adapter_and_no_parallel_contract() -> None:
+    assert _class_definitions(APP_ROOT, "RunSingleWaterbodyAgent") == (
+        Path("application/reasoning/runner.py"),
+    )
+    assert _class_definitions(APP_ROOT, "OpenAIResponsesWaterbodyAdapter") == (
+        Path("infrastructure/adapters/openai_responses_waterbody.py"),
+    )
+    assert _class_definitions(APP_ROOT, "WaterbodyAgent" + "Runner") == ()
+
+    forbidden_tokens = (
+        "InferenceResult" + "V2",
+        "TimeWindowResult" + "V2",
+        "WATERAGENTS_M6_" + "ENABLED",
+        "WATERAGENTS_REASONING_" + "ENABLED",
+        "reasoning_" + "delta",
+    )
+    violations = []
+    for source_path in sorted(APP_ROOT.rglob("*.py")):
+        source = source_path.read_text(encoding="utf-8")
+        violations.extend(
+            f"{source_path.relative_to(APP_ROOT)}: {token}"
+            for token in forbidden_tokens
+            if token in source
+        )
+
+    assert violations == []
+
+
 def test_production_exposes_exactly_the_two_existing_sse_routes() -> None:
     application = create_app(AppSettings(_env_file=None))
     event_paths = {

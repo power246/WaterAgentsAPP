@@ -438,7 +438,7 @@ Application 层负责编排 waterbody Agent loop、模型调用前的确定性 e
 
 M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 upstream 与 M8 transcript-RAG producer 仍按后续责任保持 unavailable；真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
 
-M6 的实现边界、policy、typed content、读取契约和 Milestone 0–13 施工清单已经设计确认，但尚未编码；实施必须以 [M6 设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和 [Implementation TODO](M6/m6_implementation_todo.md) 为准，不得把设计或未勾选清单写成已实现。
+M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 DAG/direct-upstream、M8 transcript RAG 和 M9 frontend/settings/admin 仍由后续阶段实现。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
 
 ## 7. Domain Layer
 

@@ -14,7 +14,7 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M3 transcript/history/idempotency/SSE | Milestone 0–19 本机实现与复审完成，追加 findings 已关闭；实际 Windows/Linux runner、三平台完整 CI 与同库迁移仍为 `partial` | 以当前 OpenAPI、API 指南和 SSE frame 设计接入；Windows 入口、短前缀取消、private URL、性能与正文一致性已完成本机实现和复审，公共契约不变。正式消费由产品阶段 M9 接入。 |
 | M4 query/context/topology | 后端协议与本机集成审计已完成；外部 PostgreSQL/provider/三平台证据仍按实际结果保持 `not run`/`partial` | 以 M4 API、运行时 OpenAPI 和既有两层 SSE 作为 M9 前端实现输入；当前不开始正式联调，也不增加 M4 产品兼容分支。 |
 | M5 evidence | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run`/`partial` | production 不新增 direct tool route，前端只沿现有 transcript/reference/SSE 读取 evidence；正式消费仍由 M9 接入。 |
-| M6 reasoning/result | 设计、policy、typed content、读取契约与施工清单已确认，尚未实现 | 以 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md) 和 [Implementation TODO](M6/m6_implementation_todo.md) 作为 M9 接入设计输入；当前不得当作运行时已具备能力。 |
+| M6 reasoning/result | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run` / `partial` | 以现有 result summary/ref、session transcript/SSE、history 与 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md) 作为 M9 接入输入；正式前端仍由 M9 实现，不调用 direct prompt/model/tool surface。 |
 | M7–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未全部冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
@@ -372,7 +372,7 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 ## 5. M4–M9 的前端接力边界
 
-M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完成 evidence typed content、引用、读取、policy、provider adapter 与 production/test composition 的本机实现和集成审计。M6 已冻结设计态的数据语义、typed content 和读取路径，但尚未实现。新前端仍由 M9 统一实现并开始正式联调；设计内容不得冒充当前 OpenAPI 或运行时能力。
+M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完成 evidence typed content、引用、读取、policy、provider adapter 与 production/test composition 的本机实现和集成审计。M6 已完成单水体 reasoning、typed content、result summary/ref、session transcript/SSE、history 和 production composition 的本机实现与集成审计。新前端仍由 M9 统一实现并开始正式联调；M6 不增加 direct prompt/model/tool route 或第三条流。
 
 | Milestone | 前端必须遵守的语义 |
 |---|---|
