@@ -69,6 +69,7 @@ def request(**changes: object) -> WaterbodyModelRequest:
         ),
         "tool_descriptors": (),
         "response_schema": schema(),
+        "prompt_policy_digest": "sha256:prompt-policy",
         "scope_digest": "sha256:scope",
         "evidence_bundle_ref": ItemReference(item_id="bundle-item-1"),
         "batch_id": "batch-1",

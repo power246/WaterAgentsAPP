@@ -151,6 +151,17 @@ class WaterbodyJsonSchema(DomainModel):
     schema_text: JsonObjectText
     strict: StrictBool = True
 
+    @field_validator("schema_text", mode="after")
+    @classmethod
+    def canonicalize_schema(cls, value: str) -> str:
+        return json.dumps(
+            json.loads(value),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+
     @field_validator("strict")
     @classmethod
     def require_strict_schema(cls, value: bool) -> bool:
@@ -179,6 +190,7 @@ class WaterbodyModelRequest(DomainModel):
     messages: tuple[WaterbodyModelMessage, ...]
     tool_descriptors: tuple[WaterbodyToolDescriptor, ...] = ()
     response_schema: WaterbodyJsonSchema
+    prompt_policy_digest: NonEmptyString
     scope_digest: NonEmptyString
     evidence_bundle_ref: ItemReference
     batch_id: NonEmptyString | None = None
