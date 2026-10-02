@@ -2,9 +2,10 @@ import ast
 import asyncio
 import inspect
 import sys
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import get_origin
+from typing import get_args, get_origin
 
 import pytest
 
@@ -41,6 +42,12 @@ from app.application.query_understanding import (
     ParserPromptMessage,
     QueryParserInputV1,
 )
+from app.application.reasoning.model_models import (
+    WaterbodyJsonSchema,
+    WaterbodyModelEvent,
+    WaterbodyModelRequest,
+    WaterbodyToolDescriptor,
+)
 from app.ports import (
     CachePort,
     ClockPort,
@@ -72,6 +79,7 @@ from app.ports import (
     WeatherEvidencePort,
     UnsupportedPortVersionError,
 )
+from app.ports.waterbody_model import WaterbodyModelPort
 
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
 PORTS_ROOT = APP_ROOT / "ports"
@@ -123,6 +131,7 @@ def test_all_port_contracts_are_public_protocols() -> None:
         TranscriptEvidencePort,
         UpstreamResultPort,
         WaterObservationPort,
+        WaterbodyModelPort,
         WeatherEvidencePort,
     )
 
@@ -131,6 +140,7 @@ def test_all_port_contracts_are_public_protocols() -> None:
 
 def test_port_method_sync_and_async_semantics() -> None:
     assert not inspect.iscoroutinefunction(ClockPort.now)
+    assert not inspect.iscoroutinefunction(WaterbodyModelPort.stream)
     async_methods = (
         GeocodingPort.resolve_text,
         GeocodingPort.reverse,
@@ -170,6 +180,15 @@ def test_port_method_sync_and_async_semantics() -> None:
     )
 
     assert all(inspect.iscoroutinefunction(method) for method in async_methods)
+
+
+def test_waterbody_model_stream_signature_is_provider_neutral() -> None:
+    stream = inspect.signature(WaterbodyModelPort.stream)
+
+    assert tuple(stream.parameters) == ("self", "request")
+    assert stream.parameters["request"].annotation is WaterbodyModelRequest
+    assert get_origin(stream.return_annotation) is AsyncIterator
+    assert get_args(stream.return_annotation) == (WaterbodyModelEvent,)
 
 
 @pytest.mark.parametrize(
@@ -479,6 +498,21 @@ def test_query_parser_contract_remains_tool_free() -> None:
             model=model,
             messages=messages,
             tools=("collect_water_observations",),
+        )
+
+    waterbody_descriptor = WaterbodyToolDescriptor(
+        name="collect_water_observations",
+        description="Collect authorized water observations.",
+        input_schema=WaterbodyJsonSchema(
+            name="collect_water_observations",
+            schema_text='{"type":"object","additionalProperties":false}',
+        ),
+    )
+    with pytest.raises(ValueError):
+        QueryParserInputV1(
+            model=model,
+            messages=messages,
+            tools=(waterbody_descriptor,),
         )
 
 
