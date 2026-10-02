@@ -460,39 +460,46 @@
 
 ### 工作
 
-- [ ] 注册当前唯一 v1 的六类 M6 typed content：`waterbody_agent_input`、`waterbody_model_request`、`waterbody_agent_message`、`waterbody_model_response`、`reasoning_decision`、`inference_result`；复用 M3 envelope/inline/reference/preview。
-- [ ] 为六类内容实现 strict parser、public projection、tags、rag-candidate default、confidence/provenance 提取和 reference collector；unknown/corrupt schema 沿用 M3 安全读取。
-- [ ] model request 保存实际发送的安全 messages/schema/tool descriptors 或 content ref 与 canonical digest；model response 保存 provider-neutral visible response/usage/ref，不保存完整 provider envelope/header/URL query/secret。
-- [ ] Agent 可见 message 在首个 delta 前 reserve item identity/sequence/created_at；沿用 coordinator 的 `message_started`、`message_delta`、`message_finalized` 和跨 chunk credential redaction。
-- [ ] refusal/content filter/timeout/error/cancel/truncated 都以同一 message identity finalize 为 incomplete；cancel 后 late chunks 只进入 M3 history-only audit，不再修改正文、working context 或 result。
-- [ ] tool call/result/evidence/decision/repair/synthesis/result 使用既有 `transcript_item`；operation/provider call identity 配对，同名 tool 多次调用不能靠相邻顺序猜测。
-- [ ] 落实写入顺序：model request → visible message → visible model response/tool facts → decision/validated draft → final result → session completed。中途失败保留实际已产生内容。
-- [ ] 原子扩展 lifecycle v2 `SessionCompletedPayload` 与 `SessionSummary`：waterbody completed 必须同时有 `result_ref/result_summary`；parser completed 为空；failed/cancelled 无 result。同步当前全部 serializer/fixture/consumer，不升版本、不保留兼容 union。
-- [ ] result item 与 completed lifecycle item 使用同一必需提交批次或等价原子边界；完成事件不得引用不存在/未确认的 result。持久化失败沿用 run persistence 补写，不新增 session persistence 状态。
-- [ ] run snapshot/history/session detail 只投影同一 result 的 `result_id/COMID/range risk/availability/overall confidence/ref`；不内联完整 series/rationale/evidence，不在读取时重算。
-- [ ] session SSE 只使用 `transcript_item / message_started / message_delta / message_finalized / stream_end`；首次无 cursor 回放此前全部可见过程并接 live，Last-Event-ID/去重/410/history/关闭语义保持 M3。run SSE 不复制完整 Agent context。
+- [x] 注册当前唯一 v1 的六类 M6 typed content：`waterbody_agent_input`、`waterbody_model_request`、`waterbody_agent_message`、`waterbody_model_response`、`reasoning_decision`、`inference_result`；复用 M3 envelope/inline/reference/preview。
+- [x] 为六类内容实现 strict parser、public projection、tags、rag-candidate default、confidence/provenance 提取和 reference collector；unknown/corrupt schema 沿用 M3 安全读取。
+- [x] model request 保存实际发送的安全 messages/schema/tool descriptors 或 content ref 与 canonical digest；model response 保存 provider-neutral visible response/usage/ref，不保存完整 provider envelope/header/URL query/secret。
+- [x] Agent 可见 message 在首个 delta 前 reserve item identity/sequence/created_at；沿用 coordinator 的 `message_started`、`message_delta`、`message_finalized` 和跨 chunk credential redaction。
+- [x] refusal/content filter/timeout/error/cancel/truncated 都以同一 message identity finalize 为 incomplete；cancel 后 late chunks 只进入 M3 history-only audit，不再修改正文、working context 或 result。
+- [x] tool call/result/evidence/decision/repair/synthesis/result 使用既有 `transcript_item`；operation/provider call identity 配对，同名 tool 多次调用不能靠相邻顺序猜测。
+- [x] 落实写入顺序：model request → visible message → visible model response/tool facts → decision/validated draft → final result → session completed。中途失败保留实际已产生内容。
+- [x] 原子扩展 lifecycle v2 `SessionCompletedPayload` 与 `SessionSummary`：waterbody completed 必须同时有 `result_ref/result_summary`；parser completed 为空；failed/cancelled 无 result。同步当前全部 serializer/fixture/consumer，不升版本、不保留兼容 union。
+- [x] result item 与 completed lifecycle item 使用同一必需提交批次或等价原子边界；完成事件不得引用不存在/未确认的 result。持久化失败沿用 run persistence 补写，不新增 session persistence 状态。
+- [x] run snapshot/history/session detail 只投影同一 result 的 `result_id/COMID/range risk/availability/overall confidence/ref`；不内联完整 series/rationale/evidence，不在读取时重算。
+- [x] session SSE 只使用 `transcript_item / message_started / message_delta / message_finalized / stream_end`；首次无 cursor 回放此前全部可见过程并接 live，Last-Event-ID/去重/410/history/关闭语义保持 M3。run SSE 不复制完整 Agent context。
 
 ### Tests
 
-- [ ] 六类 content 的 strict parse、canonical serialization、unknown/corrupt、large content、reference closure、public projection 和 secret scan 均有正反例。
-- [ ] message 三事件保持同 item identity/sequence/time，跨 chunk secret 被完整脱敏，多消息交错不串正文，finalized 不等待数据库保存。
-- [ ] 首次订阅前已有消息/tools/decisions/result 能完整回放后无缝接 live；重连只补未消费，重复 SSE id 不重复正文，stream_end 顺序正确。
-- [ ] cancel/error/content filter/truncated message 为 incomplete，late audit 不出现在当前正文/working context/result；已完成 message 不被 run 后续取消改写。
-- [ ] result + completed 成功/整批回滚、完成事件单独补写、PostgreSQL reload/startup repair、live/history/auto source 和 persistence warning 均保持 reference closure。
-- [ ] parser session completed payload 仍无 result；waterbody completed 缺任一 ref/summary、failed/cancelled 带 result 或 summary/ref identity 不一致均被拒绝。
-- [ ] run snapshot 只有轻量 summary，session transcript 有完整真实上下文；production registry/OpenAPI 不出现新 transport event 或第三条 SSE。
+- [x] 六类 content 的 strict parse、canonical serialization、unknown/corrupt、large content、reference closure、public projection 和 secret scan 均有正反例。
+- [x] message 三事件保持同 item identity/sequence/time，跨 chunk secret 被完整脱敏，多消息交错不串正文，finalized 不等待数据库保存。
+- [x] 首次订阅前已有消息/tools/decisions/result 能完整回放后无缝接 live；重连只补未消费，重复 SSE id 不重复正文，stream_end 顺序正确。
+- [x] cancel/error/content filter/truncated message 为 incomplete，late audit 不出现在当前正文/working context/result；已完成 message 不被 run 后续取消改写。
+- [x] result + completed 成功/整批回滚、完成事件单独补写、PostgreSQL reload/startup repair、live/history/auto source 和 persistence warning 均保持 reference closure。
+- [x] parser session completed payload 仍无 result；waterbody completed 缺任一 ref/summary、failed/cancelled 带 result 或 summary/ref identity 不一致均被拒绝。
+- [x] run snapshot 只有轻量 summary，session transcript 有完整真实上下文；production registry/OpenAPI 不出现新 transport event 或第三条 SSE。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_transcript_store.py backend/tests/application/test_transcript_registry.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/test_streaming_redaction.py backend/tests/smoke/test_run_sse_smoke.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_analysis_history.py backend/tests/api/test_analysis_events.py backend/tests/persistence -q`（PostgreSQL 仅按专用测试库门禁执行）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_m9_transcript_store.py backend/tests/application/test_transcript_registry.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/test_streaming_redaction.py backend/tests/smoke/test_run_sse_smoke.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_analysis_history.py backend/tests/api/test_analysis_events.py backend/tests/persistence -q`（PostgreSQL 仅按专用测试库门禁执行）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app`
+- [x] `git diff --check`
 
 阶段出口：完整 M6 会话内容、最终结果和 completion/summary 可经唯一 writer/reader、现有 session SSE 与历史路径一致交付；没有新 route、event stream 或事实副本。
 
 提交边界：typed models/registry/store、streaming integration、lifecycle/summary/history projection、persistence/API fixtures 和 focused tests；不得接入真实 provider 或 M7 workflow。
+
+#### Milestone 9 完成记录（2026-10-02）
+
+- 实现：在唯一 production registry 中注册六类 M6 v1 typed content，新增 `ReasoningTranscriptStore` 和 provider-neutral recording port，并把 planning、validated batch/synthesis 与 runner 接到原 M3 coordinator/writer/reader。Agent message 继续使用既有三事件和跨 chunk 脱敏；tool/evidence/decision/result 继续使用 `transcript_item`。lifecycle v2 与 `SessionSummary` 原子增加轻量 `result_ref/result_summary`，`inference_result` 与 completed lifecycle 进入同一 persistence group；PostgreSQL 从已持久化 completed lifecycle 恢复同一 summary，未新增表、migration、route、event 或第三条 SSE。
+- 验证：M9 registry/store focused 为 `27 passed`，streaming redaction/run SSE 为 `71 passed`，专用 `wateragents_test` 上 API/history/persistence 为 `108 passed`；新增真实 PostgreSQL large-content/restart 回放覆盖 session detail、run detail、history page 与全文读取。最终 Docker PostgreSQL 17 healthy，进程级隔离库完整 backend 回归为 `1759 passed, 1 warning`，`compileall` 与 staged `git diff --check` 通过。首次全量回归暴露 12 处旧 completion/文档 fixture，修正后通过；新增 PostgreSQL 测试首次复用故障注入后的共享 schema 导致 startup-repair 失败，改用独立临时 schema 后通过。受限沙箱的 Docker named pipe/pytest basetemp 权限错误不计为产品失败，已在允许的 Docker/测试权限下重跑。
+- 风险与边界：真实 provider 请求和 Ubuntu/macOS/Windows 同提交 CI 为 `not run`。未实现 Milestone 10 adapter、Milestone 11 production composition、M7 DAG、M8 RAG producer、M9 frontend/settings/admin；`backend/.env` 和业务数据库未修改。
+- 提交：本地实现提交 `fd84562`；本完成记录随紧随其后的本地文档提交保存，均未 push。
 
 ## Milestone 10：OpenAI Responses waterbody adapter
 
