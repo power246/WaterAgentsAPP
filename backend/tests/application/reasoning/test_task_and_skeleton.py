@@ -169,7 +169,7 @@ async def _validated_fixture(
         store,
         water_port=_water_port(scope, mode=mode) if with_station else None,
     )
-    handoff = await service.acquire(scope)
+    handoff = await service.start(scope)
     return validated, handoff, load_parameter_capability_registry()
 
 

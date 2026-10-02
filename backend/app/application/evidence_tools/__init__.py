@@ -60,6 +60,7 @@ from app.application.evidence_tools.scope import (
     EvidenceSessionScope,
     EvidenceWindow,
     assemble_evidence_session_scope,
+    with_evidence_rule_plan,
 )
 from app.application.evidence_tools.authorization import (
     AuthorizedEvidenceRequest,
@@ -114,6 +115,7 @@ __all__ = [
     "RunLocalSingleFlight",
     "StoredPolicyObservations",
     "assemble_evidence_session_scope",
+    "with_evidence_rule_plan",
     "authorize_evidence_tool_request",
     "authorize_provider_request",
     "build_collection_manifest",

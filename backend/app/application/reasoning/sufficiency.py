@@ -301,7 +301,22 @@ def seal_evidence_input(
         bundle.time_resolution_source is scope.time_resolution_source,
         "bundle_resolution_source_mismatch",
     )
-    _require(handoff.rule_plan_digest == scope.evidence_rule_plan.plan_digest, "rule_digest_mismatch")
+    _require(
+        handoff.rule_plan.plan_digest == handoff.rule_plan_digest,
+        "rule_digest_mismatch",
+    )
+    current_rules = {
+        rule.rule_id: rule for rule in handoff.rule_plan.effective_rules
+    }
+    _require(
+        handoff.rule_plan.baseline_rules
+        == scope.evidence_rule_plan.baseline_rules
+        and all(
+            current_rules.get(rule.rule_id) == rule
+            for rule in scope.evidence_rule_plan.appended_rules
+        ),
+        "rule_plan_not_append_only",
+    )
     _require(
         handoff.capability_registry_digest == capability_registry.manifest_digest,
         "capability_digest_mismatch",

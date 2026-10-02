@@ -16,12 +16,21 @@ from app.application.evidence_tools.models import (
     EvidenceToolWriter,
 )
 from app.application.evidence_tools.registry import EvidenceToolRegistry
-from app.application.evidence_tools.scope import EvidenceSessionScope
+from app.application.evidence_tools.scope import (
+    EvidenceSessionScope,
+    with_evidence_rule_plan,
+)
 from app.application.evidence_tools.relation_materializer import (
     EvidenceRelationMaterializer,
 )
 from app.application.evidence_tools.evidence_sources import (
     weather_capable_parameters,
+)
+from app.application.query_understanding import (
+    EvidenceRule,
+    EvidenceRuleOrigin,
+    EvidenceRulePlan,
+    append_evidence_rules,
 )
 from app.domain import (
     CollectionFactPayload,
@@ -69,8 +78,11 @@ class EvidenceAcquisitionCellGate:
 
 @dataclass(frozen=True, slots=True)
 class EvidenceAcquisitionHandoff:
+    run_id: str
+    session_id: str
     bundle_ref: ItemReference
     bundle: EvidenceBundle
+    rule_plan: EvidenceRulePlan
     rule_plan_digest: str
     capability_registry_digest: str
     cells: tuple[EvidenceCell, ...]
@@ -107,6 +119,7 @@ class EvidenceAcquisitionService:
         self._reader = reader
         self._writer = writer
         self._clock = clock or _UtcClock()
+        self._capability_registry = capability_registry
         self._capability_registry_digest = capability_registry.manifest_digest
         self._bundle_builder = EvidenceBundleBuilder(reader=reader, writer=writer)
         self._relation_materializer = EvidenceRelationMaterializer(
@@ -115,13 +128,12 @@ class EvidenceAcquisitionService:
             writer=writer,
         )
 
-    async def acquire(
+    async def start(
         self,
         scope: EvidenceSessionScope,
-        *,
-        optional_requests: tuple[EvidenceToolRequest, ...] = (),
     ) -> EvidenceAcquisitionHandoff:
-        self._validate_optional_requests(scope, optional_requests)
+        """Run the deterministic M5 preflight and persist its first bundle."""
+
         fragment_refs: list[EvidenceFragmentReference] = []
         result_refs: list[ItemReference] = []
         block_facts: list[str] = []
@@ -143,8 +155,7 @@ class EvidenceAcquisitionService:
                 scope,
                 required.result.fragment_refs,
             )
-            has_rules = bool(scope.evidence_rule_plan.effective_rules)
-            stop_before_model = completed and not has_direct and not has_rules
+            stop_before_model = completed and not has_direct
             run_optional = completed and not stop_before_model
         else:
             upstream = await self._execute(
@@ -162,10 +173,7 @@ class EvidenceAcquisitionService:
             )
 
         if run_optional:
-            for request in (
-                *self._required_rule_requests(scope),
-                *optional_requests,
-            ):
+            for request in self._required_rule_requests(scope):
                 execution = await self._execute(
                     scope,
                     request,
@@ -180,38 +188,186 @@ class EvidenceAcquisitionService:
                 ):
                     break
 
-        fragment_refs.extend(
+        return await self._build_handoff(
+            scope,
+            fragment_refs=tuple(fragment_refs),
+            result_refs=tuple(result_refs),
+            block_facts=tuple(block_facts),
+            stop_before_model=stop_before_model,
+            stop_facts=(
+                ("station_backed_no_usable_direct_evidence",)
+                if stop_before_model
+                else ()
+            ),
+        )
+
+    async def execute_optional(
+        self,
+        scope: EvidenceSessionScope,
+        requests: tuple[EvidenceToolRequest, ...],
+        prior: EvidenceAcquisitionHandoff,
+        *,
+        max_calls: int = 4,
+    ) -> EvidenceAcquisitionHandoff:
+        """Execute one bounded Agent-selected tool turn in provider order."""
+
+        current_scope = self._scope_for_handoff(scope, prior)
+        self._validate_optional_requests(
+            current_scope,
+            requests,
+            prior=prior,
+            max_calls=max_calls,
+        )
+        fragment_refs = list(prior.fragment_allowlist)
+        result_refs = list(prior.tool_result_refs)
+        block_facts = list(prior.block_facts)
+        for request in requests:
+            self._validate_optional_request(current_scope, request, prior)
+            execution = await self._execute(
+                current_scope,
+                request,
+                fragment_refs=fragment_refs,
+                result_refs=result_refs,
+                block_facts=block_facts,
+                materialize_technical_facts=False,
+            )
+            if (
+                execution.result.execution_status
+                is EvidenceToolExecutionStatus.CANCELLED
+            ):
+                break
+        return await self._build_handoff(
+            current_scope,
+            fragment_refs=tuple(fragment_refs),
+            result_refs=tuple(result_refs),
+            block_facts=tuple(block_facts),
+            stop_before_model=prior.stop_before_model,
+            stop_facts=prior.stop_facts,
+        )
+
+    async def append_rules(
+        self,
+        scope: EvidenceSessionScope,
+        rules: tuple[EvidenceRule, ...],
+        prior: EvidenceAcquisitionHandoff,
+    ) -> EvidenceAcquisitionHandoff:
+        """Append validated Agent rules and persist a rebuilt immutable bundle."""
+
+        current_scope = self._scope_for_handoff(scope, prior)
+        if not rules:
+            raise EvidenceScopeViolationError()
+        allowed_outputs = set(
+            (*scope.requested_parameters, *scope.supporting_parameters)
+        )
+        for rule in rules:
+            if (
+                rule.origin is not EvidenceRuleOrigin.WATERBODY_AGENT
+                or rule.origin_session_id != scope.session_id
+                or rule.required_collection_attempt
+                or rule.output_parameter not in allowed_outputs
+                or self._capability_registry.get(rule.output_parameter) is None
+                or any(
+                    self._capability_registry.get(parameter) is None
+                    for parameter in rule.input_parameters
+                )
+            ):
+                raise EvidenceScopeViolationError()
+        try:
+            plan = append_evidence_rules(current_scope.evidence_rule_plan, rules)
+        except ValueError as error:
+            raise EvidenceScopeViolationError() from error
+        next_scope = with_evidence_rule_plan(current_scope, plan)
+        return await self._build_handoff(
+            next_scope,
+            fragment_refs=prior.fragment_allowlist,
+            result_refs=prior.tool_result_refs,
+            block_facts=prior.block_facts,
+            stop_before_model=prior.stop_before_model,
+            stop_facts=prior.stop_facts,
+        )
+
+    def seal(
+        self,
+        scope: EvidenceSessionScope,
+        handoff: EvidenceAcquisitionHandoff,
+    ) -> EvidenceAcquisitionHandoff:
+        """Validate and return the only handoff eligible for reasoning sealing."""
+
+        self._scope_for_handoff(scope, handoff)
+        return handoff
+
+    def planning_roster(
+        self,
+        scope: EvidenceSessionScope,
+        handoff: EvidenceAcquisitionHandoff,
+    ) -> tuple[EvidenceToolDescriptor, ...]:
+        current_scope = self._scope_for_handoff(scope, handoff)
+        usage = self._executor.budget_usage(current_scope)
+        visible: list[EvidenceToolDescriptor] = []
+        for descriptor in self._registry.roster(current_scope):
+            if descriptor.policy_class not in {
+                EvidencePolicyClass.OPTIONAL,
+                EvidencePolicyClass.DETERMINISTIC,
+            }:
+                continue
+            if (
+                descriptor.policy_class is EvidencePolicyClass.OPTIONAL
+                and usage.collection_used >= usage.collection_limit
+            ) or (
+                descriptor.policy_class is EvidencePolicyClass.DETERMINISTIC
+                and usage.transform_used >= usage.transform_limit
+            ):
+                continue
+            if descriptor.name == "collect_facility_evidence" and scope.geometry_ref is None:
+                continue
+            if descriptor.name == "convert_evidence_unit" and not handoff.fragment_allowlist:
+                continue
+            if descriptor.name in {
+                "aggregate_evidence",
+                "inspect_evidence_records",
+            } and not handoff.source_record_allowlist:
+                continue
+            visible.append(descriptor)
+        return tuple(visible)
+
+    async def _build_handoff(
+        self,
+        scope: EvidenceSessionScope,
+        *,
+        fragment_refs: tuple[EvidenceFragmentReference, ...],
+        result_refs: tuple[ItemReference, ...],
+        block_facts: tuple[str, ...],
+        stop_before_model: bool,
+        stop_facts: tuple[str, ...],
+    ) -> EvidenceAcquisitionHandoff:
+        mutable_fragments = list(fragment_refs)
+
+        mutable_fragments.extend(
             await self._relation_materializer.materialize(
                 scope,
-                _unique_fragment_refs(fragment_refs),
+                _unique_fragment_refs(mutable_fragments),
                 operation_id=f"m5:materialize-relations:{scope.session_id}",
             )
         )
-        fragment_refs.extend(
+        mutable_fragments.extend(
             await self._write_missing_cell_facts(
                 scope,
-                _unique_fragment_refs(fragment_refs),
+                _unique_fragment_refs(mutable_fragments),
             )
         )
-        if (
-            scope.station_refs
-            and not stop_before_model
-            and scope.evidence_rule_plan.effective_rules
-        ):
-            stop_before_model = not await self._has_usable_target_evidence(
-                scope,
-                _unique_fragment_refs(fragment_refs),
-            )
 
         bundle, bundle_ref = await self._bundle_builder.build_and_write(
             scope,
-            fragment_refs=_unique_fragment_refs(fragment_refs),
-            tool_result_refs=_unique_item_refs(result_refs),
+            fragment_refs=_unique_fragment_refs(mutable_fragments),
+            tool_result_refs=_unique_item_refs(list(result_refs)),
             created_at=self._clock.now(),
         )
         return EvidenceAcquisitionHandoff(
+            run_id=scope.run_id,
+            session_id=scope.session_id,
             bundle_ref=bundle_ref,
             bundle=bundle,
+            rule_plan=scope.evidence_rule_plan,
             rule_plan_digest=scope.evidence_rule_plan.plan_digest,
             capability_registry_digest=self._capability_registry_digest,
             cells=bundle.cells,
@@ -246,13 +402,40 @@ class EvidenceAcquisitionService:
             executor=self._executor,
             cell_gates=_cell_gates(bundle.cells),
             stop_before_model=stop_before_model,
-            stop_facts=(
-                ("station_backed_no_usable_direct_evidence",)
-                if stop_before_model
-                else ()
-            ),
+            stop_facts=tuple(dict.fromkeys(stop_facts)),
             block_facts=tuple(dict.fromkeys(block_facts)),
         )
+
+    def _scope_for_handoff(
+        self,
+        scope: EvidenceSessionScope,
+        handoff: EvidenceAcquisitionHandoff,
+    ) -> EvidenceSessionScope:
+        baseline = scope.evidence_rule_plan
+        current = handoff.rule_plan
+        current_rules = {rule.rule_id: rule for rule in current.effective_rules}
+        if (
+            handoff.run_id != scope.run_id
+            or handoff.session_id != scope.session_id
+            or current.plan_digest != handoff.rule_plan_digest
+            or current.baseline_rules != baseline.baseline_rules
+            or any(
+                current_rules.get(rule.rule_id) != rule
+                for rule in baseline.appended_rules
+            )
+            or handoff.capability_registry_digest
+            != self._capability_registry_digest
+            or handoff.bundle.agent_comid != scope.agent_comid
+            or handoff.bundle.context_ref.item_id
+            != scope.analysis_context_ref.item_id
+            or handoff.bundle.topology_ref.item_id != scope.topology_ref.item_id
+            or handoff.bundle.requested_parameters != scope.requested_parameters
+            or handoff.bundle.supporting_parameters != scope.supporting_parameters
+            or handoff.bundle.window_refs
+            != tuple(window.window_id for window in scope.time_windows)
+        ):
+            raise EvidenceScopeViolationError()
+        return with_evidence_rule_plan(scope, current)
 
     async def _write_missing_cell_facts(
         self,
@@ -450,27 +633,6 @@ class EvidenceAcquisitionService:
                 return True
         return False
 
-    async def _has_usable_target_evidence(
-        self,
-        scope: EvidenceSessionScope,
-        references: tuple[EvidenceFragmentReference, ...],
-    ) -> bool:
-        target_parameters = set(scope.requested_parameters)
-        for reference in references:
-            fragment = await self._reader.read_fragment(scope, reference)
-            if (
-                target_parameters.intersection(fragment.parameter_refs)
-                and fragment.applicability
-                in {
-                    EvidenceApplicability.DIRECT_MEASUREMENT,
-                    EvidenceApplicability.ALLOWED_INDIRECT,
-                }
-                and fragment.quality_class
-                in {EvidenceQualityClass.VALID, EvidenceQualityClass.SUSPICIOUS}
-            ):
-                return True
-        return False
-
     @staticmethod
     def _required_rule_requests(
         scope: EvidenceSessionScope,
@@ -532,18 +694,35 @@ class EvidenceAcquisitionService:
         self,
         scope: EvidenceSessionScope,
         requests: tuple[EvidenceToolRequest, ...],
+        *,
+        prior: EvidenceAcquisitionHandoff,
+        max_calls: int,
     ) -> None:
+        if type(max_calls) is not int or max_calls <= 0 or len(requests) > max_calls:
+            raise EvidenceScopeViolationError()
         call_ids = tuple(request.tool_call_id for request in requests)
         if len(call_ids) != len(set(call_ids)):
             raise EvidenceScopeViolationError()
-        for request in requests:
-            descriptor = self._registry.get(request.tool_name)
-            if (
-                request.session_id != scope.session_id
-                or descriptor is None
-                or descriptor.policy_class is not EvidencePolicyClass.OPTIONAL
-            ):
-                raise EvidenceScopeViolationError()
+
+    def _validate_optional_request(
+        self,
+        scope: EvidenceSessionScope,
+        request: EvidenceToolRequest,
+        prior: EvidenceAcquisitionHandoff,
+    ) -> None:
+        legal = {item.name for item in self.planning_roster(scope, prior)}
+        descriptor = self._registry.get(request.tool_name)
+        if (
+            request.session_id != scope.session_id
+            or descriptor is None
+            or descriptor.policy_class
+            not in {
+                EvidencePolicyClass.OPTIONAL,
+                EvidencePolicyClass.DETERMINISTIC,
+            }
+            or request.tool_name not in legal
+        ):
+            raise EvidenceScopeViolationError()
 
 
 def _cell_gates(

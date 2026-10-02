@@ -40,7 +40,7 @@ def test_station_backed_empty_preflight_stops_before_any_model_call() -> None:
             clock=FixedClock(),
         )
 
-        handoff = await service.acquire(scope)
+        handoff = await service.start(scope)
         model_calls = 0
         if not handoff.stop_before_model:
             model_calls += 1

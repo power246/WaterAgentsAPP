@@ -1,9 +1,18 @@
 from app.application.reasoning.errors import (
     AllCellsBlockedError,
+    PlanningLoopError,
     ReasoningBoundaryError,
     ResultSkeletonValidationError,
     SealedEvidenceValidationError,
     WaterbodyTaskValidationError,
+)
+from app.application.reasoning.planning_loop import (
+    EvidencePlanningLoop,
+    EvidencePlanningOutcome,
+    EvidencePlanningStageCounts,
+    EvidenceRuleProposal,
+    PlanningConvergenceReason,
+    PlanningLoopLimits,
 )
 from app.application.reasoning.result_models import (
     AgentReasoningCellScope,
@@ -38,8 +47,15 @@ from app.application.reasoning.task import (
 __all__ = [
     "AgentReasoningCellScope",
     "AllCellsBlockedError",
+    "EvidencePlanningLoop",
+    "EvidencePlanningOutcome",
+    "EvidencePlanningStageCounts",
+    "EvidenceRuleProposal",
     "FixedSkeletonCell",
     "ReasoningBoundaryError",
+    "PlanningConvergenceReason",
+    "PlanningLoopError",
+    "PlanningLoopLimits",
     "ReasoningCellClaim",
     "ReasoningCellGate",
     "ReasoningGateDecision",

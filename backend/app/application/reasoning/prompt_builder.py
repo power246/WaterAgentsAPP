@@ -39,6 +39,7 @@ from app.domain import (
     ModelSelection,
     NonEmptyString,
     OutcomeStatus,
+    ParameterKey,
     RiskLevel,
     UtcDatetime,
     ensure_unique_tuple,
@@ -116,6 +117,7 @@ class EvidencePlanningPromptInput(_PromptInput):
     gates: tuple[ReasoningCellGate, ...]
     budget: PromptBudgetRemaining
     authorized_tools: tuple[PromptToolAuthorization, ...]
+    authorized_parameters: tuple[ParameterKey, ...] = ()
 
     @model_validator(mode="after")
     def validate_planning_scope(self) -> Self:
@@ -128,6 +130,10 @@ class EvidencePlanningPromptInput(_PromptInput):
         ensure_unique_tuple(
             tuple(tool.name for tool in self.authorized_tools),
             field_name="evidence planning tool names",
+        )
+        ensure_unique_tuple(
+            self.authorized_parameters,
+            field_name="evidence planning parameters",
         )
         allowed = set(self.context.reference_allowlist)
         refs = {
@@ -502,9 +508,10 @@ class PromptBuilder:
         }
         window_ids = tuple(dict.fromkeys(gate.window_id for gate in prompt.gates))
         parameter_keys = tuple(
-            dict.fromkeys(
-                (gate.parameter.code_system, gate.parameter.code)
-                for gate in prompt.gates
+            (parameter.code_system, parameter.code)
+            for parameter in (
+                prompt.authorized_parameters
+                or tuple(dict.fromkeys(gate.parameter for gate in prompt.gates))
             )
         )
         schema = {

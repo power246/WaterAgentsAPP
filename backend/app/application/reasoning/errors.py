@@ -12,6 +12,10 @@ class SealedEvidenceValidationError(ReasoningBoundaryError):
     pass
 
 
+class PlanningLoopError(ReasoningBoundaryError):
+    pass
+
+
 class ResultSkeletonValidationError(ReasoningBoundaryError):
     pass
 
