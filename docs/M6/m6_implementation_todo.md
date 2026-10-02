@@ -292,37 +292,44 @@
 
 ### 工作
 
-- [ ] 将 M5 一次性 `acquire(optional_requests=...)` 收敛为可迭代 application seam：`start`、`execute_optional`、`append_rules`、`seal` 或等价最小接口；内部继续复用原 registry/executor/writer/materializer/bundle builder。
-- [ ] 保持旧调用方原子迁移到新 seam，不保留两套 production acquisition、兼容 wrapper 链或重复 bundle builder；M5 自身 contracts/regression 必须继续通过。
-- [ ] 实现 station-backed 启动：先执行确定性 local observation/discharge preflight；成功但全部 usable local cells 自然为空时保存真实事实并立即 fixed 收敛，0 planning/0 final reasoning。
-- [ ] 实现 stationless 启动：禁止 local observation tool，先读取 direct-upstream producer slot；无论初始 evidence 是否充分，都允许在 hard budget 内由 Agent 决定 optional tools/rules 或 ready。
-- [ ] 在 Agent 前执行 `required_collection_attempt=true` 的确定性动作和已有 relation materialization；technical failure/invalid/incomplete 保持 blocker，不改写为 empty。
-- [ ] 每轮 planning 只执行至多配置上限的合法 calls，按 provider 顺序逐个 authorization；cancel 后停止余下 calls。append rule 只能追加 validated registry relation，不能删除/替换 baseline。
-- [ ] 每轮 tools/rules 后写入新 source/fragment/result/bundle，并重建 gates/working context；旧 bundle/item 不修改，引用闭包成立。
-- [ ] 收敛条件只允许 valid `evidence_ready`、无 remaining legal actions、planning turn 上限或 M5 budget 耗尽；无合法 action 的纯文字 response 是 invalid planning response。
-- [ ] seal 后生成 `SealedEvidenceInput`；预算耗尽不授权猜测。尚有未完成 conditional-mandatory action 时形成 technical blocker，而非 natural unsupported。
-- [ ] 分阶段记录 planning model calls、tool calls、rule proposals、bundle refs、budget/deadline/cancel 和 final reasoning eligibility；不得用总调用数掩盖 stationless planning。
+- [x] 将 M5 一次性 `acquire(optional_requests=...)` 收敛为可迭代 application seam：`start`、`execute_optional`、`append_rules`、`seal` 或等价最小接口；内部继续复用原 registry/executor/writer/materializer/bundle builder。
+- [x] 保持旧调用方原子迁移到新 seam，不保留两套 production acquisition、兼容 wrapper 链或重复 bundle builder；M5 自身 contracts/regression 必须继续通过。
+- [x] 实现 station-backed 启动：先执行确定性 local observation/discharge preflight；成功但全部 usable local cells 自然为空时保存真实事实并立即 fixed 收敛，0 planning/0 final reasoning。
+- [x] 实现 stationless 启动：禁止 local observation tool，先读取 direct-upstream producer slot；无论初始 evidence 是否充分，都允许在 hard budget 内由 Agent 决定 optional tools/rules 或 ready。
+- [x] 在 Agent 前执行 `required_collection_attempt=true` 的确定性动作和已有 relation materialization；technical failure/invalid/incomplete 保持 blocker，不改写为 empty。
+- [x] 每轮 planning 只执行至多配置上限的合法 calls，按 provider 顺序逐个 authorization；cancel 后停止余下 calls。append rule 只能追加 validated registry relation，不能删除/替换 baseline。
+- [x] 每轮 tools/rules 后写入新 source/fragment/result/bundle，并重建 gates/working context；旧 bundle/item 不修改，引用闭包成立。
+- [x] 收敛条件只允许 valid `evidence_ready`、无 remaining legal actions、planning turn 上限或 M5 budget 耗尽；无合法 action 的纯文字 response 是 invalid planning response。
+- [x] seal 后生成 `SealedEvidenceInput`；预算耗尽不授权猜测。尚有未完成 conditional-mandatory action 时形成 technical blocker，而非 natural unsupported。
+- [x] 分阶段记录 planning model calls、tool calls、rule proposals、bundle refs、budget/deadline/cancel 和 final reasoning eligibility；不得用总调用数掩盖 stationless planning。
 
 ### Tests
 
-- [ ] station-backed full empty 精确 0 planning/0 final reasoning；partial/full usable 进入 planning；provider failure 不走 completed-empty。
-- [ ] stationless 无上游、上游 usable、上游 indeterminate、producer unavailable、weather/facility optional 的组合稳定，且从不调用 local observation。
-- [ ] Agent 未选择 optional tool 不是 failure/empty；选择依赖天气的 relation 后缺 weather 前置不能通过 gate。
-- [ ] 多轮 tool/rule/rebuild 的 bundle refs 单调追加且旧内容不可变；重复 exact request 仍由 M5 single-flight 处理并计 budget。
-- [ ] 任意 COMID/station/URL、scope 外 parameter/window/ref、非法 radius/unit/method、baseline rule 删除、contextual 升级均在 executor/writer 前拒绝。
-- [ ] max turns、per-turn calls、M5 collection/transform budget、session deadline、cancel race 和 late provider output 均有边界 fixture；不出现无限 loop/retry。
-- [ ] 全 unsupported seal 后为 0 reasoning batch/0 synthesis；partial supported 只把 supported cells 交给后续阶段。
+- [x] station-backed full empty 精确 0 planning/0 final reasoning；partial/full usable 进入 planning；provider failure 不走 completed-empty。
+- [x] stationless 无上游、上游 usable、上游 indeterminate、producer unavailable、weather/facility optional 的组合稳定，且从不调用 local observation。
+- [x] Agent 未选择 optional tool 不是 failure/empty；选择依赖天气的 relation 后缺 weather 前置不能通过 gate。
+- [x] 多轮 tool/rule/rebuild 的 bundle refs 单调追加且旧内容不可变；重复 exact request 仍由 M5 single-flight 处理并计 budget。
+- [x] 任意 COMID/station/URL、scope 外 parameter/window/ref、非法 radius/unit/method、baseline rule 删除、contextual 升级均在 executor/writer 前拒绝。
+- [x] max turns、per-turn calls、M5 collection/transform budget、session deadline、cancel race 和 late provider output 均有边界 fixture；不出现无限 loop/retry。
+- [x] 全 unsupported seal 后为 0 reasoning batch/0 synthesis；partial supported 只把 supported cells 交给后续阶段。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_planning_loop.py backend/tests/application/evidence_tools/test_acquisition_workflow.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m5_evidence_workflow_smoke.py backend/tests/architecture -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_planning_loop.py backend/tests/application/evidence_tools/test_acquisition_workflow.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m5_evidence_workflow_smoke.py backend/tests/architecture -q`
+- [x] `git diff --check`
 
 阶段出口：两种 station 起点可经真实 M5 execution seam 完成有界 planning、重建和 seal，并产生准确 gates/计数；尚未执行 reasoning batches。
 
 提交边界：M5 iterative seam、planning loop、rule appender、调用计数和 focused regression；不得实现 M7 upstream producer、final batch/synthesis、RAG producer 或 frontend。
+
+完成记录（2026-10-02）：
+
+- 实现：将一次性 `acquire(optional_requests=...)` 原子替换为 `start/execute_optional/append_rules/seal` 唯一 seam；新增有界 evidence-planning loop、严格 ready/rule/tool response、动态 registry-authorized parameter roster、append-only rule plan、逐 call authorization/execution、每次 action 后 immutable bundle rebuild 与最终 `SealedEvidenceInput`。station-backed 全空保持 0 planning，stationless 始终显式记录 planning；reasoning batch/synthesis 仍为 0，未实现 M6 之后能力。
+- 边界：local/upstream/required-rule preflight、technical blocker、single-flight/budget、deadline/cancel、scope/ref/unit/method/radius 等执行权限继续由 M5 registry/executor/writer/materializer/bundle builder 掌权；working context 仅含有界摘要与引用，不包含 raw provider body。纯文字无 action、超出每轮 call 上限、非法 tool args/rule 均拒绝。
+- 验证：focused planning/acquisition `23 passed`，全部 evidence-tools `74 passed`，M5 smoke + architecture `109 passed`；健康的 Docker PostgreSQL 17 上使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 执行完整 backend 为 `1690 passed, 1 warning`，health smoke 与 history/independent-process-restart/restart-repair smoke 均通过。`compileall`、staged `git diff --check` 通过；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `8fc4a83`；本完成记录随紧随其后的本地文档提交保存，均未 push。M6–M13 尚未开始。
 
 ## Milestone 6：确定性 reasoning batch planner
 
