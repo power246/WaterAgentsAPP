@@ -133,8 +133,8 @@
 #### Milestone 0 完成记录（2026-10-02）
 
 - 实现：从最新 `origin/main` 创建 `codex/m6-milestone-0`，保护并纳入既有 M6 文档输入；完成当前 backend 接缝、影响面和原子消费者盘点。新增窄 architecture guard，锁定 parser 无 tools、parser/waterbody port 分离、waterbody port 仅可依赖 provider-neutral reasoning DTO，并扩展 production OpenAPI 的 M6 禁止路由；未新增 M6 业务行为、表、migration、provider adapter、runtime 或 lifecycle 字段。
-- 验证：原始 full command 得到 `1494 passed, 3 failed, 48 errors`，其中 33 个 error 来自默认 pytest 临时目录 ACL，另 18 个 PostgreSQL cases 因缺少进程级测试库分为 3 failed/15 errors；沙箱外新 basetemp 的非 PostgreSQL 全量回归为 `1527 passed`。最终 M0 focused/architecture 为 `176 passed`，serialization/registry/OpenAPI/history/SSE 合约集为 `148 passed`，新增 guard 定向为 `59 passed`，standalone run SSE smoke 输出 completed/cancelled 均 passed；`compileall` 与 `git diff --check` 通过。
-- 风险：Docker Desktop 未运行且 `WATERAGENTS_TEST_DB_NAME` 未设置，18 个 PostgreSQL tests 与 `run_history_smoke.py` 为 `not run`；真实 provider 请求、Ubuntu/macOS/Windows 同提交 CI 也为 `not run`。M6 Milestone 1–13 尚未开始，本阶段不声称任何 reasoning runtime 已实现。
+- 验证：原始 full command 得到 `1494 passed, 3 failed, 48 errors`，其中 33 个 error 来自默认 pytest 临时目录 ACL，另 18 个 PostgreSQL cases 因缺少进程级测试库分为 3 failed/15 errors；沙箱外新 basetemp 的非 PostgreSQL 全量回归为 `1527 passed`。最终 M0 focused/architecture 为 `176 passed`，serialization/registry/OpenAPI/history/SSE 合约集为 `148 passed`，新增 guard 定向为 `59 passed`，standalone run SSE smoke 输出 completed/cancelled 均 passed。随后启动 Docker Engine `29.8.1` / Compose `v5.5.1` / PostgreSQL `17.11`，仅以进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 补验：18 个 PostgreSQL persistence cases 为 `18 passed`，`run_history_smoke.py` 的 history、independent-process restart、restart repair 均 passed，`health_smoke.py` 为 healthy；首次仓库内 basetemp 全量运行因目录被测试过程移除得到 `1515 passed, 33 errors`，改用新的系统 basetemp 后重跑为 `1548 passed, 1 warning`。`compileall` 与 `git diff --check` 通过，未修改业务数据库或 `backend/.env`。
+- 风险：真实 provider 请求、Ubuntu/macOS/Windows 同提交 CI 为 `not run`。M6 Milestone 1–13 尚未开始，本阶段不声称任何 reasoning runtime 已实现。
 - 提交：本地架构护栏提交 `f4bc754`；本完成记录与受保护的 M6 设计文档随紧随其后的本地文档提交保存，均未 push。
 
 ## Milestone 1：当前唯一 V1 inference domain
