@@ -152,7 +152,10 @@ def test_app_shutdown_cleans_run_resources_before_m5_runtime_closes(
         del args, kwargs
         runtime_open = True
         try:
-            yield SimpleNamespace(cleanup_run=cleanup_run)
+            yield SimpleNamespace(
+                acquisition=object(),
+                cleanup_run=cleanup_run,
+            )
         finally:
             runtime_open = False
 

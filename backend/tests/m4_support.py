@@ -1,4 +1,5 @@
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 
 from app.application.query_understanding import (
@@ -31,6 +32,37 @@ MODEL_CAPABILITIES = (
 MODEL_CATALOG = ModelCatalog(MODEL_CAPABILITIES)
 
 _OMITTED = object()
+
+
+class _UnscriptedWaterbodyModelPort:
+    async def stream(self, request):
+        del request
+        raise AssertionError("test app received an unscripted M6 model call")
+        yield  # pragma: no cover
+
+
+@asynccontextmanager
+async def _build_test_m6_runtime(settings, **kwargs):
+    from app.infrastructure.runtime import (
+        OpenAIResponsesSizeEstimator,
+        WaterbodyAdapterRegistration,
+    )
+    from app.infrastructure.runtime.m6_test import build_m6_test_runtime
+
+    async with build_m6_test_runtime(
+        settings,
+        registrations=(
+            WaterbodyAdapterRegistration(
+                provider="test-provider",
+                port=_UnscriptedWaterbodyModelPort(),
+                context_window_tokens=128_000,
+                max_output_tokens=32_768,
+                size_estimator=OpenAIResponsesSizeEstimator(),
+            ),
+        ),
+        **kwargs,
+    ) as runtime:
+        yield runtime
 
 
 class NoOpWorkflow:
@@ -130,6 +162,7 @@ def create_test_app(*args: object, **kwargs: object):
     from app.main import create_app
 
     kwargs.setdefault("model_catalog", MODEL_CATALOG)
+    kwargs.setdefault("m6_runtime_builder", _build_test_m6_runtime)
     if kwargs.get("workflow") is None:
         kwargs["workflow"] = NoOpWorkflow()
     return create_app(*args, **kwargs)

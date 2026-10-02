@@ -195,3 +195,28 @@ def test_frontend_does_not_consume_the_m5_test_route() -> None:
             consumers.append(source_path.relative_to(FRONTEND_ROOT))
 
     assert consumers == []
+
+
+def test_frontend_does_not_consume_a_direct_m6_surface() -> None:
+    forbidden = (
+        "/__test__/m6",
+        "/reasoning",
+        "/models/complete",
+        "/tools",
+        "/evidence/collect",
+    )
+    consumers = []
+    for source_path in FRONTEND_ROOT.rglob("*"):
+        if not source_path.is_file() or source_path.suffix not in {
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".vue",
+        }:
+            continue
+        source = source_path.read_text(encoding="utf-8", errors="ignore")
+        if any(path in source for path in forbidden):
+            consumers.append(source_path.relative_to(FRONTEND_ROOT))
+
+    assert consumers == []

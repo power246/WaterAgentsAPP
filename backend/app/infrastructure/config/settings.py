@@ -115,6 +115,22 @@ class AppSettings(BaseSettings):
     evidence_preview_max_records: int = Field(default=32, ge=1, le=32)
     evidence_preview_max_bytes: int = Field(default=16_384, ge=1024, le=16_384)
     evidence_facility_max_centers: int = Field(default=32, ge=1, le=32)
+    reasoning_max_planning_turns: int = Field(default=6, ge=1, le=6)
+    reasoning_max_tool_calls_per_turn: int = Field(default=4, ge=1, le=4)
+    reasoning_max_cells_per_batch: int = Field(default=32, ge=1, le=32)
+    reasoning_max_batches: int = Field(default=24, ge=1, le=24)
+    reasoning_model_timeout_seconds: float = Field(
+        default=90,
+        gt=0,
+        le=90,
+        allow_inf_nan=False,
+    )
+    reasoning_session_deadline_seconds: float = Field(
+        default=600,
+        gt=0,
+        le=600,
+        allow_inf_nan=False,
+    )
     nws_user_agent_project: str = Field(default="WaterAgents", min_length=1)
     nws_user_agent_contact: str = Field(
         default="wateragents@example.invalid",
@@ -207,12 +223,16 @@ class AppSettings(BaseSettings):
         "evidence_preview_max_records",
         "evidence_preview_max_bytes",
         "evidence_facility_max_centers",
+        "reasoning_max_planning_turns",
+        "reasoning_max_tool_calls_per_turn",
+        "reasoning_max_cells_per_batch",
+        "reasoning_max_batches",
         mode="before",
     )
     @classmethod
-    def reject_non_integer_m4_limits(cls, value: object) -> object:
+    def reject_non_integer_limits(cls, value: object) -> object:
         if isinstance(value, (bool, float)):
-            raise ValueError("M4 integer limits require an integer value")
+            raise ValueError("integer limits require an integer value")
         return value
 
     @field_validator(
@@ -223,13 +243,15 @@ class AppSettings(BaseSettings):
         "provider_http_retry_delay_seconds",
         "evidence_provider_timeout_seconds",
         "evidence_total_deadline_seconds",
+        "reasoning_model_timeout_seconds",
+        "reasoning_session_deadline_seconds",
         "topology_stage_timeout_seconds",
         mode="before",
     )
     @classmethod
-    def reject_boolean_m4_numbers(cls, value: object) -> object:
+    def reject_boolean_numbers(cls, value: object) -> object:
         if isinstance(value, bool):
-            raise ValueError("M4 numeric settings must not be boolean")
+            raise ValueError("numeric settings must not be boolean")
         return value
 
     @field_validator("db_sslmode", mode="before")
@@ -303,6 +325,14 @@ class AppSettings(BaseSettings):
             raise ValueError(
                 "evidence_inspection_page_size must not exceed "
                 "evidence_inspection_max_page_size"
+            )
+        if (
+            self.reasoning_model_timeout_seconds
+            > self.reasoning_session_deadline_seconds
+        ):
+            raise ValueError(
+                "reasoning_model_timeout_seconds must not exceed "
+                "reasoning_session_deadline_seconds"
             )
         return self
 
