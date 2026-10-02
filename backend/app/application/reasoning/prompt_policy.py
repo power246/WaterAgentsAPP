@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from typing import Self
@@ -426,6 +427,10 @@ def _json_value(value: object) -> object:
         return value.model_dump(mode="json")
     if isinstance(value, UUID):
         return str(value)
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("canonical datetime must include timezone information")
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, dict):
