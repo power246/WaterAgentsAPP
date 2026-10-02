@@ -335,32 +335,39 @@
 
 ### 工作
 
-- [ ] 定义不可变 `ReasoningBatchPlan`/`ReasoningBatch`，只包含 supported cells；identity 绑定 run/session/result、scope digest、bundle/rule/capability digest 和 batch index。
-- [ ] 稳定排序为 requested ParameterKey 顺序、time segment 顺序、连续 final windows；不得按 hash/set/provider output order 形成 batch。
-- [ ] 同一 batch 不跨 ParameterKey 或 inference segment；连续 windows 尽量合并，但同时受 `reasoning_batch_max_cells=32`、总 batches=24、序列化输入和预计输出/model limit 约束。
-- [ ] model-fit 估算使用 model catalog/adapter capability 与实际 schema/context bytes；不能只用字符数或在 provider 截断后再猜测。
-- [ ] 每个 supported cell 恰好出现一次；unsupported/blocked/fixed cells 永不进入 batch。无法在硬上限内完整覆盖时，在任何 batch call 前失败为 `reasoning_plan_too_large`。
-- [ ] batches 仍属于同一 waterbody session/model，不创建子 session、同义 agent identity 或 per-cell lifecycle。
-- [ ] 生成 synthesis input plan：validated results、fixed cells、coverage/blocker facts 和 bounded summaries/refs；不重复内联全部 raw evidence。
+- [x] 定义不可变 `ReasoningBatchPlan`/`ReasoningBatch`，只包含 supported cells；identity 绑定 run/session/result、scope digest、bundle/rule/capability digest 和 batch index。
+- [x] 稳定排序为 requested ParameterKey 顺序、time segment 顺序、连续 final windows；不得按 hash/set/provider output order 形成 batch。
+- [x] 同一 batch 不跨 ParameterKey 或 inference segment；连续 windows 尽量合并，但同时受 `reasoning_batch_max_cells=32`、总 batches=24、序列化输入和预计输出/model limit 约束。
+- [x] model-fit 估算使用 model catalog/adapter capability 与实际 schema/context bytes；不能只用字符数或在 provider 截断后再猜测。
+- [x] 每个 supported cell 恰好出现一次；unsupported/blocked/fixed cells 永不进入 batch。无法在硬上限内完整覆盖时，在任何 batch call 前失败为 `reasoning_plan_too_large`。
+- [x] batches 仍属于同一 waterbody session/model，不创建子 session、同义 agent identity 或 per-cell lifecycle。
+- [x] 生成 synthesis input plan：validated results、fixed cells、coverage/blocker facts 和 bounded summaries/refs；不重复内联全部 raw evidence。
 
 ### Tests
 
-- [ ] 最大 6 参数 × 15 当地日期 × 6h windows 的 batch count/order 可重现，全部 supported cells 无漏无重。
-- [ ] `6h/12h/24h`、mixed segment、DST spring/fall、partial supported、all unsupported 和单 cell 边界均有 fixture。
-- [ ] 32/33 cells、23/24/25 batches、request/output/model limit 临界值正确；超过任一硬上限在模型调用前失败。
-- [ ] 更换 dict/hash seed、并发完成顺序或 evidence item 保存顺序不改变 batch identity/order/digest。
-- [ ] synthesis plan 不含 unbounded raw records、scope 外 refs 或未验证 draft，fixed cells/availability facts 不可被模型修改。
+- [x] 最大 6 参数 × 15 当地日期 × 6h windows 的 batch count/order 可重现，全部 supported cells 无漏无重。
+- [x] `6h/12h/24h`、mixed segment、DST spring/fall、partial supported、all unsupported 和单 cell 边界均有 fixture。
+- [x] 32/33 cells、23/24/25 batches、request/output/model limit 临界值正确；超过任一硬上限在模型调用前失败。
+- [x] 更换 dict/hash seed、并发完成顺序或 evidence item 保存顺序不改变 batch identity/order/digest。
+- [x] synthesis plan 不含 unbounded raw records、scope 外 refs 或未验证 draft，fixed cells/availability facts 不可被模型修改。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_batch_planner.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_time_windows.py backend/tests/domain/test_results.py -q`
-- [ ] 运行 deterministic serialization/hash-seed audit，记录最大 fixture 的 cells/batches/serialized bytes。
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_batch_planner.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_time_windows.py backend/tests/domain/test_results.py -q`
+- [x] 运行 deterministic serialization/hash-seed audit，记录最大 fixture 的 cells/batches/serialized bytes。
+- [x] `git diff --check`
 
 阶段出口：任意合法 sealed input 都能在调用模型前得到完整、稳定、有界且 model-fit 的 batch/synthesis 计划；超限安全失败。
 
 提交边界：batch/synthesis plan DTO、planner、size estimator 和 focused tests；不得解析模型 response、repair、组装 final result 或修改 SSE。
+
+完成记录（2026-10-02）：
+
+- 实现：新增不可变 batch/synthesis plan DTO、同一 run/session/result/model 的 canonical identity/digest、requested parameter/segment/final-window 稳定分组和 greedy fit；每批最多 32 cells、全计划最多 24 batches。catalog 继续掌握 waterbody role，adapter 注入 context/output token capability 与基于实际 canonical request/schema bytes 的 estimator；任何单 cell、总批次、request/output/model 超限均在无 model port 的 planner 内失败为 `reasoning_plan_too_large`。
+- 边界：batch 仅含 skeleton supported scopes，fixed/unsupported/blocked cells 只进入不可修改的 synthesis coverage/fixed summaries；synthesis 仅接受与计划同序、同 window 且 evidence refs 属于对应 cell allowlist 的 validated summaries，并只携带有界 facts/summaries/refs。未实现 response parser、repair、final result assembler、provider 调用、子 session/per-cell lifecycle 或 SSE 变更。
+- 验证：focused batch planner `19 passed`；time-window/result regression `128 passed`；Docker PostgreSQL 17 healthy，使用进程级隔离库 `wateragents_test` 的最终完整 backend 回归为 `1709 passed, 1 warning`。`PYTHONHASHSEED=1/999` 固定 digest 审计各 `1 passed`；最大 fixture 为 360 cells/12 batches，batch serialized input 总计 202413 bytes、单 batch 最大 21905 bytes，synthesis base/reserved input 为 115262/32808 bytes。`compileall` 与 staged `git diff --check` 通过；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `4a042c5`；本完成记录随紧随其后的本地文档提交保存，均未 push。Milestone 7–13 尚未开始。
 
 ## Milestone 7：draft validation 与一次 repair
 
