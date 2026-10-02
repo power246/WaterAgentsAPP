@@ -141,33 +141,40 @@
 
 ### 工作
 
-- [ ] 原子增加 `RiskLevel.NONE`；新增 `AssessmentAvailability=complete|partial|indeterminate`，并更新 exports、serialization、fixtures 和所有枚举穷举消费者。
-- [ ] 将 `RiskOrTrendAssessment` 收敛为带 `risk_level`、非空 `risk_rationale`、`supporting_refs`、trend/reason codes 的当前唯一结构；Agent 产出要求真实 rationale/refs，backend fixed 产出使用稳定 reason/rationale，不新增同义 V2 或伪装 Agent 文本。
-- [ ] 收敛 `TimeWindowResult`：representative value 使用 canonical decimal string；indeterminate 的 source 为 null；增加 confidence rationale 并复用本层 refs；三态 shape、unit/source/aggregation/evidence 约束原子更新。
-- [ ] 收敛 `ParameterTimeSeries`：完整计划 windows、series confidence/rationale/result refs；禁止空 series、重复/缺失/额外/重叠 windows。
-- [ ] 新增 `CompositeRiskAssessment` 和 `OverallWaterbodyAssessment`，包含 risk/confidence rationales、availability、assessed/total counts、missing/blocker/result refs；counts/availability 是后端事实。
-- [ ] 扩展 `InferenceResult`：run/session identity、requested parameter order、window composites、range overall、execution summary；保留 AnalysisDetail、AttributionSummary、EvidenceChain 和 generated_at 单一事实。
-- [ ] 修正 prediction/gap-filling source 验证：quantified/directional 才要求 observed/inferred/predicted；indeterminate source=null 不因 segment mode 被拒绝。
-- [ ] 完整 reference closure 同时覆盖 point、series、composite、overall、analysis steps、attribution、missing/blocker refs；未知、跨 result 或重复引用安全失败。
+- [x] 原子增加 `RiskLevel.NONE`；新增 `AssessmentAvailability=complete|partial|indeterminate`，并更新 exports、serialization、fixtures 和所有枚举穷举消费者。
+- [x] 将 `RiskOrTrendAssessment` 收敛为带 `risk_level`、非空 `risk_rationale`、`supporting_refs`、trend/reason codes 的当前唯一结构；Agent 产出要求真实 rationale/refs，backend fixed 产出使用稳定 reason/rationale，不新增同义 V2 或伪装 Agent 文本。
+- [x] 收敛 `TimeWindowResult`：representative value 使用 canonical decimal string；indeterminate 的 source 为 null；增加 confidence rationale 并复用本层 refs；三态 shape、unit/source/aggregation/evidence 约束原子更新。
+- [x] 收敛 `ParameterTimeSeries`：完整计划 windows、series confidence/rationale/result refs；禁止空 series、重复/缺失/额外/重叠 windows。
+- [x] 新增 `CompositeRiskAssessment` 和 `OverallWaterbodyAssessment`，包含 risk/confidence rationales、availability、assessed/total counts、missing/blocker/result refs；counts/availability 是后端事实。
+- [x] 扩展 `InferenceResult`：run/session identity、requested parameter order、window composites、range overall、execution summary；保留 AnalysisDetail、AttributionSummary、EvidenceChain 和 generated_at 单一事实。
+- [x] 修正 prediction/gap-filling source 验证：quantified/directional 才要求 observed/inferred/predicted；indeterminate source=null 不因 segment mode 被拒绝。
+- [x] 完整 reference closure 同时覆盖 point、series、composite、overall、analysis steps、attribution、missing/blocker refs；未知、跨 result 或重复引用安全失败。
 
 ### Tests
 
-- [ ] 五级风险、三态 result、decimal round-trip、indeterminate source null/fixed confidence 0、Agent-selected indeterminate、strict enum/number 均有正反例。
-- [ ] planned windows 精确覆盖 `6h/12h/24h`、mixed segments、DST 5/7/23/25 elapsed hours；缺失/重复/额外/乱序/跨 segment point 被拒绝。
-- [ ] observed 一对一、aggregate inferred、prediction predicted、allowed-indirect 不 quantified 等 source/value 资格保持可验证。
-- [ ] composite/overall availability counts 和 refs 不一致、`none` 无依据、rationale/ref 缺失、overall confidence 冒充 risk 等错误 shape 被拒绝。
-- [ ] 旧 fixture/serializer/OpenAPI consumer 已原子更新；production/test 搜索无旧非 nullable source、float result value 或四级风险兼容分支。
+- [x] 五级风险、三态 result、decimal round-trip、indeterminate source null/fixed confidence 0、Agent-selected indeterminate、strict enum/number 均有正反例。
+- [x] planned windows 精确覆盖 `6h/12h/24h`、mixed segments、DST 5/7/23/25 elapsed hours；缺失/重复/额外/乱序/跨 segment point 被拒绝。
+- [x] observed 一对一、aggregate inferred、prediction predicted、allowed-indirect 不 quantified 等 source/value 资格保持可验证。
+- [x] composite/overall availability counts 和 refs 不一致、`none` 无依据、rationale/ref 缺失、overall confidence 冒充 risk 等错误 shape 被拒绝。
+- [x] 旧 fixture/serializer/OpenAPI consumer 已原子更新；production/test 搜索无旧非 nullable source、float result value 或四级风险兼容分支。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_results.py backend/tests/domain/test_serialization.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_domain_contracts.py backend/tests/architecture/test_domain_dependencies.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/domain`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_results.py backend/tests/domain/test_serialization.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_domain_contracts.py backend/tests/architecture/test_domain_dependencies.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/domain`
+- [x] `git diff --check`
 
 阶段出口：当前唯一 V1 能独立表达完整 M6 final result，所有机械不变量由 Domain 验证，风险判断内容仍不由 Domain 计算。
 
 提交边界：仅 inference/attribution/evidence-chain domain、exports、fixtures、直接消费者和对应测试；不得开始模型调用、prompt、planning、transcript 或 runtime。
+
+#### Milestone 1 完成记录（2026-10-02）
+
+- 实现：在 `backend/app/domain/inference/` 原子收敛当前唯一 V1，增加五级风险、三态 availability、严格 decimal-string point、nullable indeterminate source、四层 risk/confidence rationales、window/range assessments、safe model execution summary 与 run/session/requested-parameter identity；`InferenceResult` 校验完整窗口、segment/source/unit、counts/availability 和 evidence/result reference closure。同步 `app.domain` exports、domain fixtures 与 serializer 测试；未新增 V2/兼容读取、application reasoning、provider、transcript、runtime、route、表或 migration。
+- 验证：旧模型 red gate 因缺少 `AssessmentAvailability` 在 collection 阶段按预期失败；最终 focused 为 `133 passed`，指定 domain architecture 为 `9 passed`，全部 domain 为 `343 passed`，全部 architecture 为 `107 passed`。Windows/Python 3.12 下以进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 和 PostgreSQL 17.11 执行全量后端为 `1607 passed, 1 warning`；`compileall`、JSON schema string/null 审计、旧 shape 搜索与 `git diff --check` 通过。
+- 风险：真实 provider 请求与 Ubuntu/macOS/Windows 同提交 CI 为 `not run`；本阶段没有模型调用面。M2–M13 尚未开始，allowed-indirect 的具体 evidence 资格仍由后续 sealed skeleton/draft validator 依据 M5 facts 校验，M1 只锁定该路径使用的 directional/inferred shape 不携带 quantified value。
+- 提交：本地实现提交 `c6b670e`；本完成记录随紧随其后的本地文档提交保存，均未 push。
 
 ## Milestone 2：task、sealed gate 与结果骨架
 
