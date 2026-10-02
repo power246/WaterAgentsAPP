@@ -217,31 +217,37 @@
 
 ### 工作
 
-- [ ] 新增独立 `ports/waterbody_model.py` 和 application DTO：`WaterbodyModelRequest`、phase、safe messages、tool descriptors、response schema、scope digest、bundle ref、batch id 与 deadline。
-- [ ] 定义 strict `WaterbodyModelEvent` 判别联合：visible text delta、completed tool call、structured output、refusal、usage、terminal；禁止 provider SDK object、arbitrary dict 和 secret。
-- [ ] 定义 provider-neutral completed response/usage/finish reason 与 typed port errors；区分 unavailable、timeout、content filtered/refusal、invalid protocol、truncated/incomplete 和 cancel。
-- [ ] 保持 query parser port/adapter 只支持一次性 generate 且 tools 为空；添加 architecture/API test 防止 M6 权限反向扩散。
-- [ ] 提供 deterministic fake streaming port，可脚本化多 message、tool call、structured response、错误、取消、usage 和 terminal 顺序；所有 call/operation identity 可断言。
-- [ ] event consumer 拒绝未知 event/item、空 delta、损坏 tool arguments、重复 structured output/terminal、terminal 后输出、provider/model identity 漂移。
+- [x] 新增独立 `ports/waterbody_model.py` 和 application DTO：`WaterbodyModelRequest`、phase、safe messages、tool descriptors、response schema、scope digest、bundle ref、batch id 与 deadline。
+- [x] 定义 strict `WaterbodyModelEvent` 判别联合：visible text delta、completed tool call、structured output、refusal、usage、terminal；禁止 provider SDK object、arbitrary dict 和 secret。
+- [x] 定义 provider-neutral completed response/usage/finish reason 与 typed port errors；区分 unavailable、timeout、content filtered/refusal、invalid protocol、truncated/incomplete 和 cancel。
+- [x] 保持 query parser port/adapter 只支持一次性 generate 且 tools 为空；添加 architecture/API test 防止 M6 权限反向扩散。
+- [x] 提供 deterministic fake streaming port，可脚本化多 message、tool call、structured response、错误、取消、usage 和 terminal 顺序；所有 call/operation identity 可断言。
+- [x] event consumer 拒绝未知 event/item、空 delta、损坏 tool arguments、重复 structured output/terminal、terminal 后输出、provider/model identity 漂移。
 
 ### Tests
 
-- [ ] 每种合法 event 和组合顺序可 round-trip；多条 message/tool/structured terminal 的顺序与 identity 保持。
-- [ ] 未知/重复/乱序/terminal 后/损坏 JSON/空字段/extra secret 字段被 strict 拒绝，不产生 tool 或 result side effect。
-- [ ] fake cancellation 在 event 边界停止，晚到 events 不进入 working context 或 result；usage 缺失允许为 null，但伪造负数/布尔值被拒绝。
-- [ ] parser fixtures 继续断言 `tools=[]`，waterbody descriptor 不能传入 parser request。
-- [ ] public error 只含安全 provider/model identity、code、stage、retryable 和 error_id，不含 prompt/body/arguments/credential/traceback。
+- [x] 每种合法 event 和组合顺序可 round-trip；多条 message/tool/structured terminal 的顺序与 identity 保持。
+- [x] 未知/重复/乱序/terminal 后/损坏 JSON/空字段/extra secret 字段被 strict 拒绝，不产生 tool 或 result side effect。
+- [x] fake cancellation 在 event 边界停止，晚到 events 不进入 working context 或 result；usage 缺失允许为 null，但伪造负数/布尔值被拒绝。
+- [x] parser fixtures 继续断言 `tools=[]`，waterbody descriptor 不能传入 parser request。
+- [x] public error 只含安全 provider/model identity、code、stage、retryable 和 error_id，不含 prompt/body/arguments/credential/traceback。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/ports/test_waterbody_model.py backend/tests/application/reasoning/test_model_protocol.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/architecture/test_port_imports.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/ports backend/app/application/reasoning`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/ports/test_waterbody_model.py backend/tests/application/reasoning/test_model_protocol.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_parser.py backend/tests/architecture/test_port_imports.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/ports backend/app/application/reasoning`
+- [x] `git diff --check`
 
 阶段出口：application 可只依赖 provider-neutral streaming port 驱动可见文字、tools 和 structured output；parser 权限不变；尚无真实 provider adapter。
 
 提交边界：waterbody port、application model protocol、fake 与边界测试；不得修改 OpenAI adapter、M5 executor、transcript payload 或 runtime composition。
+
+完成记录（2026-10-02）：
+
+- 实现：新增独立 provider-neutral streaming port、严格 request/event/completed-response/usage/error DTO、完整事件 consumer 与 deterministic scripted fake；按 operation/provider/model identity、JSON、usage、重复/乱序/terminal 后输出和取消边界封口。query parser 仍为一次性无 tools，未实现真实 provider adapter、prompt、planning/batch、transcript 或 runtime。
+- 验证：M3 focused `38 passed`，指定 parser + port regression `101 passed`，全部 architecture `108 passed`；以进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 和健康的 Docker PostgreSQL 17 执行完整 backend 为 `1664 passed, 1 warning`。`compileall` 与 staged `git diff --check` 通过；真实 provider 请求和三平台同提交 CI 为 `not run`。
+- 提交：本地实现提交 `c856719`；本完成记录随紧随其后的本地文档提交保存，均未 push。M4–M13 尚未开始。
 
 ## Milestone 4：prompt builder 与 policy audit
 
