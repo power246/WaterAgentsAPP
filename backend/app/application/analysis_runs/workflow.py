@@ -14,6 +14,7 @@ from app.application.analysis_runs.models import (
 
 if TYPE_CHECKING:
     from app.application.transcripts.models import AnalysisRequestV1
+    from app.domain import InferenceResult
 
 
 class WorkflowStopped(Exception):
@@ -73,6 +74,19 @@ class WorkflowOperations(Protocol):
         session_id: UUID | str,
     ) -> SessionSummary: ...
 
+    async def complete_waterbody_agent_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        result: "InferenceResult",
+    ) -> SessionSummary: ...
+
+    async def cancel_agent_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+    ) -> SessionSummary: ...
+
     async def fail_agent_session(
         self,
         run_id: UUID | str,
@@ -118,6 +132,7 @@ class WorkflowOperations(Protocol):
         tags: tuple[str, ...] = (),
         rag_eligible: bool = False,
         private_values: tuple[str, ...] = (),
+        initial_body: object | None = None,
     ) -> TranscriptItemIdentity: ...
 
     async def append_transcript_message_delta(

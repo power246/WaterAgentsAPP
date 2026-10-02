@@ -172,6 +172,8 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
                     "status": "pending",
                     "created_at": detail.json()["sessions"][0]["created_at"],
                     "updated_at": detail.json()["sessions"][0]["updated_at"],
+                    "result_ref": None,
+                    "result_summary": None,
                 }
             ]
             assert all(item["scope"]["session_id"] is None for item in detail.json()["items"])

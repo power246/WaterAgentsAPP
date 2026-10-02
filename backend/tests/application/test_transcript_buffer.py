@@ -122,6 +122,21 @@ def test_redaction_happens_before_live_and_is_rechecked_for_storage() -> None:
         buffer.to_storage_batch(private_values=("inspect",))
 
 
+def test_usage_token_metrics_preserve_counts_but_not_string_credentials() -> None:
+    assert redaction.redact({
+        "input_tokens": 12,
+        "output_tokens": None,
+        "access_token": 34,
+    }) == {
+        "input_tokens": 12,
+        "output_tokens": None,
+        "access_token": redaction.REDACTED,
+    }
+    assert redaction.redact({"input_tokens": "synthetic-secret"}) == {
+        "input_tokens": redaction.REDACTED,
+    }
+
+
 def test_large_non_sensitive_text_round_trips_unchanged() -> None:
     value = "水" * 30000
 

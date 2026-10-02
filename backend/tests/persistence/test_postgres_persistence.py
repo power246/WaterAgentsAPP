@@ -68,6 +68,12 @@ from tests.m4_support import (
     create_request_bytes,
     create_test_app as create_app,
 )
+from tests.application.evidence_tools.fakes import FixedClock
+from tests.application.reasoning.test_planning_loop import _fixture
+from tests.application.reasoning.test_runner import (
+    AdaptiveWaterbodyModelPort,
+    _runner,
+)
 from scripts.test_database import temporary_migrated_schema
 
 
@@ -1553,6 +1559,126 @@ def test_m4_context_history_projection_survives_real_postgres_restart() -> None:
                 item for item in history.items if item.run_id == created.run_id
             )
             assert listed.context_summary == detail.run.context_summary
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
+def test_m9_waterbody_result_projection_survives_real_postgres_restart() -> None:
+    class Workflow:
+        def __init__(self) -> None:
+            self.calls: asyncio.Queue[WorkflowContext] = asyncio.Queue()
+            self.release = asyncio.Event()
+
+        async def run(self, context: WorkflowContext) -> None:
+            self.calls.put_nowait(context)
+            await self.release.wait()
+            context.cancellation.checkpoint()
+
+    async def exercise(postgres_settings: AppSettings) -> None:
+        model_port = AdaptiveWaterbodyModelPort()
+        _scope, _evidence_store, loop, task = await _fixture(
+            model_port,
+            water_mode="full",
+        )
+        outcome = await _runner(loop, model_port).run(
+            task,
+            deadline=FixedClock().now() + timedelta(minutes=5),
+        )
+        assert outcome.result is not None
+
+        settings = postgres_settings.model_copy(update={
+            "transcript_inline_max_bytes": 256,
+            "transcript_preview_bytes": 40,
+        })
+        workflow = Workflow()
+        first_app = create_app(
+            settings,
+            workflow=workflow,
+            shutdown_grace_period=0,
+        )
+        async with first_app.router.lifespan_context(first_app):
+            coordinator = first_app.state.run_coordinator
+            created = await coordinator.create_run(create_request_bytes("M9 result"))
+            await workflow.calls.get()
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="1234567",
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            result = outcome.result.model_copy(update={
+                "run_id": created.run_id,
+                "session_id": session.session_id,
+                "target_comid": "1234567",
+            })
+            completed = await coordinator.complete_waterbody_agent_session(
+                created.run_id,
+                session.session_id,
+                result,
+            )
+            workflow.release.set()
+            await coordinator._runs[created.run_id].workflow_quiesced.wait()
+            await _wait_persistence(coordinator, created.run_id)
+
+        second_app = create_app(settings, shutdown_grace_period=0)
+        async with second_app.router.lifespan_context(second_app):
+            reader = second_app.state.transcript_reader
+            session_detail = await reader.get_session(
+                created.run_id,
+                session.session_id,
+                ReadView.HISTORY,
+            )
+            assert session_detail.session.result_ref == completed.result_ref
+            assert session_detail.session.result_summary == completed.result_summary
+
+            run_detail = await reader.get_run(created.run_id, ReadView.HISTORY)
+            restored = next(
+                item
+                for item in run_detail.sessions
+                if item.session_id == session.session_id
+            )
+            assert restored.result_ref == completed.result_ref
+            assert restored.result_summary == completed.result_summary
+
+            stored_history = await second_app.state.transcript_store.list_runs(
+                200,
+                None,
+                None,
+            )
+            listed = next(
+                item
+                for item in stored_history.runs
+                if item.run.run_id == created.run_id
+            )
+            listed_session = next(
+                item
+                for item in listed.sessions
+                if item.session_id == session.session_id
+            )
+            assert listed_session.result_ref == completed.result_ref
+            assert listed_session.result_summary == completed.result_summary
+
+            transcript = await reader.get_session_transcript(
+                created.run_id,
+                session.session_id,
+                ReadView.HISTORY,
+            )
+            assert tuple(item.content_type for item in transcript.items[-2:]) == (
+                "inference_result",
+                "lifecycle_event",
+            )
+            result_item = transcript.items[-2]
+            assert result_item.content.kind == "reference"
+            full_result = await reader.get_content(
+                created.run_id,
+                result_item.item_id,
+                ReadView.HISTORY,
+            )
+            assert result.result_id in full_result.text
 
     with temporary_migrated_schema() as settings:
         asyncio.run(exercise(settings))

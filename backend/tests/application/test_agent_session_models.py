@@ -13,9 +13,12 @@ from app.application.analysis_runs.models import (
     RunCompletedPayload,
     RunStatus,
     SessionCompletedEvent,
+    SessionCompletedPayload,
     SessionCreatedEvent,
     SessionLifecycleEvent,
     SessionSummary,
+    SessionResultReference,
+    SessionResultSummary,
     TranscriptItemIdentity,
 )
 
@@ -90,6 +93,8 @@ def test_query_parser_and_waterbody_summaries_round_trip_immutably() -> None:
         **session_data(),
         "created_at": UTC_TIME,
         "updated_at": UTC_TIME,
+        "result_ref": None,
+        "result_summary": None,
     }
     assert SessionSummary.model_validate_json(waterbody.model_dump_json()) == waterbody
     with pytest.raises(ValidationError, match="frozen"):
@@ -139,6 +144,52 @@ def test_session_lifecycle_v2_requires_run_and_session_scope() -> None:
                     "configuration": {},
                 },
             }
+        )
+
+
+def test_completed_waterbody_summary_requires_one_matching_result_projection() -> None:
+    reference = SessionResultReference(run_id=RUN_ID, item_id=ITEM_ID)
+    summary = SessionResultSummary(
+        result_id="result:001234",
+        target_comid="001234",
+        risk_level="low",
+        availability="partial",
+        overall_confidence=0.7,
+    )
+    completed = SessionSummary.model_validate(session_data(
+        status="completed",
+        result_ref=reference,
+        result_summary=summary,
+    ))
+
+    assert completed.result_ref == reference
+    assert completed.result_summary == summary
+    with pytest.raises(ValidationError, match="require a result"):
+        SessionSummary.model_validate(session_data(status="completed"))
+    with pytest.raises(ValidationError, match="must not have a result"):
+        SessionSummary.model_validate(session_data(
+            agent_role="query_parser",
+            target_comid=None,
+            status="completed",
+            result_ref=reference,
+            result_summary=summary,
+        ))
+    with pytest.raises(ValidationError, match="appear together"):
+        SessionCompletedPayload(
+            completed_at=LOCAL_TIME,
+            result_ref=reference,
+        )
+    with pytest.raises(ValidationError, match="remain in the run"):
+        SessionCompletedEvent(
+            run_id=RUN_ID,
+            session_id=SESSION_ID,
+            sequence=2,
+            occurred_at=LOCAL_TIME,
+            payload={
+                "completed_at": LOCAL_TIME,
+                "result_ref": reference.model_copy(update={"run_id": SESSION_ID}),
+                "result_summary": summary,
+            },
         )
 
 

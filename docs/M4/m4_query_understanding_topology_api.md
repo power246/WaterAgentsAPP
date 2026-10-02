@@ -525,7 +525,9 @@ event: stream_end
       "target_comid": null,
       "status": "completed",
       "created_at": "2026-09-25T08:00:01Z",
-      "updated_at": "2026-09-25T08:00:03Z"
+      "updated_at": "2026-09-25T08:00:03Z",
+      "result_ref": null,
+      "result_summary": null
     }
   ],
   "waterbodies": [

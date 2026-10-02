@@ -52,6 +52,8 @@ from app.application.analysis_runs.models import (
     SessionFailedEvent,
     SessionFailedPayload,
     SessionLifecycleEvent,
+    SessionResultReference,
+    SessionResultSummary,
     SessionStateMutation,
     SessionSummary,
     TranscriptItemIdentity,
@@ -108,6 +110,7 @@ from app.application.transcripts.stream_models import (
     TranscriptItemProcessRecord,
     snapshot_from_state,
 )
+from app.domain import InferenceResult
 from app.application.transcripts.streaming import StreamingCredentialFilter
 from app.domain.common import NonEmptyString, normalize_utc_datetime
 from app.domain.model_catalog import ModelRole
@@ -1413,6 +1416,89 @@ class RunCoordinator:
             AgentSessionStatus.COMPLETED,
         )
 
+    async def complete_waterbody_agent_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        result: InferenceResult,
+    ) -> SessionSummary:
+        runtime = await self._lookup(run_id)
+        key = _UUID.validate_python(session_id)
+        validated_result = InferenceResult.model_validate(result)
+        async with runtime.condition:
+            session_runtime = self._lookup_agent_session_locked(runtime, key)
+            current = session_runtime.summary
+            if (
+                current.agent_role is not AgentRole.WATERBODY
+                or validated_result.run_id != runtime.snapshot.run_id
+                or validated_result.session_id != key
+                or validated_result.target_comid != current.target_comid
+            ):
+                raise ValueError("inference result does not match the waterbody session")
+            if current.status is AgentSessionStatus.CANCELLED:
+                return current
+            if current.status not in _SESSION_TRANSITIONS:
+                raise InvalidAgentSessionTransitionError(
+                    current,
+                    AgentSessionStatus.COMPLETED,
+                )
+            if (
+                runtime.cancel_requested.is_set()
+                or session_runtime.stop_requested.is_set()
+            ):
+                previous, summary, event = self._transition_agent_session_locked(
+                    runtime,
+                    session_runtime,
+                    AgentSessionStatus.CANCELLED,
+                    None,
+                    None,
+                )
+                runtime.condition.notify_all()
+            else:
+                timestamp = self._clock.now()
+                result_identity = self._reserve_transcript_item_locked(
+                    runtime,
+                    session_id=key,
+                    request_id=request_id_context.get(),
+                    operation_id=None,
+                    created_at=timestamp,
+                )
+                result_item = runtime.transcript_buffer.append(
+                    result_identity,
+                    "inference_result",
+                    1,
+                    validated_result,
+                )
+                self._append_transcript_process_locked(
+                    runtime,
+                    result_item,
+                    timestamp,
+                )
+                result_ref = SessionResultReference(
+                    run_id=runtime.snapshot.run_id,
+                    item_id=result_identity.item_id,
+                )
+                result_summary = SessionResultSummary(
+                    result_id=validated_result.result_id,
+                    target_comid=validated_result.target_comid,
+                    risk_level=validated_result.overall_assessment.risk_level,
+                    availability=validated_result.overall_assessment.availability,
+                    overall_confidence=validated_result.overall_confidence,
+                )
+                previous, summary, event = self._transition_agent_session_locked(
+                    runtime,
+                    session_runtime,
+                    AgentSessionStatus.COMPLETED,
+                    None,
+                    timestamp,
+                    result_ref=result_ref,
+                    result_summary=result_summary,
+                    additional_item_ids=(result_identity.item_id,),
+                )
+                runtime.condition.notify_all()
+        self._log_agent_session_transition(runtime, previous, summary, event)
+        return summary
+
     async def fail_agent_session(
         self,
         run_id: UUID | str,
@@ -1596,12 +1682,35 @@ class RunCoordinator:
         tags: tuple[str, ...] = (),
         rag_eligible: bool = False,
         private_values: tuple[str, ...] = (),
+        initial_body: object | None = None,
     ) -> TranscriptItemIdentity:
         if not self._registry.is_message_type(
             content_type,
             content_schema_version,
         ):
             raise ValueError("streamed transcript content must be a registered message")
+        base_safe_body = None
+        derived_metadata = TranscriptMetadata()
+        if initial_body is not None:
+            encoded = self._registry.encode(
+                content_type,
+                content_schema_version,
+                initial_body,
+                private_values=private_values,
+            )
+            projection = self._registry.message_projection(
+                content_type,
+                content_schema_version,
+                encoded.safe_body,
+            )
+            if (
+                projection.generation_status is not GenerationStatus.GENERATING
+                or projection.text
+                or projection.end_reason is not None
+            ):
+                raise ValueError("initial streamed message body must be empty and generating")
+            base_safe_body = encoded.safe_body
+            derived_metadata = encoded.metadata
         runtime = await self._lookup(run_id)
         session_key = _UUID.validate_python(session_id)
         request_key = _UUID.validate_python(request_id) if request_id is not None else None
@@ -1636,7 +1745,12 @@ class RunCoordinator:
                 operation_id=operation_key,
                 created_at=timestamp,
             )
-            metadata = TranscriptMetadata(tags=tags, rag_eligible=rag_eligible)
+            metadata = TranscriptMetadata(
+                tags=tuple(dict.fromkeys((*derived_metadata.tags, *tags))),
+                rag_eligible=(derived_metadata.rag_eligible or rag_eligible),
+                confidence=derived_metadata.confidence,
+                provenance=derived_metadata.provenance,
+            )
             metadata = metadata.model_copy(
                 update={
                     "tags": redact_tags(metadata.tags, private_values),
@@ -1669,6 +1783,7 @@ class RunCoordinator:
                 metadata=metadata,
                 filter=StreamingCredentialFilter(private_values),
                 private_values=private_values,
+                base_safe_body=base_safe_body,
             )
             session_runtime.process_events.append(MessageStartedProcessRecord(
                 sequence=len(session_runtime.process_events) + 1,
@@ -1773,6 +1888,7 @@ class RunCoordinator:
                     message.safe_text,
                     finalized_status,
                     MessageEndReason.ERROR,
+                    message.base_safe_body,
                 )
             finalized = runtime.transcript_buffer.append(
                 identity,
@@ -1852,6 +1968,7 @@ class RunCoordinator:
                 message.safe_text,
                 GenerationStatus.INCOMPLETE,
                 end_reason,
+                message.base_safe_body,
             )
             finalized = runtime.transcript_buffer.append(
                 identity,
@@ -2445,6 +2562,13 @@ class RunCoordinator:
         async with runtime.condition:
             session_runtime = self._lookup_agent_session_locked(runtime, key)
             if (
+                target is AgentSessionStatus.COMPLETED
+                and session_runtime.summary.agent_role is AgentRole.WATERBODY
+            ):
+                raise ValueError(
+                    "waterbody sessions must complete with an inference result"
+                )
+            if (
                 session_runtime.summary.status is AgentSessionStatus.CANCELLED
                 and target is AgentSessionStatus.CANCELLED
             ):
@@ -2475,6 +2599,10 @@ class RunCoordinator:
         target: AgentSessionStatus,
         error: PublicError | None,
         timestamp: datetime | None,
+        *,
+        result_ref: SessionResultReference | None = None,
+        result_summary: SessionResultSummary | None = None,
+        additional_item_ids: tuple[UUID, ...] = (),
     ) -> tuple[
         AgentSessionStatus,
         SessionSummary,
@@ -2521,6 +2649,8 @@ class RunCoordinator:
             status=resolved,
             created_at=current.created_at,
             updated_at=timestamp,
+            result_ref=result_ref,
+            result_summary=result_summary,
         )
         event = self._agent_session_terminal_event(
             runtime.snapshot.run_id,
@@ -2569,7 +2699,10 @@ class RunCoordinator:
         runtime.state_mutations.append(mutation)
         self._transcript_writer.enqueue_locked(
             runtime,
-            item_ids=(item.item_id,) if item is not None else (),
+            item_ids=(
+                *additional_item_ids,
+                *((item.item_id,) if item is not None else ()),
+            ),
             mutation_ids=(mutation.mutation_id,),
         )
         return current.status, summary, event
@@ -2632,7 +2765,11 @@ class RunCoordinator:
                 session_id=summary.session_id,
                 sequence=sequence,
                 occurred_at=summary.updated_at,
-                payload=SessionCompletedPayload(completed_at=summary.updated_at),
+                payload=SessionCompletedPayload(
+                    completed_at=summary.updated_at,
+                    result_ref=summary.result_ref,
+                    result_summary=summary.result_summary,
+                ),
             )
         if summary.status is AgentSessionStatus.FAILED:
             if error is None:

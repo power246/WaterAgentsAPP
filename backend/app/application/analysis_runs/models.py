@@ -10,8 +10,10 @@ from pydantic import (
 )
 
 from app.domain.common import NonEmptyString, UtcDatetime
+from app.domain.common import DomainFloat
 from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
+from app.domain.inference import AssessmentAvailability, RiskLevel
 from app.domain.memory import MemoryMode
 from app.domain.model_catalog import ModelSelection
 from app.domain.time.time_resolution_preference import TimeResolutionPreference
@@ -97,6 +99,19 @@ class AnalysisRunSnapshot(DomainModel):
         return self
 
 
+class SessionResultReference(DomainModel):
+    run_id: UUID
+    item_id: UUID
+
+
+class SessionResultSummary(DomainModel):
+    result_id: NonEmptyString
+    target_comid: NonEmptyString
+    risk_level: RiskLevel
+    availability: AssessmentAvailability
+    overall_confidence: Annotated[DomainFloat, Field(ge=0, le=1)]
+
+
 class SessionSummary(DomainModel):
     session_id: UUID
     agent_role: AgentRole
@@ -104,6 +119,8 @@ class SessionSummary(DomainModel):
     status: AgentSessionStatus
     created_at: UtcDatetime
     updated_at: UtcDatetime
+    result_ref: SessionResultReference | None = None
+    result_summary: SessionResultSummary | None = None
 
     @model_validator(mode="after")
     def validate_role_and_timestamps(self) -> "SessionSummary":
@@ -113,6 +130,17 @@ class SessionSummary(DomainModel):
             raise ValueError("waterbody sessions require target_comid")
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not precede created_at")
+        result_pair = (self.result_ref is not None, self.result_summary is not None)
+        if result_pair[0] != result_pair[1]:
+            raise ValueError("result_ref and result_summary must appear together")
+        if self.agent_role is AgentRole.QUERY_PARSER and any(result_pair):
+            raise ValueError("query_parser sessions must not have a result")
+        if self.agent_role is AgentRole.WATERBODY:
+            completed = self.status is AgentSessionStatus.COMPLETED
+            if completed != all(result_pair):
+                raise ValueError("completed waterbody sessions require a result")
+            if completed and self.result_summary.target_comid != self.target_comid:
+                raise ValueError("waterbody result summary must match the session")
         return self
 
 
@@ -221,6 +249,14 @@ class SessionCreatedPayload(DomainModel):
 class SessionCompletedPayload(DomainModel):
     status: Literal[AgentSessionStatus.COMPLETED] = AgentSessionStatus.COMPLETED
     completed_at: UtcDatetime
+    result_ref: SessionResultReference | None = None
+    result_summary: SessionResultSummary | None = None
+
+    @model_validator(mode="after")
+    def validate_result_pair(self) -> "SessionCompletedPayload":
+        if (self.result_ref is None) != (self.result_summary is None):
+            raise ValueError("result_ref and result_summary must appear together")
+        return self
 
 
 class SessionFailedPayload(DomainModel):
@@ -290,6 +326,15 @@ class SessionCompletedEvent(_SessionLifecycleEventEnvelope):
         LifecycleEventType.SESSION_COMPLETED
     )
     payload: SessionCompletedPayload
+
+    @model_validator(mode="after")
+    def validate_result_run(self) -> "SessionCompletedEvent":
+        if (
+            self.payload.result_ref is not None
+            and self.payload.result_ref.run_id != self.run_id
+        ):
+            raise ValueError("session result reference must remain in the run")
+        return self
 
 
 class SessionFailedEvent(_SessionLifecycleEventEnvelope):

@@ -515,7 +515,7 @@ def test_single_session_cancel_contains_stream_and_generic_late_results() -> Non
                     generation_status=GenerationStatus.COMPLETED,
                 ),
             )
-            await coordinator.complete_agent_session(
+            await coordinator.cancel_agent_session(
                 created.run_id,
                 other_session.session_id,
             )

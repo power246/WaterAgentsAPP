@@ -83,6 +83,12 @@ def test_production_registry_has_only_real_writable_types() -> None:
         ("evidence_fragment", 1),
         ("evidence_tool_result", 1),
         ("evidence_bundle", 1),
+        ("waterbody_agent_input", 1),
+        ("waterbody_model_request", 1),
+        ("waterbody_agent_message", 1),
+        ("waterbody_model_response", 1),
+        ("reasoning_decision", 1),
+        ("inference_result", 1),
     )
     assert ("fixture_message", 1) not in registry.registered_keys
     with pytest.raises(UnsupportedTranscriptContentError):

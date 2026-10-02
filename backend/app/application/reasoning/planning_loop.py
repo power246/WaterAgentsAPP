@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated, Callable, Literal
+from typing import TYPE_CHECKING, Annotated, Callable, Literal
 from uuid import UUID, uuid4
 
 from pydantic import Field, TypeAdapter, field_validator
@@ -66,6 +66,9 @@ from app.domain import (
     SourceRecordReference,
 )
 from app.ports.waterbody_model import WaterbodyModelPort
+
+if TYPE_CHECKING:
+    from app.application.reasoning.transcript_store import ReasoningTranscriptStore
 
 
 _MAX_CONTEXT_FACTS = 120
@@ -185,6 +188,7 @@ class EvidencePlanningLoop:
         limits: PlanningLoopLimits = PlanningLoopLimits(),
         clock: object | None = None,
         operation_id_factory: Callable[[], UUID] | None = None,
+        transcript_store: "ReasoningTranscriptStore | None" = None,
     ) -> None:
         self._acquisition = acquisition
         self._capabilities = capability_registry
@@ -193,6 +197,7 @@ class EvidencePlanningLoop:
         self._limits = limits
         self._clock = clock or _UtcClock()
         self._operation_id_factory = operation_id_factory or uuid4
+        self._transcript_store = transcript_store
 
     async def run(
         self,
@@ -302,17 +307,18 @@ class EvidencePlanningLoop:
                 # Visible prose is useful only as an explanation accompanying an action.
                 _ = visible
                 raise PlanningLoopError("invalid_planning_response")
+            decision_bundle_ref = handoff.bundle_ref
 
             if tool_events:
                 for event in tool_events:
                     if self._clock.now() >= deadline:
                         convergence = PlanningConvergenceReason.DEADLINE_REACHED
                         break
-                    request = await _tool_request(scope, handoff, event)
+                    tool_request = await _tool_request(scope, handoff, event)
                     previous_results = len(handoff.tool_result_refs)
                     handoff = await self._acquisition.execute_optional(
                         scope,
-                        (request,),
+                        (tool_request,),
                         handoff,
                         max_calls=self._limits.max_tool_calls_per_turn,
                     )
@@ -323,10 +329,10 @@ class EvidencePlanningLoop:
                     if scope.cancel_token.is_requested():
                         raise PlanningLoopError("planning_cancelled")
 
-            if convergence is PlanningConvergenceReason.DEADLINE_REACHED:
-                continue
-
-            if isinstance(decision, _EvidenceRulesDecision):
+            deadline_reached = (
+                convergence is PlanningConvergenceReason.DEADLINE_REACHED
+            )
+            if not deadline_reached and isinstance(decision, _EvidenceRulesDecision):
                 try:
                     rules = tuple(
                         _materialize_rule(scope.session_id, proposal)
@@ -344,8 +350,52 @@ class EvidencePlanningLoop:
                     len(handoff.rule_plan.appended_rules) - previous_count
                 )
                 bundle_refs.append(handoff.bundle_ref)
-            elif isinstance(decision, _EvidenceReadyDecision):
+            elif not deadline_reached and isinstance(decision, _EvidenceReadyDecision):
                 convergence = PlanningConvergenceReason.EVIDENCE_READY
+
+            if self._transcript_store is not None:
+                from app.application.reasoning.transcript_models import (
+                    ReasoningDecisionType,
+                )
+
+                if tool_events:
+                    await self._transcript_store.write_planning_decision(
+                        request,
+                        decision_type=ReasoningDecisionType.TOOL_CALLS_REQUESTED,
+                        bundle_ref=decision_bundle_ref,
+                        rationale=(
+                            visible
+                            or "The model requested authorized evidence tools."
+                        ),
+                        tool_call_ids=tuple(
+                            event.provider_call_id for event in tool_events
+                        ),
+                    )
+                if not deadline_reached and isinstance(
+                    decision,
+                    _EvidenceRulesDecision,
+                ):
+                    await self._transcript_store.write_planning_decision(
+                        request,
+                        decision_type=ReasoningDecisionType.EVIDENCE_RULES_PROPOSED,
+                        bundle_ref=decision_bundle_ref,
+                        rationale="The model proposed bounded evidence rules.",
+                    )
+                elif not deadline_reached and isinstance(
+                    decision,
+                    _EvidenceReadyDecision,
+                ):
+                    await self._transcript_store.write_planning_decision(
+                        request,
+                        decision_type=ReasoningDecisionType.EVIDENCE_READY,
+                        bundle_ref=decision_bundle_ref,
+                        rationale=(
+                            visible
+                            or "The model reported that evidence planning is complete."
+                        ),
+                    )
+            if deadline_reached:
+                continue
 
         if convergence is None:
             convergence = PlanningConvergenceReason.MAX_TURNS

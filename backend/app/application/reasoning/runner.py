@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 from uuid import UUID, uuid4
 
 from app.application.analysis_runs.models import PublicError
@@ -53,6 +53,9 @@ from app.domain import (
 from app.ports.errors import WaterbodyModelPortError
 from app.ports.waterbody_model import WaterbodyModelPort
 
+if TYPE_CHECKING:
+    from app.application.reasoning.transcript_store import ReasoningTranscriptStore
+
 
 class WaterbodyAgentRunStatus(str, Enum):
     COMPLETED = "completed"
@@ -97,6 +100,7 @@ class RunSingleWaterbodyAgent:
         result_id_factory: Callable[[], str],
         error_id_factory: Callable[[], UUID] = uuid4,
         clock: object | None = None,
+        transcript_store: "ReasoningTranscriptStore | None" = None,
     ) -> None:
         self._planning_loop = planning_loop
         self._capabilities = capability_registry
@@ -107,8 +111,29 @@ class RunSingleWaterbodyAgent:
         self._result_id_factory = result_id_factory
         self._error_id_factory = error_id_factory
         self._clock = clock or _UtcClock()
+        self._transcript_store = transcript_store
 
     async def run(
+        self,
+        task: ValidatedWaterbodyAgentTask,
+        *,
+        deadline: datetime,
+    ) -> WaterbodyAgentRunOutcome:
+        if self._transcript_store is not None:
+            await self._transcript_store.write_agent_input(task)
+        outcome = await self._run_reasoning(task, deadline=deadline)
+        if self._transcript_store is not None:
+            if outcome.status is WaterbodyAgentRunStatus.COMPLETED:
+                assert outcome.result is not None
+                await self._transcript_store.complete_with_result(outcome.result)
+            elif outcome.status is WaterbodyAgentRunStatus.FAILED:
+                assert outcome.error is not None
+                await self._transcript_store.fail(outcome.error)
+            else:
+                await self._transcript_store.cancel()
+        return outcome
+
+    async def _run_reasoning(
         self,
         task: ValidatedWaterbodyAgentTask,
         *,
@@ -175,6 +200,7 @@ class RunSingleWaterbodyAgent:
                     model_port=self._model_port,
                     prompt_builder=self._prompt_builder,
                     validator=validator,
+                    decision_store=self._transcript_store,
                 )
                 validated_batches = []
                 stage = "reasoning_batch"

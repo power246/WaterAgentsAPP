@@ -388,7 +388,7 @@ async def test_evidence_content_uses_existing_writer_reader_history_and_session_
         assert "tool_call_id" not in run_payload
         assert "source_uri" not in run_payload
 
-        await coordinator.complete_agent_session(created.run_id, session.session_id)
+        await coordinator.cancel_agent_session(created.run_id, session.session_id)
         await wait_until(
             lambda: coordinator._transcript_writer.info_locked(runtime).state
             is PersistenceState.UP_TO_DATE

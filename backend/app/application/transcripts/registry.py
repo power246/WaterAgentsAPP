@@ -49,6 +49,7 @@ from app.domain.evidence.evidence_source_records import EvidenceSourceRecords
 from app.domain.evidence.evidence_tool_call import EvidenceToolCall
 from app.domain.evidence.evidence_tool_result import EvidenceToolResult
 from app.domain.hydrology import HydrologyGraph
+from app.domain.inference import InferenceResult
 
 
 class UnsupportedTranscriptContentError(ValueError):
@@ -59,7 +60,7 @@ ReferenceExtractor = Callable[[object], tuple[UUID, ...]]
 MetadataExtractor = Callable[[object], TranscriptMetadata]
 VisibilityExtractor = Callable[[object], ContentVisibility]
 MessageAdapter = Callable[[object], MessageProjection]
-MessageFinalizer = Callable[[str, GenerationStatus, MessageEndReason | None], object]
+MessageFinalizer = Callable[..., object]
 ErrorExtractor = Callable[[object], tuple[UUID, ...]]
 PublicProjection = Callable[[object], JsonValue]
 
@@ -323,16 +324,29 @@ class TranscriptRegistry:
         text: str,
         generation_status: GenerationStatus,
         end_reason: MessageEndReason | None,
+        base_safe_body: str | None = None,
     ) -> object:
         registration = self._registrations.get((content_type, content_schema_version))
         if registration is None or registration.message_finalizer is None:
             raise UnsupportedTranscriptContentError(
                 f"transcript type is not a message: {content_type} v{content_schema_version}"
             )
+        base_body = (
+            registration.adapter.validate_json(base_safe_body)
+            if base_safe_body is not None
+            else None
+        )
+        if base_body is None:
+            return registration.message_finalizer(
+                text,
+                generation_status,
+                end_reason,
+            )
         return registration.message_finalizer(
             text,
             generation_status,
             end_reason,
+            base_body,
         )
 
     def is_message_type(
@@ -474,6 +488,123 @@ def _evidence_fragment_metadata(body: object) -> TranscriptMetadata:
     return TranscriptMetadata(rag_eligible=body.rag_eligible)
 
 
+def _unique_uuid_references(values: tuple[UUID, ...]) -> tuple[UUID, ...]:
+    return tuple(dict.fromkeys(values))
+
+
+def _waterbody_input_references(body: object) -> tuple[UUID, ...]:
+    from app.application.reasoning.transcript_models import WaterbodyAgentInputV1
+
+    if not isinstance(body, WaterbodyAgentInputV1):
+        raise TypeError("waterbody input reference extractor received another type")
+    return _unique_uuid_references(tuple(
+        reference.item_id
+        for reference in (
+            body.analysis_context_ref,
+            body.topology_ref,
+            *(
+                (body.initial_evidence_bundle_ref,)
+                if body.initial_evidence_bundle_ref is not None
+                else ()
+            ),
+        )
+    ))
+
+
+def _waterbody_request_references(body: object) -> tuple[UUID, ...]:
+    from app.application.reasoning.transcript_models import WaterbodyModelRequestV1
+
+    if not isinstance(body, WaterbodyModelRequestV1):
+        raise TypeError("waterbody request reference extractor received another type")
+    return (body.evidence_bundle_ref.item_id,)
+
+
+def _waterbody_response_references(body: object) -> tuple[UUID, ...]:
+    from app.application.reasoning.transcript_models import WaterbodyModelResponseV1
+
+    if not isinstance(body, WaterbodyModelResponseV1):
+        raise TypeError("waterbody response reference extractor received another type")
+    return _unique_uuid_references(tuple(
+        reference.item_id for reference in body.message_refs
+    ))
+
+
+def _reasoning_decision_references(body: object) -> tuple[UUID, ...]:
+    from app.application.reasoning.transcript_models import ReasoningDecisionV1
+
+    if not isinstance(body, ReasoningDecisionV1):
+        raise TypeError("reasoning decision reference extractor received another type")
+    return _unique_uuid_references(tuple(
+        reference.item_id
+        for reference in (body.model_response_ref, body.bundle_ref)
+        if reference is not None
+    ))
+
+
+def _inference_result_references(body: object) -> tuple[UUID, ...]:
+    if not isinstance(body, InferenceResult):
+        raise TypeError("inference result reference extractor received another type")
+    return extract_analysis_detail_references(body.analysis_detail)
+
+
+def _static_metadata(*tags: str) -> MetadataExtractor:
+    def metadata(body: object) -> TranscriptMetadata:
+        del body
+        return TranscriptMetadata(tags=tags)
+
+    return metadata
+
+
+def _inference_result_metadata(body: object) -> TranscriptMetadata:
+    if not isinstance(body, InferenceResult):
+        raise TypeError("inference result metadata extractor received another type")
+    return TranscriptMetadata(
+        tags=("waterbody", "result"),
+        rag_eligible=True,
+        confidence=body.overall_confidence,
+        provenance=tuple(
+            reference.evidence_id for reference in body.evidence_chain.references
+        ),
+    )
+
+
+def _waterbody_response_projection(body: object) -> JsonValue:
+    from app.application.reasoning.transcript_models import WaterbodyModelResponseV1
+
+    if not isinstance(body, WaterbodyModelResponseV1):
+        raise TypeError("waterbody response projection received another type")
+    return {
+        "schema_version": body.schema_version,
+        "operation_id": str(body.operation_id),
+        "phase": body.phase.value,
+        "model": body.model.model_dump(mode="json"),
+        "finish_reason": body.finish_reason.value,
+        "message_refs": [
+            reference.model_dump(mode="json") for reference in body.message_refs
+        ],
+        "tool_calls": [
+            {
+                "provider_call_id": call.provider_call_id,
+                "name": call.name,
+            }
+            for call in body.tool_calls
+        ],
+        "structured_outputs": [
+            {"output_id": output.output_id, "present": True}
+            for output in body.structured_outputs
+        ],
+        "refusal": (
+            {"message_id": body.refusal.message_id, "text": body.refusal.text}
+            if body.refusal is not None
+            else None
+        ),
+        "usage": (
+            body.usage.model_dump(mode="json") if body.usage is not None else None
+        ),
+        "provider_response_id": body.provider_response_id,
+    }
+
+
 _PUBLIC_SOURCE_HOST_SUFFIXES = (
     ".epa.gov",
     ".usgs.gov",
@@ -542,6 +673,16 @@ def _evidence_source_records_projection(body: object) -> JsonValue:
 
 
 def create_production_registry() -> TranscriptRegistry:
+    from app.application.reasoning.transcript_models import (
+        ReasoningDecisionV1,
+        WaterbodyAgentInputV1,
+        WaterbodyAgentMessageV1,
+        WaterbodyModelRequestV1,
+        WaterbodyModelResponseV1,
+        finalize_waterbody_agent_message,
+        waterbody_agent_message_projection,
+    )
+
     registry = TranscriptRegistry()
     registry.register(ContentRegistration(
         content_type="analysis_request",
@@ -621,6 +762,50 @@ def create_production_registry() -> TranscriptRegistry:
         content_schema_version=1,
         adapter=TypeAdapter(EvidenceBundle),
         references=_evidence_references,
+    ))
+    registry.register(ContentRegistration(
+        content_type="waterbody_agent_input",
+        content_schema_version=1,
+        adapter=TypeAdapter(WaterbodyAgentInputV1),
+        references=_waterbody_input_references,
+        metadata=_static_metadata("waterbody", "input"),
+    ))
+    registry.register(ContentRegistration(
+        content_type="waterbody_model_request",
+        content_schema_version=1,
+        adapter=TypeAdapter(WaterbodyModelRequestV1),
+        references=_waterbody_request_references,
+        metadata=_static_metadata("waterbody", "model_request"),
+    ))
+    registry.register(ContentRegistration(
+        content_type="waterbody_agent_message",
+        content_schema_version=1,
+        adapter=TypeAdapter(WaterbodyAgentMessageV1),
+        metadata=_static_metadata("waterbody", "agent_message"),
+        message_adapter=waterbody_agent_message_projection,
+        message_finalizer=finalize_waterbody_agent_message,
+    ))
+    registry.register(ContentRegistration(
+        content_type="waterbody_model_response",
+        content_schema_version=1,
+        adapter=TypeAdapter(WaterbodyModelResponseV1),
+        references=_waterbody_response_references,
+        metadata=_static_metadata("waterbody", "model_response"),
+        public_projection=_waterbody_response_projection,
+    ))
+    registry.register(ContentRegistration(
+        content_type="reasoning_decision",
+        content_schema_version=1,
+        adapter=TypeAdapter(ReasoningDecisionV1),
+        references=_reasoning_decision_references,
+        metadata=_static_metadata("waterbody", "reasoning_decision"),
+    ))
+    registry.register(ContentRegistration(
+        content_type="inference_result",
+        content_schema_version=1,
+        adapter=TypeAdapter(InferenceResult),
+        references=_inference_result_references,
+        metadata=_inference_result_metadata,
     ))
     registry.register(ContentRegistration(
         content_type="lifecycle_event",

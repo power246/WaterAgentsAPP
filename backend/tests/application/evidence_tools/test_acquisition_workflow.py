@@ -7,6 +7,8 @@ import pytest
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
+    SessionResultReference,
+    SessionResultSummary,
     SessionSummary,
 )
 from app.application.evidence_tools import (
@@ -183,16 +185,38 @@ def _upstream_port(
     duplicate_closure=False,
 ):
     upstream_session_id = "00000000-0000-0000-0000-000000000200"
+    upstream_result_item_id = "00000000-0000-0000-0000-000000000300"
     upstream_comid = scope.direct_upstream_comids[0]
     reference_session_id = reference_session_id or upstream_session_id
+    target_comid = session_comid or upstream_comid
+    completed = session_status is AgentSessionStatus.COMPLETED
     store.seed_session(
         SessionSummary(
             session_id=UUID(upstream_session_id),
             agent_role=AgentRole.WATERBODY,
-            target_comid=session_comid or upstream_comid,
+            target_comid=target_comid,
             status=session_status,
             created_at=scope.query_envelope.start,
             updated_at=scope.query_envelope.end,
+            result_ref=(
+                SessionResultReference(
+                    run_id=UUID("00000000-0000-0000-0000-000000000100"),
+                    item_id=UUID(upstream_result_item_id),
+                )
+                if completed
+                else None
+            ),
+            result_summary=(
+                SessionResultSummary(
+                    result_id=f"result:{upstream_comid}",
+                    target_comid=target_comid,
+                    risk_level="indeterminate",
+                    availability="indeterminate",
+                    overall_confidence=0.0,
+                )
+                if completed
+                else None
+            ),
         )
     )
 
@@ -202,7 +226,7 @@ def _upstream_port(
             window = next(item for item in scope.time_windows if item.window_id == window_id)
             for parameter in plan.parameter_keys:
                 suffix = f"{parameter.code}-{window_id}"
-                result_ref = ItemReference(item_id=f"upstream-result-{suffix}")
+                result_ref = ItemReference(item_id=upstream_result_item_id)
                 closure_ref = ItemReference(item_id=f"upstream-bundle-{suffix}")
                 store.seed_scope(
                     result_ref.item_id,

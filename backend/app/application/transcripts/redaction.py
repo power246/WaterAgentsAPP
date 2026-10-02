@@ -7,6 +7,7 @@ SENSITIVE_NAME_PATTERN = (
     r"passwd|credential|private[ _-]?key)[\w-]*|request[_-]?body|headers)"
 )
 SENSITIVE_KEY = re.compile(rf"^{SENSITIVE_NAME_PATTERN}$", re.IGNORECASE)
+_SAFE_NUMERIC_METRIC_KEYS = frozenset({"input_tokens", "output_tokens"})
 _ASCII_LOWER = str.maketrans(
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
     "abcdefghijklmnopqrstuvwxyz",
@@ -678,7 +679,13 @@ def redact(value: object, private_values: tuple[str, ...] = ()) -> object:
         return {
             redact_text(key, private_values): (
                 REDACTED
-                if SENSITIVE_KEY.fullmatch(key)
+                if (
+                    SENSITIVE_KEY.fullmatch(key)
+                    and not (
+                        key.lower() in _SAFE_NUMERIC_METRIC_KEYS
+                        and (item is None or type(item) is int)
+                    )
+                )
                 else redact(item, private_values)
             )
             for key, item in value.items()

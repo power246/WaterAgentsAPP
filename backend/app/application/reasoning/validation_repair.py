@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from typing import Self, TypeVar
+from typing import Protocol, Self, TypeVar
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import model_validator
@@ -59,6 +59,13 @@ ValidatedDraftT = TypeVar(
     ValidatedReasoningBatch,
     ValidatedOverallSynthesis,
 )
+
+
+class ValidationDecisionStore(Protocol):
+    async def write_validated_exchange(
+        self,
+        audit: "ValidationExchangeAudit",
+    ) -> object: ...
 
 
 class ValidationExchangeAudit(DomainModel):
@@ -177,10 +184,12 @@ class ValidationExchange:
         model_port: WaterbodyModelPort,
         prompt_builder: PromptBuilder,
         validator: DraftValidator,
+        decision_store: ValidationDecisionStore | None = None,
     ) -> None:
         self._model_port = model_port
         self._prompt_builder = prompt_builder
         self._validator = validator
+        self._decision_store = decision_store
 
     async def run_batch(
         self,
@@ -279,6 +288,8 @@ class ValidationExchange:
                 accepted_operation_id=request.operation_id,
                 validated_digest=validated.validation_digest,
             )
+            if self._decision_store is not None:
+                await self._decision_store.write_validated_exchange(audit)
             return validated, audit
 
         repair_request = self._prompt_builder.build_schema_repair(
@@ -375,6 +386,8 @@ class ValidationExchange:
             accepted_operation_id=repair_request.operation_id,
             validated_digest=validated.validation_digest,
         )
+        if self._decision_store is not None:
+            await self._decision_store.write_validated_exchange(audit)
         return validated, audit
 
 

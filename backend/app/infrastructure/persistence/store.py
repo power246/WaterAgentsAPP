@@ -21,6 +21,7 @@ from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
     RunStatus,
+    SessionCompletedEvent,
     SessionStateMutation,
     SessionSummary,
 )
@@ -60,6 +61,52 @@ def _session_terminal_item_id(mutation: SessionStateMutation) -> UUID | None:
         mutation.transcript_item.item_id
         if mutation.transcript_item is not None
         else None
+    )
+
+
+def _session_summary_from_rows(
+    row,
+    items: dict[UUID, StoredTranscriptItem],
+    contents: dict[UUID, StoredTranscriptContent],
+) -> SessionSummary:
+    result_ref = None
+    result_summary = None
+    if (
+        row["agent_role"] == AgentRole.WATERBODY.value
+        and row["status"] == AgentSessionStatus.COMPLETED.value
+    ):
+        terminal_id = row["terminal_item_id"]
+        terminal = items.get(terminal_id)
+        if terminal is None:
+            raise ValueError("completed waterbody session has no terminal item")
+        body = (
+            terminal.inline_body
+            if terminal.inline_body is not None
+            else contents.get(terminal_id).body
+            if terminal_id in contents
+            else None
+        )
+        if body is None:
+            raise ValueError("completed waterbody terminal content is unavailable")
+        event = SessionCompletedEvent.model_validate_json(body)
+        if (
+            event.run_id != row["run_id"]
+            or event.session_id != row["session_id"]
+            or event.payload.result_ref is None
+            or event.payload.result_summary is None
+        ):
+            raise ValueError("completed waterbody terminal result is invalid")
+        result_ref = event.payload.result_ref
+        result_summary = event.payload.result_summary
+    return SessionSummary(
+        session_id=row["session_id"],
+        agent_role=AgentRole(row["agent_role"]),
+        target_comid=row["target_comid"],
+        status=AgentSessionStatus(row["status"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        result_ref=result_ref,
+        result_summary=result_summary,
     )
 
 
@@ -242,12 +289,32 @@ class PostgresTranscriptStore:
                 content_rows = ()
                 session_rows = ()
                 if created_ids:
+                    session_rows = tuple(
+                        (
+                            await connection.execute(
+                                select(analysis_sessions)
+                                .where(analysis_sessions.c.run_id.in_(run_ids))
+                                .order_by(
+                                    analysis_sessions.c.created_at,
+                                    analysis_sessions.c.session_id,
+                                )
+                            )
+                        ).mappings()
+                    )
+                    terminal_ids = tuple(
+                        row["terminal_item_id"]
+                        for row in session_rows
+                        if row["terminal_item_id"] is not None
+                    )
                     item_rows = tuple(
                         (
                             await connection.execute(
                                 select(transcript_items)
                                 .where(or_(
-                                    transcript_items.c.item_id.in_(created_ids),
+                                    transcript_items.c.item_id.in_((
+                                        *created_ids,
+                                        *terminal_ids,
+                                    )),
                                     and_(
                                         transcript_items.c.run_id.in_(run_ids),
                                         transcript_items.c.content_type
@@ -258,21 +325,6 @@ class PostgresTranscriptStore:
                             )
                         ).mappings()
                     )
-                    session_ids = tuple(
-                        row["session_id"]
-                        for row in item_rows
-                        if row["session_id"] is not None
-                    )
-                    if session_ids:
-                        session_rows = tuple(
-                            (
-                                await connection.execute(
-                                    select(analysis_sessions).where(
-                                        analysis_sessions.c.session_id.in_(session_ids)
-                                    )
-                                )
-                            ).mappings()
-                        )
                     external_ids = tuple(
                         row["item_id"]
                         for row in item_rows
@@ -299,14 +351,7 @@ class PostgresTranscriptStore:
             for row in content_rows
         }
         sessions = {
-            row["session_id"]: SessionSummary(
-                session_id=row["session_id"],
-                agent_role=AgentRole(row["agent_role"]),
-                target_comid=row["target_comid"],
-                status=AgentSessionStatus(row["status"]),
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-            )
+            row["session_id"]: _session_summary_from_rows(row, items, contents)
             for row in session_rows
         }
         return StoredRunHistoryPage(runs=tuple(
@@ -380,26 +425,22 @@ class PostgresTranscriptStore:
                     )
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise PortUnavailableError("transcript history is unavailable") from error
+        item_models = {
+            row["item_id"]: StoredTranscriptItem.model_validate(dict(row))
+            for row in item_rows
+        }
+        content_models = {
+            row["item_id"]: StoredTranscriptContent.model_validate(dict(row))
+            for row in content_rows
+        }
         return StoredRunRead(
             run=self._stored_run_header(run_row),
             sessions=tuple(
-                SessionSummary(
-                    session_id=row["session_id"],
-                    agent_role=AgentRole(row["agent_role"]),
-                    target_comid=row["target_comid"],
-                    status=AgentSessionStatus(row["status"]),
-                    created_at=row["created_at"],
-                    updated_at=row["updated_at"],
-                )
+                _session_summary_from_rows(row, item_models, content_models)
                 for row in session_rows
             ),
-            items=tuple(
-                StoredTranscriptItem.model_validate(dict(row)) for row in item_rows
-            ),
-            contents=tuple(
-                StoredTranscriptContent.model_validate(dict(row))
-                for row in content_rows
-            ),
+            items=tuple(item_models.values()),
+            contents=tuple(content_models.values()),
         )
 
     async def list_interrupted_run_ids(self) -> tuple[UUID, ...]:
