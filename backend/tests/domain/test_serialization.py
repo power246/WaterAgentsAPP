@@ -7,7 +7,13 @@ from pydantic import ValidationError
 from app.domain import (
     DirectRecordPayload,
     EvidenceContentError,
+    OutcomeStatus,
+    ResultSource,
+    RiskLevel,
+    RiskOrTrendAssessment,
     SourceRecordReference,
+    TimeWindowResult,
+    TrendDirection,
     canonical_model_bytes,
     load_evidence_payload_json,
     load_source_record_json,
@@ -181,6 +187,37 @@ def test_canonical_evidence_serialization_normalizes_decimal_and_utc() -> None:
     )
     assert canonical_model_bytes(timestamp) == b'{"timestamp":"2026-01-01T18:00:00Z"}'
     assert load_evidence_payload_json(canonical_model_bytes(payload)) == payload
+
+
+def test_inference_point_serialization_keeps_decimal_string_and_current_v1_fields() -> None:
+    point = TimeWindowResult(
+        cell_id="cell:usgs:00010:window-0001",
+        start_time=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        end_time=datetime(2026, 1, 1, 6, tzinfo=timezone.utc),
+        outcome_status=OutcomeStatus.QUANTIFIED,
+        representative_value="001.2300",
+        unit_id="degC",
+        assessment=RiskOrTrendAssessment(
+            summary="No identified risk",
+            trend=TrendDirection.STABLE,
+            risk_level=RiskLevel.NONE,
+            risk_rationale="The cited observation supports no identified risk.",
+            supporting_refs=("evidence-1",),
+        ),
+        source=ResultSource.OBSERVED,
+        confidence=0.9,
+        confidence_rationale="The observation is direct and complete.",
+        aggregation_method=None,
+        evidence_refs=("evidence-1",),
+    )
+
+    payload = json.loads(point.model_dump_json())
+
+    assert payload["representative_value"] == "1.23"
+    assert payload["unit_id"] == "degC"
+    assert payload["source"] == "observed"
+    assert payload["assessment"]["risk_level"] == "none"
+    assert TimeWindowResult.model_validate_json(point.model_dump_json()) == point
 
 
 @pytest.mark.parametrize(
