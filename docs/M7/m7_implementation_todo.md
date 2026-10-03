@@ -2,7 +2,7 @@
 
 更新日期：2026-10-03
 
-> 当前状态：Milestone 0–9 均未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；本清单中的命令、路径和测试均是施工要求，不是已通过证据。
+> 当前状态：Milestone 0 已完成本机基线与架构红线，Milestone 1–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
 
 本清单执行以下已确认文档：
 
@@ -75,30 +75,41 @@
 
 ### 工作
 
-- [ ] 记录 branch、HEAD、`origin/main`、merge-base、tracked/untracked/permission-limited 状态、Python/依赖版本和测试入口；明确保护本分支已有文档及用户改动。
-- [ ] 追踪真实 production call chain：route/coordinator → `QueryTopologyWorkflow` → topology save/phase → run completion，定位唯一延伸点、当前状态提交顺序和 cancel token 来源。
-- [ ] 盘点 M3 coordinator/writer/reader/registry/SSE、M4 `HydrologyGraph` 与 topology limits、M5 `UpstreamResultPort`/acquisition、M6 `RunSingleWaterbodyAgent`/runtime/model/transcript 的真实接口；形成 M7 影响表和单一 source-of-truth 表。
-- [ ] 扫描 `AgentRole`、`AnalysisPhase`、`SessionResultSummary`、session completed payload、run snapshot/detail/history、production typed-content registry、OpenAPI fixtures、runtime composition 和 test builders 的全部生产/测试消费者，形成原子更新清单。
-- [ ] 记录当前 M1–M6 full regression、architecture、PostgreSQL、SSE/history smoke 基线；环境缺失或 ACL 限制写 `not run`/permission-limited，不修改测试或设置绕过基础设施。
-- [ ] 增加 architecture red gates：M7 不依赖归档/前端/M8；Domain/ports 不导入 infrastructure/provider SDK；production 只有一个 topology workflow caller、两条 SSE、无新 public route；`backend/tests/application/reasoning/m7_support.py` 仍是 M6 内部测试 helper，不能误当本里程碑实现。
-- [ ] 确认默认不新增业务表/Alembic migration。若四表、通用 typed contents 和现有索引不足，必须在本阶段给出失败 fixture 与设计修订，不能直接建表。
+- [x] 记录 branch、HEAD、`origin/main`、merge-base、tracked/untracked/permission-limited 状态、Python/依赖版本和测试入口；明确保护本分支已有文档及用户改动。
+- [x] 追踪真实 production call chain：route/coordinator → `QueryTopologyWorkflow` → topology save/phase → run completion，定位唯一延伸点、当前状态提交顺序和 cancel token 来源。
+- [x] 盘点 M3 coordinator/writer/reader/registry/SSE、M4 `HydrologyGraph` 与 topology limits、M5 `UpstreamResultPort`/acquisition、M6 `RunSingleWaterbodyAgent`/runtime/model/transcript 的真实接口；形成 M7 影响表和单一 source-of-truth 表。
+- [x] 扫描 `AgentRole`、`AnalysisPhase`、`SessionResultSummary`、session completed payload、run snapshot/detail/history、production typed-content registry、OpenAPI fixtures、runtime composition 和 test builders 的全部生产/测试消费者，形成原子更新清单。
+- [x] 记录当前 M1–M6 full regression、architecture、PostgreSQL、SSE/history smoke 基线；环境缺失或 ACL 限制写 `not run`/permission-limited，不修改测试或设置绕过基础设施。
+- [x] 增加 architecture red gates：M7 不依赖归档/前端/M8；Domain/ports 不导入 infrastructure/provider SDK；production 只有一个 topology workflow caller、两条 SSE、无新 public route；`backend/tests/application/reasoning/m7_support.py` 仍是 M6 内部测试 helper，不能误当本里程碑实现。
+- [x] 确认默认不新增业务表/Alembic migration。若四表、通用 typed contents 和现有索引不足，必须在本阶段给出失败 fixture 与设计修订，不能直接建表。
 
 ### Tests
 
-- [ ] 当前 backend 基线无未解释失败；PostgreSQL 用例只使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，且与业务库不同。
-- [ ] architecture tests 锁定 archive isolation、layer dependency、production/test import isolation、单 workflow owner、无 direct M7 route 与仅两条 SSE。
-- [ ] 现有 M4 topology、M5 upstream port、M6 runner、lifecycle/registry/OpenAPI/SSE/history 基线结果被记录。
+- [x] 当前 backend 基线无未解释失败；PostgreSQL 用例只使用进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，且与业务库不同。
+- [x] architecture tests 锁定 archive isolation、layer dependency、production/test import isolation、单 workflow owner、无 direct M7 route 与仅两条 SSE。
+- [x] 现有 M4 topology、M5 upstream port、M6 runner、lifecycle/registry/OpenAPI/SSE/history 基线结果被记录。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（无法运行的 PostgreSQL/外部项明确拆出并记录）
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application/analysis_runs backend/tests/application/reasoning -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（无法运行的 PostgreSQL/外部项明确拆出并记录）
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：唯一 production 接入点、原子更新面、基线证据和默认无 migration 结论可复现；本阶段不新增 M7 业务行为。
 
 提交边界：只允许 architecture guard、必要的基线测试修正、影响表和本清单完成记录；不得提前实现 scheduler、store、summary 或 runtime composition。
+
+#### Milestone 0 完成记录（2026-10-03）
+
+- 基线：分支 `codex/m7-milestone-0` 从 `origin/main`/merge-base `59efea071f9f46e3949ca3bd14ee403c771a5151` 创建；既有 M7 文档输入受保护并独立提交为 `fe95b293d863d2c0fc92643f61fa8693a99b69f9`。Python 3.12.14，pytest 9.1.1，FastAPI 0.141.1，Pydantic 2.13.5，SQLAlchemy 2.0.54，psycopg 3.3.6，httpx 0.28.1。仓库根部历史 pytest 目录存在 ACL permission-limited 警告，因此状态结论限于 tracked 文件及 `docs`、`backend/app`、`backend/tests`、`backend/scripts` 等本阶段路径。
+- 调用链：`POST /api/analysis/runs` → `RunCoordinator.create_run` → 唯一 `_run_workflow` task/cancellation token → `QueryTopologyWorkflow` → 保存 `query_understood`/`topology_ready` 并推进 phase → workflow 返回后 `complete_run`。M7 唯一延伸点是同一 workflow 在 `topology_ready` 后继续执行 DAG；不得增加 route/background caller。
+- 影响与事实源：`analysis_runs/models.py` 定义 role/phase/session/result；coordinator/runtime/writer 与四表保存 lifecycle、cancel、quiescence 和原子结果；transcript registry/reader/stream models 负责 typed content、history 与两层 SSE；保存后的 `AnalysisContext`/`HydrologyGraph` 是 M4 scope/limits 权威；M5 `UpstreamResultPort`/acquisition 是唯一上游证据接缝；M6 `RunSingleWaterbodyAgent`、runtime/model/transcript 是唯一单水体执行链。原子消费者包括 API schemas/routes、persistence records/store、startup repair、OpenAPI fixtures，以及 application/API/persistence/smoke test builders。
+- 实现：新增 `test_m7_boundaries.py`，锁定单一 topology workflow composition/执行 owner、M7 不导入 M8 transcript/RAG port、`m7_support.py` 仅为测试 helper；扩展现有 public-surface guard 拒绝 direct M7/scheduler/summary route。修正 M7 文档同步触发的 M6 状态措辞基线；未新增 M7 业务行为。
+- 数据库：Docker PostgreSQL 17 healthy；仅在测试进程设置 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，与业务库分离。现有四表和唯一初始 migration 未改动，M0 没有新增表、索引或 Alembic revision。
+- 验证：focused guard/document gate `18 passed`；architecture + application `866 passed`；完整 `backend/tests`（含专用 PostgreSQL、M4/M5/M6、registry/OpenAPI/SSE/smoke）`1842 passed, 1 warning`。`run_sse_smoke.py` 的 completed/cancelled 通过；`run_history_smoke.py` 的 history、独立进程重启和 startup repair 通过；`compileall` 与 `git diff --check` 通过。首次受限运行的 PostgreSQL/pytest 临时目录错误记为 permission-limited，授权上下文重跑后无遗留失败。
+- 风险：真实外部 provider 请求和本次提交后的 Ubuntu/macOS/Windows CI 均 `not run`；Milestone 1–9、frontend、M8 producer 与 M9 接力未开始。
+- 提交：架构红线与必要基线修正 `258e69149b6ce352ab1f06fdd3631e73085b5410`；本完成记录由后续本地文档提交保存。
 
 ## Milestone 1：当前唯一 V1 类型与投影骨架
 
