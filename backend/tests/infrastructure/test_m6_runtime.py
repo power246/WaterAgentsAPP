@@ -161,12 +161,10 @@ def request(selection: ModelSelection = OPENAI_MODEL) -> WaterbodyModelRequest:
 
 def composition_arguments(port=None):
     operations = object()
-    reader = object()
     acquisition = object()
     m5_runtime = SimpleNamespace(acquisition=acquisition)
     arguments = {
         "operations": operations,
-        "transcript_reader": reader,
         "m5_runtime": m5_runtime,
         "capability_registry": load_parameter_capability_registry(),
         "model_catalog": catalog(capability(OPENAI_MODEL, ModelRole.WATERBODY)),

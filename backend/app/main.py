@@ -175,7 +175,6 @@ def create_app(
                     async with active_m6_builder(
                         resolved_settings,
                         operations=coordinator,
-                        transcript_reader=transcript_reader,
                         m5_runtime=m5_runtime,
                         capability_registry=resolved_parameter_capabilities,
                         model_catalog=resolved_model_catalog.snapshot(),

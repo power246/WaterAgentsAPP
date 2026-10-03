@@ -28,7 +28,6 @@ from app.application.reasoning.model_models import (
 from app.application.reasoning.prompt_builder import PromptBuilder
 from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POLICY
 from app.application.reasoning.transcript_store import ReasoningTranscriptStore
-from app.application.transcripts.reader import TranscriptReader
 from app.domain import ModelCatalogSnapshot, ModelRole, ModelSelection
 from app.domain.hydrology import ParameterCapabilityRegistry
 from app.infrastructure.adapters import OpenAIResponsesWaterbodyAdapter
@@ -303,7 +302,6 @@ def compose_m6_runtime(
     settings: AppSettings,
     *,
     operations: WorkflowOperations,
-    transcript_reader: TranscriptReader,
     m5_runtime: M5Runtime,
     capability_registry: ParameterCapabilityRegistry,
     model_catalog: ModelCatalogSnapshot,
@@ -355,7 +353,6 @@ async def build_m6_runtime(
     settings: AppSettings,
     *,
     operations: WorkflowOperations,
-    transcript_reader: TranscriptReader,
     m5_runtime: M5Runtime,
     capability_registry: ParameterCapabilityRegistry,
     model_catalog: ModelCatalogSnapshot,
@@ -399,7 +396,6 @@ async def build_m6_runtime(
         yield compose_m6_runtime(
             settings,
             operations=operations,
-            transcript_reader=transcript_reader,
             m5_runtime=m5_runtime,
             capability_registry=capability_registry,
             model_catalog=model_catalog,

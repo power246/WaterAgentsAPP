@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from uuid import UUID, uuid4
 
 from app.application.analysis_runs.workflow import WorkflowOperations
-from app.application.transcripts.reader import TranscriptReader
 from app.domain import ModelCatalogSnapshot
 from app.domain.hydrology import ParameterCapabilityRegistry
 from app.infrastructure.config import AppSettings
@@ -25,7 +24,6 @@ async def build_m6_test_runtime(
     settings: AppSettings,
     *,
     operations: WorkflowOperations,
-    transcript_reader: TranscriptReader,
     m5_runtime: M5Runtime,
     capability_registry: ParameterCapabilityRegistry,
     model_catalog: ModelCatalogSnapshot,
@@ -41,7 +39,6 @@ async def build_m6_test_runtime(
     yield compose_m6_runtime(
         settings,
         operations=operations,
-        transcript_reader=transcript_reader,
         m5_runtime=m5_runtime,
         capability_registry=capability_registry,
         model_catalog=model_catalog,
