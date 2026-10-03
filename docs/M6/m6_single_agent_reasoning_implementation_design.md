@@ -4,7 +4,7 @@
 
 > 状态：当前唯一 V1 已完成 M6 Milestone 0–13 本机实现与集成审计。本文描述已落地的代码结构与可执行契约；分阶段提交、验证证据、外部 `not run` 项和剩余风险见 [M6 Implementation TODO](m6_implementation_todo.md)。
 
-> M7 接力说明：本文 2026-10-03 只在第 16 节登记 dependency manifest、stationless 0-model 调度和 `run_summarizer` 接缝；前文仍描述已实现的 M6 单水体 runtime，M7 目标尚未实现或验证。
+> M7 接力说明：本文 2026-10-03 只在第 16 节登记 dependency manifest、stationless 0-model 调度和 `run_summarizer` 接缝；前文仍描述已实现的 M6 单水体 runtime，新增目标由 M7 后续阶段实现和验证。
 
 ## 1. 核心结论与范围
 
