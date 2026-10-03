@@ -28,6 +28,7 @@ from app.application.query_understanding import (
 )
 from app.domain import (
     DischargeObservationRecord,
+    EvidenceCellRole,
     EvidenceCellStatus,
     EvidenceLocation,
     EvidenceToolOptions,
@@ -338,7 +339,7 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
                 model_calls += 1
             assert handoff.stop_before_model
             assert handoff.stop_facts == (
-                "station_backed_no_usable_direct_evidence",
+                "no_usable_local_or_upstream_evidence",
             )
             assert model_calls == 0
             assert skipped_optional.calls == []
@@ -347,6 +348,54 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
                 fragment.source != "topology_ready"
                 for fragment in store.fragments.values()
             )
+
+    asyncio.run(exercise())
+
+
+def test_station_backed_missing_target_uses_local_discharge_and_usable_upstream(
+    scope_factory,
+) -> None:
+    async def exercise() -> None:
+        scope = scope_factory(
+            run_id="00000000-0000-0000-0000-000000000100",
+            session_id="00000000-0000-0000-0000-000000000500",
+            with_upstream=True,
+        )
+        store = MemoryEvidenceStore()
+
+        def local_discharge_only(plan):
+            include = plan.parameter_keys[0] == scope.supporting_parameters[0]
+            return complete_batch(
+                plan,
+                _water_records(scope, plan, include=include),
+            )
+
+        local = FakeCollectionPort(local_discharge_only)
+        upstream = _upstream_port(
+            scope,
+            store,
+            result_kind="directional",
+        )
+        handoff = await _runtime(
+            store,
+            water_port=local,
+            upstream_port=upstream,
+            upstream_ready=True,
+        ).start(scope)
+
+        assert local.calls
+        assert upstream.calls
+        assert handoff.stop_before_model is False
+        target_cells = tuple(
+            cell for cell in handoff.cells if cell.role is EvidenceCellRole.TARGET
+        )
+        discharge_cells = tuple(
+            cell
+            for cell in handoff.cells
+            if cell.role is EvidenceCellRole.REQUIRED_SUPPORT
+        )
+        assert all(not cell.direct_fragment_refs for cell in target_cells)
+        assert all(cell.direct_fragment_refs for cell in discharge_cells)
 
     asyncio.run(exercise())
 

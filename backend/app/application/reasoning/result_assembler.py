@@ -22,6 +22,7 @@ from app.domain import (
     ModelExecutionSummary,
     OutcomeStatus,
     OverallWaterbodyAssessment,
+    ParameterCapabilityRegistry,
     ParameterTimeSeries,
     RiskLevel,
     RiskOrTrendAssessment,
@@ -34,6 +35,26 @@ _FIXED_RISK_RATIONALE = "No supported water-quality judgment is available."
 _FIXED_CONFIDENCE_RATIONALE = (
     "Confidence is zero because no requested cell has a determinate outcome."
 )
+
+
+def build_parameter_definitions(
+    keys,
+    registry: ParameterCapabilityRegistry,
+) -> tuple[WaterQualityParameter, ...]:
+    definitions = []
+    for key in keys:
+        capability = registry.get(key)
+        if capability is None:
+            raise InferenceAssemblyError()
+        definitions.append(
+            WaterQualityParameter(
+                key=key,
+                name=capability.canonical_name,
+                canonical_unit=capability.canonical_unit,
+                category=capability.official_group,
+            )
+        )
+    return tuple(definitions)
 
 
 def assemble_inference_result(

@@ -38,8 +38,12 @@ from app.application.reasoning.planning_loop import (
     PlanningConvergenceReason,
     build_reasoning_working_context,
 )
+from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning.prompt_builder import PromptBuilder
-from app.application.reasoning.result_assembler import assemble_inference_result
+from app.application.reasoning.result_assembler import (
+    assemble_inference_result,
+    build_parameter_definitions,
+)
 from app.application.reasoning.result_models import build_result_skeleton
 from app.application.reasoning.task import ValidatedWaterbodyAgentTask
 from app.application.reasoning.validation_repair import (
@@ -52,7 +56,6 @@ from app.domain import (
     ModelExecutionSummary,
     ModelUsageSummary,
     ParameterCapabilityRegistry,
-    WaterQualityParameter,
 )
 from app.ports.errors import WaterbodyModelPortError
 from app.ports.waterbody_model import WaterbodyModelPort
@@ -122,10 +125,22 @@ class RunSingleWaterbodyAgent:
         task: ValidatedWaterbodyAgentTask,
         *,
         deadline: datetime,
+        initial_handoff: EvidenceAcquisitionHandoff | None = None,
     ) -> WaterbodyAgentRunOutcome:
         if self._transcript_store is not None:
-            await self._transcript_store.write_agent_input(task)
-        outcome = await self._run_reasoning(task, deadline=deadline)
+            await self._transcript_store.write_agent_input(
+                task,
+                initial_evidence_bundle_ref=(
+                    initial_handoff.bundle_ref
+                    if initial_handoff is not None
+                    else None
+                ),
+            )
+        outcome = await self._run_reasoning(
+            task,
+            deadline=deadline,
+            initial_handoff=initial_handoff,
+        )
         if self._transcript_store is not None:
             if outcome.status is WaterbodyAgentRunStatus.COMPLETED:
                 assert outcome.result is not None
@@ -145,6 +160,7 @@ class RunSingleWaterbodyAgent:
         task: ValidatedWaterbodyAgentTask,
         *,
         deadline: datetime,
+        initial_handoff: EvidenceAcquisitionHandoff | None,
     ) -> WaterbodyAgentRunOutcome:
         audits: list[ValidationExchangeAudit] = []
         planning: EvidencePlanningOutcome | None = None
@@ -156,7 +172,15 @@ class RunSingleWaterbodyAgent:
 
         try:
             self._checkpoint(task, deadline, stage=stage)
-            planning = await self._planning_loop.run(task, deadline=deadline)
+            planning = (
+                await self._planning_loop.run(task, deadline=deadline)
+                if initial_handoff is None
+                else await self._planning_loop.run(
+                    task,
+                    deadline=deadline,
+                    initial_handoff=initial_handoff,
+                )
+            )
             if planning.counts.deadline_reached:
                 return self._failed(
                     code="reasoning_deadline_exceeded",
@@ -269,7 +293,7 @@ class RunSingleWaterbodyAgent:
                 skeleton,
                 reasoning=reasoning,
                 synthesis=synthesis,
-                parameter_definitions=_parameter_definitions(
+                parameter_definitions=build_parameter_definitions(
                     skeleton.requested_parameters,
                     self._capabilities,
                 ),
@@ -469,23 +493,6 @@ def _committed_outcome(
     if committed.status is not expected:
         raise RuntimeError("committed Agent session outcome does not match the runner")
     return calculated
-
-
-def _parameter_definitions(keys, registry: ParameterCapabilityRegistry):
-    definitions = []
-    for key in keys:
-        capability = registry.get(key)
-        if capability is None:
-            raise InferenceAssemblyError()
-        definitions.append(
-            WaterQualityParameter(
-                key=key,
-                name=capability.canonical_name,
-                canonical_unit=capability.canonical_unit,
-                category=capability.official_group,
-            )
-        )
-    return tuple(definitions)
 
 
 def _execution_summary(task, planning, audits, plan) -> ModelExecutionSummary:

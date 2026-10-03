@@ -1,10 +1,21 @@
 from __future__ import annotations
 
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import Field, StrictBool, field_validator, model_validator
+from pydantic import (
+    Field,
+    StrictBool,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
+from app.application.analysis_runs.models import SessionResultReference
+from app.application.analysis_runs.topology_result_models import (
+    DependencyStatus,
+    WaterbodyDependencyManifest,
+)
 from app.application.reasoning.model_models import (
     NonBlankText,
     WaterbodyModelMessage,
@@ -13,7 +24,14 @@ from app.application.reasoning.prompt_policy import (
     canonical_json_digest,
     canonical_json_text,
 )
-from app.domain import DomainEnum, DomainModel, ItemReference, NonEmptyString
+from app.domain import (
+    DomainEnum,
+    DomainModel,
+    InferenceMode,
+    ItemReference,
+    NonEmptyString,
+    ensure_unique_tuple,
+)
 
 
 _MAX_RECENT_MESSAGES = 16
@@ -89,6 +107,79 @@ class BoundedEvidenceSummary(DomainModel):
         return tuple(sorted(value))
 
 
+class DependencyPromptWindow(DomainModel):
+    window_id: NonEmptyString
+    mode: InferenceMode
+
+
+class DependencyPromptEntry(DomainModel):
+    upstream_comid: NonEmptyString
+    dependency_status: DependencyStatus
+    result_ref: SessionResultReference | None = None
+    source_role: Literal["cross_waterbody_inferred_evidence"] = (
+        "cross_waterbody_inferred_evidence"
+    )
+
+    @model_validator(mode="after")
+    def validate_status_projection(self) -> Self:
+        if (self.dependency_status is DependencyStatus.USABLE) != (
+            self.result_ref is not None
+        ):
+            raise ValueError("only usable prompt dependencies expose result_ref")
+        return self
+
+    @model_serializer(mode="wrap")
+    def serialize_without_empty_result_ref(self, handler):
+        value = handler(self)
+        if self.result_ref is None:
+            value.pop("result_ref", None)
+        return value
+
+
+class WaterbodyDependencyPromptBlock(DomainModel):
+    manifest_digest: NonEmptyString
+    current_waterbody_comid: NonEmptyString
+    mode: InferenceMode
+    windows: tuple[DependencyPromptWindow, ...]
+    dependencies: tuple[DependencyPromptEntry, ...]
+    local_same_parameter_role: Literal["direct_observation"] = "direct_observation"
+    local_supporting_role: Literal["supporting_indirect_evidence"] = (
+        "supporting_indirect_evidence"
+    )
+    upstream_role: Literal["cross_waterbody_inferred_evidence"] = (
+        "cross_waterbody_inferred_evidence"
+    )
+    quantified_value_policy: Literal["registered_deterministic_tool_only"] = (
+        "registered_deterministic_tool_only"
+    )
+
+    @field_validator("windows")
+    @classmethod
+    def validate_windows(
+        cls,
+        value: tuple[DependencyPromptWindow, ...],
+    ) -> tuple[DependencyPromptWindow, ...]:
+        if not value:
+            raise ValueError("dependency prompt requires at least one window")
+        ensure_unique_tuple(
+            tuple(item.window_id for item in value),
+            field_name="dependency prompt windows",
+        )
+        return value
+
+    @field_validator("dependencies")
+    @classmethod
+    def canonicalize_dependencies(
+        cls,
+        value: tuple[DependencyPromptEntry, ...],
+    ) -> tuple[DependencyPromptEntry, ...]:
+        ensure_unique_tuple(
+            tuple(item.upstream_comid for item in value),
+            field_name="dependency prompt COMIDs",
+        )
+        return tuple(sorted(value, key=lambda item: item.upstream_comid))
+
+
 class WorkingContextProjection(DomainModel):
     schema_version: Annotated[int, Field(strict=True, ge=1, le=1)] = 1
     run_id: UUID
@@ -103,6 +194,7 @@ class WorkingContextProjection(DomainModel):
     recent_messages: tuple[WaterbodyModelMessage, ...]
     facts: tuple[WorkingContextFact, ...]
     evidence_summaries: tuple[BoundedEvidenceSummary, ...]
+    dependency_context: WaterbodyDependencyPromptBlock | None = None
     working_context_digest: NonEmptyString
 
     @field_validator("target_comid")
@@ -189,6 +281,7 @@ def build_working_context_projection(
     recent_messages: tuple[WaterbodyModelMessage, ...],
     facts: tuple[WorkingContextFact, ...],
     evidence_summaries: tuple[BoundedEvidenceSummary, ...],
+    dependency_context: WaterbodyDependencyPromptBlock | None = None,
 ) -> WorkingContextProjection:
     values = {
         "schema_version": 1,
@@ -206,10 +299,33 @@ def build_working_context_projection(
         "evidence_summaries": tuple(
             sorted(evidence_summaries, key=lambda item: item.evidence_ref)
         ),
+        "dependency_context": dependency_context,
     }
     return WorkingContextProjection(
         **values,
         working_context_digest=canonical_json_digest(values),
+    )
+
+
+def build_dependency_prompt_block(
+    manifest: WaterbodyDependencyManifest,
+    *,
+    mode: InferenceMode,
+    windows: tuple[DependencyPromptWindow, ...],
+) -> WaterbodyDependencyPromptBlock:
+    return WaterbodyDependencyPromptBlock(
+        manifest_digest=manifest.manifest_digest,
+        current_waterbody_comid=manifest.target_comid,
+        mode=mode,
+        windows=windows,
+        dependencies=tuple(
+            DependencyPromptEntry(
+                upstream_comid=item.upstream_comid,
+                dependency_status=item.dependency_status,
+                result_ref=item.result_ref,
+            )
+            for item in manifest.dependencies
+        ),
     )
 
 

@@ -104,6 +104,7 @@ _REQUIRED_BASE_RULE_IDS = frozenset(
         "absence_is_not_none",
         "attribution_eligibility",
         "confidence_semantics",
+        "cross_waterbody_sources",
         "evidence_eligibility",
         "outcome_semantics",
         "reference_integrity",
@@ -172,6 +173,16 @@ def audit_prompt_policy(policy: ReasoningPromptPolicy) -> PromptPolicyAuditRepor
             "correlated",
             "inferred",
             "hypothesized",
+        ),
+        "cross_waterbody_sources": (
+            "current-waterbody",
+            "direct observation",
+            "upstream-waterbody",
+            "inferred evidence",
+            "local discharge",
+            "directional",
+            "registered deterministic",
+            "never invent",
         ),
     }
     for rule_id, anchors in required_anchors.items():
@@ -269,6 +280,10 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         _rule(
             "source_eligibility",
             "Use observed only for one direct current source record. Mark aggregates, cross-series selection, upstream interpretation, and gap fill inferred; forecasts are predicted and indeterminate has no source.",
+        ),
+        _rule(
+            "cross_waterbody_sources",
+            "Treat a current-waterbody same-parameter station reading as a direct observation. Treat an upstream-waterbody result as cross-waterbody inferred evidence, and local discharge, weather, or facility facts as supporting indirect evidence. Ordinary upstream and supporting evidence may support only directional trend or risk; a quantified inferred value requires an executed registered deterministic formula or tool. Never invent a formula, weight, coefficient, or specific value.",
         ),
         _rule(
             "outcome_semantics",

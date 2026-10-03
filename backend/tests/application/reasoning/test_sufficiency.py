@@ -233,7 +233,7 @@ async def test_direct_and_materialized_indirect_support_but_contextual_does_not(
 
 
 @_async_test
-async def test_unmaterialized_rule_and_stationless_unavailable_producer_do_not_unlock():
+async def test_unmaterialized_rule_and_stationless_source_absence_do_not_unlock():
     rule = create_evidence_rule(
         output_parameter=TARGET_PARAMETER,
         input_parameters=(SUPPORT_PARAMETER,),
@@ -263,7 +263,7 @@ async def test_unmaterialized_rule_and_stationless_unavailable_producer_do_not_u
         stationless_registry,
     )
     assert {gate.decision for gate in stationless.gates} == {
-        ReasoningGateDecision.BLOCKED
+        ReasoningGateDecision.UNSUPPORTED
     }
     assert any(
         fact.name == "get_upstream_results"

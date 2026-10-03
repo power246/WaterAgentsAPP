@@ -9,6 +9,7 @@ from math import ceil
 from uuid import UUID, uuid4
 
 from app.application.analysis_runs.workflow import WorkflowOperations
+from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning import (
     EvidencePlanningLoop,
     ModelFitCapability,
@@ -263,6 +264,7 @@ class M6RunnerService:
         task: ValidatedWaterbodyAgentTask,
         *,
         deadline: datetime,
+        initial_handoff: EvidenceAcquisitionHandoff | None = None,
     ) -> WaterbodyAgentRunOutcome:
         if deadline.tzinfo is None or deadline.utcoffset() is None:
             raise ValueError("waterbody reasoning deadline must be timezone-aware")
@@ -271,7 +273,11 @@ class M6RunnerService:
             raise ValueError("waterbody reasoning deadline has been reached")
         if deadline > now + timedelta(seconds=self._limits.session_deadline_seconds):
             raise ValueError("waterbody reasoning deadline exceeds the runtime limit")
-        return await self.build_runner(task).run(task, deadline=deadline)
+        return await self.build_runner(task).run(
+            task,
+            deadline=deadline,
+            initial_handoff=initial_handoff,
+        )
 
 
 @dataclass(frozen=True, slots=True)

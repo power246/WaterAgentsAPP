@@ -2,7 +2,7 @@
 
 更新日期：2026-10-03
 
-> 当前状态：Milestone 0–2 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架及 run-local direct-upstream evidence seam，Milestone 3–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
+> 当前状态：Milestone 0–3 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架、run-local direct-upstream evidence seam，以及水体启动门禁/零模型正式结果接缝；Milestone 4–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
 
 本清单执行以下已确认文档：
 
@@ -187,30 +187,37 @@
 
 ### 工作
 
-- [ ] 新增 backend-owned node launch decision。输入只来自 topology/station facts、dependency manifest、M5 capability/collection facts和 cancel token；输出明确 `run_agent / deterministic_insufficient / invalid / cancelled` 及可审计理由。
-- [ ] station-backed 总是先执行本地目标参数与 discharge preflight；目标值缺失但本地 discharge/允许的支持证据加至少一个 usable upstream 时允许进入同一个 M6 planning loop。
-- [ ] stationless 不制造本地空查询；至少一个 usable direct upstream 才可 planning。全部 direct upstream insufficient/invalid 时，先创建水体 session，再复用 M6 skeleton/assembler 生成完整 `indeterminate / insufficient_evidence`，调用数严格为 0/0/0。
-- [ ] source/root node 没有 direct upstream 时按 topology/station facts 进入 station-backed 路径，不把空依赖集合误判为“上游证据不足”。
-- [ ] 构造 M6 waterbody prompt dependency block：明确本地同参数站点值是直接观测，上游值是上游水体推理；可按需使用本地其他站点参数（例如 discharge）、天气、设施等允许的间接证据。
-- [ ] 保持数值边界：普通上游 + 本地间接证据只可支持 directional/trend/risk；registry 可执行确定性公式/工具是具体 inferred value 的唯一入口。
-- [ ] deterministic insufficient outcome 发布为 `insufficient`，保留完整 result/session 供 run 汇总，但不给下游 `UpstreamResultRecord`。
+- [x] 新增 backend-owned node launch decision。输入只来自 topology/station facts、dependency manifest、M5 capability/collection facts和 cancel token；输出明确 `run_agent / deterministic_insufficient / invalid / cancelled` 及可审计理由。
+- [x] station-backed 总是先执行本地目标参数与 discharge preflight；目标值缺失但本地 discharge/允许的支持证据加至少一个 usable upstream 时允许进入同一个 M6 planning loop。
+- [x] stationless 不制造本地空查询；至少一个 usable direct upstream 才可 planning。全部 direct upstream insufficient/invalid 时，先创建水体 session，再复用 M6 skeleton/assembler 生成完整 `indeterminate / insufficient_evidence`，调用数严格为 0/0/0。
+- [x] source/root node 没有 direct upstream 时按 topology/station facts 进入 station-backed 路径，不把空依赖集合误判为“上游证据不足”。
+- [x] 构造 M6 waterbody prompt dependency block：明确本地同参数站点值是直接观测，上游值是上游水体推理；可按需使用本地其他站点参数（例如 discharge）、天气、设施等允许的间接证据。
+- [x] 保持数值边界：普通上游 + 本地间接证据只可支持 directional/trend/risk；registry 可执行确定性公式/工具是具体 inferred value 的唯一入口。
+- [x] deterministic insufficient outcome 发布为 `insufficient`，保留完整 result/session 供 run 汇总，但不给下游 `UpstreamResultRecord`。
 
 ### Tests
 
-- [ ] station-backed：target+discharge、target missing+discharge+usable upstream、target missing 无任何种子、source node 四条路径及调用计数。
-- [ ] stationless：usable+invalid 可运行；all insufficient/invalid 为 0 planning/0 final/0 optional tool；完整 session/result/ref 存在但下游记录为 0。
-- [ ] prompt fixture 锁定 source roles、local discharge 可用、invalid 无详情、禁止自造公式/权重/具体数值；gap_filling/prediction/mixed 与 window 原样传入。
+- [x] station-backed：target+discharge、target missing+discharge+usable upstream、target missing 无任何种子、source node 四条路径及调用计数。
+- [x] stationless：usable+invalid 可运行；all insufficient/invalid 为 0 planning/0 final/0 optional tool；完整 session/result/ref 存在但下游记录为 0。
+- [x] prompt fixture 锁定 source roles、local discharge 可用、invalid 无详情、禁止自造公式/权重/具体数值；gap_filling/prediction/mixed 与 window 原样传入。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_node_launch_policy.py backend/tests/application/analysis_runs/test_zero_model_result.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_prompt_policy.py backend/tests/application/reasoning/test_runner.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_acquisition_workflow.py -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_node_launch_policy.py backend/tests/application/analysis_runs/test_zero_model_result.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning/test_prompt_policy.py backend/tests/application/reasoning/test_runner.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_acquisition_workflow.py -q`
+- [x] `git diff --check`
 
 阶段出口：backend 可在不依赖 scheduler 的单节点 harness 中正确决定是否运行 Agent，并为 stationless 全不可用路径保存可审计的零模型正式结果。
 
 提交边界：仅 launch policy、dependency prompt block、M6 handoff 的最小接缝、zero-model assembler 与 tests；不得接通完整 DAG 或 run summarizer。
+
+#### Milestone 3 完成记录（2026-10-03）
+
+- 实现：新增 backend-owned node launch policy、station/local + direct-upstream deterministic preflight、M6 initial handoff 复用、canonical dependency prompt block 与 zero-model insufficient assembler；usable dependency 才暴露 result ref，invalid/insufficient 不暴露 result/error/evidence，未接 scheduler、完整 DAG、run summarizer 或 frontend。
+- 验证：三组 M3 focused 分别 `9 passed`、`28 passed`、`17 passed`；domain/application `1139 passed`；architecture `122 passed`；最终完整 `backend/tests` 使用 Docker 中健康的 PostgreSQL 与进程级 `wateragents_test` 得到 `1892 passed, 1 warning`，warning 仅为既有 Starlette/httpx 弃用提示；`compileall`、应用导入与 `git diff --check` 通过。architecture 首次受 Windows pytest 临时目录 ACL/目录准备影响，改用 `D:\DockerData\pytest-temp` 独立目录后通过；真实外部 provider 与三平台 CI `not run`。
+- 边界：Milestone 4–9 尚未开始；当前只提供 scheduler 无关的单节点 launch/result harness 与 M6 接缝，M1–M9 仍作为一个原子任务等待最终验收。
+- 提交：本完成记录与 M3 launch/preflight/prompt/zero-model/tests 由当前本地提交保存。
 
 ## Milestone 4：依赖感知 scheduler 与有界并行
 
@@ -404,21 +411,21 @@
 | GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | 只有实际平台证据才能升级状态。 |
 | M7-C01 | pending | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 等待全部直接上游后只判定一次。 |
 | M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
-| M7-C03 | pending | run context/node task handoff | gap_filling/prediction/mixed fixtures | mode/window 不漂移。 |
+| M7-C03 | partial | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 dependency prompt 的 mode/window 原样传递已验证；production workflow handoff 待 M5。 |
 | M7-C04 | pending | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | 先封调度，再通知已有 sessions。 |
 | M7-C05 | pending | provider/tool late-output audit | cancelled stream/late callback tests | 晚到结果不对外或下传。 |
 | M7-C06 | pending | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | cleanup 等待真实收敛。 |
 | M7-C07 | pending | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 无第二套 run-wide quota。 |
 | M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M1 构造不变量已验证；assembler/lifecycle 提交待 M5/M7。 |
-| M7-C09 | pending | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | insufficient 正式结果保留但不传播 evidence。 |
-| M7-C10 | partial | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | M2 projection 原样保留 source/confidence/ref 且不重算；dependency prompt 与 M6 gate 待 M3。 |
+| M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
+| M7-C10 | 本机已验证 | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | source role、usable-only result ref、invalid redaction、mode/window 与 deterministic numeric boundary 已通过 focused/full regression。 |
 | M7-C11 | partial | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M1 target + all-card/ref/no-tools schema 已验证；prompt/runner 待 M6。 |
 | M7-C12 | pending | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary 失败不抹掉 target/waterbody results。 |
 | M7-A01 | pending | production workflow fake topology | 3+ nodes、event/session order、exact once | session 不预建。 |
-| M7-A02 | partial | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 manifest、M5 collect/validation 与 invalid/insufficient/cancelled 0 records 已验证；完整 launch/bundle handoff 待 M3/M5。 |
+| M7-A02 | partial | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 manifest/usable-only provider 与 M3 launch/bundle handoff 已验证；完整 production workflow orchestration 待 M5。 |
 | M7-A03 | pending | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 无新下游动作并最终 quiesced。 |
 | M7-A04 | pending | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | 迟到内容只可审计。 |
-| M7-A05 | pending | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径均保存正式 session/result。 |
+| M7-A05 | 本机已验证 | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径复用 canonical M6 result/session 提交接缝，stationless 发布 insufficient 且无 usable records。 |
 | M7-A06 | pending | limiter/topology snapshot/settings | peak in-flight、max topology、no run quota | 并发、范围和 per-session budget 分开。 |
 | M7-A07 | pending | summarizer/input/validator/failure projection | same model、all cards、special values、failure | 数字有 unit/window/ref，无 fallback。 |
 

@@ -339,6 +339,7 @@ class PromptBuilder:
             "budget": prompt.budget,
             "authorized_tools": prompt.authorized_tools,
         }
+        _add_dependency_context(body, prompt.context)
         return self._request(
             phase=WaterbodyModelPhase.EVIDENCE_PLANNING,
             prompt=prompt,
@@ -371,6 +372,7 @@ class PromptBuilder:
                 "digest": _schema_digest(prompt.response_schema),
             },
         }
+        _add_dependency_context(body, prompt.context)
         return self._request(
             phase=WaterbodyModelPhase.REASONING_BATCH,
             prompt=prompt,
@@ -405,6 +407,7 @@ class PromptBuilder:
             # hypothesized attribution without allowing those refs to unlock a cell.
             "bounded_reference_summaries": prompt.context.evidence_summaries,
         }
+        _add_dependency_context(body, prompt.context)
         return self._request(
             phase=WaterbodyModelPhase.OVERALL_SYNTHESIS,
             prompt=prompt,
@@ -694,3 +697,11 @@ def _option_schema(
 
 def _schema_digest(schema: WaterbodyJsonSchema) -> str:
     return canonical_json_digest(json.loads(schema.schema_text))
+
+
+def _add_dependency_context(
+    body: dict[str, object],
+    context: WorkingContextProjection,
+) -> None:
+    if context.dependency_context is not None:
+        body["dependency_context"] = context.dependency_context

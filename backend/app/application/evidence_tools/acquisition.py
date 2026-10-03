@@ -51,11 +51,12 @@ from app.domain import (
     EvidenceToolOptions,
     EvidenceLocation,
     EvidenceFragmentReference,
+    InferenceMode,
     ItemReference,
     ParameterKey,
     ParameterCapabilityRegistry,
     Provenance,
-    InferenceMode,
+    UpstreamResultPayload,
 )
 
 
@@ -98,6 +99,7 @@ class EvidenceAcquisitionHandoff:
     tool_roster: tuple[EvidenceToolDescriptor, ...]
     executor: EvidenceToolExecutor
     cell_gates: tuple[EvidenceAcquisitionCellGate, ...]
+    usable_upstream_comids: tuple[str, ...]
     stop_before_model: bool
     stop_facts: tuple[str, ...]
     block_facts: tuple[str, ...]
@@ -146,8 +148,9 @@ class EvidenceAcquisitionService:
         result_refs: list[ItemReference] = []
         block_facts: list[str] = []
 
+        cancelled = False
         if scope.station_refs:
-            required = await self._execute(
+            local = await self._execute(
                 scope,
                 self._request(scope, "collect_water_observations"),
                 fragment_refs=fragment_refs,
@@ -155,17 +158,12 @@ class EvidenceAcquisitionService:
                 block_facts=block_facts,
                 materialize_technical_facts=True,
             )
-            completed = (
-                required.result.execution_status
-                is EvidenceToolExecutionStatus.COMPLETED
+            cancelled = (
+                local.result.execution_status
+                is EvidenceToolExecutionStatus.CANCELLED
             )
-            has_direct = await self._has_usable_direct(
-                scope,
-                required.result.fragment_refs,
-            )
-            stop_before_model = completed and not has_direct
-            run_optional = completed and not stop_before_model
-        else:
+
+        if scope.direct_upstream_comids and not cancelled:
             upstream = await self._execute(
                 scope,
                 self._request(scope, "get_upstream_results"),
@@ -174,11 +172,33 @@ class EvidenceAcquisitionService:
                 block_facts=block_facts,
                 materialize_technical_facts=True,
             )
-            stop_before_model = False
-            run_optional = (
+            cancelled = (
                 upstream.result.execution_status
-                is not EvidenceToolExecutionStatus.CANCELLED
+                is EvidenceToolExecutionStatus.CANCELLED
             )
+
+        local_target = await self._has_usable_direct(
+            scope,
+            tuple(fragment_refs),
+            parameters=scope.requested_parameters,
+        )
+        local_discharge = await self._has_usable_direct(
+            scope,
+            tuple(fragment_refs),
+            parameters=scope.supporting_parameters,
+        )
+        usable_upstream = await self._has_usable_upstream(
+            scope,
+            tuple(fragment_refs),
+        )
+        has_starting_evidence = (
+            local_target
+            or (usable_upstream and (not scope.station_refs or local_discharge))
+        )
+        stop_before_model = (
+            not cancelled and not block_facts and not has_starting_evidence
+        )
+        run_optional = not cancelled and has_starting_evidence
 
         if run_optional:
             for request in self._required_rule_requests(scope):
@@ -203,10 +223,14 @@ class EvidenceAcquisitionService:
             block_facts=tuple(block_facts),
             stop_before_model=stop_before_model,
             stop_facts=(
-                ("station_backed_no_usable_direct_evidence",)
-                if stop_before_model
-                else ()
-            ),
+                (
+                    "upstream_dependencies_insufficient"
+                    if not scope.station_refs
+                    else "no_usable_local_or_upstream_evidence"
+                ),
+            )
+            if stop_before_model
+            else (),
         )
 
     async def execute_optional(
@@ -411,6 +435,10 @@ class EvidenceAcquisitionService:
             tool_roster=self._registry.roster(scope),
             executor=self._executor,
             cell_gates=_cell_gates(bundle.cells),
+            usable_upstream_comids=await self._usable_upstream_comids(
+                scope,
+                bundle.fragment_refs,
+            ),
             stop_before_model=stop_before_model,
             stop_facts=tuple(dict.fromkeys(stop_facts)),
             block_facts=tuple(dict.fromkeys(block_facts)),
@@ -638,16 +666,45 @@ class EvidenceAcquisitionService:
         self,
         scope: EvidenceSessionScope,
         references: tuple[EvidenceFragmentReference, ...],
+        *,
+        parameters: tuple[ParameterKey, ...],
     ) -> bool:
         for reference in references:
             fragment = await self._reader.read_fragment(scope, reference)
             if (
                 fragment.applicability is EvidenceApplicability.DIRECT_MEASUREMENT
+                and set(fragment.parameter_refs) & set(parameters)
                 and fragment.quality_class
                 in {EvidenceQualityClass.VALID, EvidenceQualityClass.SUSPICIOUS}
             ):
                 return True
         return False
+
+    async def _has_usable_upstream(
+        self,
+        scope: EvidenceSessionScope,
+        references: tuple[EvidenceFragmentReference, ...],
+    ) -> bool:
+        return bool(await self._usable_upstream_comids(scope, references))
+
+    async def _usable_upstream_comids(
+        self,
+        scope: EvidenceSessionScope,
+        references: tuple[EvidenceFragmentReference, ...],
+    ) -> tuple[str, ...]:
+        comids = set()
+        for reference in references:
+            fragment = await self._reader.read_fragment(scope, reference)
+            if (
+                isinstance(fragment.payload, UpstreamResultPayload)
+                and fragment.quality_class
+                in {EvidenceQualityClass.VALID, EvidenceQualityClass.SUSPICIOUS}
+            ):
+                comid = fragment.location.comid
+                if comid not in scope.direct_upstream_comids:
+                    raise EvidenceScopeViolationError()
+                comids.add(comid)
+        return tuple(sorted(comids))
 
     @staticmethod
     def _required_rule_requests(
