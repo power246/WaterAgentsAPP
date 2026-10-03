@@ -11,6 +11,15 @@ from app.ports.errors import (
     PortTimeoutError,
     PortUnavailableError,
     UnsupportedPortVersionError,
+    WaterbodyModelCancelledError,
+    WaterbodyModelContentFilteredError,
+    WaterbodyModelIncompleteError,
+    WaterbodyModelPortError,
+    WaterbodyModelProtocolError,
+    WaterbodyModelRefusalError,
+    WaterbodyModelTimeoutError,
+    WaterbodyModelTruncatedError,
+    WaterbodyModelUnavailableError,
 )
 from app.ports.event_publisher import EventPublisherPort
 from app.ports.facility_evidence import FacilityEvidencePort
@@ -61,6 +70,15 @@ __all__ = [
     "TranscriptEvidencePort",
     "UpstreamResultPort",
     "WaterObservationPort",
+    "WaterbodyModelCancelledError",
+    "WaterbodyModelContentFilteredError",
+    "WaterbodyModelIncompleteError",
+    "WaterbodyModelPortError",
+    "WaterbodyModelProtocolError",
+    "WaterbodyModelRefusalError",
+    "WaterbodyModelTimeoutError",
+    "WaterbodyModelTruncatedError",
+    "WaterbodyModelUnavailableError",
     "WeatherEvidencePort",
     "UnsupportedPortVersionError",
 ]

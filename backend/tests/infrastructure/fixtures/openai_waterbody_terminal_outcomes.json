@@ -1,0 +1,58 @@
+{
+  "completed_without_usage": [
+    {
+      "type": "response.completed",
+      "response": {
+        "id": "resp-complete",
+        "model": "waterbody-test",
+        "status": "completed",
+        "output": [
+          {"id": "output-complete", "type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "{\"decision\":\"evidence_ready\"}"}]}
+        ]
+      }
+    }
+  ],
+  "incomplete": [
+    {
+      "type": "response.incomplete",
+      "response": {"id": "resp-incomplete", "model": "waterbody-test", "status": "incomplete", "output": [], "incomplete_details": {"reason": "server_error"}}
+    }
+  ],
+  "truncated": [
+    {
+      "type": "response.incomplete",
+      "response": {"id": "resp-truncated", "model": "waterbody-test", "status": "incomplete", "output": [], "incomplete_details": {"reason": "max_output_tokens"}}
+    }
+  ],
+  "content_filtered": [
+    {
+      "type": "response.incomplete",
+      "response": {"id": "resp-filtered", "model": "waterbody-test", "status": "incomplete", "output": [], "incomplete_details": {"reason": "content_filter"}}
+    }
+  ],
+  "refused": [
+    {
+      "type": "response.completed",
+      "response": {
+        "id": "resp-refused",
+        "model": "waterbody-test",
+        "status": "completed",
+        "output": [
+          {"id": "message-refused", "type": "message", "role": "assistant", "content": [{"type": "refusal", "refusal": "I cannot complete this request."}]}
+        ]
+      }
+    }
+  ],
+  "cancelled": [
+    {
+      "type": "response.cancelled",
+      "response": {"id": "resp-cancelled", "model": "waterbody-test", "status": "cancelled", "output": []}
+    }
+  ],
+  "failed": [
+    {
+      "type": "response.failed",
+      "response": {"id": "resp-failed", "model": "waterbody-test", "status": "failed", "error": {"message": "fixture-private-provider-diagnostic"}}
+    }
+  ]
+}

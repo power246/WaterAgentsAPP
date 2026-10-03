@@ -49,3 +49,67 @@ class PortResponseLimitError(InvalidPortResponseError):
 
 class UnsupportedPortVersionError(InvalidPortResponseError):
     """Raised when a provider API version is not supported by the adapter."""
+
+
+class WaterbodyModelPortError(PortError):
+    """Base class for safe, provider-neutral waterbody model failures."""
+
+    code = "waterbody_model_error"
+    retryable = False
+    default_message = "The waterbody model request failed."
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        model: str,
+        operation_id: str,
+    ) -> None:
+        super().__init__(
+            self.default_message,
+            provider=provider,
+            operation=operation_id,
+        )
+        self.model = model
+
+
+class WaterbodyModelUnavailableError(WaterbodyModelPortError, PortUnavailableError):
+    code = "waterbody_model_unavailable"
+    retryable = True
+    default_message = "The waterbody model is unavailable."
+
+
+class WaterbodyModelTimeoutError(WaterbodyModelPortError, PortTimeoutError):
+    code = "waterbody_model_timeout"
+    retryable = True
+    default_message = "The waterbody model request timed out."
+
+
+class WaterbodyModelContentFilteredError(WaterbodyModelPortError):
+    code = "waterbody_model_content_filtered"
+    default_message = "The waterbody model response was filtered."
+
+
+class WaterbodyModelRefusalError(WaterbodyModelPortError):
+    code = "waterbody_model_refused"
+    default_message = "The waterbody model refused the request."
+
+
+class WaterbodyModelProtocolError(WaterbodyModelPortError, InvalidPortResponseError):
+    code = "waterbody_model_response_invalid"
+    default_message = "The waterbody model returned an invalid response."
+
+
+class WaterbodyModelTruncatedError(WaterbodyModelPortError):
+    code = "waterbody_model_truncated"
+    default_message = "The waterbody model response was truncated."
+
+
+class WaterbodyModelIncompleteError(WaterbodyModelPortError):
+    code = "waterbody_model_incomplete"
+    default_message = "The waterbody model response was incomplete."
+
+
+class WaterbodyModelCancelledError(WaterbodyModelPortError):
+    code = "waterbody_model_cancelled"
+    default_message = "The waterbody model request was cancelled."

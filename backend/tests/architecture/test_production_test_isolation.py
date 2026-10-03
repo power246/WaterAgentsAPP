@@ -145,6 +145,34 @@ def test_transcript_has_one_writer_and_one_reader_implementation() -> None:
     )
 
 
+def test_m6_has_one_runner_one_adapter_and_no_parallel_contract() -> None:
+    assert _class_definitions(APP_ROOT, "RunSingleWaterbodyAgent") == (
+        Path("application/reasoning/runner.py"),
+    )
+    assert _class_definitions(APP_ROOT, "OpenAIResponsesWaterbodyAdapter") == (
+        Path("infrastructure/adapters/openai_responses_waterbody.py"),
+    )
+    assert _class_definitions(APP_ROOT, "WaterbodyAgent" + "Runner") == ()
+
+    forbidden_tokens = (
+        "InferenceResult" + "V2",
+        "TimeWindowResult" + "V2",
+        "WATERAGENTS_M6_" + "ENABLED",
+        "WATERAGENTS_REASONING_" + "ENABLED",
+        "reasoning_" + "delta",
+    )
+    violations = []
+    for source_path in sorted(APP_ROOT.rglob("*.py")):
+        source = source_path.read_text(encoding="utf-8")
+        violations.extend(
+            f"{source_path.relative_to(APP_ROOT)}: {token}"
+            for token in forbidden_tokens
+            if token in source
+        )
+
+    assert violations == []
+
+
 def test_production_exposes_exactly_the_two_existing_sse_routes() -> None:
     application = create_app(AppSettings(_env_file=None))
     event_paths = {
@@ -166,7 +194,14 @@ def test_production_openapi_has_no_tool_invocation_or_test_route() -> None:
     assert not any(
         forbidden in path
         for path in paths
-        for forbidden in ("/__test__", "/tools", "/evidence/collect")
+        for forbidden in (
+            "/__test__",
+            "/tools",
+            "/evidence/collect",
+            "/reasoning",
+            "/agents/run",
+            "/models/complete",
+        )
     )
 
 
@@ -185,6 +220,31 @@ def test_frontend_does_not_consume_the_m5_test_route() -> None:
             encoding="utf-8",
             errors="ignore",
         ):
+            consumers.append(source_path.relative_to(FRONTEND_ROOT))
+
+    assert consumers == []
+
+
+def test_frontend_does_not_consume_a_direct_m6_surface() -> None:
+    forbidden = (
+        "/__test__/m6",
+        "/reasoning",
+        "/models/complete",
+        "/tools",
+        "/evidence/collect",
+    )
+    consumers = []
+    for source_path in FRONTEND_ROOT.rglob("*"):
+        if not source_path.is_file() or source_path.suffix not in {
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".vue",
+        }:
+            continue
+        source = source_path.read_text(encoding="utf-8", errors="ignore")
+        if any(path in source for path in forbidden):
             consumers.append(source_path.relative_to(FRONTEND_ROOT))
 
     assert consumers == []

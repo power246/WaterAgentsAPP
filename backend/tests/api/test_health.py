@@ -55,6 +55,12 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "evidence_preview_max_records": 32,
         "evidence_preview_max_bytes": 16384,
         "evidence_facility_max_centers": 32,
+        "reasoning_max_planning_turns": 6,
+        "reasoning_max_tool_calls_per_turn": 4,
+        "reasoning_max_cells_per_batch": 32,
+        "reasoning_max_batches": 24,
+        "reasoning_model_timeout_seconds": 90.0,
+        "reasoning_session_deadline_seconds": 600.0,
         "nws_user_agent_project": "WaterAgents",
         "nws_user_agent_contact": "wateragents@example.invalid",
         "google_geocoding_api_key": None,
@@ -213,6 +219,8 @@ def test_model_catalog_is_parsed_once_as_safe_role_metadata(
                     "provider": "configured-provider",
                     "model": "configured-model",
                     "roles": ["query_parser", "waterbody"],
+                    "context_window_tokens": 64_000,
+                    "max_output_tokens": 8_192,
                 }
             ]
         ),
@@ -223,6 +231,8 @@ def test_model_catalog_is_parsed_once_as_safe_role_metadata(
         "provider": "configured-provider",
         "model": "configured-model",
         "roles": ["query_parser", "waterbody"],
+        "context_window_tokens": 64_000,
+        "max_output_tokens": 8_192,
     }
 
 

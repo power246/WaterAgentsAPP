@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-10-01
+更新日期：2026-10-02
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -16,6 +16,11 @@
 - [M2 Implementation TODO](M2/m2_analysis_session_sse_implementation_todo.md)
 - [M5 设计决策](M5/m5_evidence_tools_design.md)
 - [M5 实施设计](M5/m5_evidence_tools_implementation_design.md)
+- [M6 设计决策](M6/m6_single_agent_reasoning_design.md)
+- [M6 实施设计](M6/m6_single_agent_reasoning_implementation_design.md)
+- [M6 Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)
+- [M6 API / 读取契约](M6/m6_single_agent_reasoning_api.md)
+- [M6 Implementation TODO](M6/m6_implementation_todo.md)
 - [M5 Policy Catalog](M5/m5_evidence_policy_catalog.md)
 - [M5 API / 读取契约](M5/m5_evidence_tools_api.md)
 
@@ -324,32 +329,40 @@ Contract changes:
 
 ### 必须实现
 
-- **M6-C01 — LLM 契约**：定型 LLM request、raw/structured response DTO、EvidencePolicy、SufficiencyPolicy 和 structured output parser。
-- **M6-C02 — Tool policy**：station-backed 水体的本地 observation/discharge preflight 由确定性 policy 在模型前执行；stationless 水体不注册该本地调用。Agent 根据任务、上游结果和 evidence 缺口决定是否调用 weather/facility/inspection/aggregation 等 optional tools，不能查询其他水体的 station/geometry。
+- **M6-C01 — LLM 契约**：定型 provider-neutral waterbody streaming port、LLM request、provider 可见 message/tool/structured response DTO、EvidencePolicy、SufficiencyPolicy 和 structured output validator。问题解析的一次性 LLM port 继续保持无 tools；水体 Agent 不能复用或放宽 parser adapter。
+- **M6-C02 — Tool policy 与不同取证起点**：station-backed 水体的本地 observation/discharge preflight 由确定性 policy 在模型前执行；preflight 成功但所有 usable cells 都自然为空时直接装配完整 indeterminate，不启动 planning 或 final reasoning。stationless 没有本地观测是正常起点，不注册本地 observation 调用；它先消费上游结果，再允许 Agent 根据任务和 evidence 缺口在预算内规划 weather/facility/inspection/aggregation 等 optional tools。两类水体都不能查询其他水体的 station/geometry。
 - **M6-C03 — 窗口完整性**：每个计划时间窗都必须生成结果，不得因证据缺失而省略 point。
 - **M6-C04 — 三态输出**：证据充分时输出 quantified；只能判断方向时输出 directional；完全缺证据时输出带 reason code/evidence refs 的 indeterminate。
-- **M6-C05 — Confidence**：Domain 只硬校验 `[0,1]`；评分、聚合和最终判断规则属于 reasoning 层，并保留 Agent 自主判断。
+- **M6-C05 — Confidence**：confidence 表示 Agent 对水质判断的把握，与风险等级和 evidence availability 正交。Agent 为 cell、series、逐窗口综合和日期范围总体判断分别输出 `[0,1]` confidence、理由与 refs；Domain/validator 只校验范围、字段和引用，不做平均或重算。后端固定的 `indeterminate/insufficient_evidence` confidence 为 0。
 - **M6-C06 — 多 series 差异**：M5/backend 不自动判定或标记“冲突观测”。system prompt 要求 Agent 检查 station/time/method/quality 等差异，引用所有影响判断的 series 并解释选择、保持不确定或输出 indeterminate；加权/折中/综合和任何多记录 aggregate 均为 inferred，只有一对一原样采用当前水体具体直接记录（可逆单位展示转换除外）为 observed。
 - **M6-C07 — 单位职责**：Agent 可选择目标单位，但实际换算必须调用确定性 unit tool。
 - **M6-C08 — Attribution**：attribution factor 引用 evidence，并标记 `basis: observed | correlated | inferred | hypothesized`。
 - **M6-C09 — 当前证据优先**：当前 session 的有效观测优先于历史推理。
-- **M6-C10 — Transcript**：prompt、raw LLM output、structured intermediate decision 和 final result 可写入 transcript。承接 M3 D22/M3-C16，为真实水体推理记录填入 COMID 和操作关联，结果关联完整过程及适用的公共上下文；不只保存最终总结引用的少量步骤。
+- **M6-C10 — Transcript**：prompt、provider 实际返回的可见消息与 tool calls、raw structured output、validated intermediate decision、repair 和 final result 可写入 transcript。承接 M3 D22/M3-C16，为真实水体推理记录填入 COMID 和操作关联，结果关联完整过程及适用的公共上下文；不只保存最终总结引用的少量步骤。provider 未返回的隐藏思维链不请求、不保存、不展示。
   - 按 D79 接入真实模型文本片段推送及消息正文整理，SSE 与数据库使用不同粒度；正文只保存一份，片段保持 live 续传身份，失败/取消保留实际输出和未完成语义。raw output、结构化决策和有效业务结果仍按各自类型处理，流式文本不能绕过结果校验，推送前跨片段脱敏及原可见性限制必须生效。
   - 承接 D33 的按需索引评估：基于真实关联/反向查询或性能需求决定是否建设 transcript_item_links，无需求继续使用 scope + 原显式引用读取；不得为预想需求强制加表。若建设，索引仅从原记录生成，与对应记录同批提交；用真实过程验证索引前后读取结果一致及写入失败整批回滚。该延后不豁免 M3-C16 的既有能力验收。
-- **M6-C11 — Final event**：定型 `session_completed` 的真实 inference-result payload，替换 M2 空 lifecycle payload，不保留 fake result 兼容结构。
+- **M6-C11 — Final event**：在现有 `session_completed` typed lifecycle payload 上原子增加水体 session 的真实 `result_ref` 和轻量 `result_summary`；问题解析等无结果 session 保持字段为空。不得新增同义 completion transport event，也不保留 fake result 兼容结构。
 - **M6-C12 — Correlation**：按 M3 D50–D52，以 run_id 关联整次分析的 SSE、日志与 transcript，适用的 Agent 记录使用独立 session_id；session_id 统一标识 Agent 上下文与本次完整执行，不另生成同义 agent_id。agent_role 表达职责，stage name 表达阶段，真实模型/工具等调用生成 operation_id UUID；开始/结束及直接关联 hook 保留操作身份，模型原 tool_call_id 保留在类型 payload 中。COMID、角色、Agent 名称和工具名称不代替执行身份。
-- **M6-C13 — History result 扩展**：在 M3 history/detail DTO 上增加真实 final result summary 和 final confidence；值必须来自持久化 result，不在 history 查询时重新推理。
-- **M6-C14 — 综合水质指标**：承接 M3 D21，用户所称“总体预测值”是跨多个参数的综合水质指标。定型所用指标、计算口径、单位/尺度、所需参数与缺失参数处理，提供有可追溯依据的结果；不能用 overall_confidence 或未经定义的分时段均值替代。对应水体的分时段预测、综合指标及推理概述/总结须能关联到真实 AnalysisDetail/transcript。
-- **M6-C15 — 模型调用前门禁**：在每个水体模型调用前按“目标 ParameterKey × 时间段”读取 M5 cell，并同时检查同窗 required-support discharge cell。目标与 discharge 都有 direct 或 capability allowed-indirect evidence 才能进入 LLM；只有侧面证据时保留不足事实并限制结果/置信度。任一缺失则该单元确定性生成 reason=`insufficient_evidence` 的 indeterminate；全部单元不足时整个水体乃至 run 不为措辞调用水体模型。provider unavailable/invalid/technical incomplete 是 blocker/技术失败，不当作 empty；天气 contextual evidence不能单独解锁。
+- **M6-C13 — History result 扩展**：在 M3 session summary、run snapshot 和 history/detail DTO 上增加由已持久化 result 投影的轻量结果摘要，包括日期范围总体 risk、availability 和 confidence。history 查询不得重新推理、重算风险或复制完整 result。
+- **M6-C14 — 综合水质判断**：承接 M3 D21，“总体预测值”在当前唯一 V1 收敛为**分类综合风险判断**，不设计任意 0–100 分或后端加权公式。Agent 按 prompt 规则输出 `none / low / medium / high / indeterminate`，并说明使用了什么证据、证据表示什么、为何选择该等级；后端不按最大值、均值或阈值重算。每个时间窗口有跨参数综合判断，日期范围另有总体判断；后端独立装配 `complete / partial / indeterminate` availability 及 counts/missing/blocker refs。风险、confidence 和 availability 不能互相替代，`none/low + partial` 不得表述为整体安全。对应结果、理由和概述须关联真实 AnalysisDetail/transcript。
+- **M6-C15 — 最终门禁**：evidence planning 完成并 seal 后，按“目标 ParameterKey × 时间段”读取当前 M5 cell，并同时检查同窗 required-support discharge cell。目标与 discharge 都有 direct 或 capability allowed-indirect evidence 才能进入 final reasoning；仅 allowed-indirect 时最多 directional，不能输出具体目标值。任一缺失则该 cell 由后端确定性生成 reason=`insufficient_evidence` 的 indeterminate；全部 cells 不足时不调用 reasoning batch 或 overall synthesis。stationless 在 seal 前允许发生有界 planning 模型调用，因此此规则只承诺 0 次 final reasoning，不把整个 session 谎报为 0 次模型调用。provider unavailable/invalid/technical incomplete 是 blocker/技术失败，不当作 empty；天气 contextual evidence 不能单独解锁。
+- **M6-C16 — 结果骨架与装配边界**：后端先固定 cell/window/parameter identity、完整窗口骨架、gate 范围、固定 indeterminate 和可引用 evidence allowlist；Agent 只输出 supported cells 的受约束 `ReasoningDraft`。validator 检查 schema、scope、枚举、数值/单位资格、observed 资格与引用闭包；assembler 只从 validated drafts 和固定 facts 生成 `InferenceResult`，不得评价或改写 Agent 的风险和 confidence。
+- **M6-C17 — 单 session 有界分批**：一个水体从 evidence planning 到 overall synthesis 始终属于同一个 Agent session。supported cells 按参数和连续窗口稳定分批，每批有硬 cell 数与总 batch 数上限；全部 batches 验证后由同一 waterbody model 做一次 synthesis，生成 series、逐窗口综合、日期范围总体、AnalysisDetail 和 AttributionSummary 草稿。无 supported cell 时不存在 batch 或 synthesis。
+- **M6-C18 — 实时会话上下文就是推理过程**：不新增 reasoning/progress SSE、摘要流或第三条事件流。Agent 可见文本沿用 session SSE 的 `message_started / message_delta / message_finalized`；tool call/result、evidence、decision、repair、synthesis 和 final result 作为 typed item 沿用 `transcript_item`。首次订阅回放、整数 cursor、去重、stream_end、断线续传、取消和晚到输出继续遵守 M3；run SSE 只保留轻量完整快照，不复制 Agent 正文或 tool payload。
+- **M6-C19 — 修复、失败与预算**：每个 reasoning batch 和 overall synthesis 在正常响应不满足机械 schema 时，最多用同一模型、同一 scope 修复一次，不允许新 tool、新 evidence 或 failover。再次无效则整个 waterbody session failed；已验证 batch 仅留 transcript 审计，不发布部分正式结果或向 M7 传播。planning turns、每轮 tool calls、batch cells、总 batches、模型 timeout 和 session deadline 都有硬上限；风险结论与后端预期不同不是 repair 条件。
 
 ### 验收重点
 
-- **M6-A01**：fake EvidenceBundle 跑出完整 InferenceResult，三种状态都有正反例。
-- **M6-A02**：每个窗口有 source、confidence 和 evidence refs，结果与归因引用闭包成立。
+- **M6-A01**：fake EvidenceBundle 跑出完整 InferenceResult，quantified、directional、Agent-selected indeterminate 和 fixed indeterminate 都有正反例；所有计划窗口精确覆盖且不重叠。
+- **M6-A02**：每个窗口有 outcome、risk、confidence、rationales 和 evidence refs；series、逐窗口综合、日期范围总体及 attribution 的引用闭包成立。indeterminate source 为 null，fixed insufficient confidence 为 0。
 - **M6-A03**：多 series 明显差异、无证据和未知单位不会被静默猜测或丢弃；后端不依赖自动冲突 detector，Agent 是否解释、保持不确定或 indeterminate 可由 prompt/validator fixture 证明。
-- **M6-A04**：completed event、日志和 transcript 中的 result identity/版本一致。
-- **M6-A05**：综合水质指标按 M6-C14 定型的规则产出，已知输入可验证，缺失参数时按明确规则表达可用性，指标与置信度不混淆；持久化后能读取原结果和推理依据。
-- **M6-A06**：通过模型调用计数证明全无证据为 0 次、部分无证据只调用通过门禁的范围；确定性 indeterminate 覆盖所有计划窗口，允许侧面证据的结果明确降级且引用关系闭包成立。
+- **M6-A04**：completed item、session summary、run snapshot、history、日志和 transcript 中的 result identity/版本一致；结果与 completion 原子发布，history 只读持久化事实。
+- **M6-A05**：风险等级由 Agent 按 prompt 规则输出并附带可追溯简述；fixture 证明后端不根据数字阈值、参数最大值或平均值重算。逐窗口综合和日期范围总体与 availability 同时存在，覆盖 `high + partial`、`low/none + partial` 和全 indeterminate。
+- **M6-A06**：通过分阶段模型调用计数证明 station-backed 全空为 0 planning/0 final reasoning，stationless 全不足允许有界 planning 但为 0 final reasoning，部分不足只将 supported cells 放入 final reasoning；确定性 indeterminate 覆盖全部未通过 cells，unavailable/invalid 不走自然无证据降级。
+- **M6-A07**：恶意或错误 draft 无法新增窗口、越权引用、覆盖 fixed cell、伪造 observed/单位或改变 identity；backend skeleton、validator 和 assembler 的测试证明权限边界闭合。
+- **M6-A08**：大输入稳定分批且不漏不重；每个 batch/synthesis 至多一次同 scope repair，第二次无效时 whole session failed、无 partial final result、无 M7 传播、无 failover。
+- **M6-A09**：真实 provider 可见消息按同 item identity 增量展示，tool/evidence/decision/result 通过既有 transcript_item 展示；首次订阅能回放此前上下文后无缝续接，断线/取消/晚到输出保持 M3 语义。不存在新增 transport event、第三条 SSE、合成推理摘要或隐藏思维链字段。
+- **M6-A10**：planning、tool、batch、timeout 和 session deadline 上限均有边界 fixture；预算耗尽不扩大权限、不丢 cell、不无限 retry，production OpenAPI 仍无 direct reasoning/tool route。
 
 ## 9. M7：Topology-Driven Multi-Agent Workflow
 
@@ -416,7 +429,7 @@ Contract changes:
   - 按 D75，首次查看未结束 Agent 直接无游标订阅 session SSE，消费已有全部可见记录后继续接收新增；无需先 GET transcript。重连按 D73 携带原消费游标，已结束 Agent/历史仍用统一 GET；共享客户端与内容模型，不新增第二套过程读取模型。
   - 按 D74 实现当前状态来源优先级：收到 run SSE 状态后，迟到的 GET 不覆盖；首次尚无 SSE 状态可使用 GET，断线核对与历史读取保留。不为此设计快照版本协议或时间戳比较。session 续传游标与内容 schema version 保持原义。
 - **M9-C09 — Demo 单 worker**：启动说明明确 demo 单进程、单 worker；不得通过未实现的共享状态暗示支持多 worker。
-- **M9-C10 — 地图结果与上下文阅读**：承接 M3 D21，分析完成后地图展示所有实际参与推理的水体；点击水体展示分时段预测、跨参数综合水质指标和推理概述/总结。从预测结果入口进入对应的具体推理上下文，skill/tool/hook 等按语义默认折叠、用户点击展开，与内容大小和是否已下载无关。前端依据真实结果与 transcript 引用关联，不把后端四种查询职责直接变成四层页面导航。
+- **M9-C10 — 地图结果与上下文阅读**：承接 M3 D21 与 M6-C14/M6-C18，分析完成后地图展示所有实际参与推理的水体；点击水体展示分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由。从结果入口进入对应 waterbody Agent session 的真实消息、tool、evidence、decision 与 result 上下文，skill/tool/hook 等按语义默认折叠、用户点击展开，与内容大小和是否已下载无关。前端不另造推理摘要流，不请求隐藏思维链，也不把后端四种查询职责直接变成四层页面导航。
   - 按 D66，run 执行中也允许选中已有 session 的水体观看实时上报，不要求先有最终结果；用户不能给 Agent 追加消息，但保留取消整个 run 的操作。SSE 连接时机按 D68，独立 session 的具体订阅协议继续定型，关闭查看连接不取消分析，历史读取不重新执行。
   - 按 [D68](M3/m3_transcript_history_design.md#d68按查看需要订阅水体-session已结束与历史使用统一读取)，前端打开水体实时过程时才订阅对应 session，切换水体或关闭过程视图时关闭旧订阅，不在进入 run 页面时连接所有 Agent。未被查看的 Agent 正常执行和保存，打开前的全部可见过程也必须能读全。已结束 Agent 和历史通过统一接口读取，auto 与严格 history 语义保留；完整记录与实时流的衔接协议继续定型。
   - 按 D69，当前 run 页面同时建立一条轻量 run 通知流，更新 run 状态、新 session、各 Agent 状态和保存变化。切换水体保持 run 连接，通常一页为一条 run 流加一条当前 session 流，离开页面才关闭两类连接；run 通知不承载完整 Agent 消息，历史不订阅实时流。
@@ -452,7 +465,7 @@ Contract changes:
   - 按 D47 验证 query 历史列表默认 50、最多 200 条，遵守创建时间/session_id 倒序及原样传回 next_cursor 的规则，不依赖总条数；状态更新不重新排序，刷新首页可见新分析，错误不能显示成正常空列表。
   - 按 D48 验证前端不解析或重建历史游标，服务重启后可继续读取；422 游标错误被明确展示/处理，不把错误响应当成首页或空列表。
   - 按 D49，首版前端历史列表使用 limit/cursor 浏览并展示既有字段，不依赖未提供的关键词、状态或日期筛选 API。
-- **M9-A07**：从地图上的每个参与水体可查看该水体的分时段预测、综合水质指标、概述/总结及对应推理流程；skill/tool/hook 小内容即使 inline 也默认折叠，大内容展开时能取得完整已保存内容。存储 preview、综合指标和置信度不混用。
+- **M9-A07**：从地图上的每个参与水体可查看该水体的分时段结果、逐窗口/日期范围风险、availability、Agent 理由及对应真实 session 上下文；实时消息、tool/evidence/decision/result 与历史回放一致。skill/tool/hook 小内容即使 inline 也默认折叠，大内容展开时能取得完整已保存内容；存储 preview、风险、confidence 和 availability 不混用。
   - 按 D66 验证 run 未结束时即可选中水体查看已有 session 的上报过程，不预造最终结果或未创建会话，不提供追加用户消息入口；run 停止操作与查看连接的关闭分离，具体 SSE 协议按最终定型结果验收。
   - 按 D67 验证前端仅请求 run cancel，不因当前只查看一个水体而缩小停止范围，也不将取消受理当作所有在途调用已停止；各 Agent 原终态保留。
   - 按 D68 验证查看才订阅、切换或关闭即释放旧连接，未订阅 Agent 的执行与保存不受影响；首次打开和切回均可取得此前完整可见过程，已结束 Agent 和历史使用统一读取，已结束但未保存的当前内容仍保留警告且不混入严格历史。首次衔接按 D75、续传按 D73 验收，消费身份与游标按 D78 验收，具体事件 DTO 继续定型。
@@ -523,7 +536,7 @@ M4 Milestone 0–10 已完成本机实现与契约审计；这里只索引本机
 
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
-| `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07` | [M4 契约覆盖矩阵](M4/m4_implementation_todo.md#契约覆盖矩阵)、[实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[API/前端接入](M4/m4_query_understanding_topology_api.md)和[154 项 capability 目录](M4/m4_parameter_capability_catalog.md)。固定 fake workflow、离线 manifest 审计、1 请求官方 refresh、完整非 PostgreSQL backend regression 与 standalone run SSE smoke 已在 Windows 本机通过。 | 在专用 PostgreSQL 测试库运行完整 persistence/health/history/restart，并补齐 Google 与已配置 parser provider contract smoke 及 Ubuntu/macOS/Windows 同一提交 CI 后，再评估中心最终承接。 |
+| `GLOBAL-C01`–`GLOBAL-C11`、`M4-C01`–`M4-C13`、`M4-A01`–`M4-A07` | [M4 契约覆盖矩阵](M4/m4_implementation_todo.md#契约覆盖矩阵实施时填写)、[实施设计](M4/m4_query_understanding_topology_implementation_design.md)、[API/前端接入](M4/m4_query_understanding_topology_api.md)和[154 项 capability 目录](M4/m4_parameter_capability_catalog.md)。固定 fake workflow、离线 manifest 审计、1 请求官方 refresh、完整非 PostgreSQL backend regression 与 standalone run SSE smoke 已在 Windows 本机通过。 | 在专用 PostgreSQL 测试库运行完整 persistence/health/history/restart，并补齐 Google 与已配置 parser provider contract smoke 及 Ubuntu/macOS/Windows 同一提交 CI 后，再评估中心最终承接。 |
 
 ### M5 待验收索引
 
@@ -533,7 +546,15 @@ M5 Milestone 0–13 已完成本机实现与契约审计；这里只索引本机
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、`M5-C01`–`M5-C20`、`M5-A01`–`M5-A08` | [M5 契约覆盖矩阵](M5/m5_implementation_todo.md#契约覆盖矩阵实施时填写)、[实施设计](M5/m5_evidence_tools_implementation_design.md)、[Policy Catalog](M5/m5_evidence_policy_catalog.md)、[API/读取契约](M5/m5_evidence_tools_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 fake workflow、official provider fixtures、154 项 manifest/policy、geometry/corridor、五类 typed content、production OpenAPI、专用 PostgreSQL 和 M1–M4 完整回归均已在 Windows 本机通过。 | 以安全的 station/series/time、NWS contact 和 EPA geometry 配置分别执行真实 USGS/NWS/EPA contract smoke，并在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke；通过后再评估中心最终承接表的 `implemented` 记录。 |
 
-未新增、拆分、替换或取消 contract；Milestone 11–16 是既有 M3/Global/MR 约束的审查修复分解。M2 CI 待验收仍属于 M2 Milestone 7/8；M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
+### M6 待验收索引
+
+M6 Milestone 0–13 已完成 Windows 本机实现与契约审计；这里只索引本机和专用 PostgreSQL 证据，不把缺少的真实 OpenAI waterbody provider 请求或 Ubuntu/macOS/Windows 同提交 CI 冒充中心最终承接。M6 继续只执行一个已经存在的 waterbody session；M7 DAG/direct-upstream、M8 transcript RAG 和 M9 frontend/settings/admin 没有提前实现。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M6-C01`–`M6-C19`、`M6-A01`–`M6-A10` | [M6 契约覆盖矩阵](M6/m6_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 fake E2E、官方 Responses fixtures、五级风险/三态结果、sealed gate/batch/repair、六类 typed content、现有两层 SSE、production OpenAPI、专用 `wateragents_test` history/restart/startup-repair 及完整 M1–M6 regression 已在 Windows 本机通过。 | 取得明确授权和安全 model 配置后执行真实 OpenAI waterbody contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的同库跨系统迁移证据后，再评估中心最终承接表的 `implemented` 记录。 |
+
+M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
 ## 14. 维护规则
 

@@ -152,6 +152,7 @@ class StreamingMessage:
     metadata: TranscriptMetadata
     filter: StreamingCredentialFilter
     private_values: tuple[str, ...] = ()
+    base_safe_body: str | None = None
     safe_text: str = ""
     late_text: str = ""
     late_end_reason: MessageEndReason | None = None

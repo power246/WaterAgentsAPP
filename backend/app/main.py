@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Coroutine
+from typing import AsyncContextManager, Coroutine
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI
@@ -42,9 +42,12 @@ from app.infrastructure.persistence.database import (
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.infrastructure.runtime import (
+    M6Runtime,
     RuntimeComponents,
     build_m4_runtime,
     build_m5_runtime,
+    build_m6_runtime,
+    safe_m6_metadata,
 )
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
@@ -80,6 +83,9 @@ def create_app(
         [Coroutine[object, object, None], str],
         asyncio.Task[None],
     ] | None = None,
+    m6_runtime_builder: (
+        Callable[..., AsyncContextManager[M6Runtime]] | None
+    ) = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
     resolved_clock = clock if clock is not None else SystemClock()
@@ -165,15 +171,28 @@ def create_app(
                     clock=resolved_clock,
                 ) as m5_runtime:
                     coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
-                    application.state.run_coordinator = coordinator
-                    application.state.transcript_reader = transcript_reader
-                    application.state.transcript_store = active_store
-                    application.state.m5_runtime = m5_runtime
-                    try:
-                        yield
-                    finally:
-                        await coordinator.shutdown()
-                        coordinator = None
+                    active_m6_builder = m6_runtime_builder or build_m6_runtime
+                    async with active_m6_builder(
+                        resolved_settings,
+                        operations=coordinator,
+                        m5_runtime=m5_runtime,
+                        capability_registry=resolved_parameter_capabilities,
+                        model_catalog=resolved_model_catalog.snapshot(),
+                        clock=resolved_clock,
+                        operation_id_factory=id_factory,
+                        result_id_factory=lambda: str(id_factory()),
+                        error_id_factory=id_factory,
+                    ) as m6_runtime:
+                        application.state.run_coordinator = coordinator
+                        application.state.transcript_reader = transcript_reader
+                        application.state.transcript_store = active_store
+                        application.state.m5_runtime = m5_runtime
+                        application.state.m6_runtime = m6_runtime
+                        try:
+                            yield
+                        finally:
+                            await coordinator.shutdown()
+                            coordinator = None
             finally:
                 if coordinator is not None:
                     await coordinator.shutdown()
@@ -253,6 +272,10 @@ def create_app(
             ],
             "max_target_parameters": 6,
         }
+        schema["x-m6-runtime"] = safe_m6_metadata(
+            resolved_settings,
+            resolved_model_catalog.snapshot(),
+        )
         return schema
 
     application.openapi = openapi_with_create_body

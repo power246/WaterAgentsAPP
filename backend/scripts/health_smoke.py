@@ -50,6 +50,8 @@ def run_health_smoke(settings) -> None:
                 "provider": "openai",
                 "model": "health-smoke-waterbody",
                 "roles": ["waterbody"],
+                "context_window_tokens": 128_000,
+                "max_output_tokens": 32_768,
             },
         ],
         separators=(",", ":"),

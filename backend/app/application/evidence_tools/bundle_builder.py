@@ -191,8 +191,6 @@ class EvidenceBundleBuilder:
                 rule = rules_by_id.get(fragment.payload.rule_id)
                 if (
                     rule is None
-                    or fragment.payload.plan_digest
-                    != scope.evidence_rule_plan.plan_digest
                     or fragment.parameter_refs != (rule.output_parameter,)
                 ):
                     raise EvidenceScopeViolationError()

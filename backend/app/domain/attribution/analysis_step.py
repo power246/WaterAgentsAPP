@@ -15,11 +15,16 @@ class AnalysisStep(DomainModel):
     title: NonEmptyString
     content: JsonValue
     evidence_refs: tuple[NonEmptyString, ...] = ()
+    result_cell_refs: tuple[NonEmptyString, ...] = ()
     transcript_item_refs: tuple[NonEmptyString, ...] = ()
 
     @model_validator(mode="after")
     def validate_references(self) -> Self:
         ensure_unique_tuple(self.evidence_refs, field_name="evidence_refs")
+        ensure_unique_tuple(
+            self.result_cell_refs,
+            field_name="result_cell_refs",
+        )
         ensure_unique_tuple(
             self.transcript_item_refs,
             field_name="transcript_item_refs",

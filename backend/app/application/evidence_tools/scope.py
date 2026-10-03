@@ -35,6 +35,7 @@ class EvidenceWindow:
 class EvidenceSessionScope:
     run_id: str
     session_id: str
+    session_ref: ReferenceScope
     agent_comid: str
     query: str
     analysis_context_ref: ReferenceScope
@@ -61,6 +62,7 @@ class EvidenceSessionScope:
         *,
         run_id: str,
         session_id: str,
+        session_ref: ReferenceScope,
         agent_comid: str,
         query: str,
         analysis_context_ref: ReferenceScope,
@@ -91,6 +93,7 @@ class EvidenceSessionScope:
         values = {
             "run_id": run_id,
             "session_id": session_id,
+            "session_ref": session_ref,
             "agent_comid": agent_comid,
             "query": query,
             "analysis_context_ref": analysis_context_ref,
@@ -174,6 +177,7 @@ def assemble_evidence_session_scope(
     return EvidenceSessionScope(
         run_id=run_id,
         session_id=session_id,
+        session_ref=session_fact,
         agent_comid=agent_comid,
         query=context.query,
         analysis_context_ref=analysis_context_ref,
@@ -194,6 +198,40 @@ def assemble_evidence_session_scope(
         time_resolution_source=context.time_resolution_source,
         query_envelope=_build_query_envelope(context),
         cancel_token=cancel_token,
+        _seal=_SCOPE_SEAL,
+    )
+
+
+def with_evidence_rule_plan(
+    scope: EvidenceSessionScope,
+    evidence_rule_plan: EvidenceRulePlan,
+) -> EvidenceSessionScope:
+    """Return the same sealed session scope with an append-only rule-plan view."""
+
+    return EvidenceSessionScope(
+        run_id=scope.run_id,
+        session_id=scope.session_id,
+        session_ref=scope.session_ref,
+        agent_comid=scope.agent_comid,
+        query=scope.query,
+        analysis_context_ref=scope.analysis_context_ref,
+        topology_ref=scope.topology_ref,
+        topology=scope.topology,
+        target_node=scope.target_node,
+        time_windows=scope.time_windows,
+        requested_parameters=scope.requested_parameters,
+        supporting_parameters=scope.supporting_parameters,
+        evidence_rule_plan=evidence_rule_plan,
+        station_refs=scope.station_refs,
+        geometry_ref=scope.geometry_ref,
+        direct_upstream_comids=scope.direct_upstream_comids,
+        memory_mode=scope.memory_mode,
+        mode=scope.mode,
+        analysis_timezone=scope.analysis_timezone,
+        time_resolution=scope.time_resolution,
+        time_resolution_source=scope.time_resolution_source,
+        query_envelope=scope.query_envelope,
+        cancel_token=scope.cancel_token,
         _seal=_SCOPE_SEAL,
     )
 

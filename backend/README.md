@@ -139,7 +139,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_HOST` | `127.0.0.1` |
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
-| `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with only `provider`, `model`, and `roles` (`query_parser` / `waterbody`) |
+| `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with `provider`, `model`, and `roles`; every `waterbody` model also requires its exact `context_window_tokens` and `max_output_tokens` |
 | `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `100` |
 | `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `12` |
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
@@ -175,9 +175,11 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_LIVE_STATE_GRACE_SECONDS` | `60` |
 | `WATERAGENTS_SHUTDOWN_SAVE_GRACE_SECONDS` | `5` |
 
+Each waterbody token limit belongs to that exact provider/model entry. Copy the selected model's documented limits; do not reuse one provider-wide default for multiple models.
+
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
-Production startup builds the complete M4 runtime before opening the database. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The catalog stores only public model identities and role metadata; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
+Production startup builds the complete M4 runtime before opening the database. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry with explicit token limits, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
 
 ### Local PostgreSQL with Compose
 

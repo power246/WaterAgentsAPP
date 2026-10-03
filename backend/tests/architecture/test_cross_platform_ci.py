@@ -1,5 +1,10 @@
 import ast
+import json
+import re
 from pathlib import Path
+
+from app.domain import ModelRole
+from app.infrastructure.config import AppSettings
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "backend-m1.yml"
@@ -48,6 +53,27 @@ def test_ci_commands_do_not_require_a_platform_specific_shell() -> None:
     )
 
     assert not any(command in workflow for command in platform_specific_commands)
+
+
+def test_ci_model_catalog_matches_the_runtime_settings_schema() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    match = re.search(
+        r"WATERAGENTS_MODEL_CATALOG:\s*'([^'\n]+)'",
+        workflow,
+    )
+
+    assert match is not None
+    settings = AppSettings(
+        _env_file=None,
+        model_catalog=json.loads(match.group(1)),
+    )
+    waterbody_capabilities = tuple(
+        capability
+        for capability in settings.model_catalog
+        if ModelRole.WATERBODY in capability.roles
+    )
+
+    assert waterbody_capabilities
 
 
 def test_tests_and_direct_async_smoke_share_windows_loop_initialization() -> None:

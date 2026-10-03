@@ -7,6 +7,8 @@ import pytest
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
+    SessionResultReference,
+    SessionResultSummary,
     SessionSummary,
 )
 from app.application.evidence_tools import (
@@ -183,16 +185,38 @@ def _upstream_port(
     duplicate_closure=False,
 ):
     upstream_session_id = "00000000-0000-0000-0000-000000000200"
+    upstream_result_item_id = "00000000-0000-0000-0000-000000000300"
     upstream_comid = scope.direct_upstream_comids[0]
     reference_session_id = reference_session_id or upstream_session_id
+    target_comid = session_comid or upstream_comid
+    completed = session_status is AgentSessionStatus.COMPLETED
     store.seed_session(
         SessionSummary(
             session_id=UUID(upstream_session_id),
             agent_role=AgentRole.WATERBODY,
-            target_comid=session_comid or upstream_comid,
+            target_comid=target_comid,
             status=session_status,
             created_at=scope.query_envelope.start,
             updated_at=scope.query_envelope.end,
+            result_ref=(
+                SessionResultReference(
+                    run_id=UUID("00000000-0000-0000-0000-000000000100"),
+                    item_id=UUID(upstream_result_item_id),
+                )
+                if completed
+                else None
+            ),
+            result_summary=(
+                SessionResultSummary(
+                    result_id=f"result:{upstream_comid}",
+                    target_comid=target_comid,
+                    risk_level="indeterminate",
+                    availability="indeterminate",
+                    overall_confidence=0.0,
+                )
+                if completed
+                else None
+            ),
         )
     )
 
@@ -202,7 +226,7 @@ def _upstream_port(
             window = next(item for item in scope.time_windows if item.window_id == window_id)
             for parameter in plan.parameter_keys:
                 suffix = f"{parameter.code}-{window_id}"
-                result_ref = ItemReference(item_id=f"upstream-result-{suffix}")
+                result_ref = ItemReference(item_id=upstream_result_item_id)
                 closure_ref = ItemReference(item_id=f"upstream-bundle-{suffix}")
                 store.seed_scope(
                     result_ref.item_id,
@@ -261,7 +285,7 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
         full = await _runtime(
             full_store,
             water_port=_water_port(full_scope),
-        ).acquire(full_scope)
+        ).start(full_scope)
         assert not full.stop_before_model
         assert {item.status for item in full.cell_gates} == {
             EvidenceCellStatus.SUPPORTED
@@ -277,19 +301,22 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
             session_id="session-partial",
         )
         partial_store = MemoryEvidenceStore()
-        partial = await _runtime(
+        partial_service = _runtime(
             partial_store,
             water_port=_water_port(partial_scope, mode="partial"),
             weather_port=optional,
-        ).acquire(
+        )
+        partial = await partial_service.start(partial_scope)
+        partial = await partial_service.execute_optional(
             partial_scope,
-            optional_requests=(
+            (
                 _optional_request(
                     partial_scope,
                     "collect_weather_evidence",
                     call_id="weather-partial",
                 ),
             ),
+            partial,
         )
         assert not partial.stop_before_model
         assert optional.calls
@@ -305,16 +332,7 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
                 store,
                 water_port=_water_port(scope, mode=mode),
                 weather_port=skipped_optional,
-            ).acquire(
-                scope,
-                optional_requests=(
-                    _optional_request(
-                        scope,
-                        "collect_weather_evidence",
-                        call_id=f"weather-{mode}",
-                    ),
-                ),
-            )
+            ).start(scope)
             model_calls = 0
             if not handoff.stop_before_model:
                 model_calls += 1
@@ -397,7 +415,7 @@ def test_required_rain_and_discharge_rule_materializes_directional_support(
             store,
             water_port=_water_port(scope),
             weather_port=weather,
-        ).acquire(scope)
+        ).start(scope)
 
         relations = tuple(
             fragment
@@ -437,7 +455,7 @@ def test_station_backed_technical_failure_and_incomplete_are_not_natural_empty(
                 port = FakeCollectionPort(fail)
             else:
                 port = _water_port(scope, mode=mode)
-            handoff = await _runtime(store, water_port=port).acquire(scope)
+            handoff = await _runtime(store, water_port=port).start(scope)
             assert not handoff.stop_before_model
             assert expected in handoff.block_facts
             assert {item.status for item in handoff.cell_gates} == {
@@ -478,7 +496,7 @@ def test_station_backed_cancellation_returns_auditable_technical_handoff(scope_f
 
         water = CancelAfterConfirmedBatch()
         task = asyncio.create_task(
-            _runtime(store, water_port=water).acquire(scope)
+            _runtime(store, water_port=water).start(scope)
         )
         await water.started.wait()
         cancel_event.set()
@@ -556,7 +574,7 @@ def test_stationless_consumes_only_upstream_and_indeterminate_never_unlocks_gate
             water_port=water,
             upstream_port=upstream,
             upstream_ready=True,
-        ).acquire(scope)
+        ).start(scope)
         assert water.calls == []
         assert upstream.calls
         assert "collect_water_observations" not in {
@@ -618,7 +636,7 @@ def test_upstream_output_is_authorized_before_it_can_support_cells(
                 **overrides,
             ),
             upstream_ready=True,
-        ).acquire(scope)
+        ).start(scope)
 
         assert len(store.calls) == 1
         assert len(store.results) == 1
@@ -647,13 +665,15 @@ def test_stationless_unavailable_upstream_allows_bounded_optional_context(
         store = MemoryEvidenceStore()
         weather = FakeCollectionPort(lambda plan: complete_batch(plan))
         facility = FakeCollectionPort(lambda plan: complete_batch(plan))
-        handoff = await _runtime(
+        service = _runtime(
             store,
             weather_port=weather,
             facility_port=facility,
-        ).acquire(
+        )
+        handoff = await service.start(scope)
+        handoff = await service.execute_optional(
             scope,
-            optional_requests=(
+            (
                 _optional_request(
                     scope,
                     "collect_weather_evidence",
@@ -666,6 +686,7 @@ def test_stationless_unavailable_upstream_allows_bounded_optional_context(
                     options=EvidenceToolOptions(facility_radius_miles=20),
                 ),
             ),
+            handoff,
         )
         assert weather.calls and facility.calls
         assert "evidence_producer_unavailable" in handoff.block_facts
@@ -699,8 +720,10 @@ def test_acquisition_rejects_non_optional_requests_before_execution(evidence_sco
             window_ids=(evidence_scope.time_windows[0].window_id,),
             parameter_keys=evidence_scope.requested_parameters,
         )
+        handoff = await service.start(evidence_scope)
+        calls_before = tuple(store.calls)
         with pytest.raises(EvidenceScopeViolationError):
-            await service.acquire(evidence_scope, optional_requests=(request,))
-        assert store.calls == []
+            await service.execute_optional(evidence_scope, (request,), handoff)
+        assert tuple(store.calls) == calls_before
 
     asyncio.run(exercise())

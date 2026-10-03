@@ -20,9 +20,20 @@ class ModelCatalogSnapshot(DomainModel):
         return self
 
     def supports(self, selection: ModelSelection, role: ModelRole) -> bool:
-        return any(
-            capability.provider == selection.provider
-            and capability.model == selection.model
-            and role in capability.roles
-            for capability in self.capabilities
+        return self.capability_for(selection, role) is not None
+
+    def capability_for(
+        self,
+        selection: ModelSelection,
+        role: ModelRole,
+    ) -> ModelCapability | None:
+        return next(
+            (
+                capability
+                for capability in self.capabilities
+                if capability.provider == selection.provider
+                and capability.model == selection.model
+                and role in capability.roles
+            ),
+            None,
         )

@@ -106,7 +106,10 @@ def finalize_query_parser_message(
     text: str,
     generation_status: GenerationStatus,
     end_reason: MessageEndReason | None,
+    base_body: object | None = None,
 ) -> QueryParserMessageV1:
+    if base_body is not None:
+        raise TypeError("query parser messages do not use a generating body")
     return QueryParserMessageV1(
         text=text,
         generation_status=generation_status,
