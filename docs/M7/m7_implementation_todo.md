@@ -2,7 +2,7 @@
 
 更新日期：2026-10-03
 
-> 当前状态：Milestone 0–1 已完成本机基线、架构红线与当前唯一 V1 类型/投影骨架，Milestone 2–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
+> 当前状态：Milestone 0–2 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架及 run-local direct-upstream evidence seam，Milestone 3–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
 
 本清单执行以下已确认文档：
 
@@ -151,29 +151,37 @@
 
 ### 工作
 
-- [ ] 实现 run-local immutable outcome store：每个 active COMID 只能发布一次 canonical outcome，记录 session/result/ref/availability/dependency status；重复或身份不一致发布失败。
-- [ ] 实现真实 `UpstreamResultPort`，只允许当前 node 的 participating direct-upstream COMIDs、同 run、已收敛 outcome；拒绝祖先越级、兄弟、下游、任意 station/COMID 和跨 run 读取。
-- [ ] usable outcome 投影为现有 `ProviderCollectionBatch[UpstreamResultRecord]`，包含 result/confidence/evidence summary/uncertainty、逐窗口 discharge 状态和闭合 refs；不重算、不加权、不覆盖本地 evidence。
-- [ ] insufficient/invalid/cancelled 为 0 `UpstreamResultRecord`，但全部 direct dependency 状态进入稳定排序的 `waterbody_dependency_manifest v1`；invalid 不含内部错误、结果或 evidence refs。
-- [ ] 将 manifest 作为 downstream prompt 中 dependency status 的唯一事实源；M5 descriptor/scope/options/request-shape 的 pure preflight 仍在 scope preparation/call audit 之前，合法调用后的失败仍保留原 typed audit。
-- [ ] producer 发布与 collect authorization 复用 topology snapshot，不另建 Agent-to-Agent channel、共享 mutable prompt 或跨 run cache。
+- [x] 实现 run-local immutable outcome store：每个 active COMID 只能发布一次 canonical outcome，记录 session/result/ref/availability/dependency status；重复或身份不一致发布失败。
+- [x] 实现真实 `UpstreamResultPort`，只允许当前 node 的 participating direct-upstream COMIDs、同 run、已收敛 outcome；拒绝祖先越级、兄弟、下游、任意 station/COMID 和跨 run 读取。
+- [x] usable outcome 投影为现有 `ProviderCollectionBatch[UpstreamResultRecord]`，包含 result/confidence/evidence summary/uncertainty、逐窗口 discharge 状态和闭合 refs；不重算、不加权、不覆盖本地 evidence。
+- [x] insufficient/invalid/cancelled 为 0 `UpstreamResultRecord`，但全部 direct dependency 状态进入稳定排序的 `waterbody_dependency_manifest v1`；invalid 不含内部错误、结果或 evidence refs。
+- [x] 将 manifest 作为 downstream prompt 中 dependency status 的唯一事实源；M5 descriptor/scope/options/request-shape 的 pure preflight 仍在 scope preparation/call audit 之前，合法调用后的失败仍保留原 typed audit。
+- [x] producer 发布与 collect authorization 复用 topology snapshot，不另建 Agent-to-Agent channel、共享 mutable prompt 或跨 run cache。
 
 ### Tests
 
-- [ ] chain/diamond direct-upstream allow/deny、同 run identity、发布 exact once、乱序输入稳定 manifest。
-- [ ] usable 记录字段/ref 闭包；insufficient/invalid/cancelled 均 0 records，且 invalid 不泄露错误正文。
-- [ ] M5 pure preflight 保持 invalid input `0 scope prepare / 0 call / 0 result`；合法 collect failure 仍有 typed call/result audit。
+- [x] chain/diamond direct-upstream allow/deny、同 run identity、发布 exact once、乱序输入稳定 manifest。
+- [x] usable 记录字段/ref 闭包；insufficient/invalid/cancelled 均 0 records，且 invalid 不泄露错误正文。
+- [x] M5 pure preflight 保持 invalid input `0 scope prepare / 0 call / 0 result`；合法 collect failure 仍有 typed call/result audit。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_upstream_result_store.py backend/tests/application/evidence_tools/test_upstream_result_provider.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools backend/tests/domain/evidence -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_evidence_tool_boundaries.py -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools/test_upstream_result_store.py backend/tests/application/evidence_tools/test_upstream_result_provider.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools backend/tests/domain/evidence -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_evidence_tool_boundaries.py -q`
+- [x] `git diff --check`
 
 阶段出口：下游可通过原 M5 evidence seam 安全读取“仅直接上游、仅 usable”的真实记录，同时完整看到所有直接依赖状态；无 scheduler 或水体启动决策。
 
 提交边界：仅 outcome store/upstream projection/M5 collect adapter、manifest builder 与对应测试；不得创建 sessions、运行 M6 runner 或汇总 Agent。
+
+#### Milestone 2 完成记录（2026-10-03）
+
+- 实现：新增 run-local immutable outcome store、可信 transcript result/closure reader、usable-only `UpstreamResultRecord` projection 与稳定 dependency manifest builder；授权完全复用保存后的 topology，只接受同 run、已收敛、participating direct-upstream outcomes，并提供 run cleanup，不引入跨 run cache 或 Agent-to-Agent channel。
+- 安全：usable result/session/cell/closure identity 在发布时机械复核；insufficient/invalid/cancelled 均返回 0 records，manifest 仍保留全部 direct dependency statuses，invalid 的内部 error/result/evidence refs 不下传。M5 invalid request 保持 `0 scope prepare / 0 call / 0 result`，合法 producer failure 保留 typed call/result audit。
+- 验证：M2 focused `11 passed`；evidence-tools/domain gate `86 passed`；完整 domain/application gate `432 passed`；M2 architecture gate `2 passed`，完整 architecture gate `122 passed`；最终完整 `backend/tests`（含 Docker PostgreSQL）`1880 passed, 1 warning`，warning 仅为既有 Starlette/httpx 弃用提示。普通权限完整 architecture 首次因 Windows pytest 临时目录 ACL 拒绝，提升权限使用独立目录后通过；真实外部 provider 与三平台 CI `not run`。
+- 边界：未创建 waterbody session、未运行 M6 runner、未接 DAG scheduler/workflow、未注册 M7 typed contents，也未实现 run summarizer 或 frontend；Milestone 3–9 尚未开始。
+- 提交：本完成记录与 M2 store/provider/manifest/tests 由当前本地提交保存。
 
 ## Milestone 3：水体启动门禁与零模型正式结果
 
@@ -388,14 +396,14 @@
 |---|---|---|---|---|
 | GLOBAL-C01 | pending | 当前 `backend/`、M0 archive guards | archive isolation、production import scan | 不读取或复用归档。 |
 | GLOBAL-C02 | partial | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | M1 类型和直接消费者已本机验证；runtime/registry 仍待后续阶段。 |
-| GLOBAL-C06 | partial | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | M1 schema ref closure 已验证；真实 store/assembler 待 M2/M6。 |
+| GLOBAL-C06 | partial | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | M2 真实 store/upstream ref closure 已本机验证；summary validator/result assembler 待 M6。 |
 | GLOBAL-C07 | pending | logs、transcript、public projection、provider adapter | secret/error/provider envelope scans | internal error 只留后端。 |
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
 | GLOBAL-C09 | partial | typed models、writer/reader、snapshot/history | serialization/persistence/reload | M1 payload/snapshot/read projection 与 session role persistence 已验证；typed writer/reload 待 M7。 |
 | GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
 | GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | 只有实际平台证据才能升级状态。 |
 | M7-C01 | pending | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 等待全部直接上游后只判定一次。 |
-| M7-C02 | pending | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | 所有 direct statuses 可见，只有 usable 是 evidence。 |
+| M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
 | M7-C03 | pending | run context/node task handoff | gap_filling/prediction/mixed fixtures | mode/window 不漂移。 |
 | M7-C04 | pending | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | 先封调度，再通知已有 sessions。 |
 | M7-C05 | pending | provider/tool late-output audit | cancelled stream/late callback tests | 晚到结果不对外或下传。 |
@@ -403,11 +411,11 @@
 | M7-C07 | pending | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 无第二套 run-wide quota。 |
 | M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M1 构造不变量已验证；assembler/lifecycle 提交待 M5/M7。 |
 | M7-C09 | pending | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | insufficient 正式结果保留但不传播 evidence。 |
-| M7-C10 | pending | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | 后端不重算或发明系数。 |
+| M7-C10 | partial | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | M2 projection 原样保留 source/confidence/ref 且不重算；dependency prompt 与 M6 gate 待 M3。 |
 | M7-C11 | partial | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M1 target + all-card/ref/no-tools schema 已验证；prompt/runner 待 M6。 |
 | M7-C12 | pending | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary 失败不抹掉 target/waterbody results。 |
 | M7-A01 | pending | production workflow fake topology | 3+ nodes、event/session order、exact once | session 不预建。 |
-| M7-A02 | pending | manifest/upstream bundle | status/evidence/ref/merge fixtures | invalid/insufficient 0 records。 |
+| M7-A02 | partial | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 manifest、M5 collect/validation 与 invalid/insufficient/cancelled 0 records 已验证；完整 launch/bundle handoff 待 M3/M5。 |
 | M7-A03 | pending | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 无新下游动作并最终 quiesced。 |
 | M7-A04 | pending | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | 迟到内容只可审计。 |
 | M7-A05 | pending | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径均保存正式 session/result。 |
