@@ -293,29 +293,34 @@
 
 ### 工作
 
-- [ ] 实现 `application/run_summary` prompt builder、runner、validator 与 transcript adapter；全部 active waterbody outcomes settle 后才创建 `run_summarizer` session，`target_comid=null`。
-- [ ] 复用本 run 精确 `waterbody_model` selection 与现有 provider adapter/可见消息流；summary 无 tools、无第三模型设置、无 fallback，主调用一次，schema repair 至多一次且同模型/同 scope。
-- [ ] input builder 只读持久化安全业务投影：target 一份 full projection，其他每个 active node 恰好一张 compact card，稳定 topology 顺序；technical details、secrets、原始 provider envelope 和隐藏 reasoning 不进入 prompt。
-- [ ] prompt 要求用浅显语言说明全流程、目标结论、分支覆盖/限制和特殊值；不得改变水体科学结论、重新评分、补造缺失数字或把 insufficient 猜成 0。
-- [ ] validator 对任何数字 highlight 强制 exact value、unit、window、source refs，并验证 refs 属于输入；允许非数字特殊发现带 refs。拒绝 Agent URL、scope 外 COMID/ref、遗漏 target/coverage 和不支持的断言。
-- [ ] summary 失败保存 failed session 和安全 public failure，详细异常只进 backend log/audit；不生成固定模板、拼接 fallback 或旧 summary。target 有效时仍允许后续 run completed。
+- [x] 实现 `application/run_summary` prompt builder、runner、validator 与 transcript adapter；全部 active waterbody outcomes settle 后才创建 `run_summarizer` session，`target_comid=null`。
+- [x] 复用本 run 精确 `waterbody_model` selection 与现有 provider adapter/可见消息流；summary 无 tools、无第三模型设置、无 fallback，主调用一次，schema repair 至多一次且同模型/同 scope。
+- [x] input builder 只读持久化安全业务投影：target 一份 full projection，其他每个 active node 恰好一张 compact card，稳定 topology 顺序；technical details、secrets、原始 provider envelope 和隐藏 reasoning 不进入 prompt。
+- [x] prompt 要求用浅显语言说明全流程、目标结论、分支覆盖/限制和特殊值；不得改变水体科学结论、重新评分、补造缺失数字或把 insufficient 猜成 0。
+- [x] validator 对任何数字 highlight 强制 exact value、unit、window、source refs，并验证 refs 属于输入；允许非数字特殊发现带 refs。拒绝 Agent URL、scope 外 COMID/ref、遗漏 target/coverage 和不支持的断言。
+- [x] summary 失败保存 failed session 和安全 public failure，详细异常只进 backend log/audit；不生成固定模板、拼接 fallback 或旧 summary。target 有效时仍允许后续 run completed。
 
 ### Tests
 
-- [ ] input 恰好 target full + N-1 cards，输入乱序后稳定、每 active node 无漏无重；large bounded topology 仍满足 model input capability，否则确定性 safe failure。
-- [ ] same-model/no-tools/one-repair 调用计数；invalid JSON、bad ref、数字缺 unit/window、URL、第二次 repair 失败均按契约终止。
-- [ ] plain-language output 保留 target science、partial coverage、invalid/insufficient 限制和特殊值；summary failed 无任何 fallback content。
+- [x] input 恰好 target full + N-1 cards，输入乱序后稳定、每 active node 无漏无重；large bounded topology 仍满足 model input capability，否则确定性 safe failure。
+- [x] same-model/no-tools/one-repair 调用计数；invalid JSON、bad ref、数字缺 unit/window、URL、第二次 repair 失败均按契约终止。
+- [x] plain-language output 保留 target science、partial coverage、invalid/insufficient 限制和特殊值；summary failed 无任何 fallback content。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/run_summary/test_prompt_builder.py backend/tests/application/run_summary/test_runner.py backend/tests/application/run_summary/test_validator.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/providers/test_openai_responses_waterbody.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/run_summary/test_transcript_store.py -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/run_summary/test_prompt_builder.py backend/tests/application/run_summary/test_runner.py backend/tests/application/run_summary/test_validator.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_openai_responses_waterbody.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/run_summary/test_transcript_store.py -q`
+- [x] `git diff --check`
 
 阶段出口：summary runner 可在 direct application harness 中产出严格可引用的浅显汇总，或真实失败且无 fallback；尚未完成 final persistence/API/SSE 集成。
 
 提交边界：仅 run_summary application、复用现有 provider/transcript 的最小 adapter、fixtures 与 tests；不得新增 provider、route、SSE 或 frontend URL。
+
+- 实现：新增 canonical summary input/prompt、严格 draft validator、一次同模型 repair runner、现有 visible-message transcript adapter 与 direct application stage。输入固定为稳定顺序的非 target cards + 末尾 target full safe result；highlight 只接受允许 kind/ref，数值必须逐项匹配原 value/unit/window。OpenAI Responses adapter 仅扩展接受同一 provider-neutral summary request，tools 始终为空；未新增 provider、route、SSE、frontend URL 或 fallback。
+- 验证：指定 summary prompt/runner/validator `15 passed`，provider adapter `32 passed`，summary transcript `2 passed`；M4–M7 application/provider 宽回归 `344 passed`，port/M7 architecture + summary 回归 `81 passed`，`compileall` 与 `git diff --check` 通过。专用 `wateragents_test` 下除既有 45 秒 session SSE 超时用例外的完整套件为 `1940 passed, 1 deselected, 1 warning`；该 SSE 用例单独复跑仍在打开首个 stream 时 `54.78s` 外层超时、尚未进入业务断言。warning 为既有 Starlette/httpx 弃用提示；Docker PostgreSQL 17 healthy。真实外部 provider 与三平台 CI `not run`。
+- 修复与边界：完整收集发现并修复测试模块同名冲突及多余 summary port 的架构违规。Milestone 7 的 production typed-content registry、summary completed/result 原子提交、API/SSE/history 与最终 run completion 尚未接线；当前阶段出口仅为 direct application harness，M1–M9 仍等待 M9 后统一验收。
+- 提交：本完成记录与 M6 summary application/provider adapter/tests 由当前本地提交保存。
 
 ## Milestone 7：typed transcript、持久化、SSE 与 history
 

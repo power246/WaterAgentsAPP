@@ -306,14 +306,14 @@ def test_highlight_numeric_display_fields_are_atomic_and_ref_bound() -> None:
             kind="flow",
             text="Flow value.",
             source_ref=TARGET_SOURCE,
-            display_value=12.5,
+            display_value="12.5",
         )
     with pytest.raises(ValidationError, match="must match source_ref"):
         RunSummaryHighlight(
             kind="flow",
             text="Flow value.",
             source_ref=TARGET_SOURCE,
-            display_value=12.5,
+            display_value="12.5",
             display_unit="ft3/s",
             window_id="w2",
         )

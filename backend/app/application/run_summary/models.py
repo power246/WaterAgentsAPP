@@ -25,6 +25,7 @@ from app.application.transcripts.models import (
     TranscriptContentRef,
 )
 from app.domain.common import (
+    CanonicalDecimal,
     DomainFloat,
     NonEmptyString,
     UtcDatetime,
@@ -34,6 +35,7 @@ from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
 from app.domain.inference import (
     AssessmentAvailability,
+    InferenceResult,
     InferenceMode,
     ModelExecutionSummary,
     ModelUsageSummary,
@@ -85,6 +87,22 @@ class NotableFinding(DomainModel):
     kind: NonEmptyString
     text: NonBlankText
     source_ref: StableSourceReference
+    display_value: CanonicalDecimal | None = None
+    display_unit: NonEmptyString | None = None
+    window_id: NonEmptyString | None = None
+
+    @model_validator(mode="after")
+    def validate_display_value(self) -> Self:
+        numeric_fields = (
+            self.display_value is not None,
+            self.display_unit is not None,
+            self.window_id is not None,
+        )
+        if any(numeric_fields) and not all(numeric_fields):
+            raise ValueError("numeric finding display fields must appear together")
+        if self.window_id is not None and self.source_ref.window_id != self.window_id:
+            raise ValueError("finding window_id must match source_ref")
+        return self
 
 
 class _WaterbodyResultProjection(DomainModel):
@@ -111,10 +129,16 @@ class _WaterbodyResultProjection(DomainModel):
     ] = ()
     model_execution_summary: ModelExecutionSummary
 
-    @field_validator("direct_upstream_comids", "key_reasons")
+    @field_validator("direct_upstream_comids")
     @classmethod
-    def canonicalize_strings(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        ensure_unique_tuple(value, field_name="projection values")
+    def canonicalize_upstream_comids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        ensure_unique_tuple(value, field_name="projection upstream COMIDs")
+        return tuple(sorted(value, key=_comid_key))
+
+    @field_validator("key_reasons")
+    @classmethod
+    def canonicalize_reasons(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        ensure_unique_tuple(value, field_name="projection reasons")
         return tuple(sorted(value))
 
     @field_validator("window_summaries")
@@ -147,7 +171,11 @@ class _WaterbodyResultProjection(DomainModel):
         return tuple(
             sorted(
                 (
-                    *(reference for item in self.window_summaries for reference in item.source_refs),
+                    *(
+                        reference
+                        for item in self.window_summaries
+                        for reference in item.source_refs
+                    ),
                     *(item.source_ref for item in self.notable_findings),
                 ),
                 key=_source_reference_key,
@@ -158,12 +186,36 @@ class _WaterbodyResultProjection(DomainModel):
 class TargetResultProjection(_WaterbodyResultProjection):
     time_range: TimeRange
     analysis_timezone: NonEmptyString
+    # Added at the M6 construction boundary.  Older M1 fixtures remain readable,
+    # while the production builder below always supplies the complete safe domain
+    # result rather than reconstructing it from prose or provider payloads.
+    full_result: InferenceResult | None = None
 
     @field_validator("analysis_timezone")
     @classmethod
     def validate_timezone(cls, value: str) -> str:
         get_iana_timezone(value)
         return value
+
+    @model_validator(mode="after")
+    def validate_full_result(self) -> Self:
+        result = self.full_result
+        if result is None:
+            return self
+        if (
+            result.run_id != self.result_ref.run_id
+            or result.session_id != self.session_id
+            or result.target_comid != self.target_comid
+            or result.mode is not self.mode
+            or result.time_range != self.time_range
+            or result.analysis_timezone != self.analysis_timezone
+            or result.overall_assessment.risk_level is not self.overall_risk
+            or result.overall_assessment.availability is not self.availability
+            or result.overall_confidence != self.confidence
+            or result.model_execution_summary != self.model_execution_summary
+        ):
+            raise ValueError("full target result must match its summary projection")
+        return self
 
 
 class WaterbodyReportCard(DomainModel):
@@ -191,10 +243,16 @@ class WaterbodyReportCard(DomainModel):
     ] = ()
     model_execution_summary: ModelExecutionSummary | None = None
 
-    @field_validator("direct_upstream_comids", "key_reasons")
+    @field_validator("direct_upstream_comids")
     @classmethod
-    def canonicalize_strings(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        ensure_unique_tuple(value, field_name="report card values")
+    def canonicalize_upstream_comids(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        ensure_unique_tuple(value, field_name="card upstream COMIDs")
+        return tuple(sorted(value, key=_comid_key))
+
+    @field_validator("key_reasons")
+    @classmethod
+    def canonicalize_reasons(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        ensure_unique_tuple(value, field_name="card reasons")
         return tuple(sorted(value))
 
     @field_validator("window_summaries")
@@ -246,7 +304,11 @@ class WaterbodyReportCard(DomainModel):
         return tuple(
             sorted(
                 (
-                    *(reference for item in self.window_summaries for reference in item.source_refs),
+                    *(
+                        reference
+                        for item in self.window_summaries
+                        for reference in item.source_refs
+                    ),
                     *(item.source_ref for item in self.notable_findings),
                 ),
                 key=_source_reference_key,
@@ -503,7 +565,7 @@ class RunSummaryHighlight(DomainModel):
     kind: NonEmptyString
     text: NonBlankText
     source_ref: StableSourceReference
-    display_value: DomainFloat | None = None
+    display_value: CanonicalDecimal | None = None
     display_unit: NonEmptyString | None = None
     window_id: NonEmptyString | None = None
 
@@ -556,3 +618,9 @@ def _source_reference_key(reference: StableSourceReference) -> tuple[str, ...]:
         reference.cell_id or "",
         reference.window_id or "",
     )
+
+
+def _comid_key(comid: str) -> tuple[int, str]:
+    if not comid.isdecimal() or comid.startswith("0"):
+        raise ValueError("COMID must be a positive decimal string")
+    return int(comid), comid

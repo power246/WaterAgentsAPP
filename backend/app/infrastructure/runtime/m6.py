@@ -83,23 +83,31 @@ class OpenAIResponsesSizeEstimator:
         del model
         try:
             shape = json.loads(serialized_response_shape)
-            cell_ids = shape["cell_ids"]
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise ValueError("model response shape is invalid") from error
-        if not isinstance(cell_ids, list) or not all(
-            isinstance(item, str) and item for item in cell_ids
-        ):
-            raise ValueError("model response cell identities are invalid")
-        cell_count = len(cell_ids)
+        if not isinstance(shape, dict):
+            raise ValueError("model response shape is invalid")
+        if "cell_ids" in shape:
+            cell_ids = shape["cell_ids"]
+            if not isinstance(cell_ids, list) or not all(
+                isinstance(item, str) and item for item in cell_ids
+            ):
+                raise ValueError("model response cell identities are invalid")
+            output_units = len(cell_ids)
+        else:
+            highlight_limit = shape.get("summary_highlight_limit")
+            if type(highlight_limit) is not int or not 0 < highlight_limit <= 32:
+                raise ValueError("model summary response shape is invalid")
+            output_units = highlight_limit
         return ModelSizeEstimate(
             input_tokens=ceil(len(serialized_request) / 3),
             output_tokens=(
                 ceil(len(serialized_response_shape) / 3)
-                + cell_count * _ESTIMATED_OUTPUT_TOKENS_PER_CELL
+                + output_units * _ESTIMATED_OUTPUT_TOKENS_PER_CELL
             ),
             estimated_output_bytes=(
                 len(serialized_response_shape)
-                + cell_count * _ESTIMATED_OUTPUT_BYTES_PER_CELL
+                + output_units * _ESTIMATED_OUTPUT_BYTES_PER_CELL
             ),
         )
 

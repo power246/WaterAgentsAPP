@@ -23,6 +23,7 @@ from app.application.reasoning.model_models import (
     WaterbodyModelRequest,
     WaterbodyToolDescriptor,
 )
+from app.application.run_summary.models import RunSummaryModelRequest
 from app.infrastructure.adapters._parsing import (
     require_list,
     require_mapping,
@@ -113,7 +114,7 @@ class OpenAIResponsesWaterbodyAdapter:
 
     async def stream(
         self,
-        request: WaterbodyModelRequest,
+        request: WaterbodyModelRequest | RunSummaryModelRequest,
     ) -> AsyncIterator[WaterbodyModelEvent]:
         if request.model.provider.casefold() != PROVIDER:
             raise PortConfigurationError(
@@ -123,7 +124,8 @@ class OpenAIResponsesWaterbodyAdapter:
             )
 
         operation = str(request.operation_id)
-        tools = {descriptor.name: descriptor for descriptor in request.tool_descriptors}
+        descriptors = getattr(request, "tool_descriptors", ())
+        tools = {descriptor.name: descriptor for descriptor in descriptors}
         state = _StreamState()
         try:
             async with self._http.post_sse(
@@ -276,7 +278,9 @@ class OpenAIResponsesWaterbodyAdapter:
             _protocol_error(request)
 
 
-def _request_body(request: WaterbodyModelRequest) -> dict[str, object]:
+def _request_body(
+    request: WaterbodyModelRequest | RunSummaryModelRequest,
+) -> dict[str, object]:
     input_items: list[dict[str, object]] = []
     for message in request.messages:
         if message.role is WaterbodyMessageRole.TOOL:
@@ -299,7 +303,10 @@ def _request_body(request: WaterbodyModelRequest) -> dict[str, object]:
         "model": request.model.model,
         "instructions": request.system_prompt,
         "input": input_items,
-        "tools": [_tool_payload(item) for item in request.tool_descriptors],
+        "tools": [
+            _tool_payload(item)
+            for item in getattr(request, "tool_descriptors", ())
+        ],
         "text": {"format": _schema_payload(request.response_schema)},
         "store": False,
         "stream": True,
