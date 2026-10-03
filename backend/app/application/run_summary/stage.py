@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -13,6 +15,7 @@ from app.application.analysis_runs.workflow import WorkflowOperations
 from app.application.reasoning.batch_planner import ModelFitCapability
 from app.application.run_summary.errors import SummaryInputTooLargeError
 from app.application.run_summary.input_builder import RunSummaryInputBuilder
+from app.application.run_summary.models import RunSummaryResult
 from app.application.run_summary.runner import (
     CancellationProbe,
     RunSummaryRunOutcome,
@@ -30,6 +33,28 @@ class RunSummaryRunnerFactory(Protocol):
     def build(self, *, run_id: UUID, session_id: UUID) -> RunSummaryRunner: ...
 
 
+@dataclass(frozen=True, slots=True)
+class RunSummaryStageOutcome:
+    session_id: UUID | None
+    outcome: RunSummaryRunOutcome
+
+    @property
+    def status(self) -> RunSummaryRunStatus:
+        return self.outcome.status
+
+    @property
+    def result(self) -> RunSummaryResult | None:
+        return self.outcome.result
+
+    @property
+    def error(self) -> PublicError | None:
+        return self.outcome.error
+
+    @property
+    def model_calls(self) -> int:
+        return self.outcome.model_calls
+
+
 class RunSummaryStage:
     """Create the one summarizer session only from a fully settled aggregation."""
 
@@ -39,10 +64,12 @@ class RunSummaryStage:
         operations: WorkflowOperations,
         input_builder: RunSummaryInputBuilder,
         runner_factory: RunSummaryRunnerFactory,
+        error_id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
         self._operations = operations
         self._input_builder = input_builder
         self._runner_factory = runner_factory
+        self._error_id_factory = error_id_factory
 
     async def run(
         self,
@@ -56,7 +83,7 @@ class RunSummaryStage:
         model_fit: ModelFitCapability,
         deadline: datetime,
         cancellation: CancellationProbe,
-    ) -> RunSummaryRunOutcome:
+    ) -> RunSummaryStageOutcome:
         active = {
             node.comid
             for node in topology.nodes
@@ -66,12 +93,15 @@ class RunSummaryStage:
         if len(settled) != len(aggregation.outcomes) or settled != active:
             raise ValueError("run summarization requires all active outcomes")
         if cancellation.is_requested():
-            return RunSummaryRunOutcome(
-                status=RunSummaryRunStatus.CANCELLED,
-                result=None,
-                error=None,
-                model_calls=0,
-                repaired=False,
+            return RunSummaryStageOutcome(
+                session_id=None,
+                outcome=RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.CANCELLED,
+                    result=None,
+                    error=None,
+                    model_calls=0,
+                    repaired=False,
+                ),
             )
 
         session = await self._operations.prepare_agent_session(
@@ -82,12 +112,15 @@ class RunSummaryStage:
         await self._operations.mark_agent_session_running(run_id, session.session_id)
         if cancellation.is_requested():
             await self._operations.cancel_agent_session(run_id, session.session_id)
-            return RunSummaryRunOutcome(
-                status=RunSummaryRunStatus.CANCELLED,
-                result=None,
-                error=None,
-                model_calls=0,
-                repaired=False,
+            return RunSummaryStageOutcome(
+                session_id=session.session_id,
+                outcome=RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.CANCELLED,
+                    result=None,
+                    error=None,
+                    model_calls=0,
+                    repaired=False,
+                ),
             )
         try:
             summary_input = await self._input_builder.build(
@@ -102,38 +135,56 @@ class RunSummaryStage:
             )
         except SummaryInputTooLargeError:
             error = PublicError(
-                error_id=uuid4(),
+                error_id=self._error_id_factory(),
                 code="summary_input_too_large",
                 message="The complete run summary input is too large for the selected model.",
                 failed_stage="run_summarization",
                 retryable=False,
             )
             await self._operations.fail_agent_session(run_id, session.session_id, error)
-            return RunSummaryRunOutcome(
-                status=RunSummaryRunStatus.FAILED,
-                result=None,
-                error=error,
-                model_calls=0,
-                repaired=False,
+            return RunSummaryStageOutcome(
+                session_id=session.session_id,
+                outcome=RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.FAILED,
+                    result=None,
+                    error=error,
+                    model_calls=0,
+                    repaired=False,
+                ),
             )
         except Exception:
             logger.exception("run_summary_input_failed", extra={"run_id": str(run_id)})
             error = PublicError(
-                error_id=uuid4(),
+                error_id=self._error_id_factory(),
                 code="run_summary_failed",
                 message="The run summary input could not be prepared.",
                 failed_stage="run_summarization",
                 retryable=False,
             )
             await self._operations.fail_agent_session(run_id, session.session_id, error)
-            return RunSummaryRunOutcome(
-                status=RunSummaryRunStatus.FAILED,
-                result=None,
-                error=error,
-                model_calls=0,
-                repaired=False,
+            return RunSummaryStageOutcome(
+                session_id=session.session_id,
+                outcome=RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.FAILED,
+                    result=None,
+                    error=error,
+                    model_calls=0,
+                    repaired=False,
+                ),
             )
-        return await self._runner_factory.build(
+        if cancellation.is_requested():
+            await self._operations.cancel_agent_session(run_id, session.session_id)
+            return RunSummaryStageOutcome(
+                session_id=session.session_id,
+                outcome=RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.CANCELLED,
+                    result=None,
+                    error=None,
+                    model_calls=0,
+                    repaired=False,
+                ),
+            )
+        outcome = await self._runner_factory.build(
             run_id=run_id,
             session_id=session.session_id,
         ).run(
@@ -141,4 +192,8 @@ class RunSummaryStage:
             model=model,
             deadline=deadline,
             cancellation=cancellation,
+        )
+        return RunSummaryStageOutcome(
+            session_id=session.session_id,
+            outcome=outcome,
         )

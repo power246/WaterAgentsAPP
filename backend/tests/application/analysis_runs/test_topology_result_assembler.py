@@ -8,6 +8,7 @@ from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
     SessionSummary,
+    SessionResultReference,
 )
 from app.application.analysis_runs.topology_result_assembler import (
     TargetWaterbodyFailedError,
@@ -16,7 +17,9 @@ from app.application.analysis_runs.topology_result_assembler import (
 from app.application.analysis_runs.topology_result_models import (
     DependencyStatus,
     GraphCoverage,
+    TopologySummaryResult,
 )
+from app.application.transcripts.models import TranscriptContentRef
 from app.domain import OutcomeStatus, ParameterKey, WaterQualityParameter
 from tests.application.analysis_runs._topology_scheduler_support import (
     outcome,
@@ -194,3 +197,47 @@ def test_target_technical_failure_is_fatal() -> None:
                 outcome("300", DependencyStatus.INVALID),
             ),
         )
+
+
+def test_final_run_result_uses_stable_outcomes_and_summary_reference() -> None:
+    graph = topology(("100", "300"))
+    assembler = TopologyResultAssembler(FakeResultReader())
+    aggregation = assembler.aggregate(
+        graph,
+        (
+            outcome("100", DependencyStatus.USABLE),
+            outcome("300", DependencyStatus.INSUFFICIENT),
+        ),
+    )
+    summary_ref = SessionResultReference(
+        run_id=RUN_ID,
+        item_id=UUID("40000000-0000-0000-0000-000000000001"),
+    )
+
+    result = assembler.build_run_result(
+        run_id=RUN_ID,
+        analysis_context_ref=TranscriptContentRef(
+            run_id=RUN_ID,
+            item_id=UUID("40000000-0000-0000-0000-000000000002"),
+        ),
+        topology_ref=TranscriptContentRef(
+            run_id=RUN_ID,
+            item_id=UUID("40000000-0000-0000-0000-000000000003"),
+        ),
+        aggregation=aggregation,
+        summary=TopologySummaryResult(
+            status="completed",
+            session_id=UUID("40000000-0000-0000-0000-000000000004"),
+            result_ref=summary_ref,
+        ),
+        generated_at=NOW,
+    )
+
+    assert tuple(item.target_comid for item in result.node_outcomes) == (
+        "100",
+        "300",
+    )
+    assert result.target_result_ref == aggregation.target_outcome.result_ref
+    assert result.outcome_counts.usable == 1
+    assert result.outcome_counts.insufficient == 1
+    assert result.summary.result_ref == summary_ref

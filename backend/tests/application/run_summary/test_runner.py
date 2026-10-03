@@ -112,6 +112,29 @@ def test_invalid_json_terminates_as_real_failure_without_summary_content() -> No
     assert len(port.requests) == 2
 
 
+def test_cancel_after_validated_model_output_suppresses_summary_result() -> None:
+    class CancelAtCommit:
+        def __init__(self) -> None:
+            self.checks = 0
+
+        def is_requested(self):
+            self.checks += 1
+            return self.checks >= 7
+
+    port = FakeSummaryModelPort([draft_payload()])
+    outcome = asyncio.run(RunSummaryRunner(model_port=port).run(
+        summary_input(),
+        model=MODEL,
+        deadline=NOW,
+        input_ref=TranscriptContentRef(run_id=RUN_ID, item_id=INPUT_ITEM_ID),
+        cancellation=CancelAtCommit(),
+    ))
+
+    assert outcome.status is RunSummaryRunStatus.CANCELLED
+    assert outcome.result is None
+    assert outcome.model_calls == 1
+
+
 class _NotCancelled:
     def is_requested(self):
         return False

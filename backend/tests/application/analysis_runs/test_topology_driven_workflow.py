@@ -122,7 +122,16 @@ class RecordingSummaryBoundary:
         self.reached = asyncio.Event()
         self.aggregation = None
 
-    async def wait(self, context, aggregation) -> None:
+    async def wait(
+        self,
+        context,
+        analysis_context,
+        topology,
+        analysis_context_ref,
+        topology_ref,
+        aggregation,
+    ) -> None:
+        del analysis_context, topology, analysis_context_ref, topology_ref
         self.aggregation = aggregation
         self.reached.set()
         await context.cancellation.wait()

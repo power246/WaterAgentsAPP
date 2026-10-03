@@ -132,6 +132,12 @@ class AppSettings(BaseSettings):
         le=600,
         allow_inf_nan=False,
     )
+    run_summary_timeout_seconds: float = Field(
+        default=120,
+        gt=0,
+        le=300,
+        allow_inf_nan=False,
+    )
     nws_user_agent_project: str = Field(default="WaterAgents", min_length=1)
     nws_user_agent_contact: str = Field(
         default="wateragents@example.invalid",
@@ -247,6 +253,7 @@ class AppSettings(BaseSettings):
         "evidence_total_deadline_seconds",
         "reasoning_model_timeout_seconds",
         "reasoning_session_deadline_seconds",
+        "run_summary_timeout_seconds",
         "topology_stage_timeout_seconds",
         mode="before",
     )

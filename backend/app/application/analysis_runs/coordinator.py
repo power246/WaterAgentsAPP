@@ -1092,7 +1092,10 @@ class RunCoordinator:
             await asyncio.gather(*writer_tasks, return_exceptions=True)
 
     async def _run_workflow(self, runtime: RunRuntime) -> None:
-        token = CancellationToken(runtime.stop_requested)
+        token = CancellationToken(
+            runtime.stop_requested,
+            runtime.workflow_commit_gate,
+        )
         try:
             await runtime.workflow_start.wait()
             token.checkpoint()
@@ -2267,7 +2270,10 @@ class RunCoordinator:
         comid = _COMID.validate_python(target_comid)
         async with runtime.condition:
             if (
-                runtime.analysis_phase is not AnalysisPhase.WATERBODY_EXECUTION
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status is not RunStatus.RUNNING
+                or runtime.analysis_phase is not AnalysisPhase.WATERBODY_EXECUTION
                 or runtime.waterbody_participation.get(comid) is not True
                 or comid in runtime.waterbody_session_ids
             ):
@@ -2490,8 +2496,9 @@ class RunCoordinator:
 
     async def cancel_run(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         runtime = await self._lookup(run_id)
-        runtime.cancel_requested.set()
-        runtime.stop_requested.set()
+        async with runtime.workflow_commit_gate:
+            runtime.cancel_requested.set()
+            runtime.stop_requested.set()
         try:
             return await self._transition_run(
                 runtime.snapshot.run_id,
@@ -2796,12 +2803,13 @@ class RunCoordinator:
                 raise InvalidRunTransitionError(current, target)
             timestamp = self._clock.now()
             if topology_result is not None:
-                self._validate_topology_result_locked(runtime, topology_result)
-                if target not in {
+                if resolved not in {
                     RunStatus.COMPLETED,
                     RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR,
                 }:
-                    raise ValueError("topology result requires a completed run")
+                    topology_result = None
+                else:
+                    self._validate_topology_result_locked(runtime, topology_result)
             snapshot = AnalysisRunSnapshot(
                 run_id=current.run_id,
                 status=resolved,

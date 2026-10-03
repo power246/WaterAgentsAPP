@@ -145,6 +145,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
 | `WATERAGENTS_TOPOLOGY_MAX_CONCURRENCY` | `8` |
 | `WATERAGENTS_WATERBODY_WORKFLOW_MAX_CONCURRENCY` | `4`; shared waterbody-session limit, valid range `1..32` |
+| `WATERAGENTS_RUN_SUMMARY_TIMEOUT_SECONDS` | `120`; one run-summary request deadline, valid range `(0, 300]` |
 | `WATERAGENTS_PREDICTION_BASELINE_HOURS` | `48` |
 | `WATERAGENTS_MAX_TARGET_PARAMETERS` | `6` |
 | `WATERAGENTS_QUERY_PARSER_TIMEOUT_SECONDS` | `45` |
@@ -180,7 +181,7 @@ Each waterbody token limit belongs to that exact provider/model entry. Copy the 
 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
-Production startup builds the complete M4 runtime before opening the database. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry with explicit token limits, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
+Production startup builds and binds the complete topology workflow before accepting traffic. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry with explicit token limits, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The run summarizer uses the run's exact waterbody model and its catalog token limits; it has no separate model setting or tools. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
 
 ### Local PostgreSQL with Compose
 
@@ -217,7 +218,7 @@ WATERAGENTS_DB_SSLMODE=verify-full
 WATERAGENTS_DB_SSLROOTCERT=/absolute/path/to/provider-ca.pem
 ```
 
-Run `wateragents-db upgrade` as an explicit deployment step, followed by `wateragents-db check`, before starting the application. Never grant the application more database privileges than its deployment model requires. Do not run multiple application workers or replicas: the first M3 release intentionally keeps live coordination and persistence ownership in one process.
+Run `wateragents-db upgrade` as an explicit deployment step, followed by `wateragents-db check`, before starting the application. Never grant the application more database privileges than its deployment model requires. Do not run multiple application workers or replicas: the scheduler, concurrency limiter, run-local upstream-result registry, live cancellation, and workflow quiescence are owned by one process and are not shared across workers.
 
 When moving to another OS or machine, check out the source and committed `backend/uv.lock`, create a fresh environment with either setup path above, enter `backend/`, activate that environment, recreate the uncommitted UTF-8 `.env`, start or select PostgreSQL 17, and run `wateragents-db upgrade` followed by `wateragents-db check`. Never copy an old virtual environment or database data directory between platforms.
 

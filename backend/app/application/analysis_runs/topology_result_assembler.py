@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from app.application.analysis_runs.models import (
@@ -14,7 +15,11 @@ from app.application.analysis_runs.topology_result_models import (
     DependencyOutcome,
     DependencyStatus,
     GraphCoverage,
+    OutcomeCounts,
     StableSourceReference,
+    TopologyRunResult,
+    TopologySummaryResult,
+    WaterbodyRunEntry,
 )
 from app.application.evidence_tools import (
     UpstreamInferenceResultReader,
@@ -22,6 +27,7 @@ from app.application.evidence_tools import (
 from app.application.evidence_tools.upstream_projection import (
     validate_resolved_outcome,
 )
+from app.application.transcripts.models import TranscriptContentRef
 from app.domain import (
     HydrologyGraph,
     HydrologyParticipation,
@@ -174,6 +180,67 @@ class TopologyResultAssembler:
             target_outcome=target,
             outcomes=ordered,
             graph_coverage=coverage,
+        )
+
+    def build_run_result(
+        self,
+        *,
+        run_id: UUID,
+        analysis_context_ref: TranscriptContentRef,
+        topology_ref: TranscriptContentRef,
+        aggregation: WaterbodyOutcomeAggregation,
+        summary: TopologySummaryResult,
+        generated_at: datetime,
+    ) -> TopologyRunResult:
+        target = aggregation.target_outcome
+        if target.result_ref is None or target.result_summary is None:
+            raise ValueError("target outcome must contain its committed result")
+        entries = tuple(
+            WaterbodyRunEntry(
+                graph_position=position,
+                target_comid=outcome.target_comid,
+                session_id=outcome.session_id,
+                dependency_status=outcome.status,
+                session_status={
+                    DependencyStatus.USABLE: AgentSessionStatus.COMPLETED,
+                    DependencyStatus.INSUFFICIENT: AgentSessionStatus.COMPLETED,
+                    DependencyStatus.INVALID: AgentSessionStatus.FAILED,
+                    DependencyStatus.CANCELLED: AgentSessionStatus.CANCELLED,
+                }[outcome.status],
+                result_ref=outcome.result_ref,
+                result_summary=outcome.result_summary,
+            )
+            for position, outcome in enumerate(aggregation.outcomes)
+        )
+        return TopologyRunResult(
+            run_id=run_id,
+            analysis_context_ref=analysis_context_ref,
+            topology_ref=topology_ref,
+            target_comid=target.target_comid,
+            target_result_ref=target.result_ref,
+            target_result_summary=target.result_summary,
+            graph_coverage=aggregation.graph_coverage,
+            node_outcomes=entries,
+            outcome_counts=OutcomeCounts(
+                usable=sum(
+                    item.status is DependencyStatus.USABLE
+                    for item in aggregation.outcomes
+                ),
+                insufficient=sum(
+                    item.status is DependencyStatus.INSUFFICIENT
+                    for item in aggregation.outcomes
+                ),
+                invalid=sum(
+                    item.status is DependencyStatus.INVALID
+                    for item in aggregation.outcomes
+                ),
+                cancelled=sum(
+                    item.status is DependencyStatus.CANCELLED
+                    for item in aggregation.outcomes
+                ),
+            ),
+            summary=summary,
+            generated_at=generated_at,
         )
 
 

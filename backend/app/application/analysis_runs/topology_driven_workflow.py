@@ -99,6 +99,10 @@ class RunSummaryBoundary(Protocol):
     async def wait(
         self,
         context: WorkflowContext,
+        analysis_context: AnalysisContext,
+        topology: HydrologyGraph,
+        analysis_context_ref: TranscriptContentRef,
+        topology_ref: TranscriptContentRef,
         aggregation: WaterbodyOutcomeAggregation,
     ) -> None: ...
 
@@ -109,9 +113,13 @@ class AwaitRunSummaryBoundary:
     async def wait(
         self,
         context: WorkflowContext,
+        analysis_context: AnalysisContext,
+        topology: HydrologyGraph,
+        analysis_context_ref: TranscriptContentRef,
+        topology_ref: TranscriptContentRef,
         aggregation: WaterbodyOutcomeAggregation,
     ) -> None:
-        del aggregation
+        del analysis_context, topology, analysis_context_ref, topology_ref, aggregation
         await context.cancellation.wait()
         raise WorkflowStopped()
 
@@ -174,7 +182,11 @@ class TopologyWaterbodyExecutionStage:
                 runner=node_runner,
                 outcome_port=outcome_store,
                 limiter=self._limiter,
+                cancellation=context.cancellation,
+                readiness_port=self._operations,
+                outcome_observer=self._operations,
             ).run()
+            context.cancellation.checkpoint()
             aggregation = self._result_assembler.aggregate(
                 graph,
                 scheduled.outcomes,
@@ -209,7 +221,14 @@ class TopologyWaterbodyExecutionStage:
         context.cancellation.checkpoint()
         await self._operations.begin_run_summarization(context.run.run_id)
         context.cancellation.checkpoint()
-        await self._summary_boundary.wait(context, aggregation)
+        await self._summary_boundary.wait(
+            context,
+            analysis_context,
+            graph,
+            analysis_context_ref,
+            topology_ref,
+            aggregation,
+        )
 
 
 class ProductionTopologyNodeRunnerFactory:
@@ -321,6 +340,7 @@ class ProductionTopologyNodeRunner:
             session_id=session.session_id,
             target_comid=request.node.comid,
         )
+        self._context.cancellation.checkpoint()
         scope = assemble_evidence_session_scope(
             run_id=str(request.run_id),
             session_id=str(session.session_id),
@@ -364,12 +384,14 @@ class ProductionTopologyNodeRunner:
             model_catalog=self._model_catalog,
             session_reader=self._session_reader,
         )
+        self._context.cancellation.checkpoint()
         await self._operations.mark_agent_session_running(
             request.run_id,
             session.session_id,
         )
         self._context.cancellation.checkpoint()
         handoff = await self._acquisition.start(scope)
+        self._context.cancellation.checkpoint()
         decision = NodeLaunchPolicy().decide(
             build_node_launch_facts(task, handoff),
             manifest,
@@ -382,6 +404,7 @@ class ProductionTopologyNodeRunner:
                 initial_handoff=handoff,
             )
         elif decision.action is NodeLaunchAction.DETERMINISTIC_INSUFFICIENT:
+            self._context.cancellation.checkpoint()
             await self._zero_model.run(
                 task,
                 handoff,
@@ -405,6 +428,8 @@ class ProductionTopologyNodeRunner:
                     "The waterbody evidence boundary was invalid.",
                 ),
             )
+        if self._context.cancellation.is_requested():
+            raise asyncio.CancelledError()
         return await self._authoritative_outcome(request.node.comid)
 
     async def settle_failure(
@@ -451,10 +476,13 @@ class ProductionTopologyNodeRunner:
         )
         if self._context.cancellation.is_requested():
             raise asyncio.CancelledError()
-        return await self._result_assembler.dependency_outcome(
+        outcome = await self._result_assembler.dependency_outcome(
             self._context.run.run_id,
             session,
         )
+        if self._context.cancellation.is_requested():
+            raise asyncio.CancelledError()
+        return outcome
 
     def _public_error(self, code: str, message: str) -> PublicError:
         return PublicError(

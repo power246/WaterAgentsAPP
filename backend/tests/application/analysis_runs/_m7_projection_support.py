@@ -74,7 +74,7 @@ def coordinator_for(store, workflow: HoldingWorkflow, **options) -> RunCoordinat
     )
 
 
-async def complete_m7_run(
+async def prepare_m7_run(
     coordinator: RunCoordinator,
     workflow: HoldingWorkflow,
     *,
@@ -234,10 +234,6 @@ async def complete_m7_run(
         summary=summary,
         generated_at=datetime(2026, 10, 3, 8, 31, tzinfo=UTC),
     )
-    await coordinator.complete_run(created.run_id, topology_result)
-    workflow.release.set()
-    async with asyncio.timeout(2):
-        await coordinator._runs[created.run_id].workflow_quiesced.wait()
     return CompletedM7Run(
         run_id=created.run_id,
         context_item_id=context_identity.item_id,
@@ -246,6 +242,26 @@ async def complete_m7_run(
         topology_result=topology_result,
         ready_statuses=tuple(ready_statuses),
     )
+
+
+async def complete_m7_run(
+    coordinator: RunCoordinator,
+    workflow: HoldingWorkflow,
+    *,
+    partial: bool = False,
+    summary_failed: bool = False,
+) -> CompletedM7Run:
+    prepared = await prepare_m7_run(
+        coordinator,
+        workflow,
+        partial=partial,
+        summary_failed=summary_failed,
+    )
+    await coordinator.complete_run(prepared.run_id, prepared.topology_result)
+    workflow.release.set()
+    async with asyncio.timeout(2):
+        await coordinator._runs[prepared.run_id].workflow_quiesced.wait()
+    return prepared
 
 
 def _inference_result(run_id: UUID, session_id: UUID, comid: str) -> InferenceResult:

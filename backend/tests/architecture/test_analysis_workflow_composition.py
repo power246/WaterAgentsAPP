@@ -50,19 +50,22 @@ def test_production_topology_execution_has_one_owner_and_binding() -> None:
     )
 
 
-def test_m5_boundary_does_not_complete_or_fabricate_a_run_result() -> None:
+def test_m7_composition_owns_summary_and_final_run_result_once() -> None:
     workflow_sources = (
         APP_ROOT / "application/analysis_runs/query_topology_workflow.py",
         APP_ROOT / "application/analysis_runs/topology_driven_workflow.py",
         APP_ROOT / "infrastructure/runtime/m7.py",
     )
 
-    assert not any(
-        _calls_name(source_path, call)
+    assert sum(
+        _calls_name(source_path, "complete_run")
         for source_path in workflow_sources
-        for call in ("complete_run", "TopologyRunResult")
-    )
-    assert any(
+    ) == 1
+    assert sum(
+        _calls_name(source_path, "RunSummaryStage")
+        for source_path in workflow_sources
+    ) == 1
+    assert not any(
         _calls_name(source_path, "AwaitRunSummaryBoundary")
         for source_path in workflow_sources
     )

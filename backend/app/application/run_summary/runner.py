@@ -234,6 +234,16 @@ class RunSummaryRunner:
                 repaired=calls == 2,
             )
 
+        if cancellation.is_requested():
+            if self._transcript is not None:
+                await self._transcript.cancel()
+            return RunSummaryRunOutcome(
+                status=RunSummaryRunStatus.CANCELLED,
+                result=None,
+                error=None,
+                model_calls=calls,
+                repaired=calls == 2,
+            )
         if self._transcript is not None:
             await self._transcript.write_result(result)
         return RunSummaryRunOutcome(

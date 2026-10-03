@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
@@ -48,8 +50,13 @@ class WorkflowFailed(Exception):
 
 
 class CancellationToken:
-    def __init__(self, stop_requested: asyncio.Event) -> None:
+    def __init__(
+        self,
+        stop_requested: asyncio.Event,
+        commit_gate: asyncio.Lock | None = None,
+    ) -> None:
         self._stop_requested = stop_requested
+        self._commit_gate = commit_gate
 
     def is_requested(self) -> bool:
         return self._stop_requested.is_set()
@@ -60,6 +67,16 @@ class CancellationToken:
 
     async def wait(self) -> None:
         await self._stop_requested.wait()
+
+    @asynccontextmanager
+    async def commit_section(self) -> AsyncIterator[None]:
+        if self._commit_gate is None:
+            self.checkpoint()
+            yield
+            return
+        async with self._commit_gate:
+            self.checkpoint()
+            yield
 
 
 class WorkflowOperations(Protocol):

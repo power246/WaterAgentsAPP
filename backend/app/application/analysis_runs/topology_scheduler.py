@@ -11,6 +11,7 @@ from uuid import UUID
 from pydantic import Field, ValidationError, field_validator, model_validator
 
 from app.application.analysis_runs.topology_result_models import DependencyOutcome
+from app.application.analysis_runs.workflow import CancellationToken, WorkflowStopped
 from app.domain import (
     DomainModel,
     HydrologyGraph,
@@ -69,6 +70,22 @@ class NodeRunner(Protocol):
 
 class DependencyOutcomePort(Protocol):
     async def publish(self, outcome: DependencyOutcome) -> None: ...
+
+
+class NodeReadinessPort(Protocol):
+    async def mark_waterbody_ready(
+        self,
+        run_id: UUID | str,
+        target_comid: str,
+    ) -> None: ...
+
+
+class DependencyOutcomeObserver(Protocol):
+    async def record_waterbody_dependency_outcome(
+        self,
+        run_id: UUID | str,
+        outcome: DependencyOutcome,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,12 +245,18 @@ class TopologyScheduler:
         runner: NodeRunner,
         outcome_port: DependencyOutcomePort,
         limiter: WaterbodyWorkflowLimiter,
+        cancellation: CancellationToken | None = None,
+        readiness_port: NodeReadinessPort | None = None,
+        outcome_observer: DependencyOutcomeObserver | None = None,
     ) -> None:
         self._run_id = run_id
         self._view = build_topology_execution_view(topology)
         self._runner = runner
         self._outcome_port = outcome_port
         self._limiter = limiter
+        self._cancellation = cancellation
+        self._readiness_port = readiness_port
+        self._outcome_observer = outcome_observer
 
     async def run(self) -> TopologyScheduleResult:
         state = TopologyScheduleState(run_id=self._run_id, view=self._view)
@@ -241,9 +264,26 @@ class TopologyScheduler:
             asyncio.Task[tuple[NodeExecutionRequest, DependencyOutcome]],
             NodeExecutionRequest,
         ] = {}
+        stopped = (
+            asyncio.create_task(self._cancellation.wait())
+            if self._cancellation is not None
+            else None
+        )
         try:
             while not await state.is_complete():
-                while request := await state.claim_ready():
+                while True:
+                    if self._cancellation is not None:
+                        self._cancellation.checkpoint()
+                    request = await state.claim_ready()
+                    if request is None:
+                        break
+                    if self._readiness_port is not None:
+                        await self._readiness_port.mark_waterbody_ready(
+                            request.run_id,
+                            request.node.comid,
+                        )
+                    if self._cancellation is not None:
+                        self._cancellation.checkpoint()
                     task = asyncio.create_task(self._execute(request))
                     running[task] = request
                 if not running:
@@ -251,23 +291,31 @@ class TopologyScheduler:
                         "topology execution has no ready or running node"
                     )
                 completed, _ = await asyncio.wait(
-                    tuple(running),
+                    (*running, *((stopped,) if stopped is not None else ())),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if stopped is not None and stopped in completed:
+                    raise WorkflowStopped()
                 ordered = sorted(
-                    completed,
+                    (task for task in completed if task in running),
                     key=lambda task: _request_priority(running[task]),
                 )
                 for task in ordered:
                     running.pop(task)
                     _, outcome = task.result()
-                    await self._outcome_port.publish(outcome)
-                    await state.settle(outcome)
+                    if self._cancellation is None:
+                        await self._publish_and_settle(state, outcome)
+                    else:
+                        async with self._cancellation.commit_section():
+                            await self._publish_and_settle(state, outcome)
         finally:
             for task in running:
                 task.cancel()
             if running:
                 await asyncio.gather(*running, return_exceptions=True)
+            if stopped is not None:
+                stopped.cancel()
+                await asyncio.gather(stopped, return_exceptions=True)
         return TopologyScheduleResult(
             run_id=self._run_id,
             outcomes=await state.stable_outcomes(),
@@ -278,6 +326,8 @@ class TopologyScheduler:
         request: NodeExecutionRequest,
     ) -> tuple[NodeExecutionRequest, DependencyOutcome]:
         async with self._limiter.slot():
+            if self._cancellation is not None:
+                self._cancellation.checkpoint()
             try:
                 outcome = await self._runner.run(request)
             except asyncio.CancelledError:
@@ -291,6 +341,19 @@ class TopologyScheduler:
                 "runner outcome changed the scheduled COMID"
             )
         return request, outcome
+
+    async def _publish_and_settle(
+        self,
+        state: TopologyScheduleState,
+        outcome: DependencyOutcome,
+    ) -> None:
+        await self._outcome_port.publish(outcome)
+        if self._outcome_observer is not None:
+            await self._outcome_observer.record_waterbody_dependency_outcome(
+                self._run_id,
+                outcome,
+            )
+        await state.settle(outcome)
 
 
 def build_topology_execution_view(

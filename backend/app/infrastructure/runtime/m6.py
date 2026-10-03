@@ -293,6 +293,7 @@ class M6Runtime:
     runner: M6RunnerService
     model_port_router: WaterbodyModelRouter
     limits: M6RuntimeLimits
+    private_values: tuple[str, ...] = ()
 
     def safe_metadata(self) -> dict[str, object]:
         return _build_safe_m6_metadata(
@@ -359,6 +360,7 @@ def compose_m6_runtime(
         runner=runner,
         model_port_router=router,
         limits=limits,
+        private_values=private_values,
     )
 
 

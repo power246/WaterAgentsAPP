@@ -227,6 +227,7 @@ def create_app(
                                     clock=resolved_clock,
                                     result_id_factory=lambda: str(id_factory()),
                                     error_id_factory=id_factory,
+                                    operation_id_factory=id_factory,
                                 )
                             )
                         application.state.run_coordinator = coordinator

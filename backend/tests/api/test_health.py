@@ -62,6 +62,7 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "reasoning_max_batches": 24,
         "reasoning_model_timeout_seconds": 90.0,
         "reasoning_session_deadline_seconds": 600.0,
+        "run_summary_timeout_seconds": 120.0,
         "nws_user_agent_project": "WaterAgents",
         "nws_user_agent_contact": "wateragents@example.invalid",
         "google_geocoding_api_key": None,

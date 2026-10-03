@@ -363,31 +363,38 @@
 
 ### 工作
 
-- [ ] 新增 `app/infrastructure/runtime/m7.py` 或等价单一 composition root，把 scheduler/store/node runner/summarizer 接到 coordinator 已拥有 workflow；production 只有一个 caller，test harness 不进入 production import graph。
-- [ ] 配置 `WATERBODY_WORKFLOW_MAX_CONCURRENCY`、`RUN_SUMMARY_TIMEOUT_SECONDS` 和基于精确 model capability 的 summary output/input limits；不增加 summary model setting、run-wide token/model-call quota 或自动 retry expansion。
-- [ ] 在 dequeue、claim 后 session create 前、本地 preflight、tool/model 前、publish、summary create/call 和 final commit 设置真实 cancel checkpoint。cancel 接受后先封调度，再通知全部已创建未终态 sessions。
-- [ ] 处理 cancel/create、cancel/node completion、cancel/summary completion、target failure/other completion 和 duplicate callback races；已完成 sessions 保持终态，未创建下游不补 session。
-- [ ] 无法强杀的 provider/tool late output 只进入 cancelled transcript/日志审计，不追加当前正文、不发布 upstream/result、不触发 summary；必要保存补写仍完成。
-- [ ] `cancel_accepted` 与 `workflow_quiesced` 分开；live cleanup、run stream 正常关闭与后台执行生命周期必须等待 quiesced，不因客户端断开提前终止。
-- [ ] 首版明确单进程/单 worker in-memory scheduler/store 边界；启动文档/部署配置不得暗示共享状态、多 worker 或跨进程 cancel 已支持。
+- [x] 新增 `app/infrastructure/runtime/m7.py` 或等价单一 composition root，把 scheduler/store/node runner/summarizer 接到 coordinator 已拥有 workflow；production 只有一个 caller，test harness 不进入 production import graph。
+- [x] 配置 `WATERBODY_WORKFLOW_MAX_CONCURRENCY`、`RUN_SUMMARY_TIMEOUT_SECONDS` 和基于精确 model capability 的 summary output/input limits；不增加 summary model setting、run-wide token/model-call quota 或自动 retry expansion。
+- [x] 在 dequeue、claim 后 session create 前、本地 preflight、tool/model 前、publish、summary create/call 和 final commit 设置真实 cancel checkpoint。cancel 接受后先封调度，再通知全部已创建未终态 sessions。
+- [x] 处理 cancel/create、cancel/node completion、cancel/summary completion、target failure/other completion 和 duplicate callback races；已完成 sessions 保持终态，未创建下游不补 session。
+- [x] 无法强杀的 provider/tool late output 只进入 cancelled transcript/日志审计，不追加当前正文、不发布 upstream/result、不触发 summary；必要保存补写仍完成。
+- [x] `cancel_accepted` 与 `workflow_quiesced` 分开；live cleanup、run stream 正常关闭与后台执行生命周期必须等待 quiesced，不因客户端断开提前终止。
+- [x] 首版明确单进程/单 worker in-memory scheduler/store 边界；启动文档/部署配置不得暗示共享状态、多 worker 或跨进程 cancel 已支持。
 
 ### Tests
 
-- [ ] 每个 checkpoint 的 cancel race；接受后 new session/tool/model/upstream publish/summary/final result 调用数均为 0。
-- [ ] cancel 前 completed session 保持 completed，in-flight session cancelled/incomplete，late content 可审计但不可从正常读取/下游看到，最终 workflow_quiesced。
-- [ ] production dependency graph 唯一、invalid settings fail fast、无 provider 时安全失败、same model selection、单 worker documentation/config guard。
+- [x] 每个 checkpoint 的 cancel race；接受后 new session/tool/model/upstream publish/summary/final result 调用数均为 0。
+- [x] cancel 前 completed session 保持 completed，in-flight session cancelled/incomplete，late content 可审计但不可从正常读取/下游看到，最终 workflow_quiesced。
+- [x] production dependency graph 唯一、invalid settings fail fast、无 provider 时安全失败、same model selection、单 worker documentation/config guard。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m7_runtime.py backend/tests/application/analysis_runs/test_topology_cancellation.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_races.py backend/tests/application/analysis_runs/test_workflow_quiescence.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_production_test_isolation.py backend/tests/architecture/test_analysis_workflow_composition.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m7_runtime.py backend/tests/application/analysis_runs/test_topology_cancellation.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_races.py backend/tests/application/analysis_runs/test_workflow_quiescence.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_production_test_isolation.py backend/tests/architecture/test_analysis_workflow_composition.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：M7 已进入唯一 production composition，取消与竞争收敛可重复验证，且运行配置/部署边界诚实；尚未宣称完整端到端验收完成。
 
 提交边界：仅 runtime/settings/coordinator cancel integration、race fixes、deployment wording 与 tests；发现前序契约缺口必须回到对应 Milestone 修复并重跑，不在本阶段堆叠大补丁。
+
+#### Milestone 8 完成记录（2026-10-03）
+
+- 实现：唯一 M7 production composition 已串联 scheduler、run-local outcome store、waterbody runner、同模型 summarizer 与最终 topology result；新增 summary timeout 严格配置并复用精确 model capability。dequeue/session/preflight/tool-model/publish/summary/final commit 均接入取消检查，提交门保证 cancel acceptance 与 outcome publish 互斥，既有 late-output 审计、必要补写和 quiesced cleanup 语义保持不变；README 明确单进程/单 worker 边界。
+- 验证：指定 runtime/cancel `13 passed`，race/quiescence `3 passed`，production isolation/composition `11 passed`；Docker PostgreSQL 17 healthy，专用 `wateragents_test` 完整 backend `1966 passed, 1 warning`，warning 为既有 Starlette/httpx 弃用提示；`compileall` 与 `git diff --check` 通过。
+- 风险：真实外部 provider 与三平台 CI `not run`；M9 fake E2E、最大 topology、离线出口扫描与统一验收仍待后续 Milestone，不把 M8 内部切片声明为最终验收完成。
+- 提交：本完成记录与 M8 production composition、取消/竞态收敛、配置/部署边界由当前本地提交保存。
 
 ## Milestone 9：端到端验收、契约审计与 M8/M9 接力
 
@@ -434,13 +441,13 @@
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
 | GLOBAL-C09 | 本机已验证 | typed models、writer/reader、snapshot/history | serialization/persistence/reload | 七类 M7 内容及 lifecycle/result refs 已通过 serialization、真实 PostgreSQL reload/repair 与 snapshot/history 投影回归。 |
 | GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
-| GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | M4 并发配置默认值/严格范围与 Windows + Docker PostgreSQL 全量回归已验证；三平台 CI 待 M8/M9。 |
+| GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | M4/M8 并发与 summary timeout 配置默认值/严格范围、单 worker guard 及 Windows + Docker PostgreSQL 全量回归已验证；三平台 CI 待 M9。 |
 | M7-C01 | 本机已验证 | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 同一 workflow 的 chain/diamond 已验证全部直接上游 settle 后 exact-once claim，DAG 初始化不预建 session。 |
 | M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
 | M7-C03 | 本机已验证 | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 mode/window fixtures 与 M5 production node adapter 已验证 mode、timezone、segments、ParameterKey、window、memory/model selection 原样传递。 |
-| M7-C04 | pending | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | 先封调度，再通知已有 sessions。 |
-| M7-C05 | partial | provider/tool late-output audit | cancelled stream/late callback tests | M5 已验证 runner 晚到 completed 不能覆盖 committed failed/cancelled 或发布 upstream；provider/tool late audit 待 M8。 |
-| M7-C06 | partial | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | M5 fake summary boundary 的取消与 workflow quiescence 已验证；完整 checkpoint/cleanup races 待 M8。 |
+| M7-C04 | 本机已验证 | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | cancel acceptance 先封 outcome publish/调度；dequeue、session、preflight、tool/model、summary 与 final commit races 已验证不启动下游。 |
+| M7-C05 | 本机已验证 | provider/tool late-output audit | cancelled stream/late callback tests | 晚到 completed/result/chunk 不能覆盖 committed cancelled、进入正常正文、发布 upstream/result 或触发 summary；仅保留脱敏 audit 与必要补写。 |
+| M7-C06 | 本机已验证 | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | cancel_accepted 与 workflow_quiesced 独立；run stream、cleanup 与后台生命周期等待实际 quiesced。 |
 | M7-C07 | 本机已验证 | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 全局峰值 1/4/32、两个 run 共享 limiter、128-node 范围与 per-session failure 已验证，无第二套 run-wide quota。 |
 | M7-C08 | 本机已验证 | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | topology result、run completed lifecycle 与轻量 summary/ref 在同一必需提交组保存，partial/failure/history/reload 已验证。 |
 | M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
@@ -449,8 +456,8 @@
 | M7-C12 | 本机已验证 | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary failed 仅投影安全 PublicError，无 fallback；target/waterbody results 保持且 run 可 completed。 |
 | M7-A01 | 本机已验证 | production workflow fake topology | 3+ nodes、event/session order、exact once | chain/diamond production workflow harness 已验证 phase 顺序、session 延迟创建、每 node 一次与 outcome 全收敛。 |
 | M7-A02 | 本机已验证 | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 provider/M3 launch 与 M5 完整 workflow orchestration 已验证 direct-upstream publish、invalid+usable merge、all-insufficient 零模型。 |
-| M7-A03 | pending | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 无新下游动作并最终 quiesced。 |
-| M7-A04 | pending | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | 迟到内容只可审计。 |
+| M7-A03 | 本机已验证 | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 单 run 取消后不新建 session、不调用 tool/model、不发布 outcome/result/summary，并最终 quiesced。 |
+| M7-A04 | 本机已验证 | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | cancel 前 completed session 保持 completed，in-flight session 取消；迟到内容仅可经脱敏 audit 读取。 |
 | M7-A05 | 本机已验证 | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径复用 canonical M6 result/session 提交接缝，stationless 发布 insufficient 且无 usable records。 |
 | M7-A06 | 本机已验证 | limiter/topology snapshot/settings | peak in-flight、max topology、no run quota | 独立节点实际重叠且峰值不超设置，最大 topology 仅执行 snapshot 内 128 个 active COMID，配置 0/33 失败。 |
 | M7-A07 | 本机已验证 | summarizer/input/validator/failure projection | same model、all cards、special values、failure | M6 summary 校验与 M7 safe failure/result projection 已通过 focused、API 与完整 backend 回归，无 fallback。 |
