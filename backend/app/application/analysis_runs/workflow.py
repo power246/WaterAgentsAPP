@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
@@ -11,9 +13,11 @@ from app.application.analysis_runs.models import (
     SessionSummary,
     TranscriptItemIdentity,
 )
-
 if TYPE_CHECKING:
-    from app.application.transcripts.models import AnalysisRequestV1
+    from app.application.transcripts.models import (
+        AnalysisRequestV1,
+        TranscriptContentRef,
+    )
     from app.domain import InferenceResult
 
 
@@ -54,6 +58,22 @@ class CancellationToken:
 
 
 class WorkflowOperations(Protocol):
+    async def begin_waterbody_execution(
+        self,
+        run_id: UUID | str,
+    ) -> tuple[TranscriptContentRef, TranscriptContentRef]: ...
+
+    async def begin_run_summarization(
+        self,
+        run_id: UUID | str,
+    ) -> None: ...
+
+    async def get_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+    ) -> SessionSummary: ...
+
     async def prepare_agent_session(
         self,
         run_id: UUID | str,

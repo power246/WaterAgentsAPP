@@ -18,6 +18,7 @@ from app.application.evidence_tools import (
     OutcomeIdentityError,
     OutcomesNotReadyError,
     ResolvedInferenceResult,
+    RunLocalUpstreamResultRegistry,
     RunLocalUpstreamResultStore,
 )
 from app.application.transcripts.models import TranscriptContentRef
@@ -420,6 +421,73 @@ def test_chain_authorization_allows_only_participating_direct_upstream() -> None
                     run_id=OTHER_RUN_ID,
                 )
             )
+
+    asyncio.run(exercise())
+
+
+def test_registry_routes_and_cleans_stores_by_run_identity() -> None:
+    async def exercise() -> None:
+        reader = FakeResultReader()
+        registry = RunLocalUpstreamResultRegistry(reader)
+        graph = topology("chain")
+        first_store = await registry.open_run(
+            run_id=RUN_ID,
+            topology=graph,
+            topology_ref=TranscriptContentRef(
+                run_id=RUN_ID,
+                item_id=TOPOLOGY_ITEM_ID,
+            ),
+        )
+        second_store = await registry.open_run(
+            run_id=OTHER_RUN_ID,
+            topology=graph,
+            topology_ref=TranscriptContentRef(
+                run_id=OTHER_RUN_ID,
+                item_id=UUID("20000000-0000-0000-0000-000000000002"),
+            ),
+        )
+        with pytest.raises(OutcomeIdentityError):
+            await registry.open_run(
+                run_id=RUN_ID,
+                topology=graph,
+                topology_ref=TranscriptContentRef(
+                    run_id=RUN_ID,
+                    item_id=TOPOLOGY_ITEM_ID,
+                ),
+            )
+
+        failed_upstream = dependency_outcome(
+            "200",
+            UUID("30000000-0000-0000-0000-000000000200"),
+            status="invalid",
+        )
+        await first_store.publish(failed_upstream)
+        await second_store.publish(
+            failed_upstream.model_copy(update={"run_id": OTHER_RUN_ID})
+        )
+
+        first = await registry.collect(
+            request(agent_comid="300", upstreams=("200",), run_id=RUN_ID)
+        )
+        second = await registry.collect(
+            request(agent_comid="300", upstreams=("200",), run_id=OTHER_RUN_ID)
+        )
+        assert first.records == second.records == ()
+
+        await registry.cleanup_run(RUN_ID)
+        with pytest.raises(OutcomesNotReadyError):
+            await registry.collect(
+                request(agent_comid="300", upstreams=("200",), run_id=RUN_ID)
+            )
+        assert (
+            await registry.collect(
+                request(
+                    agent_comid="300",
+                    upstreams=("200",),
+                    run_id=OTHER_RUN_ID,
+                )
+            )
+        ).records == ()
 
     asyncio.run(exercise())
 

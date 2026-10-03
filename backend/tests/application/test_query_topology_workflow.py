@@ -350,6 +350,18 @@ class FailingTopologyBuilder:
         raise self.failure
 
 
+class CompleteAfterTopologyStage:
+    async def execute(
+        self,
+        context,
+        analysis_context,
+        graph,
+        *,
+        topology_item_id,
+    ) -> None:
+        del context, analysis_context, graph, topology_item_id
+
+
 @asynccontextmanager
 async def workflow_runtime(
     builder,
@@ -367,17 +379,19 @@ async def workflow_runtime(
         transcript_inline_max_bytes=inline_bytes,
         transcript_preview_bytes=min(64, inline_bytes // 2),
     )
+    workflow = compose_m4_workflow(
+        settings,
+        parser=parser,
+        context_resolver=resolver,
+        topology_builder=builder,
+        parameter_capabilities=load_parameter_capability_registry(),
+        error_id_factory=uuid4,
+    )
+    workflow.bind_execution_stage(CompleteAfterTopologyStage())
     application = create_test_app(
         settings=settings,
         clock=FixedClock(),
-        workflow=compose_m4_workflow(
-            settings,
-            parser=parser,
-            context_resolver=resolver,
-            topology_builder=builder,
-            parameter_capabilities=load_parameter_capability_registry(),
-            error_id_factory=uuid4,
-        ),
+        workflow=workflow,
         transcript_store=store,
     )
     async with application.router.lifespan_context(application):

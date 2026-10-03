@@ -2,7 +2,7 @@
 
 更新日期：2026-10-03
 
-> 当前状态：Milestone 0–4 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架、run-local direct-upstream evidence seam、水体启动门禁/零模型正式结果接缝，以及依赖感知 scheduler/全局有界并行；Milestone 5–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
+> 当前状态：Milestone 0–5 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架、run-local direct-upstream evidence seam、水体启动门禁/零模型正式结果接缝、依赖感知 scheduler/全局有界并行，以及同一 production workflow 的全水体执行与 outcome 收敛；Milestone 6–9 尚未完成。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
 
 本清单执行以下已确认文档：
 
@@ -258,29 +258,36 @@
 
 ### 工作
 
-- [ ] 延伸现有 `QueryTopologyWorkflow`：保存 topology 后进入 `waterbody_execution`，使用 Milestone 4 scheduler、Milestone 3 launch gate、Milestone 2 store 与同一个 M6 `RunSingleWaterbodyAgent`；删除 topology 后直接结束 run 的旧 terminal path。
-- [ ] 每个 ready node 在准备运行 Agent 或生成 deterministic result 时创建一个 waterbody session；DAG 初始化不预建，未启动节点没有假 session，创建后失败/取消则保留真实 session/process。
-- [ ] 将 M6 canonical `SessionSummary`/持久化 result 作为 outcome 权威，不传播 runner 返回但 coordinator 未提交的晚到/失配结果。
-- [ ] 汇聚所有 active node outcomes，确定 target main conclusion、non-target failures、coverage/partial 状态和 fatal target failure；target deterministic indeterminate 保持 completed。
-- [ ] 保持 mode、timezone、segments、ParameterKey、window 和 model selection 从 run context 原样贯穿；不得为各 node 猜新模式或自行扩大参数范围。
-- [ ] 本阶段以 fake summary boundary 暂停在“waterbody outcomes settled”，不得伪造最终 `TopologyRunResult`、提前将 run completed，或保留一个旁路 production workflow。
+- [x] 延伸现有 `QueryTopologyWorkflow`：保存 topology 后进入 `waterbody_execution`，使用 Milestone 4 scheduler、Milestone 3 launch gate、Milestone 2 store 与同一个 M6 `RunSingleWaterbodyAgent`；删除 topology 后直接结束 run 的旧 terminal path。
+- [x] 每个 ready node 在准备运行 Agent 或生成 deterministic result 时创建一个 waterbody session；DAG 初始化不预建，未启动节点没有假 session，创建后失败/取消则保留真实 session/process。
+- [x] 将 M6 canonical `SessionSummary`/持久化 result 作为 outcome 权威，不传播 runner 返回但 coordinator 未提交的晚到/失配结果。
+- [x] 汇聚所有 active node outcomes，确定 target main conclusion、non-target failures、coverage/partial 状态和 fatal target failure；target deterministic indeterminate 保持 completed。
+- [x] 保持 mode、timezone、segments、ParameterKey、window 和 model selection 从 run context 原样贯穿；不得为各 node 猜新模式或自行扩大参数范围。
+- [x] 本阶段以 fake summary boundary 暂停在“waterbody outcomes settled”，不得伪造最终 `TopologyRunResult`、提前将 run completed，或保留一个旁路 production workflow。
 
 ### Tests
 
-- [ ] production workflow fake chain/diamond：session 创建时机、每 node 一次、upstream publish、M6 runner 调用和 phase 顺序。
-- [ ] invalid+usable merge 继续一次、all insufficient 零模型、non-target failed partial、target failed fatal、target indeterminate completed-ready-for-summary。
-- [ ] coordinator 权威竞态：runner late completed、persistence/session failed、cancel 胜出时均不错误传播。
+- [x] production workflow fake chain/diamond：session 创建时机、每 node 一次、upstream publish、M6 runner 调用和 phase 顺序。
+- [x] invalid+usable merge 继续一次、all insufficient 零模型、non-target failed partial、target failed fatal、target indeterminate completed-ready-for-summary。
+- [x] coordinator 权威竞态：runner late completed、persistence/session failed、cancel 胜出时均不错误传播。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_driven_workflow.py backend/tests/application/analysis_runs/test_topology_result_assembler.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning backend/tests/application/evidence_tools -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_analysis_workflow_composition.py -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_driven_workflow.py backend/tests/application/analysis_runs/test_topology_result_assembler.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/reasoning backend/tests/application/evidence_tools -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_analysis_workflow_composition.py -q`
+- [x] `git diff --check`
 
 阶段出口：唯一 production workflow 已能从 topology 执行并收敛全部水体，但尚未调用 summarizer 或提交最终 run result/run completed。
 
 提交边界：只包含 workflow 延伸、node runner adapter、waterbody outcome aggregation 与 tests；不得用临时文本完成 summary，也不得提前注册最终 typed contents。
+
+#### Milestone 5 完成记录（2026-10-03）
+
+- 实现：延伸唯一 `QueryTopologyWorkflow`，由 coordinator phase gate 进入 `waterbody_execution`，用同一 M4 scheduler、M2 run-local store/M5 upstream provider、M3 launch policy/zero-model assembler 和 M6 runner 执行全部 active nodes；session 只在 node claim 后创建。新增 committed-session result assembler、target/partial/failure 收敛、按 run provider routing/cleanup、一次性 production composition binding；全部 outcomes settle 后进入 `run_summarization` 并停在 fake boundary，没有创建最终 result 或完成 run。
+- 验证：M5 workflow/result focused `11 passed`；reasoning + evidence tools `234 passed`；production composition `2 passed`；analysis-runs/M4–M6 runtime/architecture 宽回归在 D 盘 basetemp 为 `228 passed`；fresh-import/composition 最终门禁 `6 passed`；`compileall` 与 `git diff --check` 通过。Docker PostgreSQL 17 healthy，测试进程只设置 `WATERAGENTS_TEST_DB_NAME=wateragents_test`；最终完整 `backend/tests` 为 `1922 passed, 1 failed, 1 warning`，唯一失败是既有 M6 session SSE smoke 的 45 秒外层超时，该用例单独复跑 `1 passed in 29.73s`，其业务断言无失败；warning 为既有 Starlette/httpx 弃用提示。
+- 修复与边界：宽回归发现并修复 `WorkflowOperations` 类型导入环、旧 test runtime 可选参数兼容和 M4 smoke 的显式 test-only terminal stage。真实外部 provider 与三平台 CI `not run`；Milestone 6–9、summary Agent、最终 typed contents/persistence/run completion、完整 cancel races 与 frontend 均未完成，M1–M9 仍等待 M9 后统一验收。
+- 提交：本完成记录与 M5 workflow/node adapter/outcome aggregation/composition/tests 由当前本地提交保存。
 
 ## Milestone 6：独立 run summarizer Agent
 
@@ -410,26 +417,26 @@
 |---|---|---|---|---|
 | GLOBAL-C01 | pending | 当前 `backend/`、M0 archive guards | archive isolation、production import scan | 不读取或复用归档。 |
 | GLOBAL-C02 | partial | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | M1 类型和直接消费者已本机验证；runtime/registry 仍待后续阶段。 |
-| GLOBAL-C06 | partial | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | M2 真实 store/upstream ref closure 已本机验证；summary validator/result assembler 待 M6。 |
+| GLOBAL-C06 | partial | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | M2 真实 store/upstream ref closure 与 M5 committed-result assembler 已本机验证；summary validator 待 M6。 |
 | GLOBAL-C07 | pending | logs、transcript、public projection、provider adapter | secret/error/provider envelope scans | internal error 只留后端。 |
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
 | GLOBAL-C09 | partial | typed models、writer/reader、snapshot/history | serialization/persistence/reload | M1 payload/snapshot/read projection 与 session role persistence 已验证；typed writer/reload 待 M7。 |
 | GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
 | GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | M4 并发配置默认值/严格范围与 Windows + Docker PostgreSQL 全量回归已验证；三平台 CI 待 M8/M9。 |
-| M7-C01 | partial | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | scheduler 已验证全部直接上游 settle 后 exact-once claim；production session 创建时机与 workflow 接入待 M5。 |
+| M7-C01 | 本机已验证 | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 同一 workflow 的 chain/diamond 已验证全部直接上游 settle 后 exact-once claim，DAG 初始化不预建 session。 |
 | M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
-| M7-C03 | partial | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 dependency prompt 的 mode/window 原样传递已验证；production workflow handoff 待 M5。 |
+| M7-C03 | 本机已验证 | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 mode/window fixtures 与 M5 production node adapter 已验证 mode、timezone、segments、ParameterKey、window、memory/model selection 原样传递。 |
 | M7-C04 | pending | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | 先封调度，再通知已有 sessions。 |
-| M7-C05 | pending | provider/tool late-output audit | cancelled stream/late callback tests | 晚到结果不对外或下传。 |
-| M7-C06 | pending | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | cleanup 等待真实收敛。 |
+| M7-C05 | partial | provider/tool late-output audit | cancelled stream/late callback tests | M5 已验证 runner 晚到 completed 不能覆盖 committed failed/cancelled 或发布 upstream；provider/tool late audit 待 M8。 |
+| M7-C06 | partial | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | M5 fake summary boundary 的取消与 workflow quiescence 已验证；完整 checkpoint/cleanup races 待 M8。 |
 | M7-C07 | 本机已验证 | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 全局峰值 1/4/32、两个 run 共享 limiter、128-node 范围与 per-session failure 已验证，无第二套 run-wide quota。 |
-| M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M1 构造不变量已验证；assembler/lifecycle 提交待 M5/M7。 |
+| M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M5 assembler 的 target business result、non-target partial、target fatal 与 stable refs 已验证；最终 lifecycle/history 提交待 M7。 |
 | M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
 | M7-C10 | 本机已验证 | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | source role、usable-only result ref、invalid redaction、mode/window 与 deterministic numeric boundary 已通过 focused/full regression。 |
 | M7-C11 | partial | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M1 target + all-card/ref/no-tools schema 已验证；prompt/runner 待 M6。 |
 | M7-C12 | pending | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary 失败不抹掉 target/waterbody results。 |
-| M7-A01 | pending | production workflow fake topology | 3+ nodes、event/session order、exact once | session 不预建。 |
-| M7-A02 | partial | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 manifest/usable-only provider 与 M3 launch/bundle handoff 已验证；完整 production workflow orchestration 待 M5。 |
+| M7-A01 | 本机已验证 | production workflow fake topology | 3+ nodes、event/session order、exact once | chain/diamond production workflow harness 已验证 phase 顺序、session 延迟创建、每 node 一次与 outcome 全收敛。 |
+| M7-A02 | 本机已验证 | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 provider/M3 launch 与 M5 完整 workflow orchestration 已验证 direct-upstream publish、invalid+usable merge、all-insufficient 零模型。 |
 | M7-A03 | pending | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 无新下游动作并最终 quiesced。 |
 | M7-A04 | pending | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | 迟到内容只可审计。 |
 | M7-A05 | 本机已验证 | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径复用 canonical M6 result/session 提交接缝，stationless 发布 insufficient 且无 usable records。 |

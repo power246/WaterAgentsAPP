@@ -211,6 +211,60 @@ class RunLocalUpstreamResultStore:
             raise OutcomesNotReadyError()
 
 
+class RunLocalUpstreamResultRegistry:
+    """Route the shared M5 provider to one immutable store per active run."""
+
+    def __init__(self, result_reader: UpstreamInferenceResultReader) -> None:
+        self._result_reader = result_reader
+        self._stores: dict[UUID, RunLocalUpstreamResultStore] = {}
+        self._lock = asyncio.Lock()
+
+    async def open_run(
+        self,
+        *,
+        run_id: UUID,
+        topology: HydrologyGraph,
+        topology_ref: TranscriptContentRef,
+    ) -> RunLocalUpstreamResultStore:
+        store = RunLocalUpstreamResultStore(
+            run_id=run_id,
+            topology=topology,
+            topology_ref=topology_ref,
+            result_reader=self._result_reader,
+        )
+        async with self._lock:
+            if run_id in self._stores:
+                raise OutcomeIdentityError("run-local upstream store already exists")
+            self._stores[run_id] = store
+        return store
+
+    async def collect(
+        self,
+        request: UpstreamResultRequest,
+        *,
+        deadline: float | None = None,
+    ) -> ProviderCollectionBatch[UpstreamResultRecord]:
+        try:
+            run_id = UUID(request.run_id)
+        except ValueError as error:
+            raise OutcomeIdentityError() from error
+        async with self._lock:
+            store = self._stores.get(run_id)
+        if store is None:
+            raise OutcomesNotReadyError()
+        return await store.collect(request, deadline=deadline)
+
+    async def cleanup_run(self, run_id: UUID | str) -> None:
+        try:
+            key = run_id if isinstance(run_id, UUID) else UUID(str(run_id))
+        except ValueError as error:
+            raise OutcomeIdentityError() from error
+        async with self._lock:
+            store = self._stores.pop(key, None)
+        if store is not None:
+            await store.cleanup_run(key)
+
+
 def _manifest_dependency(outcome: DependencyOutcome) -> WaterbodyDependency:
     usable = outcome.status is DependencyStatus.USABLE
     return WaterbodyDependency(

@@ -21,6 +21,7 @@ from app.infrastructure.runtime.m6 import (
     m6_runtime_limits,
     safe_m6_metadata,
 )
+from app.infrastructure.runtime.m7 import compose_m7_execution_stage
 
 __all__ = [
     "RuntimeComponents",
@@ -35,6 +36,7 @@ __all__ = [
     "compose_m4_workflow",
     "compose_m5_runtime",
     "compose_m6_runtime",
+    "compose_m7_execution_stage",
     "evidence_tool_limits",
     "m6_runtime_limits",
     "safe_m6_metadata",

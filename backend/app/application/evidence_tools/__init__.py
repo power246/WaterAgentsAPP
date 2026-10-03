@@ -72,6 +72,7 @@ from app.application.evidence_tools.upstream_result_store import (
     OutcomeIdentityError,
     OutcomesNotReadyError,
     RunLocalUpstreamResultStore,
+    RunLocalUpstreamResultRegistry,
 )
 from app.application.evidence_tools.authorization import (
     AuthorizedEvidenceRequest,
@@ -125,6 +126,7 @@ __all__ = [
     "WaterbodyGeometryUnavailableError",
     "RunLocalSingleFlight",
     "RunLocalUpstreamResultStore",
+    "RunLocalUpstreamResultRegistry",
     "ResolvedInferenceResult",
     "TranscriptUpstreamInferenceResultReader",
     "UpstreamInferenceResultReader",

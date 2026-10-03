@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import Protocol
+from uuid import UUID
 
 from app.application.analysis_runs.cancellation import await_with_cancellation
 from app.application.analysis_runs.workflow import (
@@ -25,8 +26,19 @@ class TopologyBuildingStage(Protocol):
     async def build(self, context: AnalysisContext) -> HydrologyGraph: ...
 
 
+class TopologyExecutionStage(Protocol):
+    async def execute(
+        self,
+        context: WorkflowContext,
+        analysis_context: AnalysisContext,
+        graph: HydrologyGraph,
+        *,
+        topology_item_id: UUID,
+    ) -> None: ...
+
+
 class QueryTopologyWorkflow(AnalysisWorkflow):
-    """Runs the M4 query-understanding and topology stages in one owned task."""
+    """Own query, topology, and the once-bound downstream execution stage."""
 
     def __init__(
         self,
@@ -35,6 +47,16 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
     ) -> None:
         self._query_understanding = query_understanding
         self._topology_builder = topology_builder
+        self._execution_stage: TopologyExecutionStage | None = None
+
+    @property
+    def execution_bound(self) -> bool:
+        return self._execution_stage is not None
+
+    def bind_execution_stage(self, stage: TopologyExecutionStage) -> None:
+        if self._execution_stage is not None:
+            raise RuntimeError("topology execution stage is already bound")
+        self._execution_stage = stage
 
     async def run(self, context: WorkflowContext) -> None:
         analysis_context = await self._query_understanding.understand(context)
@@ -93,3 +115,17 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
             graph,
         )
         context.cancellation.checkpoint()
+        if self._execution_stage is None:
+            raise WorkflowFailed(
+                "The topology execution stage is not configured.",
+                code="workflow_not_configured",
+                public_message="The analysis workflow is not configured.",
+                failed_stage="waterbody_execution",
+                retryable=False,
+            )
+        await self._execution_stage.execute(
+            context,
+            analysis_context,
+            graph,
+            topology_item_id=topology_item.item_id,
+        )

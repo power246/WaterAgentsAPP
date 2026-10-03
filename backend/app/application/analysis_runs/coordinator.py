@@ -1315,6 +1315,55 @@ class RunCoordinator:
         async with runtime.condition:
             return self._lookup_agent_session_locked(runtime, key).summary
 
+    async def begin_waterbody_execution(
+        self,
+        run_id: UUID | str,
+    ) -> tuple[TranscriptContentRef, TranscriptContentRef]:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            if (
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status is not RunStatus.RUNNING
+            ):
+                raise InvalidRunTransitionError(
+                    runtime.snapshot,
+                    RunStatus.RUNNING,
+                )
+            if (
+                runtime.analysis_phase is not AnalysisPhase.TOPOLOGY_READY
+                or runtime.context_ref is None
+                or runtime.topology_ref is None
+            ):
+                raise ValueError(
+                    "waterbody execution requires saved context and topology"
+                )
+            runtime.analysis_phase = AnalysisPhase.WATERBODY_EXECUTION
+            runtime.condition.notify_all()
+            return runtime.context_ref, runtime.topology_ref
+
+    async def begin_run_summarization(
+        self,
+        run_id: UUID | str,
+    ) -> None:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            if (
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status is not RunStatus.RUNNING
+            ):
+                raise InvalidRunTransitionError(
+                    runtime.snapshot,
+                    RunStatus.RUNNING,
+                )
+            if runtime.analysis_phase is not AnalysisPhase.WATERBODY_EXECUTION:
+                raise ValueError(
+                    "run summarization requires settled waterbody execution"
+                )
+            runtime.analysis_phase = AnalysisPhase.RUN_SUMMARIZATION
+            runtime.condition.notify_all()
+
     async def prepare_agent_session(
         self,
         run_id: UUID | str,

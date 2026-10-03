@@ -15,6 +15,7 @@ from app.application.evidence_tools import (
     EvidenceToolRegistry,
     EvidenceTranscriptStore,
     RunLocalSingleFlight,
+    RunLocalUpstreamResultRegistry,
     create_evidence_tool_registry,
 )
 from app.application.transcripts.reader import TranscriptReader
@@ -75,12 +76,15 @@ class M5Runtime:
     executor: EvidenceToolExecutor
     acquisition: EvidenceAcquisitionService
     geometry_catalog: TrustedGeometryCatalog | None = None
+    upstream_results: RunLocalUpstreamResultRegistry | None = None
 
     async def cleanup_run(self, run_id: UUID | str) -> None:
         identity = str(run_id)
         await self.executor.cleanup_run(identity)
         if self.geometry_catalog is not None:
             self.geometry_catalog.cleanup_run(identity)
+        if self.upstream_results is not None:
+            await self.upstream_results.cleanup_run(run_id)
 
 
 def evidence_tool_limits(settings: AppSettings) -> EvidenceToolLimits:
@@ -115,6 +119,7 @@ def compose_m5_runtime(
     operation_id_factory: Callable[[], str] | None = None,
     scope_preparer: Callable[[EvidenceSessionScope], None] | None = None,
     geometry_catalog: TrustedGeometryCatalog | None = None,
+    upstream_results: RunLocalUpstreamResultRegistry | None = None,
 ) -> M5Runtime:
     required = {
         "operations": operations,
@@ -178,6 +183,7 @@ def compose_m5_runtime(
         executor=executor,
         acquisition=acquisition,
         geometry_catalog=geometry_catalog,
+        upstream_results=upstream_results,
     )
 
 
@@ -189,6 +195,7 @@ async def build_m5_runtime(
     transcript_reader: TranscriptReader,
     capability_registry: ParameterCapabilityRegistry,
     clock: ClockPort,
+    upstream_results: RunLocalUpstreamResultRegistry | None = None,
 ) -> AsyncIterator[M5Runtime]:
     geometry_catalog = TrustedGeometryCatalog()
     api_key = (
@@ -239,6 +246,8 @@ async def build_m5_runtime(
             weather_port=weather,
             facility_port=facility,
             clock=clock,
+            upstream_port=upstream_results,
             scope_preparer=geometry_catalog.register_scope,
             geometry_catalog=geometry_catalog,
+            upstream_results=upstream_results,
         )
