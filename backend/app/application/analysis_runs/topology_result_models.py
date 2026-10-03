@@ -23,6 +23,11 @@ from app.domain.domain_model import DomainModel
 from app.domain.inference.outcome_status import OutcomeStatus
 
 
+MAX_M7_TOPOLOGY_NODES = 10_000
+MAX_M7_DIRECT_UPSTREAM_NODES = MAX_M7_TOPOLOGY_NODES - 1
+MAX_M7_RESULT_CELL_REFS = 2_048
+
+
 class DependencyStatus(DomainEnum):
     USABLE = "usable"
     INSUFFICIENT = "insufficient"
@@ -73,8 +78,14 @@ class DependencyOutcome(DomainModel):
     status: DependencyStatus
     result_ref: SessionResultReference | None = None
     result_summary: WaterbodySessionResultSummary | None = None
-    usable_cell_refs: tuple[StableSourceReference, ...] = ()
-    discharge_states: tuple[DependencyDischargeState, ...] = ()
+    usable_cell_refs: Annotated[
+        tuple[StableSourceReference, ...],
+        Field(max_length=MAX_M7_RESULT_CELL_REFS),
+    ] = ()
+    discharge_states: Annotated[
+        tuple[DependencyDischargeState, ...],
+        Field(max_length=64),
+    ] = ()
     error_ref: SessionResultReference | None = None
     completed_at: UtcDatetime
 
@@ -142,8 +153,14 @@ class WaterbodyDependency(DomainModel):
     upstream_session_id: UUID | None = None
     dependency_status: DependencyStatus
     result_ref: SessionResultReference | None = None
-    usable_cell_refs: tuple[StableSourceReference, ...] = ()
-    discharge_states: tuple[DependencyDischargeState, ...] = ()
+    usable_cell_refs: Annotated[
+        tuple[StableSourceReference, ...],
+        Field(max_length=MAX_M7_RESULT_CELL_REFS),
+    ] = ()
+    discharge_states: Annotated[
+        tuple[DependencyDischargeState, ...],
+        Field(max_length=64),
+    ] = ()
 
     @field_validator("usable_cell_refs")
     @classmethod
@@ -198,7 +215,10 @@ class WaterbodyDependencyManifest(DomainModel):
     session_id: UUID
     target_comid: NonEmptyString
     topology_ref: TranscriptContentRef
-    dependencies: tuple[WaterbodyDependency, ...] = ()
+    dependencies: Annotated[
+        tuple[WaterbodyDependency, ...],
+        Field(max_length=MAX_M7_DIRECT_UPSTREAM_NODES),
+    ] = ()
     manifest_digest: NonEmptyString
 
     @field_validator("schema_version", mode="before")
@@ -311,7 +331,10 @@ class TopologyRunResult(DomainModel):
     target_result_ref: SessionResultReference
     target_result_summary: WaterbodySessionResultSummary
     graph_coverage: GraphCoverage
-    node_outcomes: Annotated[tuple[WaterbodyRunEntry, ...], Field(min_length=1)]
+    node_outcomes: Annotated[
+        tuple[WaterbodyRunEntry, ...],
+        Field(min_length=1, max_length=MAX_M7_TOPOLOGY_NODES),
+    ]
     outcome_counts: OutcomeCounts
     summary: TopologySummaryResult
     generated_at: UtcDatetime

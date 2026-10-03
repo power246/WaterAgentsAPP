@@ -441,9 +441,11 @@ M3 的完成判定按 [D38](M3/m3_transcript_history_design.md#d38终态选定�
 
 Application 层负责编排 waterbody Agent loop、模型调用前的确定性 evidence gate、完整结果骨架、分批计划、draft validation 和 final assembly。Agent 只对通过门禁的范围进行推理，不能自行绕过完全无证据的停止规则、修改 cell/window identity 或扩张 evidence/tool 权限。
 
-M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 upstream 与 M8 transcript-RAG producer 仍按后续责任保持 unavailable；真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
+M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 已通过 production workflow 实现 upstream-result producer；M8 transcript-RAG producer 仍按后续责任保持 unavailable。真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
 
-M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 DAG/direct-upstream、M8 transcript RAG 和 M9 frontend/settings/admin 仍由后续阶段实现。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
+M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 已在唯一 production workflow 中按每个 waterbody session 复用该 runner，M8 transcript RAG 和 M9 frontend/settings/admin 仍由后续阶段实现。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
+
+M7 已完成 Milestone 0–9 Windows 本机实现与集成审计：DAG ready queue、直接上游依赖 manifest、run-local outcome store、零模型收敛、M6 waterbody 调用、同模型 run summarizer、topology final result、取消/quiescence、typed transcript/history 与专用 PostgreSQL restart 路径已落到当前 `backend/`。它继续复用 M3 的 run/session、writer/reader 和两层 SSE，不新增 route、第三条流或 run-wide 模型配额；真实 provider 请求为 `not run`，三平台 CI 为 `partial`，M8 RAG 与 M9 前端尚未实现，详见 [M7 Implementation TODO](M7/m7_implementation_todo.md)。
 
 ## 7. Domain Layer
 

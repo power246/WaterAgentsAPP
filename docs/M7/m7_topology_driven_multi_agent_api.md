@@ -10,7 +10,6 @@
 POST /api/analysis/runs
 GET  /api/analysis/runs
 GET  /api/analysis/runs/{run_id}
-GET  /api/analysis/runs/{run_id}/status
 GET  /api/analysis/runs/{run_id}/events
 POST /api/analysis/runs/{run_id}/cancel
 POST /api/analysis/runs/{run_id}/persistence/retry

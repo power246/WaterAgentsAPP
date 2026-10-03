@@ -478,7 +478,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 9. M7: Topology-Driven Multi-Agent Workflow
 
-状态：设计与 Milestone 0–9 施工清单已冻结，尚未实现。正式输入见 [设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API 契约](M7/m7_topology_driven_multi_agent_api.md) 与 [Implementation TODO](M7/m7_implementation_todo.md)。
+状态：Milestone 0–9 已完成 Windows 本机实现、固定 fake E2E、专用 PostgreSQL 持久化/重启和离线契约审计；production composition 已串联 DAG 调度、直接上游依赖、M6 waterbody runner、同模型 run summarizer 与 topology final result。真实 provider 请求保持 `not run`，Ubuntu/macOS/Windows 同提交 CI 保持 `partial`，M8 transcript RAG 与 M9 frontend/settings/admin 尚未实现。正式输入与完成证据见 [设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API 契约](M7/m7_topology_driven_multi_agent_api.md) 与 [Implementation TODO](M7/m7_implementation_todo.md)。
 
 目标：
 

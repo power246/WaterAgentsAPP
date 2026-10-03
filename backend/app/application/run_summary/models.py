@@ -11,6 +11,8 @@ from app.application.analysis_runs.models import SessionResultReference
 from app.application.analysis_runs.topology_result_models import (
     DependencyStatus,
     GraphCoverage,
+    MAX_M7_DIRECT_UPSTREAM_NODES,
+    MAX_M7_TOPOLOGY_NODES,
     StableSourceReference,
 )
 from app.application.reasoning.model_models import (
@@ -112,7 +114,7 @@ class _WaterbodyResultProjection(DomainModel):
     graph_position: Annotated[StrictInt, Field(ge=0)]
     direct_upstream_comids: Annotated[
         tuple[NonEmptyString, ...],
-        Field(max_length=32),
+        Field(max_length=MAX_M7_DIRECT_UPSTREAM_NODES),
     ] = ()
     result_ref: SessionResultReference
     mode: InferenceMode
@@ -225,7 +227,7 @@ class WaterbodyReportCard(DomainModel):
     graph_position: Annotated[StrictInt, Field(ge=0)]
     direct_upstream_comids: Annotated[
         tuple[NonEmptyString, ...],
-        Field(max_length=32),
+        Field(max_length=MAX_M7_DIRECT_UPSTREAM_NODES),
     ] = ()
     dependency_status: DependencyStatus
     result_ref: SessionResultReference | None = None
@@ -334,8 +336,14 @@ class RunSummaryInput(_VersionOneContent):
     graph_coverage: GraphCoverage
     limit_facts: Annotated[tuple[RunSummaryLimitFact, ...], Field(max_length=32)] = ()
     target_result_projection: TargetResultProjection
-    report_cards: tuple[WaterbodyReportCard, ...] = ()
-    allowed_source_refs: tuple[StableSourceReference, ...] = ()
+    report_cards: Annotated[
+        tuple[WaterbodyReportCard, ...],
+        Field(max_length=MAX_M7_TOPOLOGY_NODES - 1),
+    ] = ()
+    allowed_source_refs: Annotated[
+        tuple[StableSourceReference, ...],
+        Field(max_length=32_768),
+    ] = ()
     input_digest: NonEmptyString
 
     @field_validator("analysis_timezone")
@@ -463,7 +471,10 @@ class RunSummaryModelRequest(_VersionOneContent):
     input_ref: TranscriptContentRef
     input_digest: NonEmptyString
     system_prompt: NonBlankText
-    messages: Annotated[tuple[RunSummaryModelMessage, ...], Field(min_length=1)]
+    messages: Annotated[
+        tuple[RunSummaryModelMessage, ...],
+        Field(min_length=1, max_length=8),
+    ]
     response_schema: RunSummaryJsonSchema
     deadline: UtcDatetime
     request_digest: NonEmptyString
@@ -565,7 +576,10 @@ class RunSummaryModelResponse(_VersionOneContent):
     operation_id: UUID
     model: ModelSelection
     finish_reason: RunSummaryFinishReason
-    message_refs: tuple[TranscriptContentRef, ...] = ()
+    message_refs: Annotated[
+        tuple[TranscriptContentRef, ...],
+        Field(max_length=32),
+    ] = ()
     structured_output: JsonObjectText | None = None
     visible_text: str = ""
     usage: ModelUsageSummary | None = None

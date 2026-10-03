@@ -146,12 +146,15 @@ class WorkflowNodeRunnerFactory:
         self.releases = releases or {}
         self.requests = []
         self.model_calls = []
+        self.manifests = []
         self.store = None
+        self.topology_ref = None
         self.assembler = TopologyResultAssembler(reader)
 
-    def build(self, *, outcome_store, **kwargs):
+    def build(self, *, outcome_store, topology_ref, **kwargs):
         del kwargs
         self.store = outcome_store
+        self.topology_ref = topology_ref
         return self
 
     async def run(self, request):
@@ -161,6 +164,22 @@ class WorkflowNodeRunnerFactory:
             agent_role=AgentRole.WATERBODY,
             target_comid=request.node.comid,
         )
+        manifest = await self.store.build_manifest(
+            session_id=session.session_id,
+            target_comid=request.node.comid,
+        )
+        manifest_item = await self.operations.reserve_transcript_item(
+            request.run_id,
+            session_id=session.session_id,
+        )
+        await self.operations.finalize_transcript_item(
+            request.run_id,
+            manifest_item.item_id,
+            "waterbody_dependency_manifest",
+            1,
+            manifest,
+        )
+        self.manifests.append(manifest)
         await self.operations.mark_agent_session_running(
             request.run_id,
             session.session_id,
@@ -195,6 +214,7 @@ class WorkflowNodeRunnerFactory:
                 request.node.comid,
                 session.session_id,
                 statuses=(point_status,) * 2,
+                closure_item_id=self.topology_ref.item_id,
             )
             terminal = await self.operations.complete_waterbody_agent_session(
                 request.run_id,
@@ -213,6 +233,7 @@ class WorkflowNodeRunnerFactory:
 class NodeRunnerOperations:
     def __init__(self) -> None:
         self.sessions = {}
+        self.transcript_items = []
 
     async def prepare_agent_session(self, run_id, *, agent_role, target_comid=None):
         session = SessionSummary(
@@ -241,6 +262,22 @@ class NodeRunnerOperations:
     async def cancel_agent_session(self, run_id, session_id):
         del run_id
         return self._transition(session_id, AgentSessionStatus.CANCELLED)
+
+    async def reserve_transcript_item(self, run_id, *, session_id=None):
+        item = SimpleNamespace(item_id=uuid4(), run_id=run_id, session_id=session_id)
+        return item
+
+    async def finalize_transcript_item(
+        self,
+        run_id,
+        item_id,
+        content_type,
+        content_schema_version,
+        content,
+    ):
+        self.transcript_items.append(
+            (run_id, item_id, content_type, content_schema_version, content)
+        )
 
     def _transition(self, session_id, status):
         current = self.sessions[session_id]
@@ -666,6 +703,13 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
         assert task.context is saved_context
         assert task.task.waterbody_model == saved_context.waterbody_model
         assert task.task.memory_mode is saved_context.memory_mode
+        manifests = [
+            content
+            for _, _, content_type, version, content in operations.transcript_items
+            if content_type == "waterbody_dependency_manifest" and version == 1
+        ]
+        assert len(manifests) == 1
+        assert manifests[0] == task.task.dependency_manifest
         assert task.task.evidence_scope.mode is saved_context.mode
         assert task.task.evidence_scope.analysis_timezone == (
             saved_context.analysis_timezone

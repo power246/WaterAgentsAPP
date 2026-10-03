@@ -1,8 +1,8 @@
 # M7 Topology-Driven Multi-Agent Workflow Implementation TODO
 
-更新日期：2026-10-03
+更新日期：2026-10-04
 
-> 当前状态：Milestone 0–5 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架、run-local direct-upstream evidence seam、水体启动门禁/零模型正式结果接缝、依赖感知 scheduler/全局有界并行，以及同一 production workflow 的全水体执行与 outcome 收敛；Milestone 6–9 尚未完成。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
+> 当前状态：Milestone 0–9 已完成 Windows 本机实现、专用 PostgreSQL 验证与离线契约审计，M7 已具备进入正式验收的分支证据；真实 provider 请求和 Ubuntu/macOS/Windows 同提交 CI 仍分别为 `not run` / `partial`。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；M8 transcript RAG 与 M9 frontend/settings/admin 尚未实现，也未开始正式前端联调。
 
 本清单执行以下已确认文档：
 
@@ -400,48 +400,58 @@
 
 ### 工作
 
-- [ ] 新增固定 fake M7 smoke，至少覆盖 3-node chain、diamond merge、stationless all-insufficient、invalid+usable、non-target failure partial、target failure、summary success/failure、cancel/quiesced。
-- [ ] 使用最大允许 topology 边界 fixture 验证范围、峰值并发、每 node/session/card 恰好一次、summary model fit 和无 run-wide quota；不得用缩小 topology 设置掩盖问题。
-- [ ] 在专用 PostgreSQL 验证完整 workflow、result/session/content refs、run/session SSE、history/restart/startup repair、补写与 cleanup；数据库不可用时明确 `not run`，不以 SQLite/fake 替代。
-- [ ] 执行完整 backend regression、architecture、OpenAPI、typed registry、policy fixture、secrets/log/SSE/history 出口扫描、Markdown links/JSON/code fences/trailing whitespace 和 contract ID 双向审计。
-- [ ] 可选真实 provider smoke 必须得到显式计费/联网授权并先 preflight；否则记录 requests/events/responses 均为 0 的 `not run`，不得影响 fake/fixture 验收结论。
-- [ ] 更新本清单矩阵和各 Milestone 完成记录；项目级文档只写有实际证据的状态，未跑 PostgreSQL/provider/三平台 CI 不得写 completed。
-- [ ] 确认 M8 只消费稳定 transcript/result refs，M9 只消费 snapshot/history/summary refs 并负责 clickable URL 与 frontend；M7 不提前实现 RAG producer、页面、地图连线或 admin/settings UI。
+- [x] 新增固定 fake M7 smoke，至少覆盖 3-node chain、diamond merge、stationless all-insufficient、invalid+usable、non-target failure partial、target failure、summary success/failure、cancel/quiesced。
+- [x] 使用最大允许 topology 边界 fixture 验证范围、峰值并发、每 node/session/card 恰好一次、summary model fit 和无 run-wide quota；不得用缩小 topology 设置掩盖问题。
+- [x] 在专用 PostgreSQL 验证完整 workflow、result/session/content refs、run/session SSE、history/restart/startup repair、补写与 cleanup；数据库不可用时明确 `not run`，不以 SQLite/fake 替代。
+- [x] 执行完整 backend regression、architecture、OpenAPI、typed registry、policy fixture、secrets/log/SSE/history 出口扫描、Markdown links/JSON/code fences/trailing whitespace 和 contract ID 双向审计。
+- [x] 可选真实 provider smoke 必须得到显式计费/联网授权并先 preflight；否则记录 requests/events/responses 均为 0 的 `not run`，不得影响 fake/fixture 验收结论。
+- [x] 更新本清单矩阵和各 Milestone 完成记录；项目级文档只写有实际证据的状态，未跑 PostgreSQL/provider/三平台 CI 不得写 completed。
+- [x] 确认 M8 只消费稳定 transcript/result refs，M9 只消费 snapshot/history/summary refs 并负责 clickable URL 与 frontend；M7 不提前实现 RAG producer、页面、地图连线或 admin/settings UI。
 
 ### Tests
 
-- [ ] fake E2E 对 session 创建时机、topology start/completed、dependency manifest、model/tool counts、target/partial/run status 和 summary refs 做业务断言。
-- [ ] M7 policy、scheduler、store、gate、summary、七类 typed content、lifecycle/history/runtime/cancel 均有独立可执行 gate。
-- [ ] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部错误和 unbounded arrays 的 logs/API/SSE/history 全出口扫描通过。
-- [ ] contract ID 集合与覆盖矩阵双向一致；所有勾选项均有本分支实际证据，未执行项保持未勾选或 `not run`。
+- [x] fake E2E 对 session 创建时机、topology start/completed、dependency manifest、model/tool counts、target/partial/run status 和 summary refs 做业务断言。
+- [x] M7 policy、scheduler、store、gate、summary、七类 typed content、lifecycle/history/runtime/cancel 均有独立可执行 gate。
+- [x] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部错误和 unbounded arrays 的 logs/API/SSE/history 全出口扫描通过。
+- [x] contract ID 集合与覆盖矩阵双向一致；所有勾选项均有本分支实际证据，未执行项保持未勾选或 `not run`。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`（仅专用 `wateragents_test`；未配置则 `not run`）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/m7_topology_workflow_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL 安全门禁时）
-- [ ] 运行 M7 prompt/policy、typed registry、OpenAPI、contract matrix、docs/link/JSON 离线 audits。
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence -q`（仅专用 `wateragents_test`；未配置则 `not run`）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/m7_topology_workflow_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_sse_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/run_history_smoke.py`（满足专用 PostgreSQL 安全门禁时）
+- [x] 运行 M7 prompt/policy、typed registry、OpenAPI、contract matrix、docs/link/JSON 离线 audits。
+- [x] `git diff --check`
 
 阶段出口：M7 内部切片的代码、测试、协议和接力证据完整；没有把未运行的 provider/PostgreSQL/三平台项写成通过，也没有实现 M8/M9 或开始正式前端联调。
 
 提交边界：只包含集成修复、审计、smoke、文档同步和完成记录；发现实质功能缺口时必须回到对应 Milestone 修复并重跑其 focused gate，不能把大功能补丁藏在最终审计提交。
 
+#### Milestone 9 完成记录（2026-10-04）
+
+- 实现：新增固定 M7 production-workflow smoke、最大 128-node 边界和专用 PostgreSQL restart 用例；审计时修复 dependency manifest 未写入 transcript、fake result closure 未引用本 run topology，以及合法大汇流的直接上游上限过小/部分 M7 collection 未显式有界三个缺口。同步当前 OpenAPI、七类 typed registry、CI smoke 入口、README 与项目级状态；M8/M9 只获得稳定 handoff refs，没有加入 RAG、页面、URL、settings/admin、V2、feature flag、第三条 SSE 或 run-wide quota。
+- 验证：Docker PostgreSQL 17 healthy；专用 `wateragents_test` 完整 backend `1979 passed, 1 warning`，persistence 独立门 `63 passed`，M7 workflow smoke `54 passed`，M7 PostgreSQL workflow/restart focused gate `2 passed`，离线出口/协议审计 `200 passed`；run SSE 返回 `completed/cancelled passed`，history smoke 返回 `history/independent_process_restart/restart_repair passed`；154 项 capability 审计、`compileall` 与 `git diff --check` 通过。warning 为既有 Starlette/httpx 弃用提示。
+- 风险：未获得真实 provider 计费/联网授权，因此 `requests=0 / events=0 / responses=0`，明确记为 `not run`；Ubuntu/macOS/Windows workflow 已包含 M7 smoke，但本提交的远程三平台作业未执行，GLOBAL-C08/C11 仍为 `partial`。M8 transcript RAG 与 M9 frontend/settings/admin 仍由后续阶段实现，M7 本机施工完成不等于中心外部验收完成。
+- 提交：本完成记录与 M9 集成修复、E2E/审计/持久化测试和文档同步由当前本地提交保存。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 计划实现位置 | 重点测试 | 证据与剩余风险 |
 |---|---|---|---|---|
-| GLOBAL-C01 | pending | 当前 `backend/`、M0 archive guards | archive isolation、production import scan | 不读取或复用归档。 |
+| GLOBAL-C01 | 本机已验证 | 当前 `backend/`、M0 archive guards | archive isolation、production import scan | M9 文档/registry/import 审计仅覆盖当前 `backend/`，未读取、导入或复用归档实现。 |
 | GLOBAL-C02 | 本机已验证 | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | M7 production registry、runtime lifecycle、typed reader 与 OpenAPI 已本机验证，未新增 V2、feature flag 或 route。 |
+| GLOBAL-C03 | 本机已验证 | topology、scheduler、dependency/result models | COMID identity、scope/ref closure | topology node、session target、dependency 和 final result 统一以 COMID 作为业务身份，无第二套水体 ID。 |
+| GLOBAL-C04 | 本机已验证 | run context、M6 handoff、summary input | UTC instant + IANA timezone roundtrip | run 固化 IANA timezone，窗口 instant 继续使用 UTC，workflow/summary 不重算已有 session 时间语义。 |
+| GLOBAL-C05 | 本机已验证 | M4 time windows、M6/M7 typed handoff | DST/wall-clock fixtures、window identity | M7 只传递 M4 已冻结的墙上时钟窗口及其 UTC identity，不按 elapsed duration 重建窗口。 |
 | GLOBAL-C06 | 本机已验证 | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | outcome、summary 与 topology result 的 scope/identity/reference closure 已通过 application 与 PostgreSQL 回归。 |
-| GLOBAL-C07 | pending | logs、transcript、public projection、provider adapter | secret/error/provider envelope scans | internal error 只留后端。 |
+| GLOBAL-C07 | 本机已验证 | logs、transcript、public projection、provider adapter | secret/error/provider envelope scans | 200 项离线出口门与完整回归验证 credential、private URL、raw provider/error 不进入公开 logs/API/SSE/history。 |
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
 | GLOBAL-C09 | 本机已验证 | typed models、writer/reader、snapshot/history | serialization/persistence/reload | 七类 M7 内容及 lifecycle/result refs 已通过 serialization、真实 PostgreSQL reload/repair 与 snapshot/history 投影回归。 |
-| GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
-| GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | M4/M8 并发与 summary timeout 配置默认值/严格范围、单 worker guard 及 Windows + Docker PostgreSQL 全量回归已验证；三平台 CI 待 M9。 |
+| GLOBAL-C10 | 本机已验证 | 本清单接力出口、项目级 docs | documented protocol audit | contract ID 双向覆盖、项目级状态与 M8/M9 可观察接力边界已通过离线审计，未提前实现后续 producer/UI。 |
+| GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | 并发/summary timeout 严格配置、单 worker guard、Windows + Docker PostgreSQL 全量回归与 CI M7 smoke 配置已验证；本提交的实际三平台作业仍未运行。 |
 | M7-C01 | 本机已验证 | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 同一 workflow 的 chain/diamond 已验证全部直接上游 settle 后 exact-once claim，DAG 初始化不预建 session。 |
 | M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
 | M7-C03 | 本机已验证 | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 mode/window fixtures 与 M5 production node adapter 已验证 mode、timezone、segments、ParameterKey、window、memory/model selection 原样传递。 |

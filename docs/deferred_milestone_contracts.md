@@ -561,6 +561,14 @@ M6 Milestone 0–13 已完成 Windows 本机实现与契约审计；这里只索
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、`M6-C01`–`M6-C19`、`M6-A01`–`M6-A10` | [M6 契约覆盖矩阵](M6/m6_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 fake E2E、官方 Responses fixtures、五级风险/三态结果、sealed gate/batch/repair、六类 typed content、现有两层 SSE、production OpenAPI、专用 `wateragents_test` history/restart/startup-repair 及完整 M1–M6 regression 已在 Windows 本机通过。 | 取得明确授权和安全 model 配置后执行真实 OpenAI waterbody contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的同库跨系统迁移证据后，再评估中心最终承接表的 `implemented` 记录。 |
 
+### M7 待验收索引
+
+M7 Milestone 0–9 已完成 Windows 本机实现与契约审计；这里只索引固定 fake、专用 PostgreSQL 与离线审计证据，不把缺少的真实 provider 请求或 Ubuntu/macOS/Windows 同提交 CI 冒充中心最终承接。M7 交付当前唯一 production DAG workflow、直接上游依赖、M6 waterbody 复用、run summarizer 和 topology final result，但不实现 M8 transcript RAG 或 M9 frontend/settings/admin。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M7-C01`–`M7-C12`、`M7-A01`–`M7-A07` | [M7 契约覆盖矩阵](M7/m7_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API/读取契约](M7/m7_topology_driven_multi_agent_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 chain/diamond/失败/取消/max-topology E2E、七类 typed content、production OpenAPI、专用 `wateragents_test` workflow/history/restart/startup-repair 与完整 M1–M7 regression 已在 Windows 本机通过。 | 获得明确计费/联网授权和安全 model 配置后执行真实 provider contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的实际三平台证据后，再评估中心最终承接表的 `implemented` 记录。 |
+
 M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
 ## 14. 维护规则

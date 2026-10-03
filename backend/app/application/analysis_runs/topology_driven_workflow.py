@@ -341,6 +341,19 @@ class ProductionTopologyNodeRunner:
             target_comid=request.node.comid,
         )
         self._context.cancellation.checkpoint()
+        manifest_item = await self._operations.reserve_transcript_item(
+            request.run_id,
+            session_id=session.session_id,
+        )
+        self._context.cancellation.checkpoint()
+        await self._operations.finalize_transcript_item(
+            request.run_id,
+            manifest_item.item_id,
+            "waterbody_dependency_manifest",
+            1,
+            manifest,
+        )
+        self._context.cancellation.checkpoint()
         scope = assemble_evidence_session_scope(
             run_id=str(request.run_id),
             session_id=str(session.session_id),

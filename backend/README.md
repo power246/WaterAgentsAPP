@@ -90,18 +90,19 @@ python scripts/run_history_smoke.py
 
 Expected final stdout is `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"<test DB>"}`. The history smoke fully stops its first Uvicorn child process before starting a freshly imported application in a second child process against the same database. Both smoke scripts use cross-platform process APIs with terminate, bounded wait, and kill fallback; they do not invoke a shell or GNU utility. They bypass environment proxies and fail clearly if the test database variable or connection is missing.
 
-The standalone run/SSE and M4 workflow smokes are deterministic and do not require PostgreSQL or external credentials. The M4 smoke uses the same composition seam as production with fixed model, geocoding, NLDI, WDFN, and Samples fixtures:
+The standalone run/SSE, M4 workflow, and M7 topology workflow smokes are deterministic and do not require PostgreSQL or external credentials. The M4 smoke uses the same composition seam as production with fixed model, geocoding, NLDI, WDFN, and Samples fixtures. The M7 smoke exercises production topology scheduling, dependency propagation, summary composition, failure/cancellation convergence, and the maximum-topology boundary with fixed fixtures:
 
 ```text
 python scripts/run_sse_smoke.py
 python scripts/m4_workflow_smoke.py
+python scripts/m7_topology_workflow_smoke.py
 ```
 
 Audit the checked-in 154-item capability manifest offline with `python scripts/audit_parameter_capabilities.py`. The optional `--refresh-official` flag performs a bounded read of the official USGS Water Data OGC API v1 parameter catalog and reports drift; it never modifies or enables manifest entries.
 
 The `python -m app` entry point explicitly uses one Uvicorn worker and ignores `WEB_CONCURRENCY`. On Windows it passes Uvicorn an explicit Selector loop factory compatible with psycopg async connections; macOS and Linux retain Uvicorn's `auto` selection. The run/history smoke gives its independent Uvicorn children the same platform-specific loop choice. Direct `asyncio.run()` callers keep the existing pre-start policy initialization. The entry point disables Uvicorn's default access log and gives active HTTP/SSE connections 2 seconds to finish during shutdown before entering application cleanup. Lifespan connects to PostgreSQL, requires the exact Alembic head, repairs saved non-terminal run/session state as `failed/service_interrupted`, and only then accepts traffic; it never runs DDL or resumes Agents automatically. User cancellation freezes active message prefixes and stores any later safe tail as history-only audit. Terminal live state is released only after workflow quiescence, required persistence, and the configured full grace period; saved history remains readable and SSE returns HTTP 410 afterward.
 
-The `Backend M1-M9` GitHub Actions workflow installs the same `backend/uv.lock`, provisions PostgreSQL 17, runs the complete test suite, the offline M4 audit, and all four smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation. The matrix is the reproducible CI entry; platform support is recorded as partial until each remote job has an actual passing result.
+The `Backend M1-M9` GitHub Actions workflow installs the same `backend/uv.lock`, provisions PostgreSQL 17, runs the complete test suite, the offline M4 audit, and all five smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation. The matrix is the reproducible CI entry; platform support is recorded as partial until each remote job has an actual passing result.
 
 ## Test
 
@@ -112,6 +113,7 @@ PowerShell:
 ```powershell
 $env:WATERAGENTS_TEST_DB_NAME = 'wateragents_test'
 python -m pytest -q
+python scripts/m7_topology_workflow_smoke.py
 python scripts/health_smoke.py
 python scripts/run_history_smoke.py
 Remove-Item Env:WATERAGENTS_TEST_DB_NAME
@@ -122,6 +124,7 @@ bash:
 ```bash
 export WATERAGENTS_TEST_DB_NAME='wateragents_test'
 python -m pytest -q
+python scripts/m7_topology_workflow_smoke.py
 python scripts/health_smoke.py
 python scripts/run_history_smoke.py
 unset WATERAGENTS_TEST_DB_NAME
