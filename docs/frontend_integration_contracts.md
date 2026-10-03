@@ -1,12 +1,12 @@
 # 前端接入约定
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
 M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQL 搭建说明已整理在 [M3 API 与搭建排障指南](M3/m3_transcript_history_api.md)，工程保证见 [实施详细设计](M3/m3_transcript_history_implementation_design.md)。Milestone 17–18 已完成 Windows 正式入口和统一脱敏/性能功能包，[Milestone 19](M3/m3_implementation_todo.md#milestone-19追加修复集成验收与契约复审) 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；Milestone 0–16 保留历史证据，HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已本机复审通过，`request changes` 已清除。公共 OpenAPI/SSE 契约不变；正式前端消费仍由产品阶段 M9 实现。实际 Windows/Linux runner、三平台完整 CI 与同库跨系统迁移另保持 `partial`，契约可用于接入设计但不代表中心最终承接已登记 `implemented`。
 
-**领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session 和各水体 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
+**领域基线修订（D50/D51）**：run 是一次用户提交到全部 Agent 输出结束的完整分析，历史列表分页展示 run；session 是单个 Agent 的独立上下文和一次完整 loop，包括问题解析 session、各水体 session 和 M7 的最终汇总 session。前文设计曾将整次分析称为 session，现按 [D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session) 修正。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。M2 文档中的 session_id 仍是整次分析的旧命名；当前 HTTP 已迁移到 D65 的 run 路径，不能用旧整体 ID 充当独立 Agent session ID。
 
 | 范围 | 状态 | 前端使用方式 |
 |---|---|---|
@@ -15,7 +15,8 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M4 query/context/topology | 后端协议与本机集成审计已完成；外部 PostgreSQL/provider/三平台证据仍按实际结果保持 `not run`/`partial` | 以 M4 API、运行时 OpenAPI 和既有两层 SSE 作为 M9 前端实现输入；当前不开始正式联调，也不增加 M4 产品兼容分支。 |
 | M5 evidence | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run`/`partial` | production 不新增 direct tool route，前端只沿现有 transcript/reference/SSE 读取 evidence；正式消费仍由 M9 接入。 |
 | M6 reasoning/result | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run` / `partial` | 以现有 result summary/ref、session transcript/SSE、history 与 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md) 作为 M9 接入输入；正式前端仍由 M9 实现，不调用 direct prompt/model/tool surface。 |
-| M7–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未全部冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
+| M7 workflow/summary | 设计与跨 Milestone 契约已冻结，尚未实现 | 以 M7 设计/API 文档作为 M9 接入输入；当前不宣称运行时已有 DAG 调度、依赖状态或最终汇总。 |
+| M8–M9 | 只有跨 Milestone 硬约束，最终 DTO 和路由尚未全部冻结 | 等所属 Milestone 的 OpenAPI、事件文档和验收完成后接入。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
 
@@ -31,6 +32,8 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 
 分析完成后，地图显示每个实际参与推理的水体。点击水体后展示该水体的分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由；从结果入口进入对应 waterbody Agent session，以类似 Codex 的方式阅读真实消息、tool、evidence、decision 和 result 上下文。
 
+M7 还会在全部 active 水体收敛后创建一个不绑定 COMID 的 `run_summarizer` session，用普通用户容易理解的语言总结整条上游到目标流程。run 页面展示该总结、目标结论、覆盖不足或失败分支及特殊值；数字保留单位、时间窗和稳定来源引用。汇总失败时显示后端提供的安全失败信息，不能由前端固定模板补出一份看似成功的总结；目标结果有效时，run 仍可完成，水体结果照常查看。特殊值引用在首版保持稳定身份即可，M9 可进一步把它渲染成跳往对应 Agent 上下文的内部链接。
+
 按 [D71](M3/m3_transcript_history_design.md#d71run-通知使用完整轻量快照水体区分五种展示状态)，run SSE 每次通知发送完整轻量状态快照，前端更新状态区。快照除了 run、实际 session 和保存情况，还须覆盖 BFS 范围内水体的参与/执行情况；地图不只显示已经创建 session 的水体。
 
 | 水体状态 | 前端颜色 |
@@ -45,9 +48,9 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 
 按 [M3 D44](M3/m3_transcript_history_design.md#d44query-历史列表分页按当次地图进入连续会话记录) 及 D50，前端提供按 run 分页的 query 历史列表。用户选择某次 run 后，显示当时地图上的标点和连线，点击水体标点再进入该 run 下对应 session 的多层会话记录。Agent 过程连续展示，不设置记录的上一页/下一页；同一 query 的不同 run 不合并，同一水体在不同 run 的记录不混合。历史读取使用已保存的当次消息，不重新分析 query 或用当前结果替换旧结果。
 
-完整分析记录必须在用户选中水体后展示；未选水体时不展示混合的全 run 过程。按 [D64](M3/m3_transcript_history_design.md#d64run-详情提供会话信息按-run-与-session-定位水体过程)，run 详情提供已创建 session 的 session_id、角色、适用 COMID 和自身状态；前端选中水体后取得对应 session_id，以 run_id + session_id 读取结果和完整过程，后端校验归属。首版不另提供按 COMID 读取同一 Agent 过程的第二套入口，具体 URL 按 D65。
+水体完整分析记录必须在用户选中该水体后展示；未选水体时不展示混合的全 run 过程。最终汇总从 run 汇总入口读取独立 `run_summarizer` session，也不能把所有水体 transcript 混入汇总过程。按 [D64](M3/m3_transcript_history_design.md#d64run-详情提供会话信息按-run-与-session-定位水体过程)，run 详情提供已创建 session 的 session_id、角色、适用 COMID 和自身状态；前端选中水体或汇总后取得对应 session_id，以 run_id + session_id 读取结果和完整过程，后端校验归属。首版不另提供按 COMID 读取同一 Agent 过程的第二套入口，具体 URL 按 D65。
 
-该对应信息来自原 session，后端不另存映射表或重复目录。历史只显示 PostgreSQL 已保存的会话信息，未创建节点不补造空会话；解析 session 以角色区分且不绑定 COMID，不显示为地图水体。定位方式不改变完整过程及公共引用读取，也不要求在 run 详情提前加载所有 Agent 消息。
+该对应信息来自原 session，后端不另存映射表或重复目录。历史只显示 PostgreSQL 已保存的会话信息，未创建节点不补造空会话；解析和汇总 session 以角色区分且不绑定 COMID，不显示为地图水体。定位方式不改变完整过程及公共引用读取，也不要求在 run 详情提前加载所有 Agent 消息。
 
 按 D51，问题解析 Agent 也拥有属于该 run 的独立 session，保存输入、调用过程与结构化输出。它不绑定水体 COMID，不作为地图上的水体节点；其输出可以包含目标位置和 COMID。该归属确认不新增独立前端入口，也不改变先选水体再阅读完整分析过程的交互。
 
@@ -267,7 +270,7 @@ query 历史列表按 [M3 D47](M3/m3_transcript_history_design.md#d47query-历�
 - 公共字段按 [M3 D29](M3/m3_transcript_history_design.md#d29公共-envelope-的字段命名与职责)：发生时间为 occurred_at，按 D55 由原记录 created_at 装配，仍保留原生命周期时间。按 content_type/content_schema_version 读取内容；外层不再提供同义 type，内部原 LifecycleEvent.type 保留。内联、引用和不可解析 content 的 DTO 已在 Milestone 6 冻结。
 - 身份与全文引用按 M3 D31/D57：同一 item 在内存和数据库中沿用 UUID，通过原 run_id + item_id 引用读取全文，后端核对 item 所属 run；相同正文的不同记录仍是不同 item，前端不能按文本合并过程。session_id 继续用于取得某个 Agent 的完整过程，公共记录不用借用解析 session 身份。
   - 按 [D58](M3/m3_transcript_history_design.md#d58普通过程引用限于同一-run历史证据显式关联)，普通过程引用允许同 run 内跨 session，前端保留原归属；来自其他 run 的证据通过历史来源结构关联，保留原身份与置信度，不展示为本次 session 产生的过程。仍先读取所选 session 全部记录，再读取显式公共引用；允许关联不代表合并所有 session 的消息。
-- 执行身份按 [M3 D52](M3/m3_transcript_history_design.md#d52session_id-统一标识-agent-执行取消重复-agent_id)：run_id 标识整次分析，session_id 统一标识一次 Agent 上下文与完整执行，取消同义执行 agent_id；agent_role 表达问题解析或水体推理职责，target_comid 表达适用水体。operation_id 继续标识一次模型/工具等调用，同一调用的开始/结束及直接关联 hook 按它配对。前端使用后端 ID 组织过程，不按 COMID、角色、名称或正文合并执行；读取和数据库补写不会改变原 ID。
+- 执行身份按 [M3 D52](M3/m3_transcript_history_design.md#d52session_id-统一标识-agent-执行取消重复-agent_id)：run_id 标识整次分析，session_id 统一标识一次 Agent 上下文与完整执行，取消同义执行 agent_id；agent_role 表达 `query_parser / waterbody / run_summarizer` 职责，target_comid 仅对水体推理有值。operation_id 继续标识一次模型/工具等调用，同一调用的开始/结束及直接关联 hook 按它配对。前端使用后端 ID 组织过程，不按 COMID、角色、名称或正文合并执行；读取和数据库补写不会改变原 ID。
 - 元信息按 [M3 D30](M3/m3_transcript_history_design.md#d30元信息采用明确默认值保留真实业务依据)：tags 默认空，rag_eligible 默认 false；confidence/provenance 没有适用值时为 null。前端不能将未知置信度显示为 0%/100%，也不能把缺少来源解释成某个默认来源；RAG 资格不影响普通历史和水体过程的可读性。
 - 正文已有的置信度/来源由后端按类型和对应层级提取，前端不在公共元信息中另行计算或维护同义值；整体、参数、时间窗和证据置信度分别按其业务含义展示，多来源信息保留原结构。
 - 按 [M3 D28](M3/m3_transcript_history_design.md#d28m3-首批注册四类明确-schema-的内容)，M3 首批内容为 analysis_request、lifecycle_event、error、runtime_fact；配置及事件已经携带的错误通过原记录查看，不期待重复 item。runtime_fact 属于内部过程记录，不作为新的 SSE 事件或业务终态处理。LLM/tool/skill/hook 和真实预测结果在后续阶段接入，前端以届时注册的类型与版本读取。
@@ -379,7 +382,7 @@ M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完
 | M4 query/context | 最终 create request 由 query、可选地图 target（COMID/坐标）、可选 date range、`auto/6h/12h/24h`、parser/waterbody 两个模型选择和 memory mode 组成；前端不提供参数表单，也不提交 mode/ParameterKey/key/topology limits。target/date 表单值优先，缺失才使用 query，实质冲突停止。首期日期只允许当地今天前后各 7 天，date-only inclusive end 由后端按固化 IANA timezone 转 UTC；浏览器不自行转换或截短。参数由 LLM 自主推测后经 capability registry 验证，并以 ParameterKey+rationale 展示；第一版正式联调能力范围见 [M4 的 154 项目录](M4/m4_parameter_capability_catalog.md)，单次最多 6 个用户目标，系统必需 discharge 不占上限。parser 过程走 session 流；context 是 session typed item，graph 是 run typed item，run snapshot 只给引用；没有第三条流或独立 topology_ready event。完整协议见 [M4 API](M4/m4_query_understanding_topology_api.md)。 |
 | M5 evidence | production 不提供 direct tool invocation，test-only 接口不接入前端；前端只读取现有 session transcript/SSE/reference。区分 tool execution 与 `available / empty / unavailable / invalid` collection，不能把无数据、失败和技术性分页不完整合并。direct/allowed-indirect/contextual 分别展示，M4 availability metadata 不是 evidence；suspicious 可用但带警告，invalid 只审计。大 source records 只提供 preview/reference，按需读取完整内容，不要求无界 payload 进入 SSE。单位、换算、聚合、coverage 和 provenance 由后端确定性逻辑提供，前端不自行猜测。任何多记录 aggregate/上游/天气/设施/历史结论不展示成原始 observed；未知或 indeterminate discharge 不显示为 0。完整契约见 [M5 API](M5/m5_evidence_tools_api.md)。 |
 | M6 reasoning/result | 每个计划窗口都有 quantified、directional 或 indeterminate；未通过最终 gate 的 cell 由确定性逻辑生成 `insufficient_evidence` 且不进入 final reasoning。前端不能丢弃 indeterminate、根据 confidence 改写结果，或把 source=null 显示成 observed。风险等级 `none/low/medium/high/indeterminate` 由 Agent 给出并附 `risk_rationale`；confidence 也由 Agent 给出并附理由，fixed insufficient confidence=0。每个窗口同时展示跨参数综合风险，日期范围另展示总体风险；`complete/partial/indeterminate` availability 必须独立显示，`none/low + partial` 不得称为整体安全。值、单位、refs、attribution 和 `basis: observed/correlated/inferred/hypothesized` 保留后端 identity。水体 completed payload 在现有 typed lifecycle item 上增加 result ref/summary，不新增 completion SSE event。Agent 的实时输出和工具调用就是 session 会话上下文：文字沿用 `message_started/message_delta/message_finalized`，其他过程沿用 `transcript_item`；不接入第三条 SSE、`reasoning_delta` 或后端合成推理摘要。完整设计见 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md)。 |
-| M7 workflow | Agent/tool 事件仍以 session 为根关联。cancel 后不得展示晚到 result 或启动新的前端下游动作；`workflow_quiesced` 保持内部审计事实。 |
+| M7 workflow/summary | 水体等待全部直接上游收敛后只执行一次；依赖状态区分 `usable / insufficient / invalid / cancelled`。invalid 表示技术失败且没有证据正文，insufficient 不能显示为 0；只要另一直接上游 usable，下游仍可继续。stationless 全部上游不足/invalid 时得到正常的确定性 indeterminate，0 次模型调用。目标水体结果是主结论；非目标失败时可 `completed + partial`，目标技术失败才使 run failed。全部 active 水体收敛后，`run_summarizer` 用目标完整投影与其他水体报告卡生成一次浅显总结；突出特殊值，数字带单位/窗口/ref。汇总失败只显示安全失败和原水体结果，不生成 fallback。Agent/tool 事件仍以 session 为根关联，汇总沿用同一 session SSE；cancel 后不得展示晚到 result 或启动新的前端下游动作，`workflow_quiesced` 保持内部审计事实。完整契约见 [M7 API](M7/m7_topology_driven_multi_agent_api.md)。 |
 | M8 RAG | 历史推理必须显示原 session、原 confidence、schema version、RAG score 和 provenance；当前有效观测优先，前端不得把历史推理伪装成当前 observation。 |
 | M9 settings/admin | 修改默认 timezone 只影响新 session。API key 只能通过 secret endpoint 保存/清除并以 masked status 展示，不能回显或进入普通日志。全局单位变更必须经过用户显式确认。Admin 清理 history/transcript/index/memory/cache 时不得暗示 API key 也被删除。最终 demo 仍是单进程、单 worker。 |
 
@@ -439,6 +442,10 @@ M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完
 - [ ] 按 D85 处理 message_finalized：正常或未完整生成更新原消息、结束其打字状态，重复投递按原 SSE id 去重；数据库未保存也可收到，不据此关闭 Agent 流或显示已保存。大正文预览不代替全文，取消定稿不混入晚到审计，定稿先于 session stream_end。
 - [ ] 手动补写使用 D41 的无请求体 POST；202 与实际保存完成区分，200/409 按当前情况展示，404/503 不混淆。响应丢失后先查询保存状态、不自动重发 POST，不取消已经受理的补写或自动开启另一轮。
 - [ ] 地图展示所有实际参与推理的水体，点击能查看对应水体的分时段/总体结果和真实 Agent session 上下文；文字实时增量与 tool/evidence/decision/result 共同构成过程，不展示后端另编的“推理过程”或隐藏思维链。总体风险按 M6 定型语义展示。
+- [ ] M7 依赖状态不会被 UI 混成同一种“没数据”：usable 可进入下游证据，insufficient 显示证据不足但不显示成 0，invalid 显示安全技术失败且不展示为证据；某分支 invalid、另一分支 usable 时，下游仍只出现一次真实 session/result。
+- [ ] stationless 全部直接上游 insufficient/invalid 时，前端显示 completed 的确定性 indeterminate，而不是永远 loading 或失败；0 模型调用不影响结果可读。目标技术失败显示 run failed；非目标失败且目标有效时显示 completed + partial/覆盖不完整。
+- [ ] run 页面展示 `run_summarizer` 的浅显全流程总结、特殊值、证据限制和稳定 refs；数字必须连同单位和时间窗展示。汇总 session failed 时只显示后端安全失败信息与仍可用的水体结果，不由前端拼固定模板或重复触发模型。首版 refs 可不跳转；如 M9 实现内部链接，只能由后端稳定引用装配 URL，不能采信 Agent 生成的 URL。
+- [ ] `run_summarizer` 使用既有 session 身份、状态、transcript 读取和 SSE；target_comid 为 null，不显示成地图水体，也不建立第三条事件流。用户进入其上下文时按 session_id 读取，不按角色名称合并历史。
 - [ ] 历史分页以 run 为单位，完整过程只在用户选中水体后展示其独立 session；未选水体时不展示混合的全分析过程。D50 的 run/session 身份不能与旧 M2 整体 session_id 混用，查询路径按当前 M3 OpenAPI 接入。
 - [ ] 同时展示逐窗口综合风险和日期范围总体风险，保留 Agent 风险理由、confidence 理由、证据引用和独立 availability；不显示任意 0–100 分，不把总体置信度或参数均值显示成总体风险，`none/low + partial` 不宣称整体安全。
 - [ ] skill/tool/hook 操作块按语义默认折叠，小内容 inline 不导致自动展开，大内容按需读取；摘要/总结来自真实结果，不使用存储 preview 替代。

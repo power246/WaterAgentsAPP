@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -478,6 +478,8 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 9. M7: Topology-Driven Multi-Agent Workflow
 
+状态：设计与 Milestone 0–9 施工清单已冻结，尚未实现。正式输入见 [设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API 契约](M7/m7_topology_driven_multi_agent_api.md) 与 [Implementation TODO](M7/m7_implementation_todo.md)。
+
 目标：
 
 - 把单 agent 推理扩展成水流拓扑驱动的多 agent workflow。
@@ -487,28 +489,39 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 - `GraphRunner`
 - `RunTopologyDrivenAgents`
-- upstream result evidence
+- direct-upstream dependency manifest 与 upstream result evidence
+- `RunSummaryRunner` / `run_summarizer` session
 - multi-agent session events
 
 主要能力：
 
-- 按水流拓扑 DAG 调度 agent。
-- 上游完成后，下游收到：
+- 在 M4 topology 最大上游距离、hop 和 node 范围内，使用有界 ready queue 按水流 DAG 调度 Agent；同层独立节点可并行，并受后端全局并发上限约束。
+- 不另设 run-wide token 或模型调用次数上限；继续使用各 session 的 planning/repair/timeout/deadline 预算。
+- 全部直接上游收敛后，下游先收到 `usable / insufficient / invalid / cancelled` dependency manifest；只有 usable 依赖传递：
   - `upstream_result`
   - `upstream_confidence`
   - `upstream_evidence_summary`
   - `upstream_uncertainty`
-- 下游把上游结果作为 current-session evidence。
+- 技术失败依赖只标 invalid，后端记录详细日志，不传结果、错误正文或 evidence；只要另一个直接上游 usable，下游仍可继续且只执行一次。
+- 下游把 usable 上游结果作为 current-session evidence；prompt 说明它是上游水体的推理数据，而下游自己的同参数站点读数是直接观测。后端不重评分、加权或改写上游内容。
+- station-backed 必须先查本地目标参数和 discharge；本地目标缺失时可组合本地 discharge 等支持证据与 usable 上游结果。stationless 必须有 usable 上游才能进入 optional planning；全部上游不足/invalid 时直接生成完整 insufficient 结果，0 模型调用。
+- 跨水体与本地间接证据默认只支持趋势/方向/风险；具体推断数值必须来自 registry 已注册的可执行确定性公式/工具。
 - 支持 `gap_filling / prediction / mixed`。
 - 在真实阶段边界检查 cancellation token；cancel 后不启动新 agent/tool，也不传播晚到结果。
 - 使用 session 为根的 agent/tool/operation ID 关联 SSE、日志和 transcript。
-- 基于真实 topology/workload 明确并发上限、排队或保持无限制的策略。
+- 目标水体结果是主科学结论；非目标失败但目标有效时 run completed 且标记 partial，目标技术失败时 run failed，目标确定性 indeterminate 仍是 completed。
+- 全部 active 水体收敛后创建一个 `agent_role=run_summarizer`、`target_comid=null` 的独立 session，复用 waterbody model，以目标完整安全投影和其他水体紧凑报告卡生成一次浅显总结。
+- 汇总突出特殊值，每个数字带单位、时间窗和稳定 ref；Agent 不生成 URL。汇总失败时 session failed，后端记录详情并向前端发送安全失败，不生成模板 fallback；目标有效时 run 仍 completed。
 
 阶段自测验收：
 
 - 使用 fake topology 可以稳定跑完至少 3 个节点的 upstream -> downstream workflow。
 - downstream agent 的 evidence bundle 中能看到 upstream evidence。
 - 每个 agent 的 start/completed event 顺序符合拓扑。
+- dependency manifest 完整记录所有直接上游状态，EvidenceBundle 只含 usable evidence；汇流节点在一支 invalid、另一支 usable 时继续且只执行一次。
+- stationless 全上游不足/invalid 的 0 planning/0 final reasoning 与 station-backed 本地目标缺失但可由本地 discharge + upstream 继续的路径都有 fixture。
+- 并发不超过配置上限，运行节点不超出 topology 最大上游范围；不存在额外 run-wide token/model-call quota。
+- summary session 的输入投影、单次调用、同模型、特殊值引用与失败不 fallback 均有稳定 fixture。
 - cancel 后 session 标记为 `cancelled`，并停止继续传播后续结果。
 - 已完成 agent 的结果和 transcript item 保留。
 - 无法强杀的在途调用返回后只进入 cancelled transcript/日志，不触发前端 result；workflow 最终记录 quiesced。

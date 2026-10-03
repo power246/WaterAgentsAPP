@@ -1,8 +1,10 @@
 # M6 Single-Agent Reasoning 设计决策记录
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 > 状态：设计方向、实施模式和 Milestone 0–13 已完成本机实现与集成审计。固定 fake、official provider fixtures、现有两层 SSE、专用 PostgreSQL 和完整 backend regression 已通过；真实 OpenAI waterbody provider 请求与 Ubuntu/macOS/Windows 同提交 CI 仍为 `not run` / `partial`。精确实现证据和剩余风险见同目录 Implementation TODO。
+
+> M7 接力说明：本文 2026-10-03 只在第 3 节阶段责任中登记 M7 的 dependency gate、stationless 0-model 路径和最终汇总接缝；M6 既有单水体启动/验收语义保持历史事实，不把 M7 待实现行为写成 M6 已完成证据。
 
 本文承接：
 
@@ -53,7 +55,7 @@ station-backed 水体先由确定性 policy 执行 M5 `collect_water_observation
 - 模型调用数严格为 0；
 - session 以真实 completed result 收敛，不伪造模型消息或 quantified value。
 
-stationless 水体没有本地观测是正常起点，不得套用上述停止策略。它不注册、不调用本地 observation tool，而是先读取 M7 producer slot 的直接上游结果；无论上游证据是否已经足够，都允许在有界 Agent loop 中按需调用 weather、facility、inspection、aggregation 和 unit tools。M7 尚未接入 producer 时，M6 fake/contract 验收使用显式 unavailable producer，不用 hidden fake 冒充真实上游。
+stationless 水体没有本地观测是正常起点，不得套用上述停止策略。它不注册、不调用本地 observation tool，而是先读取 M7 producer slot 的直接上游结果；无论上游证据是否已经足够，M6 单水体 runner 都允许在有界 Agent loop 中按需调用 weather、facility、inspection、aggregation 和 unit tools。M7 尚未接入 producer 时，M6 fake/contract 验收使用显式 unavailable producer，不用 hidden fake 冒充真实上游；M7 production workflow 之后会在调用该 planning 路径前执行自己的 dependency gate。
 
 ### D03：确定性 required acquisition 与 Agent optional planning 分层
 
@@ -246,7 +248,7 @@ M6 不公开 direct reasoning、prompt、tool invocation 或 result assembly HTT
 |---|---|
 | M5 | 提供 scope-safe evidence acquisition、tools、bundle、cell gates、unit/aggregation 和引用闭包；不作最终判断。 |
 | M6 | 执行一个 waterbody session 的 Agent loop、最终 gate、分批 reasoning、风险/confidence、结果验证与装配，并复用 session SSE。 |
-| M7 | 按 active DAG 创建/调度多个 waterbody sessions，注入真实直接上游结果，处理 dependency outcomes 并形成 run-level result。 |
+| M7 | 按 active DAG 创建/调度多个 waterbody sessions；在调用 M6 planning 前执行 dependency gate，stationless 无 usable upstream 时复用 M6 skeleton/assembler 生成 0-model 不足结果；注入真实直接上游结果，并形成 target/run-level result 与独立 `run_summarizer` session。 |
 | M8 | 接入 transcript RAG producer；历史 evidence 保持 contextual，不自动解锁 gate。 |
 | M9 | 实现最终前端、settings/keys/admin 和端到端联调；消费 M6 已冻结结果与 session context。 |
 

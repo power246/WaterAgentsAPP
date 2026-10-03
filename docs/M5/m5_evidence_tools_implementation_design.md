@@ -1,8 +1,10 @@
 # M5 Evidence Tools + EvidenceBundle 实施设计
 
-更新日期：2026-10-01
+更新日期：2026-10-03
 
 > 状态：设计已冻结，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。真实 USGS/NWS/EPA 请求和 Ubuntu/macOS/Windows 三平台 CI 仍为 `not run`；实施步骤、验证证据和剩余风险见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+
+> M7 接力说明：本文 2026-10-03 新增的 dependency manifest、usable upstream 启动门禁和 stationless 0-model 路径是 M7 待实施的接入目标，不表示当前 M5 runtime 已经具备真实 DAG producer。
 
 本文把 [M5 设计决策](m5_evidence_tools_design.md) 落到模块、类型、provider、执行链、持久化与测试接缝。确定性单位、质量、聚合和 applicability 规则见 [M5 Policy Catalog](m5_evidence_policy_catalog.md)，公开读取与 typed content 示例见 [M5 API 文档](m5_evidence_tools_api.md)。
 
@@ -70,8 +72,8 @@ scope 从已保存的 `query_understood v1` 与 `topology_ready v1` 装配，调
 4. 每一批完整记录只写一次 `evidence_source_records v1`；
 5. policy layer 形成 direct fragments、derived fragments 与逐窗口 collection facts；
 6. 写入 `evidence_fragment v1` 和 `evidence_tool_result v1`；
-7. 如果所有适用窗口均没有 usable target/discharge direct evidence，则形成完整 bundle 后停止该分支，交给 M6 产生全 indeterminate，水体模型调用数为 0；
-8. 只要存在至少一个 usable cell，Agent 可继续按需调用天气、设施、inspection、conversion 或 aggregation 工具；
+7. 读取 M7 已收敛的直接上游 dependency manifest/result；若本地目标参数无 usable direct evidence，但 upstream 仍有与目标参数相关的 usable result，不提前停止；
+8. 只要至少一个目标参数有 usable local direct cell，或有与目标参数相关的 usable upstream result，Agent 可继续按需调用天气、设施、inspection、conversion 或 aggregation 工具；只有本地 discharge 等 supporting cell 不能单独启动模型。没有目标 evidence 起点时形成完整 bundle 后交给 M6 以 0 model calls 产生全 indeterminate；
 9. 完成取证后写入唯一 `evidence_bundle v1`，M6 只从该 bundle 读取门禁输入。
 
 provider unavailable、认证失败、超时、分页不完整或协议损坏不走自然 empty 分支，而是保留已确认事实并产生技术失败。
@@ -80,8 +82,8 @@ provider unavailable、认证失败、超时、分页不完整或协议损坏不
 
 无合格本地站点的当前水体不调用 `collect_water_observations`。执行顺序为：
 
-1. 由 M7 注入已收敛的直接上游结果引用；M7 尚未接入时 `get_upstream_results` 明确返回 producer unavailable；
-2. Agent 根据任务和缺口决定是否调用天气、设施等 optional tools；
+1. 由 M7 注入已收敛的直接上游 dependency manifest，并只为 usable quantified/directional points 提供结果引用；M7 尚未接入时 `get_upstream_results` 明确返回 producer unavailable；
+2. 至少一个直接上游 usable 时，Agent 根据任务和缺口决定是否调用天气、设施等 optional tools；全部上游 insufficient/invalid 时不进入 Agent planning，直接走 M6 零模型不足结果；
 3. 逐窗口建立 target 与 discharge cells；
 4. discharge 必须来自直接上游传递或 capability registry 允许的估算关系；
 5. contextual-only evidence 可以进入 bundle 和说明，但不能让 cell 通过门禁；
@@ -587,7 +589,7 @@ M6 负责调用前门禁和最终 result validator；M5 不输出最终结果。
 
 M6 waterbody system prompt 至少固定以下行为，不由后端阈值 detector 代替：发现不同 series 的读数明显不一致时，先检查 station、time、method、medium/fraction、statistic、quality 与 coverage；引用所有影响判断的证据；说明采用某条、分别保留或保持不确定的理由；无法合理解释时输出受限判断或 indeterminate；不得静默删除相反记录。validator 只校验 observed 的一对一 direct-record 闭包和 inferred 的完整引用，不判断数值是否“足够冲突”。
 
-M7 实现 `UpstreamResultPort`，只返回当前水体直接上游依赖的已收敛结果；无 evidence、failed、cancelled 都以结构化 dependency outcome 传递。M5 的 tool/schema 不变。
+M7 实现 `UpstreamResultPort`，只返回当前水体直接上游依赖中 usable 的已收敛结果；正常无 evidence、failed、cancelled 通过独立的 session-owned dependency manifest 表达，其中 failed 对继续执行的下游只显示 `invalid` 且不传 evidence。M5 的公共 tool request schema 不变。
 
 M8 实现 `TranscriptEvidencePort` 与 index/search；只索引 M5 已标为 candidate、且 session/run/persistence 条件均满足的安全投影。历史命中保持 contextual/historical provenance，不满足本次 target/discharge gate。
 
