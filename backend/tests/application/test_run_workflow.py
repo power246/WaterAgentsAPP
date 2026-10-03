@@ -145,6 +145,8 @@ def test_default_workflow_is_owned_before_pending_response_and_completes(eager) 
                     "status",
                     "completed_at",
                     "warning",
+                    "result_ref",
+                    "result_summary",
                 }
                 assert runtime.workflow_task.done()
         finally:

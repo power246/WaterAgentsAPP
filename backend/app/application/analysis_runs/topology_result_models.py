@@ -7,8 +7,12 @@ from pydantic import Field, StrictInt, field_validator, model_validator
 
 from app.application.analysis_runs.models import (
     AgentSessionStatus,
+    GraphCoverage,
+    OutcomeCounts,
     PublicError,
+    RunSummaryStatus,
     SessionResultReference,
+    TopologyRunResultSummary,
     WaterbodySessionResultSummary,
 )
 from app.application.canonical_json import canonical_json_digest
@@ -26,26 +30,12 @@ class DependencyStatus(DomainEnum):
     CANCELLED = "cancelled"
 
 
-class GraphCoverage(DomainEnum):
-    COMPLETE = "complete"
-    PARTIAL = "partial"
-    NONE = "none"
-
-
 class WaterbodySchedulingStatus(DomainEnum):
     EXCLUDED = "excluded"
     WAITING = "waiting"
     READY = "ready"
     RUNNING = "running"
     TERMINAL = "terminal"
-
-
-class RunSummaryStatus(DomainEnum):
-    NOT_STARTED = "not_started"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
 
 
 class StableSourceReference(DomainModel):
@@ -296,13 +286,6 @@ class WaterbodyRunEntry(DomainModel):
         return self
 
 
-class OutcomeCounts(DomainModel):
-    usable: Annotated[StrictInt, Field(ge=0)] = 0
-    insufficient: Annotated[StrictInt, Field(ge=0)] = 0
-    invalid: Annotated[StrictInt, Field(ge=0)] = 0
-    cancelled: Annotated[StrictInt, Field(ge=0)] = 0
-
-
 class TopologySummaryResult(DomainModel):
     status: Literal[RunSummaryStatus.COMPLETED, RunSummaryStatus.FAILED]
     session_id: UUID
@@ -418,24 +401,6 @@ class TopologyRunResult(DomainModel):
             self.summary.result_ref.run_id != self.run_id
         ):
             raise ValueError("summary result must remain in the run")
-        return self
-
-
-class TopologyRunResultSummary(DomainModel):
-    target_comid: NonEmptyString
-    target_result_summary: WaterbodySessionResultSummary
-    graph_coverage: GraphCoverage
-    outcome_counts: OutcomeCounts
-    summary_status: Literal[RunSummaryStatus.COMPLETED, RunSummaryStatus.FAILED]
-    summary_result_ref: SessionResultReference | None = None
-
-    @model_validator(mode="after")
-    def validate_summary_projection(self) -> Self:
-        if self.target_result_summary.target_comid != self.target_comid:
-            raise ValueError("target result summary must match target_comid")
-        completed = self.summary_status is RunSummaryStatus.COMPLETED
-        if completed != (self.summary_result_ref is not None):
-            raise ValueError("summary result ref must match summary status")
         return self
 
 

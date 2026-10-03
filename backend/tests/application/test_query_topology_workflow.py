@@ -460,7 +460,10 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
             assert sessions[0].agent_role is AgentRole.QUERY_PARSER
             assert sessions[0].status is AgentSessionStatus.COMPLETED
             assert runtime.waterbody_session_ids == {}
-            assert runtime.waterbody_participation == {}
+            assert runtime.waterbody_participation == {
+                "100": True,
+                "200": True,
+            }
             assert len(parser.calls) == len(resolver.calls) == 1
             assert inventory.calls == [TARGET, UPSTREAM]
             assert topology.calls == [TARGET]

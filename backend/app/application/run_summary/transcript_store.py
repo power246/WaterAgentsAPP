@@ -141,7 +141,17 @@ class RunSummaryTranscriptStore:
 
     async def write_result(self, value: RunSummaryResult) -> TranscriptContentRef:
         self._require_scope(value.run_id, value.session_id)
-        return await self._write("run_summary_result", value)
+        summary = await self._operations.complete_run_summary_agent_session(
+            self.run_id,
+            self.session_id,
+            value,
+        )
+        if summary.result_ref is None:
+            raise RuntimeError("completed run summary session has no result reference")
+        return TranscriptContentRef(
+            run_id=summary.result_ref.run_id,
+            item_id=summary.result_ref.item_id,
+        )
 
     async def fail(self, error: PublicError):
         return await self._operations.fail_agent_session(

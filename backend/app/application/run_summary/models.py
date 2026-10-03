@@ -22,6 +22,7 @@ from app.application.canonical_json import canonical_json_digest
 from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
+    MessageProjection,
     TranscriptContentRef,
 )
 from app.domain.common import (
@@ -519,6 +520,33 @@ class RunSummaryAgentMessage(_VersionOneContent):
         ):
             raise ValueError("incomplete summary message cannot have completed end reason")
         return self
+
+
+def run_summary_agent_message_projection(body: object) -> MessageProjection:
+    if not isinstance(body, RunSummaryAgentMessage):
+        raise TypeError("run summary message adapter received another content type")
+    return MessageProjection(
+        text=body.text,
+        generation_status=body.generation_status,
+        end_reason=body.end_reason,
+    )
+
+
+def finalize_run_summary_agent_message(
+    text: str,
+    generation_status: GenerationStatus,
+    end_reason: MessageEndReason | None,
+    base_body: object | None = None,
+) -> RunSummaryAgentMessage:
+    if not isinstance(base_body, RunSummaryAgentMessage):
+        raise TypeError("run summary message finalization requires its generating body")
+    return base_body.model_copy(
+        update={
+            "text": text,
+            "generation_status": generation_status,
+            "end_reason": end_reason,
+        }
+    )
 
 
 class RunSummaryFinishReason(str, Enum):

@@ -14,6 +14,11 @@ from app.application.analysis_runs.models import (
     TranscriptItemIdentity,
 )
 if TYPE_CHECKING:
+    from app.application.analysis_runs.topology_result_models import (
+        DependencyOutcome,
+        TopologyRunResult,
+    )
+    from app.application.run_summary.models import RunSummaryResult
     from app.application.transcripts.models import (
         AnalysisRequestV1,
         TranscriptContentRef,
@@ -68,6 +73,18 @@ class WorkflowOperations(Protocol):
         run_id: UUID | str,
     ) -> None: ...
 
+    async def mark_waterbody_ready(
+        self,
+        run_id: UUID | str,
+        target_comid: str,
+    ) -> None: ...
+
+    async def record_waterbody_dependency_outcome(
+        self,
+        run_id: UUID | str,
+        outcome: "DependencyOutcome",
+    ) -> None: ...
+
     async def get_session(
         self,
         run_id: UUID | str,
@@ -100,6 +117,19 @@ class WorkflowOperations(Protocol):
         session_id: UUID | str,
         result: "InferenceResult",
     ) -> SessionSummary: ...
+
+    async def complete_run_summary_agent_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        result: "RunSummaryResult",
+    ) -> SessionSummary: ...
+
+    async def complete_run(
+        self,
+        run_id: UUID | str,
+        result: "TopologyRunResult | None" = None,
+    ) -> AnalysisRunSnapshot: ...
 
     async def cancel_agent_session(
         self,

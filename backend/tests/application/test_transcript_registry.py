@@ -89,6 +89,13 @@ def test_production_registry_has_only_real_writable_types() -> None:
         ("waterbody_model_response", 1),
         ("reasoning_decision", 1),
         ("inference_result", 1),
+        ("waterbody_dependency_manifest", 1),
+        ("run_summary_input", 1),
+        ("run_summary_model_request", 1),
+        ("run_summary_agent_message", 1),
+        ("run_summary_model_response", 1),
+        ("run_summary_result", 1),
+        ("topology_run_result", 1),
     )
     assert ("fixture_message", 1) not in registry.registered_keys
     with pytest.raises(UnsupportedTranscriptContentError):

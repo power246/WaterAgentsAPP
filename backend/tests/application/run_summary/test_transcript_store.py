@@ -1,8 +1,12 @@
 import asyncio
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, UUID, uuid5
+from types import SimpleNamespace
 
-from app.application.analysis_runs.models import TranscriptItemIdentity
+from app.application.analysis_runs.models import (
+    SessionResultReference,
+    TranscriptItemIdentity,
+)
 from app.application.run_summary.runner import RunSummaryRunStatus, RunSummaryRunner
 from app.application.run_summary.transcript_store import RunSummaryTranscriptStore
 from tests.application.run_summary.support import (
@@ -95,6 +99,14 @@ class RecordingOperations:
     async def cancel_agent_session(self, run_id, session_id):
         self.cancelled.append(session_id)
         return session_id
+
+    async def complete_run_summary_agent_session(self, run_id, session_id, result):
+        identity = self._identity()
+        self.items.append(("run_summary_result", result, identity.item_id))
+        return SimpleNamespace(result_ref=SessionResultReference(
+            run_id=run_id,
+            item_id=identity.item_id,
+        ))
 
 
 def execute(outputs):

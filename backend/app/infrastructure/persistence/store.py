@@ -285,6 +285,11 @@ class PostgresTranscriptStore:
                 )
                 run_ids = tuple(row["run_id"] for row in run_rows)
                 created_ids = tuple(row["created_item_id"] for row in run_rows)
+                run_terminal_ids = tuple(
+                    row["terminal_item_id"]
+                    for row in run_rows
+                    if row["terminal_item_id"] is not None
+                )
                 item_rows = ()
                 content_rows = ()
                 session_rows = ()
@@ -313,12 +318,19 @@ class PostgresTranscriptStore:
                                 .where(or_(
                                     transcript_items.c.item_id.in_((
                                         *created_ids,
+                                        *run_terminal_ids,
                                         *terminal_ids,
                                     )),
                                     and_(
                                         transcript_items.c.run_id.in_(run_ids),
                                         transcript_items.c.content_type
                                         == "query_understood",
+                                    ),
+                                    and_(
+                                        transcript_items.c.run_id.in_(run_ids),
+                                        transcript_items.c.session_id.is_(None),
+                                        transcript_items.c.content_type
+                                        == "topology_run_result",
                                     ),
                                 ))
                                 .order_by(transcript_items.c.transcript_sequence)

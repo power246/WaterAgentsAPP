@@ -326,31 +326,38 @@
 
 ### 工作
 
-- [ ] 在 production registry 注册且只注册 M7 七类当前 V1 内容：`waterbody_dependency_manifest`、`run_summary_input`、`run_summary_model_request`、`run_summary_agent_message`、`run_summary_model_response`、`run_summary_result`、`topology_run_result`。
-- [ ] summarizer 可见文本继续使用 M3 `message_started / message_delta / message_finalized`，其他内容使用 `transcript_item`；跨 chunk 脱敏、item identity、generation status、Last-Event-ID 和 late audit 全部复用原能力。
-- [ ] summary result 与 summary `session_completed(result_ref + discriminated result_summary)` 同一必需提交批次；`topology_run_result`、run result ref/summary projection 与 run completed lifecycle 同一等价原子边界。
-- [ ] 扩展 run snapshot/detail/history：waterbody node 五态、phase、partial coverage、summary status/ref/safe failure、topology result ref；读取只投影持久化事实，不重新调度、推理或重算。
-- [ ] 保持现有 run SSE 与 session SSE。run stream 只发轻量快照；waterbody/summarizer 真实过程在对应 session stream；不复制完整 result/prompt/tool 内容到 run stream。
-- [ ] PostgreSQL inline/reference、补写、reload、startup repair、history pagination 和 scope+explicit refs 继续使用四表；若需要 D33 关联索引，只能按已有设计增加同一索引，不建立第二套关联存储。
-- [ ] 同步 current OpenAPI/serializers/fixtures，确认 production 路由集合不变且没有 direct M7/scheduler/summary/test endpoint。
+- [x] 在 production registry 注册且只注册 M7 七类当前 V1 内容：`waterbody_dependency_manifest`、`run_summary_input`、`run_summary_model_request`、`run_summary_agent_message`、`run_summary_model_response`、`run_summary_result`、`topology_run_result`。
+- [x] summarizer 可见文本继续使用 M3 `message_started / message_delta / message_finalized`，其他内容使用 `transcript_item`；跨 chunk 脱敏、item identity、generation status、Last-Event-ID 和 late audit 全部复用原能力。
+- [x] summary result 与 summary `session_completed(result_ref + discriminated result_summary)` 同一必需提交批次；`topology_run_result`、run result ref/summary projection 与 run completed lifecycle 同一等价原子边界。
+- [x] 扩展 run snapshot/detail/history：waterbody node 五态、phase、partial coverage、summary status/ref/safe failure、topology result ref；读取只投影持久化事实，不重新调度、推理或重算。
+- [x] 保持现有 run SSE 与 session SSE。run stream 只发轻量快照；waterbody/summarizer 真实过程在对应 session stream；不复制完整 result/prompt/tool 内容到 run stream。
+- [x] PostgreSQL inline/reference、补写、reload、startup repair、history pagination 和 scope+explicit refs 继续使用四表；若需要 D33 关联索引，只能按已有设计增加同一索引，不建立第二套关联存储。
+- [x] 同步 current OpenAPI/serializers/fixtures，确认 production 路由集合不变且没有 direct M7/scheduler/summary/test endpoint。
 
 ### Tests
 
-- [ ] 七类 registry/serialization/reference closure/unknown version；role-discriminated completed payload 与 result identity 原子性。
-- [ ] run/session SSE 首次加载、live handoff、resume、stream_end、cancel incomplete、summary failed 和 run completed partial 快照。
-- [ ] PostgreSQL result/content/reference reload、startup interruption、pending write retry、history detail 按 waterbody/summarizer session 读取。
+- [x] 七类 registry/serialization/reference closure/unknown version；role-discriminated completed payload 与 result identity 原子性。
+- [x] run/session SSE 首次加载、live handoff、resume、stream_end、cancel incomplete、summary failed 和 run completed partial 快照。
+- [x] PostgreSQL result/content/reference reload、startup interruption、pending write retry、history detail 按 waterbody/summarizer session 读取。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcripts backend/tests/application/analysis_runs/test_m7_projections.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_events.py backend/tests/api/test_openapi_contract.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_m7_topology_workflow_persistence.py -q`（仅专用 `wateragents_test`；未配置则 `not run`）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcripts backend/tests/application/analysis_runs/test_m7_projections.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_events.py backend/tests/api/test_openapi_contract.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_m7_topology_workflow_persistence.py -q`（仅专用 `wateragents_test`；未配置则 `not run`）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：M7 全部内容、result refs、session/run lifecycle 和读取投影可以经真实 writer/reader、PostgreSQL 与既有两层 SSE 闭环；无新 public surface。
 
 提交边界：仅 registry/writer-reader/lifecycle/projection/OpenAPI fixture 与 tests；不得实现 frontend、M8 producer、点击 URL 或额外表。
+
+#### Milestone 7 完成记录（2026-10-03）
+
+- 实现：production registry 接入七类 M7 V1 内容；summary/result lifecycle 按必需提交组原子保存；run snapshot/detail/history 增加五态 waterbody、phase、partial coverage、summary ref/安全失败和 topology result ref 投影。继续复用既有四表、run/session 两层 SSE、typed writer/reader 与补写/启动修复能力；未新增 route、表、SSE、frontend、M8 producer 或点击 URL。
+- 验证：指定 application `5 passed`，API/SSE/OpenAPI `119 passed`；Docker PostgreSQL 17 healthy，专用 `wateragents_test` 持久化闭环 `1 passed`；完整 backend `1948 passed, 1 warning`，warning 为既有 Starlette/httpx 弃用提示；`compileall` 与 `git diff --check` 通过。
+- 风险：真实外部 provider 与三平台 CI `not run`；M8 production composition/cancel races 和 M9 端到端统一验收仍待后续 Milestone，不把当前内部切片声明为最终验收完成。
+- 提交：本完成记录与 M7 registry/persistence/SSE/history 实现由当前本地提交保存。
 
 ## Milestone 8：production composition、取消与竞争收敛
 
@@ -421,11 +428,11 @@
 | 契约 | 状态 | 计划实现位置 | 重点测试 | 证据与剩余风险 |
 |---|---|---|---|---|
 | GLOBAL-C01 | pending | 当前 `backend/`、M0 archive guards | archive isolation、production import scan | 不读取或复用归档。 |
-| GLOBAL-C02 | partial | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | M1 类型和直接消费者已本机验证；runtime/registry 仍待后续阶段。 |
-| GLOBAL-C06 | partial | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | M2 真实 store/upstream ref closure 与 M5 committed-result assembler 已本机验证；summary validator 待 M6。 |
+| GLOBAL-C02 | 本机已验证 | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | M7 production registry、runtime lifecycle、typed reader 与 OpenAPI 已本机验证，未新增 V2、feature flag 或 route。 |
+| GLOBAL-C06 | 本机已验证 | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | outcome、summary 与 topology result 的 scope/identity/reference closure 已通过 application 与 PostgreSQL 回归。 |
 | GLOBAL-C07 | pending | logs、transcript、public projection、provider adapter | secret/error/provider envelope scans | internal error 只留后端。 |
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
-| GLOBAL-C09 | partial | typed models、writer/reader、snapshot/history | serialization/persistence/reload | M1 payload/snapshot/read projection 与 session role persistence 已验证；typed writer/reload 待 M7。 |
+| GLOBAL-C09 | 本机已验证 | typed models、writer/reader、snapshot/history | serialization/persistence/reload | 七类 M7 内容及 lifecycle/result refs 已通过 serialization、真实 PostgreSQL reload/repair 与 snapshot/history 投影回归。 |
 | GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
 | GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | M4 并发配置默认值/严格范围与 Windows + Docker PostgreSQL 全量回归已验证；三平台 CI 待 M8/M9。 |
 | M7-C01 | 本机已验证 | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 同一 workflow 的 chain/diamond 已验证全部直接上游 settle 后 exact-once claim，DAG 初始化不预建 session。 |
@@ -435,18 +442,18 @@
 | M7-C05 | partial | provider/tool late-output audit | cancelled stream/late callback tests | M5 已验证 runner 晚到 completed 不能覆盖 committed failed/cancelled 或发布 upstream；provider/tool late audit 待 M8。 |
 | M7-C06 | partial | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | M5 fake summary boundary 的取消与 workflow quiescence 已验证；完整 checkpoint/cleanup races 待 M8。 |
 | M7-C07 | 本机已验证 | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 全局峰值 1/4/32、两个 run 共享 limiter、128-node 范围与 per-session failure 已验证，无第二套 run-wide quota。 |
-| M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M5 assembler 的 target business result、non-target partial、target fatal 与 stable refs 已验证；最终 lifecycle/history 提交待 M7。 |
+| M7-C08 | 本机已验证 | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | topology result、run completed lifecycle 与轻量 summary/ref 在同一必需提交组保存，partial/failure/history/reload 已验证。 |
 | M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
 | M7-C10 | 本机已验证 | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | source role、usable-only result ref、invalid redaction、mode/window 与 deterministic numeric boundary 已通过 focused/full regression。 |
-| M7-C11 | partial | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M1 target + all-card/ref/no-tools schema 已验证；prompt/runner 待 M6。 |
-| M7-C12 | pending | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary 失败不抹掉 target/waterbody results。 |
+| M7-C11 | 本机已验证 | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M6 runner 与 M7 transcript/lifecycle 集成已验证 all-node input、same-model/no-tools、strict refs 与 result reload。 |
+| M7-C12 | 本机已验证 | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary failed 仅投影安全 PublicError，无 fallback；target/waterbody results 保持且 run 可 completed。 |
 | M7-A01 | 本机已验证 | production workflow fake topology | 3+ nodes、event/session order、exact once | chain/diamond production workflow harness 已验证 phase 顺序、session 延迟创建、每 node 一次与 outcome 全收敛。 |
 | M7-A02 | 本机已验证 | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 provider/M3 launch 与 M5 完整 workflow orchestration 已验证 direct-upstream publish、invalid+usable merge、all-insufficient 零模型。 |
 | M7-A03 | pending | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 无新下游动作并最终 quiesced。 |
 | M7-A04 | pending | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | 迟到内容只可审计。 |
 | M7-A05 | 本机已验证 | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径复用 canonical M6 result/session 提交接缝，stationless 发布 insufficient 且无 usable records。 |
 | M7-A06 | 本机已验证 | limiter/topology snapshot/settings | peak in-flight、max topology、no run quota | 独立节点实际重叠且峰值不超设置，最大 topology 仅执行 snapshot 内 128 个 active COMID，配置 0/33 失败。 |
-| M7-A07 | pending | summarizer/input/validator/failure projection | same model、all cards、special values、failure | 数字有 unit/window/ref，无 fallback。 |
+| M7-A07 | 本机已验证 | summarizer/input/validator/failure projection | same model、all cards、special values、failure | M6 summary 校验与 M7 safe failure/result projection 已通过 focused、API 与完整 backend 回归，无 fallback。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码、fixture 或文档存在填写已验证；本机、专用 PostgreSQL、真实 provider 和三平台 CI 证据必须分开记录。
 

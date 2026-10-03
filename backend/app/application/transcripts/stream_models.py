@@ -179,6 +179,9 @@ def snapshot_from_state(
     sessions: tuple[SessionSummary, ...],
     waterbodies: tuple[RunWaterbodySummary, ...],
     persistence: PersistenceInfo,
+    result_ref: TranscriptContentRef | None = None,
+    summary: RunSummaryProjection | None = None,
+    graph_outcome: GraphOutcomeProjection | None = None,
 ) -> RunSnapshotEvent:
     return RunSnapshotEvent(
         run_id=snapshot.run_id,
@@ -188,9 +191,9 @@ def snapshot_from_state(
         updated_at=snapshot.updated_at,
         context_ref=context_ref,
         topology_ref=topology_ref,
-        result_ref=None,
-        summary=RunSummaryProjection(),
-        graph_outcome=GraphOutcomeProjection(),
+        result_ref=result_ref,
+        summary=summary or RunSummaryProjection(),
+        graph_outcome=graph_outcome or GraphOutcomeProjection(),
         sessions=sessions,
         waterbodies=waterbodies,
         persistence=persistence,

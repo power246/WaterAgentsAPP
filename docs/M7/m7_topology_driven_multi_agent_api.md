@@ -187,6 +187,7 @@ graph_coverage
 outcome_counts
 summary_status
 summary_result_ref?
+summary_error? # summary failed 时仅包含安全 PublicError
 ```
 
 完整 `topology_run_result v1` 仍从原 item/ref 读取，不在 detail、history list 或 lifecycle event 重复。历史 list 只增加必要的小型 target/coverage/summary-status 投影；损坏/未知类型通过现有 `issues` 返回，不用当前 live 数据补齐。

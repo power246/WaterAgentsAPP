@@ -1,4 +1,4 @@
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal, Self, TypeAlias
 from uuid import UUID
 
 from pydantic import (
@@ -65,6 +65,20 @@ class AgentRole(DomainEnum):
     RUN_SUMMARIZER = "run_summarizer"
 
 
+class GraphCoverage(DomainEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    NONE = "none"
+
+
+class RunSummaryStatus(DomainEnum):
+    NOT_STARTED = "not_started"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class AnalysisConfigurationSnapshot(DomainModel):
     analysis_timezone: NonEmptyString
     time_resolution_preference: TimeResolutionPreference
@@ -123,6 +137,13 @@ class RunSummarySessionResultSummary(DomainModel):
     result_kind: Literal["run_summary"] = "run_summary"
     highlight_count: Annotated[StrictInt, Field(ge=0)]
     language: NonEmptyString
+
+
+class OutcomeCounts(DomainModel):
+    usable: Annotated[StrictInt, Field(ge=0)] = 0
+    insufficient: Annotated[StrictInt, Field(ge=0)] = 0
+    invalid: Annotated[StrictInt, Field(ge=0)] = 0
+    cancelled: Annotated[StrictInt, Field(ge=0)] = 0
 
 
 def _session_result_kind(value: object) -> str | None:
@@ -193,6 +214,27 @@ class PublicError(DomainModel):
     retryable: StrictBool
 
 
+class TopologyRunResultSummary(DomainModel):
+    target_comid: NonEmptyString
+    target_result_summary: WaterbodySessionResultSummary
+    graph_coverage: GraphCoverage
+    outcome_counts: OutcomeCounts
+    summary_status: Literal[RunSummaryStatus.COMPLETED, RunSummaryStatus.FAILED]
+    summary_result_ref: SessionResultReference | None = None
+    summary_error: PublicError | None = None
+
+    @model_validator(mode="after")
+    def validate_summary_projection(self) -> Self:
+        if self.target_result_summary.target_comid != self.target_comid:
+            raise ValueError("target result summary must match target_comid")
+        completed = self.summary_status is RunSummaryStatus.COMPLETED
+        if completed != (self.summary_result_ref is not None):
+            raise ValueError("summary result ref must match summary status")
+        if completed == (self.summary_error is not None):
+            raise ValueError("summary error must match failed summary status")
+        return self
+
+
 class CorrelationContext(DomainModel):
     request_id: UUID | None = None
     run_id: UUID | None = None
@@ -260,6 +302,8 @@ class RunCompletedPayload(DomainModel):
     ]
     completed_at: UtcDatetime
     warning: PublicError | None = None
+    result_ref: SessionResultReference | None = None
+    result_summary: TopologyRunResultSummary | None = None
 
     @model_validator(mode="after")
     def validate_warning(self) -> "RunCompletedPayload":
@@ -268,6 +312,8 @@ class RunCompletedPayload(DomainModel):
         )
         if has_persistence_error != (self.warning is not None):
             raise ValueError("warning must match persistence-error completion status")
+        if (self.result_ref is None) != (self.result_summary is None):
+            raise ValueError("result_ref and result_summary must appear together")
         return self
 
 
@@ -342,6 +388,15 @@ class RunCreatedEvent(_RunLifecycleEventEnvelope):
 class RunCompletedEvent(_RunLifecycleEventEnvelope):
     type: Literal[LifecycleEventType.RUN_COMPLETED] = LifecycleEventType.RUN_COMPLETED
     payload: RunCompletedPayload
+
+    @model_validator(mode="after")
+    def validate_result_run(self) -> "RunCompletedEvent":
+        if (
+            self.payload.result_ref is not None
+            and self.payload.result_ref.run_id != self.run_id
+        ):
+            raise ValueError("run result reference must remain in the run")
+        return self
 
 
 class RunFailedEvent(_RunLifecycleEventEnvelope):

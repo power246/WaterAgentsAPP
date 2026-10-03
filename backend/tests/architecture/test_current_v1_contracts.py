@@ -167,7 +167,7 @@ def test_m7_payload_modules_do_not_import_transport_provider_or_persistence() ->
     ]
 
 
-def test_m7_current_v1_types_exist_without_registration_or_v2_forks() -> None:
+def test_m7_current_v1_types_are_registered_without_v2_forks() -> None:
     m7_content_types = {
         "waterbody_dependency_manifest",
         "run_summary_input",
@@ -182,5 +182,5 @@ def test_m7_current_v1_types_exist_without_registration_or_v2_forks() -> None:
         for content_type, _version in create_production_registry().registered_keys
     }
 
-    assert m7_content_types.isdisjoint(registered)
+    assert m7_content_types <= registered
     assert not any(content_type.endswith("_v2") for content_type in m7_content_types)
