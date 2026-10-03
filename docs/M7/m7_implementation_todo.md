@@ -2,7 +2,7 @@
 
 更新日期：2026-10-03
 
-> 当前状态：Milestone 0 已完成本机基线与架构红线，Milestone 1–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
+> 当前状态：Milestone 0–1 已完成本机基线、架构红线与当前唯一 V1 类型/投影骨架，Milestone 2–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
 
 本清单执行以下已确认文档：
 
@@ -115,29 +115,37 @@
 
 ### 工作
 
-- [ ] 在 `application/analysis_runs`/`application/run_summary` 对应模块新增并验证 `DependencyOutcome`、`WaterbodyDependencyManifest`、`WaterbodyRunEntry`、`TopologyRunResult`、`WaterbodyReportCard`、`RunSummaryInput`、`RunSummaryResult` 与稳定 canonical order/digest；Domain/Application 不导入 transport/provider 类型。
-- [ ] 将 `AgentRole` 原子扩展为 `parser / waterbody / run_summarizer`，其中 summarizer `target_comid=null`；把 `SessionResultSummary` 收敛为按 role 判别的唯一 V1 union，非法 role/result/COMID 组合构造即失败。
-- [ ] 扩展 `AnalysisPhase` 为 `waterbody_execution`、`run_summarization`，并定义 run snapshot/result projection 的最小结构；phase 不代替 run/session/node status。
-- [ ] 固化 dependency、card、summary 和 run-result ref/version 规则：每个 active COMID 恰好一个 entry，target 恰好一个 full projection，其他 active node 恰好一张 card；refs 必须属于同 run/session/content。
-- [ ] 为七类 M7 typed content 定义 application payload/schema，但本阶段不注册 writer，也不做模型调用或调度。
-- [ ] 原子更新 serializers、builders、fixtures、OpenAPI schema inputs 和 exhaustive match；删除旧封闭枚举假设，不建立 V2/read union 或兼容分支。
+- [x] 在 `application/analysis_runs`/`application/run_summary` 对应模块新增并验证 `DependencyOutcome`、`WaterbodyDependencyManifest`、`WaterbodyRunEntry`、`TopologyRunResult`、`WaterbodyReportCard`、`RunSummaryInput`、`RunSummaryResult` 与稳定 canonical order/digest；Domain/Application 不导入 transport/provider 类型。
+- [x] 将 `AgentRole` 原子扩展为 `parser / waterbody / run_summarizer`，其中 summarizer `target_comid=null`；把 `SessionResultSummary` 收敛为按 role 判别的唯一 V1 union，非法 role/result/COMID 组合构造即失败。
+- [x] 扩展 `AnalysisPhase` 为 `waterbody_execution`、`run_summarization`，并定义 run snapshot/result projection 的最小结构；phase 不代替 run/session/node status。
+- [x] 固化 dependency、card、summary 和 run-result ref/version 规则：每个 active COMID 恰好一个 entry，target 恰好一个 full projection，其他 active node 恰好一张 card；refs 必须属于同 run/session/content。
+- [x] 为七类 M7 typed content 定义 application payload/schema，但本阶段不注册 writer，也不做模型调用或调度。
+- [x] 原子更新 serializers、builders、fixtures、OpenAPI schema inputs 和 exhaustive match；删除旧封闭枚举假设，不建立 V2/read union 或兼容分支。
 
 ### Tests
 
-- [ ] dependency status/manifest、partial coverage、target failure、summary availability 和 cross-reference closure 的构造正反例。
-- [ ] `AgentRole` × COMID × result summary 判别矩阵；旧 parser/waterbody 数据仍按当前唯一 V1 正常解析。
-- [ ] canonical ordering/digest 在输入乱序、重复 COMID/ref、缺 target/card、跨 run ref 时稳定或拒绝。
+- [x] dependency status/manifest、partial coverage、target failure、summary availability 和 cross-reference closure 的构造正反例。
+- [x] `AgentRole` × COMID × result summary 判别矩阵；旧 parser/waterbody 数据仍按当前唯一 V1 正常解析。
+- [x] canonical ordering/digest 在输入乱序、重复 COMID/ref、缺 target/card、跨 run ref 时稳定或拒绝。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain backend/tests/application/analysis_runs/test_topology_result_models.py backend/tests/application/run_summary/test_models.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_domain_dependencies.py backend/tests/architecture/test_current_v1_contracts.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/domain backend/app/application`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain backend/tests/application/analysis_runs/test_topology_result_models.py backend/tests/application/run_summary/test_models.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture/test_domain_dependencies.py backend/tests/architecture/test_current_v1_contracts.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app/domain backend/app/application`
+- [x] `git diff --check`
 
 阶段出口：M7 需要的当前唯一 V1 类型能独立表达完整业务事实并机械拒绝非法组合；尚无 runtime、writer、scheduler 或模型调用。
 
 提交边界：仅类型、validation、exports、直接 fixtures/consumers 与 focused tests；不得实现 store、evidence collect、workflow 或 summary runner。
+
+#### Milestone 1 完成记录（2026-10-03）
+
+- 实现：新增 dependency/manifest/topology result 与 target/report-card/summary 的严格 V1 application models、稳定 canonical JSON/digest 和同 run/session/content 引用闭包；扩展唯一 `AgentRole`、`AnalysisPhase`、role-discriminated session result、run snapshot/detail/history/OpenAPI 投影及全部直接消费者。七类 M7 payload 只有 schema，production registry 未注册，未接入 writer、模型、scheduler 或 workflow。
+- 数据库：PostgreSQL 红灯 fixture 证明原 M3 `analysis_sessions` CHECK 拒绝 `run_summarizer`；新增窄 revision `20261003_01`，只扩展现有 CHECK 并增加每 run 一个 summarizer 的 partial unique index，不新增表/结果列。现有 `wateragents` 与专用 `wateragents_test` 均已 upgrade/check 到当前 head。
+- 验证：M1 domain/model gate `361 passed`；指定 architecture gate `8 passed`；完整 architecture `120 passed`；最终完整 `backend/tests`（含 Docker PostgreSQL、OpenAPI/SSE/history/M1–M6 回归）`1866 passed, 1 warning`；`compileall` 与 `git diff --check` 通过。首次普通权限的 pytest 临时目录错误为 Windows ACL permission-limited；一次隔离进程流式脱敏性能阈值受负载抖动，原用例连续 3 次及随后完整回归均通过。
+- 风险：真实外部 provider 请求和 Ubuntu/macOS/Windows CI `not run`；Milestone 2–9 尚未开始，当前无 M7 runtime、writer registration、DAG scheduler、summary runner 或 frontend 行为。
+- 提交：本完成记录与 M1 类型/直接消费者由当前本地提交保存。
 
 ## Milestone 2：run-local outcome store 与真实上游证据端口
 
@@ -379,11 +387,11 @@
 | 契约 | 状态 | 计划实现位置 | 重点测试 | 证据与剩余风险 |
 |---|---|---|---|---|
 | GLOBAL-C01 | pending | 当前 `backend/`、M0 archive guards | archive isolation、production import scan | 不读取或复用归档。 |
-| GLOBAL-C02 | pending | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | 所有消费者必须原子更新。 |
-| GLOBAL-C06 | pending | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | evidence/result/summary refs 全部后端校验。 |
+| GLOBAL-C02 | partial | 当前唯一 V1 role/content/lifecycle/OpenAPI | no V2/read union/feature flag/new route | M1 类型和直接消费者已本机验证；runtime/registry 仍待后续阶段。 |
+| GLOBAL-C06 | partial | outcome store、upstream projection、summary validator/result assembler | ref closure、scope/identity negative tests | M1 schema ref closure 已验证；真实 store/assembler 待 M2/M6。 |
 | GLOBAL-C07 | pending | logs、transcript、public projection、provider adapter | secret/error/provider envelope scans | internal error 只留后端。 |
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
-| GLOBAL-C09 | pending | typed models、writer/reader、snapshot/history | serialization/persistence/reload | 单一事实源跨边界一致。 |
+| GLOBAL-C09 | partial | typed models、writer/reader、snapshot/history | serialization/persistence/reload | M1 payload/snapshot/read projection 与 session role persistence 已验证；typed writer/reload 待 M7。 |
 | GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
 | GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | 只有实际平台证据才能升级状态。 |
 | M7-C01 | pending | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 等待全部直接上游后只判定一次。 |
@@ -393,10 +401,10 @@
 | M7-C05 | pending | provider/tool late-output audit | cancelled stream/late callback tests | 晚到结果不对外或下传。 |
 | M7-C06 | pending | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | cleanup 等待真实收敛。 |
 | M7-C07 | pending | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 无第二套 run-wide quota。 |
-| M7-C08 | pending | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | target 是主科学结论。 |
+| M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M1 构造不变量已验证；assembler/lifecycle 提交待 M5/M7。 |
 | M7-C09 | pending | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | insufficient 正式结果保留但不传播 evidence。 |
 | M7-C10 | pending | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | 后端不重算或发明系数。 |
-| M7-C11 | pending | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | 独立 session、无 tools/第三模型。 |
+| M7-C11 | partial | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M1 target + all-card/ref/no-tools schema 已验证；prompt/runner 待 M6。 |
 | M7-C12 | pending | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary 失败不抹掉 target/waterbody results。 |
 | M7-A01 | pending | production workflow fake topology | 3+ nodes、event/session order、exact once | session 不预建。 |
 | M7-A02 | pending | manifest/upstream bundle | status/evidence/ref/merge fixtures | invalid/insufficient 0 records。 |

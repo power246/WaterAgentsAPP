@@ -512,6 +512,8 @@ class TranscriptReader:
             query=stored.run.query,
             configuration=configuration,
             context_summary=context_summary,
+            result_ref=None,
+            result_summary=None,
         ), tuple(issues)
 
     def _context_summary(

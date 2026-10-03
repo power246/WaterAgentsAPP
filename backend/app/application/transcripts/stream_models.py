@@ -9,9 +9,16 @@ from app.application.analysis_runs.models import (
     AnalysisPhase,
     AnalysisRunSnapshot,
     RunStatus,
+    SessionResultReference,
     SessionSummary,
 )
 from app.application.analysis_runs.persistence import PersistenceInfo
+from app.application.analysis_runs.topology_result_models import (
+    DependencyStatus,
+    GraphOutcomeProjection,
+    RunSummaryProjection,
+    WaterbodySchedulingStatus,
+)
 from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
@@ -32,8 +39,11 @@ from app.domain.domain_model import DomainModel
 class RunWaterbodySummary(DomainModel):
     target_comid: NonEmptyString
     participating: StrictBool
+    scheduling_status: WaterbodySchedulingStatus
+    dependency_status: DependencyStatus | None = None
     session_id: UUID | None = None
     session_status: AgentSessionStatus | None = None
+    result_ref: SessionResultReference | None = None
 
 
 class RunSnapshotEvent(DomainModel):
@@ -45,6 +55,9 @@ class RunSnapshotEvent(DomainModel):
     updated_at: UtcDatetime
     context_ref: TranscriptContentRef | None
     topology_ref: TranscriptContentRef | None
+    result_ref: TranscriptContentRef | None
+    summary: RunSummaryProjection
+    graph_outcome: GraphOutcomeProjection
     sessions: tuple[SessionSummary, ...] = ()
     waterbodies: tuple[RunWaterbodySummary, ...] = ()
     persistence: PersistenceInfo
@@ -175,6 +188,9 @@ def snapshot_from_state(
         updated_at=snapshot.updated_at,
         context_ref=context_ref,
         topology_ref=topology_ref,
+        result_ref=None,
+        summary=RunSummaryProjection(),
+        graph_outcome=GraphOutcomeProjection(),
         sessions=sessions,
         waterbodies=waterbodies,
         persistence=persistence,

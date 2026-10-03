@@ -385,6 +385,8 @@ AgentRole.RUN_SUMMARIZER = "run_summarizer"
 
 `SessionResultSummary` 应改为带 discriminator 的窄 union，而不是给现有 waterbody fields 加大量 nullable 字段。相关 domain、schema、persistence、reader、SSE、fixtures 和 OpenAPI 必须同一变更更新；不建立 V2/read union。
 
+现有四表足以承载该 session，但 M3 的 `analysis_sessions` role/COMID CHECK 只允许 parser/waterbody，且缺少 summarizer 的 run 内唯一约束。M7 因此只增加一个窄 Alembic revision：扩展原 CHECK，并为 `agent_role='run_summarizer'` 增加按 `run_id` 的 partial unique index；不新增业务表或结果列。
+
 ## 11. AnalysisPhase 与 run snapshot
 
 当前 phase 在 `topology_ready` 后直接 terminal。增加：

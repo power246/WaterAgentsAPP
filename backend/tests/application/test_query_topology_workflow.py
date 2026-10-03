@@ -423,8 +423,9 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
             assert ready_snapshot.analysis_phase is AnalysisPhase.TOPOLOGY_READY
             assert ready_snapshot.context_ref == runtime.context_ref
             assert ready_snapshot.topology_ref == runtime.topology_ref
-            assert "nodes" not in ready_snapshot.model_dump_json()
-            assert "edges" not in ready_snapshot.model_dump_json()
+            serialized_snapshot = ready_snapshot.model_dump_json()
+            assert '"nodes":' not in serialized_snapshot
+            assert '"edges":' not in serialized_snapshot
 
             store.release_topology_write.set()
             await wait_quiesced(coordinator, created.run_id)

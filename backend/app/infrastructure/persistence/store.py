@@ -72,13 +72,13 @@ def _session_summary_from_rows(
     result_ref = None
     result_summary = None
     if (
-        row["agent_role"] == AgentRole.WATERBODY.value
+        row["agent_role"] != AgentRole.QUERY_PARSER.value
         and row["status"] == AgentSessionStatus.COMPLETED.value
     ):
         terminal_id = row["terminal_item_id"]
         terminal = items.get(terminal_id)
         if terminal is None:
-            raise ValueError("completed waterbody session has no terminal item")
+            raise ValueError("completed result session has no terminal item")
         body = (
             terminal.inline_body
             if terminal.inline_body is not None
@@ -87,7 +87,7 @@ def _session_summary_from_rows(
             else None
         )
         if body is None:
-            raise ValueError("completed waterbody terminal content is unavailable")
+            raise ValueError("completed result terminal content is unavailable")
         event = SessionCompletedEvent.model_validate_json(body)
         if (
             event.run_id != row["run_id"]
@@ -95,7 +95,7 @@ def _session_summary_from_rows(
             or event.payload.result_ref is None
             or event.payload.result_summary is None
         ):
-            raise ValueError("completed waterbody terminal result is invalid")
+            raise ValueError("completed result terminal payload is invalid")
         result_ref = event.payload.result_ref
         result_summary = event.payload.result_summary
     return SessionSummary(

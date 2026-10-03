@@ -140,6 +140,9 @@ def test_encoder_uses_optional_integer_id_and_one_json_data_line() -> None:
         updated_at="2026-09-13T03:20:00.000001Z",
         context_ref=None,
         topology_ref=None,
+        result_ref=None,
+        summary={"status": "not_started"},
+        graph_outcome={},
         persistence={"state": "pending", "warning": None},
     )
     without_id = encode_event("run_snapshot", event)
@@ -173,14 +176,20 @@ def test_run_subscription_assembles_latest_real_state_without_notification_log()
                 {
                     "target_comid": "101",
                     "participating": False,
+                    "scheduling_status": "excluded",
+                    "dependency_status": None,
                     "session_id": None,
                     "session_status": None,
+                    "result_ref": None,
                 },
                 {
                     "target_comid": "202",
                     "participating": True,
+                    "scheduling_status": "running",
+                    "dependency_status": None,
                     "session_id": str(session.session_id),
                     "session_status": "pending",
+                    "result_ref": None,
                 },
             ]
             assert tuple(coordinator._runs[created.run_id].events) == lifecycle_events

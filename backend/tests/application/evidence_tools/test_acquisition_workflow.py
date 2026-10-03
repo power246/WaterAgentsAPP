@@ -8,8 +8,8 @@ from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
     SessionResultReference,
-    SessionResultSummary,
     SessionSummary,
+    WaterbodySessionResultSummary,
 )
 from app.application.evidence_tools import (
     EvidenceAcquisitionService,
@@ -207,7 +207,7 @@ def _upstream_port(
                 else None
             ),
             result_summary=(
-                SessionResultSummary(
+                WaterbodySessionResultSummary(
                     result_id=f"result:{upstream_comid}",
                     target_comid=target_comid,
                     risk_level="indeterminate",

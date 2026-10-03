@@ -57,12 +57,16 @@ from app.application.analysis_runs.models import (
     SessionStateMutation,
     SessionSummary,
     TranscriptItemIdentity,
+    WaterbodySessionResultSummary,
 )
 from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceInfo,
     PersistenceState,
     PersistenceWriteBatch,
+)
+from app.application.analysis_runs.topology_result_models import (
+    WaterbodySchedulingStatus,
 )
 from app.application.analysis_runs.runtime import AgentSessionRuntime, RunRuntime
 from app.application.analysis_runs.writer import TranscriptWriter
@@ -1321,10 +1325,8 @@ class RunCoordinator:
         runtime = await self._lookup(run_id)
         role = _ROLE.validate_python(agent_role)
         comid = _COMID.validate_python(target_comid) if target_comid is not None else None
-        if role is AgentRole.QUERY_PARSER and comid is not None:
-            raise ValueError("query_parser sessions must not have target_comid")
-        if role is AgentRole.WATERBODY and comid is None:
-            raise ValueError("waterbody sessions require target_comid")
+        if (role is AgentRole.WATERBODY) != (comid is not None):
+            raise ValueError("only waterbody sessions require target_comid")
         async with runtime.condition:
             if self._closing:
                 raise ServiceShuttingDownError()
@@ -1334,11 +1336,12 @@ class RunCoordinator:
                 or runtime.snapshot.status not in _RUN_TRANSITIONS
             ):
                 raise InvalidRunTransitionError(runtime.snapshot, RunStatus.RUNNING)
-            existing_id = (
-                runtime.query_parser_session_id
-                if role is AgentRole.QUERY_PARSER
-                else runtime.waterbody_session_ids.get(comid)
-            )
+            if role is AgentRole.QUERY_PARSER:
+                existing_id = runtime.query_parser_session_id
+            elif role is AgentRole.WATERBODY:
+                existing_id = runtime.waterbody_session_ids.get(comid)
+            else:
+                existing_id = runtime.run_summary_session_id
             if existing_id is not None:
                 return runtime.agent_sessions[existing_id].summary
             timestamp = self._clock.now()
@@ -1375,8 +1378,10 @@ class RunCoordinator:
             self._append_transcript_process_locked(runtime, finalized, timestamp)
             if role is AgentRole.QUERY_PARSER:
                 runtime.query_parser_session_id = summary.session_id
-            else:
+            elif role is AgentRole.WATERBODY:
                 runtime.waterbody_session_ids[comid] = summary.session_id
+            else:
+                runtime.run_summary_session_id = summary.session_id
             mutation = SessionStateMutation(
                 mutation_id=mutation_id,
                 run_id=runtime.snapshot.run_id,
@@ -1478,7 +1483,7 @@ class RunCoordinator:
                     run_id=runtime.snapshot.run_id,
                     item_id=result_identity.item_id,
                 )
-                result_summary = SessionResultSummary(
+                result_summary = WaterbodySessionResultSummary(
                     result_id=validated_result.result_id,
                     target_comid=validated_result.target_comid,
                     risk_level=validated_result.overall_assessment.risk_level,
@@ -2298,9 +2303,21 @@ class RunCoordinator:
             RunWaterbodySummary(
                 target_comid=comid,
                 participating=participating,
+                scheduling_status=self._waterbody_scheduling_status_locked(
+                    runtime,
+                    comid,
+                    participating,
+                ),
                 session_id=runtime.waterbody_session_ids.get(comid),
                 session_status=(
                     runtime.agent_sessions[runtime.waterbody_session_ids[comid]].summary.status
+                    if comid in runtime.waterbody_session_ids
+                    else None
+                ),
+                result_ref=(
+                    runtime.agent_sessions[
+                        runtime.waterbody_session_ids[comid]
+                    ].summary.result_ref
                     if comid in runtime.waterbody_session_ids
                     else None
                 ),
@@ -2316,6 +2333,25 @@ class RunCoordinator:
             waterbodies,
             self._transcript_writer.info_locked(runtime),
         )
+
+    @staticmethod
+    def _waterbody_scheduling_status_locked(
+        runtime: RunRuntime,
+        comid: str,
+        participating: bool,
+    ) -> WaterbodySchedulingStatus:
+        if not participating:
+            return WaterbodySchedulingStatus.EXCLUDED
+        session_id = runtime.waterbody_session_ids.get(comid)
+        if session_id is None:
+            return WaterbodySchedulingStatus.WAITING
+        if runtime.agent_sessions[session_id].summary.status in {
+            AgentSessionStatus.COMPLETED,
+            AgentSessionStatus.FAILED,
+            AgentSessionStatus.CANCELLED,
+        }:
+            return WaterbodySchedulingStatus.TERMINAL
+        return WaterbodySchedulingStatus.RUNNING
 
     def _run_stream_closed_locked(self, runtime: RunRuntime) -> bool:
         return bool(
@@ -2563,10 +2599,10 @@ class RunCoordinator:
             session_runtime = self._lookup_agent_session_locked(runtime, key)
             if (
                 target is AgentSessionStatus.COMPLETED
-                and session_runtime.summary.agent_role is AgentRole.WATERBODY
+                and session_runtime.summary.agent_role is not AgentRole.QUERY_PARSER
             ):
                 raise ValueError(
-                    "waterbody sessions must complete with an inference result"
+                    "result sessions must complete with a typed result"
                 )
             if (
                 session_runtime.summary.status is AgentSessionStatus.CANCELLED

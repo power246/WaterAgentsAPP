@@ -44,6 +44,7 @@ class RunRuntime:
     state_mutations: list[StateMutation] = field(default_factory=list)
     agent_sessions: dict[UUID, AgentSessionRuntime] = field(default_factory=dict)
     query_parser_session_id: UUID | None = None
+    run_summary_session_id: UUID | None = None
     waterbody_session_ids: dict[str, UUID] = field(default_factory=dict)
     waterbody_participation: dict[str, bool] = field(default_factory=dict)
     streaming_messages: dict[UUID, StreamingMessage] = field(default_factory=dict)

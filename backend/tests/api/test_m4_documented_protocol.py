@@ -121,13 +121,28 @@ def test_documented_openapi_and_sse_contract_are_runtime_derived() -> None:
     ]["maxItems"] == 6
     run_summary_schema = schema["components"]["schemas"]["RunSummary"]
     assert "context_summary" in run_summary_schema["required"]
+    assert {"result_ref", "result_summary"}.issubset(
+        run_summary_schema["properties"]
+    )
     assert {item.get("type") for item in run_summary_schema["properties"][
         "context_summary"
     ]["anyOf"]} == {None, "null"}
     run_snapshot_schema = schema["components"]["schemas"]["RunSnapshotEvent"]
-    assert {"analysis_phase", "context_ref", "topology_ref"}.issubset(
+    assert {
+        "analysis_phase",
+        "context_ref",
+        "topology_ref",
+        "result_ref",
+        "summary",
+        "graph_outcome",
+    }.issubset(
         run_snapshot_schema["required"]
     )
+    assert schema["components"]["schemas"]["AgentRole"]["enum"] == [
+        "query_parser",
+        "waterbody",
+        "run_summarizer",
+    ]
     run_stream_schema = schema["paths"][
         "/api/analysis/runs/{run_id}/events"
     ]["get"]["responses"]["200"]["content"]["text/event-stream"]["schema"]

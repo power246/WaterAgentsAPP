@@ -52,7 +52,7 @@ wateragents-db check
 
 本机迁移验收已确认 Docker Desktop 4.93.0 / Engine 29.8.1 重启后仍使用 D 盘；容器为
 `healthy`，`postgres`、`wateragents`、`wateragents_test` 均存在，迁移前后规范化逻辑
-dump 的 SHA-256 一致，schema 为 `20260913_01`，health 与 run/history/restart smoke 通过。
+dump 的 SHA-256 一致；M7 Milestone 1 后当前 schema head 为 `20261003_01`（在既有四表上增加 `run_summarizer` session CHECK/唯一索引），health 与 run/history/restart smoke 通过。
 
 ## 首次启动
 

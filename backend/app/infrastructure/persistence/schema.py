@@ -109,7 +109,8 @@ analysis_sessions = Table(
     Column("terminal_item_id", UUID(as_uuid=True), nullable=True),
     UniqueConstraint("run_id", "session_id", name="uq_sessions_run_session"),
     CheckConstraint(
-        "((agent_role = 'query_parser' AND target_comid IS NULL) OR "
+        "((agent_role IN ('query_parser', 'run_summarizer') "
+        "AND target_comid IS NULL) OR "
         "(agent_role = 'waterbody' AND target_comid IS NOT NULL "
         "AND length(btrim(target_comid)) > 0))",
         name="role_comid",
@@ -266,6 +267,12 @@ Index(
     analysis_sessions.c.target_comid,
     unique=True,
     postgresql_where=analysis_sessions.c.agent_role == "waterbody",
+)
+Index(
+    "uq_analysis_sessions_run_summarizer_per_run",
+    analysis_sessions.c.run_id,
+    unique=True,
+    postgresql_where=analysis_sessions.c.agent_role == "run_summarizer",
 )
 Index(
     "ix_transcript_items_session_transcript",

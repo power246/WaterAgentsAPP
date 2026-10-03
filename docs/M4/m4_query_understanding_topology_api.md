@@ -518,6 +518,20 @@ event: stream_end
     "run_id": "0d415090-860a-4e1c-b843-191968dbcc6e",
     "item_id": "f071e82f-b341-47ed-8b55-6ac4da37b957"
   },
+  "result_ref": null,
+  "summary": {
+    "status": "not_started",
+    "session_id": null,
+    "result_ref": null,
+    "error": null
+  },
+  "graph_outcome": {
+    "coverage": null,
+    "usable_nodes": 0,
+    "insufficient_nodes": 0,
+    "invalid_nodes": 0,
+    "cancelled_nodes": 0
+  },
   "sessions": [
     {
       "session_id": "5885bd7f-a1d5-4c51-920d-528cd33f00e9",
@@ -534,8 +548,11 @@ event: stream_end
     {
       "target_comid": "12345678",
       "participating": true,
+      "scheduling_status": "waiting",
+      "dependency_status": null,
       "session_id": null,
-      "session_status": null
+      "session_status": null,
+      "result_ref": null
     }
   ],
   "persistence": {
@@ -545,7 +562,7 @@ event: stream_end
 }
 ```
 
-`analysis_phase` 是进度 code，不是 lifecycle status。M4 已知 `queued / query_understanding / topology_building / topology_ready / terminal`；后续阶段可增加 code。`context_ref`、`topology_ref` 在原 item 尚不存在时为 null，存在后不回退。
+`analysis_phase` 是进度 code，不是 lifecycle status。当前唯一 V1 已知 `queued / query_understanding / topology_building / topology_ready / waterbody_execution / run_summarization / terminal`。`context_ref`、`topology_ref` 在原 item 尚不存在时为 null，存在后不回退；M7 的轻量 `result_ref / summary / graph_outcome` 和 waterbody scheduling projection 在事实尚未形成时使用空投影，不内联完整业务结果。
 
 不存在独立 `event: topology_ready`。topology 完成通过下一份完整轻量 `run_snapshot` 和 `topology_ref` 通知；完整 graph 从原 item/全文接口读取。run stream 仍无 SSE id，重连首发最新快照。
 
