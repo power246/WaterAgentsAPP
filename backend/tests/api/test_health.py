@@ -32,6 +32,7 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "topology_max_hops": 12,
         "topology_max_nodes": 128,
         "topology_max_concurrency": 8,
+        "waterbody_workflow_max_concurrency": 4,
         "prediction_baseline_hours": 48,
         "max_target_parameters": 6,
         "query_parser_timeout_seconds": 45.0,

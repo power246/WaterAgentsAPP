@@ -2,7 +2,7 @@
 
 更新日期：2026-10-03
 
-> 当前状态：Milestone 0–3 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架、run-local direct-upstream evidence seam，以及水体启动门禁/零模型正式结果接缝；Milestone 4–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
+> 当前状态：Milestone 0–4 已完成本机基线、架构红线、当前唯一 V1 类型/投影骨架、run-local direct-upstream evidence seam、水体启动门禁/零模型正式结果接缝，以及依赖感知 scheduler/全局有界并行；Milestone 5–9 尚未开始。M7 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；只有各阶段完成记录中的实际命令和结果属于已通过证据。
 
 本清单执行以下已确认文档：
 
@@ -223,29 +223,36 @@
 
 ### 工作
 
-- [ ] 从 immutable `HydrologyGraph`/active topology view 构造 direct dependency counters、reverse edges 和稳定 ready priority；不重新 BFS、不扩展范围、不让 Agent 修改 graph。
-- [ ] node 只有在全部 participating direct-upstream outcomes settle 后入队；claim 使用单一原子状态，保证并发完成通知、重复回调和异常收敛下只执行一次。
-- [ ] 用全局 limiter 执行互不依赖的 ready nodes；`WATERBODY_WORKFLOW_MAX_CONCURRENCY` 默认 4、允许 1–32，配置非法时启动失败，不在运行中静默 clamp。
-- [ ] 稳定 tie-break 只决定同等 ready 节点的启动优先级，不把并发完成顺序冒充科学语义；测试不得依赖 wall-clock 完成顺序。
-- [ ] scheduler 只依赖 `NodeRunner`/outcome port，可用 fake runner 独立测试。node error 必须 settle 为 canonical invalid outcome，再解锁可能仍可运行的汇流节点。
-- [ ] 整次工作量仅使用 M4 snapshot 中已冻结的 distance/hop/node 边界；禁止添加 run token budget、run model-call counter 或第二套 node cap。
+- [x] 从 immutable `HydrologyGraph`/active topology view 构造 direct dependency counters、reverse edges 和稳定 ready priority；不重新 BFS、不扩展范围、不让 Agent 修改 graph。
+- [x] node 只有在全部 participating direct-upstream outcomes settle 后入队；claim 使用单一原子状态，保证并发完成通知、重复回调和异常收敛下只执行一次。
+- [x] 用全局 limiter 执行互不依赖的 ready nodes；`WATERBODY_WORKFLOW_MAX_CONCURRENCY` 默认 4、允许 1–32，配置非法时启动失败，不在运行中静默 clamp。
+- [x] 稳定 tie-break 只决定同等 ready 节点的启动优先级，不把并发完成顺序冒充科学语义；测试不得依赖 wall-clock 完成顺序。
+- [x] scheduler 只依赖 `NodeRunner`/outcome port，可用 fake runner 独立测试。node error 必须 settle 为 canonical invalid outcome，再解锁可能仍可运行的汇流节点。
+- [x] 整次工作量仅使用 M4 snapshot 中已冻结的 distance/hop/node 边界；禁止添加 run token budget、run model-call counter 或第二套 node cap。
 
 ### Tests
 
-- [ ] chain、fork、diamond、invalid+usable merge、all insufficient、runner exception、duplicate completion、out-of-order completion 的 exact-once/ready assertions。
-- [ ] 并发上限 1、默认值、最大值和非法 0/33；峰值 in-flight 不超配置且独立节点确实可重叠。
-- [ ] 最大允许 topology fixture 全覆盖且无范围外 COMID；per-session budget 耗尽只影响对应 outcome，不变成 run-wide quota。
+- [x] chain、fork、diamond、invalid+usable merge、all insufficient、runner exception、duplicate completion、out-of-order completion 的 exact-once/ready assertions。
+- [x] 并发上限 1、默认值、最大值和非法 0/33；峰值 in-flight 不超配置且独立节点确实可重叠。
+- [x] 最大允许 topology fixture 全覆盖且无范围外 COMID；per-session budget 耗尽只影响对应 outcome，不变成 run-wide quota。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_scheduler.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/topology backend/tests/application/query_understanding -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_scheduler_races.py -q`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_scheduler.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_hydrology.py backend/tests/domain/test_hydrology_topology_models.py backend/tests/application/test_analysis_context.py backend/tests/application/test_analysis_context_resolver.py backend/tests/application/test_date_resolver.py backend/tests/application/test_parameter_resolver.py backend/tests/application/test_location_resolver.py backend/tests/application/test_query_parser_prompt.py backend/tests/application/test_query_parser_workflow.py backend/tests/application/test_station_availability.py backend/tests/application/test_hydrology_topology_builder.py backend/tests/application/test_query_topology_workflow.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs/test_topology_scheduler_races.py -q`
+- [x] `git diff --check`
 
 阶段出口：scheduler 可用 fake runner 稳定执行任意已冻结 active DAG，ready/claim/并发/范围行为均可机械验证；尚未替换 production workflow。
 
 提交边界：仅 scheduler、limiter setting、fake runner protocol 与 tests；不得在 route/coordinator 中建立第二个临时 caller，也不得接 summary/persistence。
+
+#### Milestone 4 完成记录（2026-10-03）
+
+- 实现：新增从 canonical `HydrologyGraph` 重验证并构造的 immutable active execution view、direct dependency counters/reverse edges、稳定 ready queue 与原子 claim/settle 状态机；新增只依赖 `NodeRunner`/outcome port 的 scheduler 及可在多个 run 之间共享的 `WaterbodyWorkflowLimiter`，配置 `WATERBODY_WORKFLOW_MAX_CONCURRENCY` 默认 4、严格限定 1–32；未重做 BFS、未扩展 topology 范围、未新增 run-wide quota/node cap。
+- 验证：scheduler focused `10 passed`，当前 topology/query-understanding 实际回归文件 `171 passed`，race/limiter focused `7 passed`，analysis-runs + API health `76 passed`，architecture `122 passed`；最终完整 `backend/tests` 使用 Docker 中健康的 PostgreSQL 与进程级 `wateragents_test` 得到 `1909 passed, 1 warning`，warning 仅为既有 Starlette/httpx 弃用提示；应用构造与 `git diff --check` 通过。首次全量仅有既有 M6 SSE smoke 在 45 秒总时限下超时（`1908 passed, 1 failed`），该用例随后单独复跑 `1 passed`，再次全量全绿；真实外部 provider 与三平台 CI `not run`。
+- 边界：Milestone 5–9 尚未开始；scheduler 尚未替换 production `QueryTopologyWorkflow`，也未接 run summarizer、持久化或 frontend，M1–M9 仍作为一个原子任务等待最终验收。
+- 提交：本完成记录与 M4 scheduler/limiter setting/fake runner/tests 由当前本地提交保存。
 
 ## Milestone 5：同一 production workflow 执行全部水体
 
@@ -408,14 +415,14 @@
 | GLOBAL-C08 | partial | M9 handoff、current OpenAPI/SSE | no frontend/direct route guard | M7 只留稳定读取接缝，frontend 由 M9 实现。 |
 | GLOBAL-C09 | partial | typed models、writer/reader、snapshot/history | serialization/persistence/reload | M1 payload/snapshot/read projection 与 session role persistence 已验证；typed writer/reload 待 M7。 |
 | GLOBAL-C10 | pending | 本清单接力出口、项目级 docs | documented protocol audit | M8/M9 不提前实现。 |
-| GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | 只有实际平台证据才能升级状态。 |
-| M7-C01 | pending | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 等待全部直接上游后只判定一次。 |
+| GLOBAL-C11 | partial | settings、event loop、paths、PostgreSQL、CI | Windows/local gates + three-platform CI | M4 并发配置默认值/严格范围与 Windows + Docker PostgreSQL 全量回归已验证；三平台 CI 待 M8/M9。 |
+| M7-C01 | partial | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | scheduler 已验证全部直接上游 settle 后 exact-once claim；production session 创建时机与 workflow 接入待 M5。 |
 | M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
 | M7-C03 | partial | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 dependency prompt 的 mode/window 原样传递已验证；production workflow handoff 待 M5。 |
 | M7-C04 | pending | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | 先封调度，再通知已有 sessions。 |
 | M7-C05 | pending | provider/tool late-output audit | cancelled stream/late callback tests | 晚到结果不对外或下传。 |
 | M7-C06 | pending | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | cleanup 等待真实收敛。 |
-| M7-C07 | pending | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 无第二套 run-wide quota。 |
+| M7-C07 | 本机已验证 | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 全局峰值 1/4/32、两个 run 共享 limiter、128-node 范围与 per-session failure 已验证，无第二套 run-wide quota。 |
 | M7-C08 | partial | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | M1 构造不变量已验证；assembler/lifecycle 提交待 M5/M7。 |
 | M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
 | M7-C10 | 本机已验证 | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | source role、usable-only result ref、invalid redaction、mode/window 与 deterministic numeric boundary 已通过 focused/full regression。 |
@@ -426,7 +433,7 @@
 | M7-A03 | pending | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 无新下游动作并最终 quiesced。 |
 | M7-A04 | pending | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | 迟到内容只可审计。 |
 | M7-A05 | 本机已验证 | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径复用 canonical M6 result/session 提交接缝，stationless 发布 insufficient 且无 usable records。 |
-| M7-A06 | pending | limiter/topology snapshot/settings | peak in-flight、max topology、no run quota | 并发、范围和 per-session budget 分开。 |
+| M7-A06 | 本机已验证 | limiter/topology snapshot/settings | peak in-flight、max topology、no run quota | 独立节点实际重叠且峰值不超设置，最大 topology 仅执行 snapshot 内 128 个 active COMID，配置 0/33 失败。 |
 | M7-A07 | pending | summarizer/input/validator/failure projection | same model、all cards、special values、failure | 数字有 unit/window/ref，无 fallback。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码、fixture 或文档存在填写已验证；本机、专用 PostgreSQL、真实 provider 和三平台 CI 证据必须分开记录。
