@@ -212,17 +212,20 @@ class RunSummaryRunner:
                 )
                 accepted_request = repair
                 accepted_call = repaired
-        except WaterbodyModelCancelledError:
-            if self._transcript is not None:
-                await self._transcript.cancel()
-            return RunSummaryRunOutcome(
-                status=RunSummaryRunStatus.CANCELLED,
-                result=None,
-                error=None,
-                model_calls=calls,
-                repaired=calls == 2,
-            )
         except (RunSummaryValidationError, WaterbodyModelPortError) as error:
+            if (
+                isinstance(error, WaterbodyModelCancelledError)
+                and cancellation.is_requested()
+            ):
+                if self._transcript is not None:
+                    await self._transcript.cancel()
+                return RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.CANCELLED,
+                    result=None,
+                    error=None,
+                    model_calls=calls,
+                    repaired=calls == 2,
+                )
             logger.warning(
                 "run_summary_model_failed",
                 extra={

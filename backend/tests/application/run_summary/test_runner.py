@@ -9,6 +9,7 @@ from app.application.analysis_runs.topology_result_assembler import (
     TopologyResultAssembler,
 )
 from app.application.reasoning.batch_planner import ModelFitCapability
+from app.application.reasoning.model_models import Terminal, WaterbodyFinishReason
 from app.application.run_summary.stage import RunSummaryStage
 from app.application.run_summary.errors import SummaryInputTooLargeError
 from app.application.run_summary.runner import (
@@ -140,6 +141,41 @@ def test_cancel_after_validated_model_output_suppresses_summary_result() -> None
 class _NotCancelled:
     def is_requested(self):
         return False
+
+
+class _ProviderCancelledModelPort:
+    def __init__(self) -> None:
+        self.requests = []
+
+    async def stream(self, request):
+        self.requests.append(request)
+        yield Terminal(
+            operation_id=request.operation_id,
+            model=request.model,
+            provider_response_id="response-cancelled",
+            finish_reason=WaterbodyFinishReason.CANCELLED,
+        )
+
+
+def test_provider_cancelled_terminal_is_a_safe_failure_without_run_cancel() -> None:
+    port = _ProviderCancelledModelPort()
+    outcome = asyncio.run(
+        RunSummaryRunner(model_port=port).run(
+            summary_input(),
+            model=MODEL,
+            deadline=NOW,
+            input_ref=TranscriptContentRef(run_id=RUN_ID, item_id=INPUT_ITEM_ID),
+            cancellation=_NotCancelled(),
+        )
+    )
+
+    assert outcome.status is RunSummaryRunStatus.FAILED
+    assert outcome.error is not None
+    assert outcome.error.code == "run_summary_failed"
+    assert outcome.error.retryable is True
+    assert outcome.result is None
+    assert outcome.model_calls == 1
+    assert len(port.requests) == 1
 
 
 class _StageOperations:

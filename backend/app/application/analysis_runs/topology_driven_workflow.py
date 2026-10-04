@@ -107,23 +107,6 @@ class RunSummaryBoundary(Protocol):
     ) -> None: ...
 
 
-class AwaitRunSummaryBoundary:
-    """Keep the owned workflow open until the M6 summary stage is attached."""
-
-    async def wait(
-        self,
-        context: WorkflowContext,
-        analysis_context: AnalysisContext,
-        topology: HydrologyGraph,
-        analysis_context_ref: TranscriptContentRef,
-        topology_ref: TranscriptContentRef,
-        aggregation: WaterbodyOutcomeAggregation,
-    ) -> None:
-        del analysis_context, topology, analysis_context_ref, topology_ref, aggregation
-        await context.cancellation.wait()
-        raise WorkflowStopped()
-
-
 class TopologyWaterbodyExecutionStage:
     def __init__(
         self,

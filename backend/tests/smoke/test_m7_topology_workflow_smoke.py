@@ -33,13 +33,14 @@ from app.application.reasoning.batch_planner import (
     ModelFitCapability,
     ModelSizeEstimate,
 )
+from app.application.reasoning.model_models import Terminal, WaterbodyFinishReason
 from app.application.run_summary.input_builder import RunSummaryInputBuilder
 from app.application.run_summary.models import RunSummaryAgentMessage, RunSummaryResult
 from app.application.run_summary.runner import (
     RunSummaryRunOutcome,
     RunSummaryRunStatus,
 )
-from app.application.run_summary.stage import RunSummaryStageOutcome
+from app.application.run_summary.stage import RunSummaryStage, RunSummaryStageOutcome
 from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
@@ -48,7 +49,10 @@ from app.application.transcripts.models import (
 from app.domain import OutcomeStatus
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.infrastructure.runtime.m7 import CompleteRunSummaryBoundary
+from app.infrastructure.runtime.m7 import (
+    CompleteRunSummaryBoundary,
+    ProductionRunSummaryRunnerFactory,
+)
 from tests.application.analysis_runs._topology_scheduler_support import (
     RUN_ID,
     ConcurrencyProbe,
@@ -90,6 +94,30 @@ class RecordingModelFitRouter:
             model=model,
             context_window_tokens=1_000_000,
             max_output_tokens=4_096,
+        )
+
+
+class ProviderCancelledSummaryRouter(RecordingModelFitRouter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.requests = []
+
+    def estimate(self, model, *, serialized_request, serialized_response_shape):
+        assert model == WATERBODY_MODEL
+        assert serialized_request and serialized_response_shape
+        return ModelSizeEstimate(
+            input_tokens=100,
+            output_tokens=100,
+            estimated_output_bytes=1_000,
+        )
+
+    async def stream(self, request):
+        self.requests.append(request)
+        yield Terminal(
+            operation_id=request.operation_id,
+            model=request.model,
+            provider_response_id="response-cancelled",
+            finish_reason=WaterbodyFinishReason.CANCELLED,
         )
 
 
@@ -193,7 +221,7 @@ class FixtureRuntime:
     application: object
     coordinator: object
     node_factory: WorkflowNodeRunnerFactory
-    summary_stage: FixtureSummaryStage
+    summary_stage: object
     model_router: RecordingModelFitRouter
 
 
@@ -203,6 +231,7 @@ async def complete_workflow_runtime(
     statuses,
     *,
     summary_failed=False,
+    summary_provider_cancelled=False,
     settings=None,
     transcript_store=None,
 ):
@@ -244,18 +273,46 @@ async def complete_workflow_runtime(
             coordinator,
             reader,
             statuses,
+            result_model=(
+                WATERBODY_MODEL if summary_provider_cancelled else None
+            ),
         )
-        summary_stage = FixtureSummaryStage(
-            coordinator,
-            fail=summary_failed,
-        )
-        model_router = RecordingModelFitRouter()
+        if summary_provider_cancelled:
+            model_router = ProviderCancelledSummaryRouter()
+            m6_runtime = SimpleNamespace(
+                model_port_router=model_router,
+                private_values=(),
+            )
+            clock = SimpleNamespace(now=lambda: NOW)
+            summary_stage = RunSummaryStage(
+                operations=coordinator,
+                input_builder=RunSummaryInputBuilder(
+                    result_reader=reader,
+                    size_estimator=model_router,
+                ),
+                runner_factory=ProductionRunSummaryRunnerFactory(
+                    operations=coordinator,
+                    m6_runtime=m6_runtime,
+                    clock=clock,
+                    operation_id_factory=uuid4,
+                    error_id_factory=uuid4,
+                ),
+                error_id_factory=uuid4,
+            )
+        else:
+            summary_stage = FixtureSummaryStage(
+                coordinator,
+                fail=summary_failed,
+            )
+            model_router = RecordingModelFitRouter()
+            m6_runtime = SimpleNamespace(model_port_router=model_router)
+            clock = SimpleNamespace(now=lambda: NOW)
         boundary = CompleteRunSummaryBoundary(
             operations=coordinator,
             summary_stage=summary_stage,
             result_assembler=assembler,
-            m6_runtime=SimpleNamespace(model_port_router=model_router),
-            clock=SimpleNamespace(now=lambda: NOW),
+            m6_runtime=m6_runtime,
+            clock=clock,
             timeout_seconds=120,
         )
         workflow.bind_execution_stage(
@@ -425,6 +482,44 @@ def test_target_failure_skips_summary_while_summary_failure_preserves_target() -
 
     asyncio.run(target_failure())
     asyncio.run(summary_failure())
+
+
+def test_provider_cancelled_summary_fails_only_summary_when_run_is_not_cancelled() -> None:
+    async def exercise() -> None:
+        async with complete_workflow_runtime(
+            (("100", TARGET),),
+            {
+                "100": DependencyStatus.USABLE,
+                TARGET: DependencyStatus.USABLE,
+            },
+            summary_provider_cancelled=True,
+        ) as runtime:
+            created, snapshot = await run_to_quiescence(runtime)
+            sessions = await runtime.coordinator.list_sessions(created.run_id)
+            summarizers = [
+                session
+                for session in sessions
+                if session.agent_role is AgentRole.RUN_SUMMARIZER
+            ]
+
+            assert snapshot.status is RunStatus.COMPLETED
+            assert snapshot.result_ref is not None
+            assert snapshot.summary.status.value == "failed"
+            assert snapshot.summary.error.code == "run_summary_failed"
+            assert snapshot.summary.error.retryable is True
+            assert snapshot.summary.result_ref is None
+            assert len(summarizers) == 1
+            assert summarizers[0].status is AgentSessionStatus.FAILED
+            assert summarizers[0].result_ref is None
+            assert len(runtime.model_router.requests) == 1
+            assert (
+                '"input_tokens":0'
+                in runtime.model_router.requests[0].messages[0].text
+            )
+            assert "[REDACTED]" not in runtime.model_router.requests[0].messages[0].text
+            assert not runtime.coordinator._runs[created.run_id].stop_requested.is_set()
+
+    asyncio.run(exercise())
 
 
 class SummarySizeEstimator:

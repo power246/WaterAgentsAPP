@@ -92,14 +92,6 @@ class RecordingTranscriptStore:
         )
 
 
-class RecordingPublisher:
-    def __init__(self) -> None:
-        self.outcomes = []
-
-    async def publish(self, outcome) -> None:
-        self.outcomes.append(outcome)
-
-
 def dependency_manifest(topology_item_id: UUID) -> WaterbodyDependencyManifest:
     values = {
         "schema_version": 1,
@@ -172,7 +164,7 @@ def validated_task(scope, context, graph) -> ValidatedWaterbodyAgentTask:
     )
 
 
-def test_stationless_all_unusable_commits_and_publishes_zero_model_result() -> None:
+def test_stationless_all_unusable_commits_zero_model_result() -> None:
     async def exercise() -> None:
         context = make_context()
         graph = make_graph(with_station=False, with_upstream=True)
@@ -212,7 +204,6 @@ def test_stationless_all_unusable_commits_and_publishes_zero_model_result() -> N
         )
         handoff = await acquisition.start(scope)
         transcript = RecordingTranscriptStore()
-        publisher = RecordingPublisher()
         task = validated_task(scope, context, graph)
         decision = NodeLaunchPolicy().decide(
             build_node_launch_facts(task, handoff),
@@ -227,7 +218,6 @@ def test_stationless_all_unusable_commits_and_publishes_zero_model_result() -> N
             task,
             handoff,
             transcript_store=transcript,
-            publisher=publisher,
         )
 
         assert handoff.stop_before_model is True
@@ -238,7 +228,6 @@ def test_stationless_all_unusable_commits_and_publishes_zero_model_result() -> N
         assert outcome.session.result_ref is not None
         assert outcome.dependency_outcome.status is DependencyStatus.INSUFFICIENT
         assert outcome.dependency_outcome.usable_cell_refs == ()
-        assert publisher.outcomes == [outcome.dependency_outcome]
         assert len(transcript.inputs) == len(transcript.results) == 1
         assert outcome.result is not None
         execution = outcome.result.model_execution_summary

@@ -113,6 +113,10 @@ class CompleteRunSummaryBoundary:
             cancellation=context.cancellation,
         )
         if outcome.status is RunSummaryRunStatus.CANCELLED:
+            if not context.cancellation.is_requested():
+                raise RuntimeError(
+                    "cancelled run summary requires run cancellation"
+                )
             raise WorkflowStopped()
         if outcome.session_id is None:
             raise RuntimeError("terminal run summary has no session identity")

@@ -31,45 +31,47 @@
 | [Milestone 8：production composition、取消与竞争收敛](#milestone-8production-composition取消与竞争收敛) | [设计 D17](m7_topology_driven_multi_agent_design.md#d17取消仍只有-run-cancel先封调度再通知-sessions)；[实施设计 §13/§16](m7_topology_driven_multi_agent_implementation_design.md#13-cancellation-与并发竞争) | M7 runtime、单 caller、cancel/quiesced/late audit、配置边界 |
 | [Milestone 9：端到端验收、契约审计与 M8/M9 接力](#milestone-9端到端验收契约审计与-m8m9-接力) | [实施设计 §17–18](m7_topology_driven_multi_agent_implementation_design.md#17-测试策略) | chain/diamond/大图 E2E、PostgreSQL/SSE/history、全回归、接力证据 |
 
-## Coding agent 执行原则
+## Coding agent 持续执行原则（非完成项）
 
-- [ ] 只以当前 `backend/`、`docs/M1`–`docs/M7` 和项目级当前契约为实现输入。`backend_bk/`、`frontend_bk/`、`docs/backend_refactor_contract.md` 是最终丢弃的归档；不得读取、导入、复制、适配、枚举、运行或把其中行为当测试 oracle。
-- [ ] 开始每个 Milestone 前记录 branch、HEAD、`origin/main`、merge-base、`git status`、已有用户改动和 permission-limited 路径。不得清理、覆盖、回退或顺手提交不属于本阶段的文件。
-- [ ] 一个 Milestone 只交付表中一个可观察目标。先写或更新会失败的测试，再做最小 production 实现，再跑 focused gate；阶段出口未满足时不得进入下一阶段，也不得勾选项目。
-- [ ] 每个 Milestone 原则上形成一个可独立审查的提交。提交前运行适用 focused tests、architecture tests、`compileall` 和 `git diff --check`；未经用户要求不 push、不创建 PR、不改写历史。
-- [ ] 直接原子更新当前唯一 V1 的 role、typed content、lifecycle、snapshot、history、OpenAPI、fixtures 与全部消费者。不得新增 V2/read union、milestone feature flag、双写、临时兼容入口或第二套 run/session 状态。
-- [ ] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup；继续复用 M4 的 topology/范围边界、M5 的 evidence executor、M6 的 waterbody runner/model adapter。不得复制这些能力。
-- [ ] M7 必须扩展 coordinator 已拥有的 `QueryTopologyWorkflow`。不得另起 background workflow、在 route 内直接跑 DAG、让 frontend 编排 Agent，或保留 topology-only 与 M7 两条 production 路径。
-- [ ] node 只有在全部 participating direct-upstream outcomes 终结后才 ready，并只 claim/执行一次。创建水体 session 的时间是“准备执行 Agent loop 或生成确定性正式结果”，不是 DAG 建好时。
-- [ ] dependency 状态只有 `usable / insufficient / invalid / cancelled`。正常全 `indeterminate` 是 `insufficient`；技术失败是 `invalid`。两者都不产生 `UpstreamResultRecord`，也不向下游暴露 evidence、result 或错误正文。
-- [ ] 汇流节点必须等待全部直接上游。只要至少一支 usable，其他 invalid/insufficient 不阻止本地 preflight 和后续判断；不得把“某个上游失败”误写成“整个下游无条件继续”或“整个下游无条件停止”。
-- [ ] station-backed 永远先查本地目标参数和 discharge 等允许的本地站点证据。目标参数缺失时，本地 discharge/其他允许的间接证据加 usable upstream 可进入 planning；本地同参数读数是当前水体直接观测，上游值只是上游水体推理结果。
-- [ ] stationless 以 usable upstream 为强制起点。全部直接上游 insufficient/invalid 时创建完整 `indeterminate / insufficient_evidence` 结果和水体 session，且必须是 0 planning、0 final reasoning、0 optional tool；该结果只传不足状态，不作为证据继续传播。
-- [ ] 后端不为上游结果发明评分、权重、冲突裁决或内容改写。跨水体推理和普通本地间接证据默认只能支持方向、趋势或风险；只有 registry 中可执行的确定性公式/工具可以产出具体推断数值，Agent 不能自造公式或系数。
-- [ ] 同层无依赖节点可并行，但全局并发必须受 `WATERBODY_WORKFLOW_MAX_CONCURRENCY` 约束并有竞争测试。整次运行只受 M4 已冻结的最大上游距离、hop 和 node 范围限制；不得新增 run-wide token/model-call quota。M5/M6 每 session 的 budget、repair、timeout/deadline 继续有效。
-- [ ] target 水体的 M6 结果是主科学结论。非 target 技术失败但 target 有效时 run 仍可 completed 并标记 partial coverage；target 技术失败才使 run failed；target 确定性 indeterminate 是正常 completed 业务结果。
-- [ ] summarizer 是独立 `agent_role=run_summarizer`、`target_comid=null` session，只在全部 active 水体收敛后创建。它复用本 run 精确 `waterbody_model`，没有第三模型设置、模型 fallback、tools 或隐藏总结路径。
-- [ ] summary 输入恰好包含一份 target 完整安全业务投影和每个其他 active 水体各一份紧凑报告卡。数字 highlight 必须有 value、unit、window 和稳定 source refs；Agent 不生成 URL，M9 才可把 refs 渲染成可点击内部链接。
-- [ ] summary 只有一次主调用和至多一次同模型、同 scope 的 schema repair。失败时 session failed、后端保留详细日志、前端只见安全失败信息；不得生成固定模板、字符串拼接 fallback 或复用旧 summary。target 有效时 run 仍 completed，各水体结果仍可读。
-- [ ] 用户仍只调用既有 run cancel。后端先封住 dequeue/new session/tool/model，再通知所有已创建未终态 sessions；已完成 session 不改写。无法强杀的晚到内容只走原审计路径，不进入当前正文、frontend result、summary 或下游传播。
-- [ ] 只使用现有 run SSE 与 session SSE；summarizer 走 session SSE。不得新增 route、第三条 SSE、per-session cancel HTTP、direct scheduler/model/tool/test HTTP surface。默认不得新增业务表或 migration；确有必要时先用失败 fixture 证明现有四表无法承载并同步修订设计。
-- [ ] 外部 provider smoke 不是单元测试前置条件。先用 checked-in fixtures/fakes 完成确定性覆盖；需凭据、联网或可能计费的请求必须先 preflight，0 requests、缺凭据或网络不满足一律记录 `not run`，不能写成通过或空结果。
-- [ ] 实际完成记录必须写清改动路径、命令、环境、pass/fail/skip/not run 数、失败后的修复、剩余风险和 commit SHA。不得复制旧阶段 pass count，不得用 exit code 0、HTTP 200、收到 `stream_end` 或进程启动代替业务断言。
+以下条目是后续维护仍须遵守的规范，不作为完成状态复选框：
+
+- 只以当前 `backend/`、`docs/M1`–`docs/M7` 和项目级当前契约为实现输入。`backend_bk/`、`frontend_bk/`、`docs/backend_refactor_contract.md` 是最终丢弃的归档；不得读取、导入、复制、适配、枚举、运行或把其中行为当测试 oracle。
+- 开始每个 Milestone 前记录 branch、HEAD、`origin/main`、merge-base、`git status`、已有用户改动和 permission-limited 路径。不得清理、覆盖、回退或顺手提交不属于本阶段的文件。
+- 一个 Milestone 只交付表中一个可观察目标。先写或更新会失败的测试，再做最小 production 实现，再跑 focused gate；阶段出口未满足时不得进入下一阶段，也不得勾选项目。
+- 每个 Milestone 原则上形成一个可独立审查的提交。提交前运行适用 focused tests、architecture tests、`compileall` 和 `git diff --check`；未经用户要求不 push、不创建 PR、不改写历史。
+- 直接原子更新当前唯一 V1 的 role、typed content、lifecycle、snapshot、history、OpenAPI、fixtures 与全部消费者。不得新增 V2/read union、milestone feature flag、双写、临时兼容入口或第二套 run/session 状态。
+- 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup；继续复用 M4 的 topology/范围边界、M5 的 evidence executor、M6 的 waterbody runner/model adapter。不得复制这些能力。
+- M7 必须扩展 coordinator 已拥有的 `QueryTopologyWorkflow`。不得另起 background workflow、在 route 内直接跑 DAG、让 frontend 编排 Agent，或保留 topology-only 与 M7 两条 production 路径。
+- node 只有在全部 participating direct-upstream outcomes 终结后才 ready，并只 claim/执行一次。创建水体 session 的时间是“准备执行 Agent loop 或生成确定性正式结果”，不是 DAG 建好时。
+- dependency 状态只有 `usable / insufficient / invalid / cancelled`。正常全 `indeterminate` 是 `insufficient`；技术失败是 `invalid`。两者都不产生 `UpstreamResultRecord`，也不向下游暴露 evidence、result 或错误正文。
+- 汇流节点必须等待全部直接上游。只要至少一支 usable，其他 invalid/insufficient 不阻止本地 preflight 和后续判断；不得把“某个上游失败”误写成“整个下游无条件继续”或“整个下游无条件停止”。
+- station-backed 永远先查本地目标参数和 discharge 等允许的本地站点证据。目标参数缺失时，本地 discharge/其他允许的间接证据加 usable upstream 可进入 planning；本地同参数读数是当前水体直接观测，上游值只是上游水体推理结果。
+- stationless 以 usable upstream 为强制起点。全部直接上游 insufficient/invalid 时创建完整 `indeterminate / insufficient_evidence` 结果和水体 session，且必须是 0 planning、0 final reasoning、0 optional tool；该结果只传不足状态，不作为证据继续传播。
+- 后端不为上游结果发明评分、权重、冲突裁决或内容改写。跨水体推理和普通本地间接证据默认只能支持方向、趋势或风险；只有 registry 中可执行的确定性公式/工具可以产出具体推断数值，Agent 不能自造公式或系数。
+- 同层无依赖节点可并行，但全局并发必须受 `WATERBODY_WORKFLOW_MAX_CONCURRENCY` 约束并有竞争测试。整次运行只受 M4 已冻结的最大上游距离、hop 和 node 范围限制；不得新增 run-wide token/model-call quota。M5/M6 每 session 的 budget、repair、timeout/deadline 继续有效。
+- target 水体的 M6 结果是主科学结论。非 target 技术失败但 target 有效时 run 仍可 completed 并标记 partial coverage；target 技术失败才使 run failed；target 确定性 indeterminate 是正常 completed 业务结果。
+- summarizer 是独立 `agent_role=run_summarizer`、`target_comid=null` session，只在全部 active 水体收敛后创建。它复用本 run 精确 `waterbody_model`，没有第三模型设置、模型 fallback、tools 或隐藏总结路径。
+- summary 输入恰好包含一份 target 完整安全业务投影和每个其他 active 水体各一份紧凑报告卡。数字 highlight 必须有 value、unit、window 和稳定 source refs；Agent 不生成 URL，M9 才可把 refs 渲染成可点击内部链接。
+- summary 只有一次主调用和至多一次同模型、同 scope 的 schema repair。失败时 session failed、后端保留详细日志、前端只见安全失败信息；不得生成固定模板、字符串拼接 fallback 或复用旧 summary。target 有效时 run 仍 completed，各水体结果仍可读。
+- 用户仍只调用既有 run cancel。只有 run cancellation token 已置位才可把 summary 标成 cancelled；provider 自身的 cancelled terminal 按 summary technical failure 处理。后端先封住 dequeue/new session/tool/model，再通知所有已创建未终态 sessions；已完成 session 不改写。无法强杀的晚到内容只走原审计路径，不进入当前正文、frontend result、summary 或下游传播。
+- 只使用现有 run SSE 与 session SSE；summarizer 走 session SSE。不得新增 route、第三条 SSE、per-session cancel HTTP、direct scheduler/model/tool/test HTTP surface。默认不得新增业务表或 migration；确有必要时先用失败 fixture 证明现有四表无法承载并同步修订设计。
+- 外部 provider smoke 不是单元测试前置条件。先用 checked-in fixtures/fakes 完成确定性覆盖；需凭据、联网或可能计费的请求必须先 preflight，0 requests、缺凭据或网络不满足一律记录 `not run`，不能写成通过或空结果。
+- 实际完成记录必须写清改动路径、命令、环境、pass/fail/skip/not run 数、失败后的修复、剩余风险和 commit SHA。不得复制旧阶段 pass count，不得用 exit code 0、HTTP 200、收到 `stream_end` 或进程启动代替业务断言。
 
 ## M7 完成标准
 
-- [ ] 当前唯一 V1 能表达 dependency manifest、waterbody/summary discriminated session result、run summary、topology run result、partial coverage 和稳定引用；全部 producer/consumer/fixture/OpenAPI 原子一致。
-- [ ] fake chain、diamond、source、station-backed、stationless、mixed mode 和 bounded large graph 均由同一 production workflow 执行，node ready/claim/session 数量和顺序满足契约。
-- [ ] 每个 dependency status 的 evidence 资格、错误隔离和 direct-upstream authorization 有正反测试；invalid/insufficient 为 0 upstream records，usable refs 闭合且不会覆盖本地直接观测。
-- [ ] station-backed 目标缺失但有本地 discharge + usable upstream 可进入一次 loop；stationless 全不可用严格 0 planning/0 final/0 optional tool，并保存完整正式结果/session。
-- [ ] ready queue 在完成顺序扰动和并发 cancel 下仍 exact once，不超过配置并发；只消费 M4 topology 范围，不存在第二套运行规模或 run-wide token/model-call quota。
-- [ ] target、非 target failure、deterministic indeterminate、partial coverage 和 fatal target failure 的 run/session/node/result 状态均与终态矩阵一致。
-- [ ] summarizer 在全部 active nodes 收敛后创建，精确复用 waterbody model；target full + all other cards 无漏无重，plain-language summary、限制与特殊值 refs 通过机械验证。
-- [ ] summary failure 没有 fallback 文本，不抹掉 waterbody results；安全 public error、详细 backend log、summary session 与 run completion 语义彼此一致。
-- [ ] 七类 M7 typed contents、result/completed 原子闭包、run snapshot/detail/history、PostgreSQL reload/startup repair 与两层 SSE 回放均有可执行证据。
-- [ ] cancel 在 dequeue、session create、local preflight、tool/model、publish、summary 和 final commit 边界有竞争测试；cancel_accepted 后无新业务动作，最终可观察 `workflow_quiesced`。
-- [ ] production composition 只有一个 M7 caller，单进程/单 worker 首版边界明确；OpenAPI 无新 route，frontend 未实现，M8 transcript producer 与 M9 clickable URL 未提前实现。
-- [ ] M1–M6 regression、M7 focused、architecture、OpenAPI、offline fixtures/docs audits、专用 PostgreSQL、smoke、`compileall` 和 `git diff --check` 有实际证据；真实 provider 与三平台未运行项如实记录。
+- [x] 当前唯一 V1 能表达 dependency manifest、waterbody/summary discriminated session result、run summary、topology run result、partial coverage 和稳定引用；全部 producer/consumer/fixture/OpenAPI 原子一致。
+- [x] fake chain、diamond、source、station-backed、stationless、mixed mode 和 bounded large graph 均由同一 production workflow 执行，node ready/claim/session 数量和顺序满足契约。
+- [x] 每个 dependency status 的 evidence 资格、错误隔离和 direct-upstream authorization 有正反测试；invalid/insufficient 为 0 upstream records，usable refs 闭合且不会覆盖本地直接观测。
+- [x] station-backed 目标缺失但有本地 discharge + usable upstream 可进入一次 loop；stationless 全不可用严格 0 planning/0 final/0 optional tool，并保存完整正式结果/session。
+- [x] ready queue 在完成顺序扰动和并发 cancel 下仍 exact once，不超过配置并发；只消费 M4 topology 范围，不存在第二套运行规模或 run-wide token/model-call quota。
+- [x] target、非 target failure、deterministic indeterminate、partial coverage 和 fatal target failure 的 run/session/node/result 状态均与终态矩阵一致。
+- [x] summarizer 在全部 active nodes 收敛后创建，精确复用 waterbody model；target full + all other cards 无漏无重，plain-language summary、限制与特殊值 refs 通过机械验证。
+- [x] summary failure 没有 fallback 文本，不抹掉 waterbody results；安全 public error、详细 backend log、summary session 与 run completion 语义彼此一致；provider cancelled 且 run token 未取消的完整 workflow 回归已覆盖。
+- [x] 七类 M7 typed contents、result/completed 原子闭包、run snapshot/detail/history、PostgreSQL reload/startup repair 与两层 SSE 回放均有可执行证据。
+- [x] cancel 在 dequeue、session create、local preflight、tool/model、publish、summary 和 final commit 边界有竞争测试；cancel_accepted 后无新业务动作，最终可观察 `workflow_quiesced`。
+- [x] production composition 只有一个 M7 caller，单进程/单 worker 首版边界明确；OpenAPI 无新 route，frontend 未实现，M8 transcript producer 与 M9 clickable URL 未提前实现。
+- [x] M1–M6 regression、M7 focused、architecture、OpenAPI、offline fixtures/docs audits、专用 PostgreSQL、smoke、`compileall` 和 `git diff --check` 有实际证据；真实 provider 与三平台未运行项如实记录。
 
 ## Milestone 0：基线、真实接缝与原子更新清单
 
@@ -298,13 +300,13 @@
 - [x] input builder 只读持久化安全业务投影：target 一份 full projection，其他每个 active node 恰好一张 compact card，稳定 topology 顺序；technical details、secrets、原始 provider envelope 和隐藏 reasoning 不进入 prompt。
 - [x] prompt 要求用浅显语言说明全流程、目标结论、分支覆盖/限制和特殊值；不得改变水体科学结论、重新评分、补造缺失数字或把 insufficient 猜成 0。
 - [x] validator 对任何数字 highlight 强制 exact value、unit、window、source refs，并验证文本中的数字只等于 display value；plain summary 除 scope 内 COMID 外不允许数字，非数字 highlight 不允许数字。拒绝 Agent URL、scope 外 COMID/ref、遗漏 target/coverage 和不支持的断言。
-- [x] summary 失败保存 failed session 和安全 public failure，详细异常只进 backend log/audit；不生成固定模板、拼接 fallback 或旧 summary。target 有效时仍允许后续 run completed。
+- [x] summary 失败保存 failed session 和安全 public failure，详细异常只进 backend log/audit；只有 run cancellation token 已置位才返回 cancelled，provider 自身的 cancelled terminal 按可重试技术失败处理；不生成固定模板、拼接 fallback 或旧 summary。target 有效时仍允许后续 run completed。
 
 ### Tests
 
 - [x] input 恰好 target full + N-1 cards，输入乱序后稳定、每 active node 无漏无重；large bounded topology 仍满足 model input capability，否则确定性 safe failure。
 - [x] same-model/no-tools/one-repair 调用计数；invalid JSON、bad ref、数字缺 unit/window、URL、第二次 repair 失败均按契约终止。
-- [x] plain-language output 保留 target science、partial coverage、invalid/insufficient 限制和特殊值；summary failed 无任何 fallback content。
+- [x] plain-language output 保留 target science、partial coverage、invalid/insufficient 限制和特殊值；summary failed 无任何 fallback content；provider cancelled/run token 未取消有 runner 与完整 workflow 回归。
 
 ### Verify
 
@@ -400,7 +402,7 @@
 
 ### 工作
 
-- [x] 新增固定 fake M7 smoke，至少覆盖 3-node chain、diamond merge、stationless all-insufficient、invalid+usable、non-target failure partial、target failure、summary success/failure、cancel/quiesced。
+- [x] 新增固定 fake M7 smoke，至少覆盖 3-node chain、diamond merge、stationless all-insufficient、invalid+usable、non-target failure partial、target failure、summary success/failure、provider cancelled 但 run 未取消、cancel/quiesced。
 - [x] 使用最大允许 topology 边界 fixture 验证范围、峰值并发、每 node/session/card 恰好一次、summary model fit 和无 run-wide quota；不得用缩小 topology 设置掩盖问题。
 - [x] 在专用 PostgreSQL 验证完整 workflow、result/session/content refs、run/session SSE、history/restart/startup repair、补写与 cleanup；数据库不可用时明确 `not run`，不以 SQLite/fake 替代。
 - [x] 执行完整 backend regression、architecture、OpenAPI、typed registry、policy fixture、secrets/log/SSE/history 出口扫描、Markdown links/JSON/code fences/trailing whitespace 和 contract ID 双向审计。
@@ -410,7 +412,7 @@
 
 ### Tests
 
-- [x] fake E2E 对 session 创建时机、topology start/completed、dependency manifest、model/tool counts、target/partial/run status 和 summary refs 做业务断言。
+- [x] fake E2E 对 session 创建时机、topology start/completed、dependency manifest、model/tool counts、target/partial/run status、provider cancellation ownership 和 summary refs 做业务断言。
 - [x] M7 policy、scheduler、store、gate、summary、七类 typed content、lifecycle/history/runtime/cancel 均有独立可执行 gate。
 - [x] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部错误和 unbounded arrays 的 logs/API/SSE/history 全出口扫描通过；request/response 的 preview 与 full content 都使用安全投影，raw provider text 不先于 validation 公开。
 - [x] contract ID 集合与覆盖矩阵双向一致；所有勾选项均有本分支实际证据，未执行项保持未勾选或 `not run`。
@@ -432,8 +434,8 @@
 
 #### Milestone 9 完成记录（2026-10-04）
 
-- 实现：新增固定 M7 production-workflow smoke、最大 128-node 边界和专用 PostgreSQL restart 用例；审计时修复 dependency manifest 未写入 transcript、fake result closure 未引用本 run topology，以及合法大汇流的直接上游上限过小/部分 M7 collection 未显式有界三个缺口。最终审查又收紧 summary 发布边界：raw provider candidate 只作 history-only 安全投影，strict structured event 与数字事实校验通过后才原子提交 completed message/result。同步当前 OpenAPI、七类 typed registry、CI smoke 入口、README 与项目级状态；M8/M9 只获得稳定 handoff refs，没有加入 RAG、页面、URL、settings/admin、V2、feature flag、第三条 SSE 或 run-wide quota。
-- 验证：Docker PostgreSQL 17 healthy；最终审查复验为 focused `33 passed`、专用 `wateragents_test` 完整 backend `1984 passed, 1 warning`、persistence 独立门 `63 passed`、M7 workflow smoke `54 passed`，`compileall` 与 `git diff --check` 通过；原 M9 验收的 M7 PostgreSQL workflow/restart focused gate `2 passed`、离线出口/协议审计 `200 passed`、run SSE `completed/cancelled passed`、history smoke `history/independent_process_restart/restart_repair passed` 和 154 项 capability 审计仍保留。warning 为既有 Starlette/httpx 弃用提示。
+- 实现：新增固定 M7 production-workflow smoke、最大 128-node 边界和专用 PostgreSQL restart 用例；审计时修复 dependency manifest 未写入 transcript、fake result closure 未引用本 run topology，以及合法大汇流的直接上游上限过小/部分 M7 collection 未显式有界三个缺口。最终审查又收紧 summary 发布边界：raw provider candidate 只作 history-only 安全投影，strict structured event 与数字事实校验通过后才原子提交 completed message/result。复审修复 provider cancelled 被误判为 run cancel 的问题：只有 run token 已置位才取消 summary；否则 summary session 以安全 `run_summary_failed` 终结，target 已完成时 run 仍 completed。summary request 的 history-only 副本先脱敏并基于安全内容重算 digest，实际发送 provider 的原请求保持不变；完整 workflow 回归保留真实非空 usage。同步移除未使用的 summary wait 占位类与 zero-model test-only publisher 接缝，由 scheduler 保持唯一 outcome 发布所有权。同步当前 OpenAPI、七类 typed registry、CI smoke 入口、README 与项目级状态；M8/M9 只获得稳定 handoff refs，没有加入 RAG、页面、URL、settings/admin、V2、feature flag、第三条 SSE 或 run-wide quota。
+- 验证：Docker PostgreSQL 17 healthy；本次复审先以两个 red regression 复现 runner `CANCELLED` 与完整 workflow `workflow_failed`，修复后相关 focused/broad/final core gate 分别为 `27 passed` / `78 passed` / `31 passed`。发布前复查又以 direct transcript + 完整 workflow 两个 red regression 复现非空 usage 导致的 digest 失效，修复后 `2 passed`，相关 summary/workflow/registry 回归 `60 passed`；专用 `wateragents_test` 完整 backend `1988 passed, 1 warning`、persistence 独立门 `63 passed`、M7 workflow smoke `56 passed`、文档/唯一 composition gate `8 passed`，`compileall` 与 `git diff --check` 通过。原 M9 验收的 M7 PostgreSQL workflow/restart focused gate `2 passed`、离线出口/协议审计 `200 passed`、run SSE `completed/cancelled passed`、history smoke `history/independent_process_restart/restart_repair passed` 和 154 项 capability 审计仍保留。warning 为既有 Starlette/httpx 弃用提示；smoke 另有 permission-limited pytest cache warning，不影响测试断言。
 - 风险：未获得真实 provider 计费/联网授权，因此 `requests=0 / events=0 / responses=0`，明确记为 `not run`；Ubuntu/macOS/Windows workflow 已包含 M7 smoke，但本提交的远程三平台作业未执行，GLOBAL-C08/C11 仍为 `partial`。M8 transcript RAG 与 M9 frontend/settings/admin 仍由后续阶段实现，M7 本机施工完成不等于中心外部验收完成。
 - 提交：本完成记录与 M9 集成修复、E2E/审计/持久化测试和文档同步由当前本地提交保存。
 
@@ -455,7 +457,7 @@
 | M7-C01 | 本机已验证 | scheduler、topology workflow、session factory | chain/diamond/session timing/exact once | 同一 workflow 的 chain/diamond 已验证全部直接上游 settle 后 exact-once claim，DAG 初始化不预建 session。 |
 | M7-C02 | 本机已验证 | outcome store、manifest、upstream provider | status matrix、usable-only records、invalid redaction | chain/diamond、同 run/direct-only、完整状态 manifest、usable-only records 与 invalid redaction 已通过 focused/full regression。 |
 | M7-C03 | 本机已验证 | run context/node task handoff | gap_filling/prediction/mixed fixtures | M3 mode/window fixtures 与 M5 production node adapter 已验证 mode、timezone、segments、ParameterKey、window、memory/model selection 原样传递。 |
-| M7-C04 | 本机已验证 | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | cancel acceptance 先封 outcome publish/调度；dequeue、session、preflight、tool/model、summary 与 final commit races 已验证不启动下游。 |
+| M7-C04 | 本机已验证 | coordinator cancel、scheduler checkpoints | cancel-at-every-boundary races | cancel acceptance 先封 outcome publish/调度；dequeue、session、preflight、tool/model、summary 与 final commit races 已验证不启动下游；provider cancelled 不冒充 run cancel。 |
 | M7-C05 | 本机已验证 | provider/tool late-output audit | cancelled stream/late callback tests | 晚到 completed/result/chunk 不能覆盖 committed cancelled、进入正常正文、发布 upstream/result 或触发 summary；仅保留脱敏 audit 与必要补写。 |
 | M7-C06 | 本机已验证 | workflow quiescence、live cleanup | cancel_accepted vs quiesced tests | cancel_accepted 与 workflow_quiesced 独立；run stream、cleanup 与后台生命周期等待实际 quiesced。 |
 | M7-C07 | 本机已验证 | ready queue、limiter、M4 topology snapshot | concurrency/range/per-session budget fixtures | 全局峰值 1/4/32、两个 run 共享 limiter、128-node 范围与 per-session failure 已验证，无第二套 run-wide quota。 |
@@ -463,14 +465,14 @@
 | M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
 | M7-C10 | 本机已验证 | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | source role、usable-only result ref、invalid redaction、mode/window 与 deterministic numeric boundary 已通过 focused/full regression。 |
 | M7-C11 | 本机已验证 | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M6 runner 与 M7 transcript/lifecycle 集成已验证 all-node input、same-model/no-tools、strict structured event、exact numeric text/refs 与 result reload。 |
-| M7-C12 | 本机已验证 | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary request/response 为 history-only 安全投影；validation 前无公开 summary message，失败无 fallback；target/waterbody results 保持且 run 可 completed。 |
+| M7-C12 | 本机已验证 | summary failure mapping、public projection/logging | no-fallback、provider cancelled、non-null usage/digest、safe error、run completed fixture | summary request/response 为 history-only 安全投影；安全 request 副本脱敏后重算 digest，provider 原请求不变；validation 前无公开 summary message，失败无 fallback；provider cancelled 且 run token 未取消时 summary failed、target/waterbody results 保持且 run completed。 |
 | M7-A01 | 本机已验证 | production workflow fake topology | 3+ nodes、event/session order、exact once | chain/diamond production workflow harness 已验证 phase 顺序、session 延迟创建、每 node 一次与 outcome 全收敛。 |
 | M7-A02 | 本机已验证 | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 provider/M3 launch 与 M5 完整 workflow orchestration 已验证 direct-upstream publish、invalid+usable merge、all-insufficient 零模型。 |
 | M7-A03 | 本机已验证 | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 单 run 取消后不新建 session、不调用 tool/model、不发布 outcome/result/summary，并最终 quiesced。 |
 | M7-A04 | 本机已验证 | transcript late audit/session lifecycle | provider late chunks、completed-session preservation | cancel 前 completed session 保持 completed，in-flight session 取消；迟到内容仅可经脱敏 audit 读取。 |
 | M7-A05 | 本机已验证 | launch gate/zero-model/M6 handoff | stationless 0/0/0、station-backed indirect seed | 两条路径复用 canonical M6 result/session 提交接缝，stationless 发布 insufficient 且无 usable records。 |
 | M7-A06 | 本机已验证 | limiter/topology snapshot/settings | peak in-flight、max topology、no run quota | 独立节点实际重叠且峰值不超设置，最大 topology 仅执行 snapshot 内 128 个 active COMID，配置 0/33 失败。 |
-| M7-A07 | 本机已验证 | summarizer/input/validator/failure projection | same model、all cards、special values、failure | M6 summary 校验与 M7 safe failure/result projection 已通过 focused、API 与完整 backend 回归，无 fallback。 |
+| M7-A07 | 本机已验证 | summarizer/input/validator/failure projection | same model、all cards、special values、non-null usage、provider cancelled | M6 summary 校验与 M7 safe failure/result projection 已通过 focused、完整 workflow 与 backend 回归；真实 usage 可安全持久化且不改变 provider request，provider cancelled 不改变 run cancellation authority，且无 fallback。 |
 
 状态只允许：`pending`、`partial`、`本机已验证`、`外部已验证`。不能只因代码、fixture 或文档存在填写已验证；本机、专用 PostgreSQL、真实 provider 和三平台 CI 证据必须分开记录。
 

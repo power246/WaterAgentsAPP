@@ -139,11 +139,20 @@ class RecordingSummaryBoundary:
 
 
 class WorkflowNodeRunnerFactory:
-    def __init__(self, operations, reader, statuses, releases=None) -> None:
+    def __init__(
+        self,
+        operations,
+        reader,
+        statuses,
+        releases=None,
+        *,
+        result_model=None,
+    ) -> None:
         self.operations = operations
         self.reader = reader
         self.statuses = statuses
         self.releases = releases or {}
+        self.result_model = result_model
         self.requests = []
         self.model_calls = []
         self.manifests = []
@@ -216,6 +225,18 @@ class WorkflowNodeRunnerFactory:
                 statuses=(point_status,) * 2,
                 closure_item_id=self.topology_ref.item_id,
             )
+            if self.result_model is not None:
+                result = result.model_copy(
+                    update={
+                        "model_execution_summary": (
+                            result.model_execution_summary.model_copy(
+                                update={
+                                    "model": self.result_model,
+                                }
+                            )
+                        )
+                    }
+                )
             terminal = await self.operations.complete_waterbody_agent_session(
                 request.run_id,
                 session.session_id,

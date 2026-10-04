@@ -223,6 +223,62 @@ def test_summary_boundary_uses_run_model_and_commits_one_topology_result() -> No
     assert operations.results[0].summary.result_ref == summary_ref
 
 
+def test_summary_boundary_rejects_cancelled_outcome_without_run_cancel() -> None:
+    now = datetime(2026, 10, 4, 4, tzinfo=UTC)
+
+    class Router(_Router):
+        def model_fit(self, model):
+            return ModelFitCapability(
+                model=model,
+                context_window_tokens=10_000,
+                max_output_tokens=1_000,
+            )
+
+    class Stage:
+        async def run(self, **kwargs):
+            return RunSummaryStageOutcome(
+                session_id=None,
+                outcome=RunSummaryRunOutcome(
+                    status=RunSummaryRunStatus.CANCELLED,
+                    result=None,
+                    error=None,
+                    model_calls=1,
+                    repaired=False,
+                ),
+            )
+
+    context = WorkflowContext(
+        run=SimpleNamespace(run_id=RUN_ID),
+        query="Summarize.",
+        cancellation=CancellationToken(asyncio.Event()),
+        request=SimpleNamespace(),
+        operations=SimpleNamespace(),
+    )
+    boundary = CompleteRunSummaryBoundary(
+        operations=SimpleNamespace(),
+        summary_stage=Stage(),
+        result_assembler=SimpleNamespace(),
+        m6_runtime=SimpleNamespace(model_port_router=Router()),
+        clock=SimpleNamespace(now=lambda: now),
+        timeout_seconds=120,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="cancelled run summary requires run cancellation",
+    ):
+        asyncio.run(
+            boundary.wait(
+                context,
+                analysis_context(),
+                topology(("100", "300")),
+                SimpleNamespace(),
+                SimpleNamespace(),
+                SimpleNamespace(),
+            )
+        )
+
+
 @pytest.mark.parametrize("value", (0, -1, 301, True, float("inf")))
 def test_run_summary_timeout_rejects_invalid_values(value) -> None:
     with pytest.raises(ValidationError):

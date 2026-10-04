@@ -190,6 +190,8 @@ failed node 只有 safe status/ref，不内联 PublicError 详情。zero-model n
 
 cards 依 graph execution order 排列，target full projection 在输入末尾，且不重复为 card。canonical JSON 计算 input digest。cards + target projection 必须精确覆盖全部 active nodes；若 model capacity 不足则 summary failed，不按风险、confidence 或完成先后丢 node。
 
+history-only summary model request 对文本做安全脱敏后，必须基于安全副本重算 request digest；该持久化脱敏不得改变实际发送 provider 的原请求。
+
 ## 10. Summary system prompt policy
 
 system prompt 必须覆盖：
@@ -249,10 +251,11 @@ insufficient_evidence | invalid_branch | topology_limit
 | Failure | Summary session | Run |
 |---|---|---|
 | provider unavailable/timeout/content filter | failed + safe PublicError | target 已完成则 completed，summary failed |
+| provider 返回 cancelled terminal，但 run cancel 未请求 | failed + safe retryable PublicError | target 已完成则 completed，summary failed |
 | invalid output，one repair 后仍失败 | failed | completed，no summary text |
 | input cannot fit complete cards | failed/non-retryable | completed，no summary text |
 | reference/value mismatch | repair once；仍错则 failed | completed，no summary text |
-| cancel wins | cancelled，no public summary message；raw late output 仅保留 history-only 审计 | run cancelled |
+| run cancel wins | cancelled，no public summary message；raw late output 仅保留 history-only 审计 | run cancelled |
 | persistence warning after valid summary | completed，原 result 保留 | 沿用 M3 persistence warning |
 
 任何 failure 都不触发固定模板、其他模型 fallback 或旧 summary 复用。前端可继续读取 target/waterbody results。
@@ -274,3 +277,4 @@ cancel accepted before run terminal
 ```
 
 non-target invalid 只改变 graph coverage，不改变上述 target authority。summary failure 只改变 summary status。
+只有 run cancellation token 已置位才属于 `cancel accepted`；provider 自身的 cancelled terminal 不得升级为 run cancelled 或 `workflow_failed`。

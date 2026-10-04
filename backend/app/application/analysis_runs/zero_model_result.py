@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Protocol
+from typing import Callable
 
 from app.application.analysis_runs.models import (
     AgentSessionStatus,
@@ -31,10 +31,6 @@ from app.domain import (
     ModelExecutionSummary,
     ParameterCapabilityRegistry,
 )
-
-
-class DependencyOutcomePublisher(Protocol):
-    async def publish(self, outcome: DependencyOutcome) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +68,6 @@ class DeterministicInsufficientResultAssembler:
         handoff: EvidenceAcquisitionHandoff,
         *,
         transcript_store: ReasoningTranscriptStore,
-        publisher: DependencyOutcomePublisher | None = None,
     ) -> ZeroModelResultOutcome:
         if not handoff.stop_before_model or handoff.block_facts:
             raise ValueError("zero-model result requires a natural insufficient gate")
@@ -151,8 +146,6 @@ class DeterministicInsufficientResultAssembler:
             committed_result = result
         else:
             raise RuntimeError("zero-model session did not reach a terminal state")
-        if publisher is not None:
-            await publisher.publish(dependency_outcome)
         return ZeroModelResultOutcome(
             result=committed_result,
             session=session,

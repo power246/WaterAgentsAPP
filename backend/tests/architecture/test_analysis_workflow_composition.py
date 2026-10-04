@@ -65,7 +65,7 @@ def test_m7_composition_owns_summary_and_final_run_result_once() -> None:
         _calls_name(source_path, "RunSummaryStage")
         for source_path in workflow_sources
     ) == 1
-    assert not any(
-        _calls_name(source_path, "AwaitRunSummaryBoundary")
+    assert all(
+        "AwaitRunSummaryBoundary" not in source_path.read_text(encoding="utf-8")
         for source_path in workflow_sources
     )

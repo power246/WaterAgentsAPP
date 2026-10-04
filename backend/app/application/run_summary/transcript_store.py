@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.application.analysis_runs.models import PublicError
 from app.application.analysis_runs.workflow import WorkflowOperations
+from app.application.canonical_json import canonical_json_digest
 from app.application.reasoning.model_models import (
     RefusalCompleted,
     StructuredOutputCompleted,
@@ -30,6 +31,7 @@ from app.application.transcripts.models import (
     MessageEndReason,
     TranscriptContentRef,
 )
+from app.application.transcripts.redaction import redact
 from app.domain import ModelUsageSummary
 
 
@@ -59,9 +61,19 @@ class RunSummaryTranscriptStore:
         value: RunSummaryModelRequest,
     ) -> TranscriptContentRef:
         self._require_scope(value.run_id, value.session_id)
+        safe_values = redact(
+            value.model_dump(mode="json", exclude={"request_digest"}),
+            self._private_values,
+        )
+        if not isinstance(safe_values, dict):
+            raise TypeError("redacted run summary request must remain an object")
+        safe_value = RunSummaryModelRequest(
+            **safe_values,
+            request_digest=canonical_json_digest(safe_values),
+        )
         return await self._write(
             "run_summary_model_request",
-            value,
+            safe_value,
             operation_id=value.operation_id,
         )
 
