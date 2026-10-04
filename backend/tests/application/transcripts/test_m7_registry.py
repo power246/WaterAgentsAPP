@@ -233,3 +233,67 @@ def test_full_content_reader_applies_summary_request_projection() -> None:
     assert request.messages[0].text not in content.text
     assert "response_schema" not in content.text
     assert content.content_bytes == len(content.text.encode("utf-8"))
+
+
+def test_registered_item_only_parses_the_requested_item(monkeypatch) -> None:
+    registry = create_production_registry()
+    request = RunSummaryPromptBuilder().build(
+        summary_input(),
+        model=MODEL,
+        input_ref=TranscriptContentRef(run_id=RUN_ID, item_id=INPUT_ITEM_ID),
+        operation_id=UUID("a5a64a52-c1e2-4725-88ee-6c83f105e633"),
+        deadline=NOW + timedelta(minutes=1),
+    )
+    encoded = registry.encode("run_summary_model_request", 1, request)
+    unrelated = _stored(
+        "run_summary_model_request",
+        encoded.safe_body,
+    ).model_copy(update={
+        "item_id": UUID("b5a64a52-c1e2-4725-88ee-6c83f105e634"),
+    })
+    requested = unrelated.model_copy(update={
+        "item_id": UUID("c5a64a52-c1e2-4725-88ee-6c83f105e635"),
+        "transcript_sequence": 2,
+    })
+
+    class Store:
+        async def read_run(self, run_id):
+            assert run_id == RUN_ID
+            return StoredRunRead(
+                run=StoredRunHeader(
+                    run_id=RUN_ID,
+                    status=RunStatus.COMPLETED,
+                    created_at=NOW,
+                    updated_at=NOW,
+                    query="Summarize COMID 300.",
+                    request_item_id=INPUT_ITEM_ID,
+                    created_item_id=unrelated.item_id,
+                ),
+                items=(unrelated, requested),
+            )
+
+    safe_read_body = registry.safe_read_body
+    safe_read_calls = 0
+
+    def count_safe_read(content_type, content_schema_version, body):
+        nonlocal safe_read_calls
+        safe_read_calls += 1
+        return safe_read_body(content_type, content_schema_version, body)
+
+    monkeypatch.setattr(registry, "safe_read_body", count_safe_read)
+    reader = TranscriptReader(
+        object(),
+        Store(),
+        registry,
+        error_id_factory=lambda: RUN_ID,
+        inline_content_bytes=64 * 1024,
+        preview_bytes=1024,
+    )
+
+    item = asyncio.run(
+        reader.read_registered_item(RUN_ID, requested.item_id, ReadView.HISTORY)
+    )
+
+    assert item.item.item_id == requested.item_id
+    assert item.body == request
+    assert safe_read_calls == 1

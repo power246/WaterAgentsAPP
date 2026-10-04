@@ -325,13 +325,21 @@ class TranscriptReader:
         selected = await self._select(run_id, view)
         if session_id is not None:
             self._session(selected.stored, session_id)
-        item = next(
+        stored_item = next(
             (
                 candidate
-                for candidate in self._parse_items(selected.stored)
-                if candidate.item.item_id == item_id
+                for candidate in sorted(
+                    selected.stored.items,
+                    key=lambda candidate: candidate.transcript_sequence,
+                )
+                if candidate.item_id == item_id
             ),
             None,
+        )
+        item = (
+            self._parse_item(selected.stored, stored_item)
+            if stored_item is not None
+            else None
         )
         if (
             item is None
@@ -737,44 +745,46 @@ class TranscriptReader:
         ), ()
 
     def _parse_items(self, stored: StoredRunRead) -> tuple[ReadTranscriptItem, ...]:
-        parsed: list[ReadTranscriptItem] = []
-        for item in sorted(
-            stored.items,
-            key=lambda candidate: candidate.transcript_sequence,
-        ):
-            checked = self._checked_body(stored, item)
-            if checked is None:
-                parsed.append(ReadTranscriptItem(
-                    item=item,
-                    content_ref={"run_id": item.run_id, "item_id": item.item_id},
-                    parse_status=ParseStatus.CORRUPT,
-                    parse_error=self._read_error(
-                        "transcript_content_corrupt",
-                        "This transcript item's full content is unavailable.",
-                    ),
-                ))
-            else:
-                safe_item, safe_body, stored_bytes_match = checked
-                if not stored_bytes_match:
-                    parsed.append(ReadTranscriptItem(
-                        item=safe_item,
-                        content_ref={
-                            "run_id": item.run_id,
-                            "item_id": item.item_id,
-                        },
-                        parse_status=ParseStatus.CORRUPT,
-                        parse_error=self._read_error(
-                            "transcript_content_corrupt",
-                            "This transcript item contains invalid content.",
-                        ),
-                    ))
-                else:
-                    parsed.append(self._registry.parse(
-                        safe_item,
-                        safe_body,
-                        error_id_factory=self._error_id_factory,
-                    ))
-        return tuple(parsed)
+        return tuple(
+            self._parse_item(stored, item)
+            for item in sorted(
+                stored.items,
+                key=lambda candidate: candidate.transcript_sequence,
+            )
+        )
+
+    def _parse_item(
+        self,
+        stored: StoredRunRead,
+        item: StoredTranscriptItem,
+    ) -> ReadTranscriptItem:
+        checked = self._checked_body(stored, item)
+        if checked is None:
+            return ReadTranscriptItem(
+                item=item,
+                content_ref={"run_id": item.run_id, "item_id": item.item_id},
+                parse_status=ParseStatus.CORRUPT,
+                parse_error=self._read_error(
+                    "transcript_content_corrupt",
+                    "This transcript item's full content is unavailable.",
+                ),
+            )
+        safe_item, safe_body, stored_bytes_match = checked
+        if not stored_bytes_match:
+            return ReadTranscriptItem(
+                item=safe_item,
+                content_ref={"run_id": item.run_id, "item_id": item.item_id},
+                parse_status=ParseStatus.CORRUPT,
+                parse_error=self._read_error(
+                    "transcript_content_corrupt",
+                    "This transcript item contains invalid content.",
+                ),
+            )
+        return self._registry.parse(
+            safe_item,
+            safe_body,
+            error_id_factory=self._error_id_factory,
+        )
 
     def _checked_body(
         self,
