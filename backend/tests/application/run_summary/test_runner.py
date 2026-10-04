@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import replace
 from uuid import UUID
 
@@ -102,14 +103,15 @@ def test_bad_ref_or_url_after_the_only_repair_fails_without_fallback() -> None:
         assert len(port.requests) == 2
 
 
-def test_invalid_json_terminates_as_real_failure_without_summary_content() -> None:
-    outcome, port = run_runner(["not-json", "still-not-json"])
+def test_visible_only_text_is_a_protocol_failure_without_repair() -> None:
+    outcome, port = run_runner([json.dumps(draft_payload())])
 
     assert outcome.status is RunSummaryRunStatus.FAILED
-    assert outcome.error.code == "run_summary_invalid"
+    assert outcome.error.code == "run_summary_failed"
+    assert outcome.error.retryable is False
     assert outcome.result is None
-    assert outcome.model_calls == 2
-    assert len(port.requests) == 2
+    assert outcome.model_calls == 1
+    assert len(port.requests) == 1
 
 
 def test_cancel_after_validated_model_output_suppresses_summary_result() -> None:

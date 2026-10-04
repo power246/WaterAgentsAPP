@@ -34,13 +34,17 @@ from app.application.reasoning.batch_planner import (
     ModelSizeEstimate,
 )
 from app.application.run_summary.input_builder import RunSummaryInputBuilder
-from app.application.run_summary.models import RunSummaryResult
+from app.application.run_summary.models import RunSummaryAgentMessage, RunSummaryResult
 from app.application.run_summary.runner import (
     RunSummaryRunOutcome,
     RunSummaryRunStatus,
 )
 from app.application.run_summary.stage import RunSummaryStageOutcome
-from app.application.transcripts.models import TranscriptContentRef
+from app.application.transcripts.models import (
+    GenerationStatus,
+    MessageEndReason,
+    TranscriptContentRef,
+)
 from app.domain import OutcomeStatus
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
@@ -158,6 +162,18 @@ class FixtureSummaryStage:
                 arguments["run_id"],
                 session.session_id,
                 result,
+                message=RunSummaryAgentMessage(
+                    run_id=arguments["run_id"],
+                    session_id=session.session_id,
+                    message_id="validated-summary",
+                    operation_id=uuid5(
+                        NAMESPACE_URL,
+                        f"summary-message:{session.session_id}",
+                    ),
+                    text=result.plain_language_summary,
+                    generation_status=GenerationStatus.COMPLETED,
+                    end_reason=MessageEndReason.COMPLETED,
+                ),
             )
             outcome = RunSummaryRunOutcome(
                 status=RunSummaryRunStatus.COMPLETED,

@@ -206,7 +206,7 @@ summary 只用安全措辞说明“部分支流没有提供有效结果”及影
 M7 不新增公开 route 或事件流：
 
 - run SSE 继续发送轻量完整快照，增加 analysis phase、node scheduling/outcome、run result ref 和 summary status；
-- session SSE 同时承载 waterbody 与 `run_summarizer` 的真实过程；
+- session SSE 同时承载 waterbody 与 `run_summarizer` 的真实过程；summarizer 只在验证成功后发送一次性 completed message/result，不公开 provider token delta；
 - GET detail/history 从原 typed content 与引用读取完整结果；
 - run cancel 和 persistence retry 路径不变。
 

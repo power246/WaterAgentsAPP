@@ -25,9 +25,6 @@ class RecordingOperations:
     def __init__(self) -> None:
         self.next_sequence = 1
         self.items = []
-        self.started = []
-        self.deltas = []
-        self.finalized_messages = []
         self.failed = []
         self.cancelled = []
 
@@ -67,31 +64,6 @@ class RecordingOperations:
     ):
         self.items.append((content_type, body, item_id))
 
-    async def start_transcript_message(
-        self,
-        run_id,
-        session_id,
-        content_type,
-        content_schema_version,
-        *,
-        request_id=None,
-        operation_id=None,
-        tags=(),
-        rag_eligible=False,
-        private_values=(),
-        initial_body=None,
-    ):
-        identity = self._identity(operation_id=operation_id)
-        self.started.append((content_type, initial_body, identity))
-        return identity
-
-    async def append_transcript_message_delta(self, run_id, item_id, text):
-        self.deltas.append((item_id, text))
-        return text
-
-    async def finalize_transcript_message(self, run_id, item_id, body):
-        self.finalized_messages.append((item_id, body))
-
     async def fail_agent_session(self, run_id, session_id, error):
         self.failed.append(error)
         return error
@@ -100,7 +72,18 @@ class RecordingOperations:
         self.cancelled.append(session_id)
         return session_id
 
-    async def complete_run_summary_agent_session(self, run_id, session_id, result):
+    async def complete_run_summary_agent_session(
+        self,
+        run_id,
+        session_id,
+        result,
+        *,
+        message,
+    ):
+        message_identity = self._identity(operation_id=message.operation_id)
+        self.items.append(
+            ("run_summary_agent_message", message, message_identity.item_id)
+        )
         identity = self._identity()
         self.items.append(("run_summary_result", result, identity.item_id))
         return SimpleNamespace(result_ref=SessionResultReference(
@@ -129,7 +112,7 @@ def execute(outputs):
     return outcome, operations
 
 
-def test_transcript_adapter_reuses_visible_message_stream_and_typed_items() -> None:
+def test_transcript_adapter_publishes_only_the_validated_summary_message() -> None:
     outcome, operations = execute([draft_payload()])
 
     assert outcome.status is RunSummaryRunStatus.COMPLETED
@@ -137,17 +120,15 @@ def test_transcript_adapter_reuses_visible_message_stream_and_typed_items() -> N
         "run_summary_input",
         "run_summary_model_request",
         "run_summary_model_response",
+        "run_summary_agent_message",
         "run_summary_result",
     ]
-    assert [item[0] for item in operations.started] == [
-        "run_summary_agent_message"
-    ]
-    assert "".join(item[1] for item in operations.deltas) == (
-        "A plain-language summary."
-    )
-    assert operations.finalized_messages[0][1].text == (
-        "A plain-language summary."
-    )
+    response = operations.items[2][1]
+    message = operations.items[3][1]
+    assert response.visible_text == "A plain-language summary."
+    assert response.message_refs == ()
+    assert message.text == outcome.result.plain_language_summary
+    assert message.message_id == "output-1"
     assert operations.failed == []
 
 
@@ -161,6 +142,7 @@ def test_failed_summary_saves_safe_failure_and_no_result_or_fallback() -> None:
     assert len(operations.failed) == 1
     assert operations.failed[0].code == "run_summary_invalid"
     assert "run_summary_result" not in [item[0] for item in operations.items]
+    assert "run_summary_agent_message" not in [item[0] for item in operations.items]
     assert all(
         getattr(body, "plain_language_summary", None) is None
         for _, body, _ in operations.items

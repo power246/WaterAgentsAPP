@@ -1,9 +1,11 @@
+import asyncio
 import json
 from datetime import timedelta
 from uuid import UUID
 
 import pytest
 
+from app.application.analysis_runs.models import RunStatus
 from app.application.run_summary.models import (
     RunSummaryAgentMessage,
     RunSummaryFinishReason,
@@ -12,6 +14,7 @@ from app.application.run_summary.models import (
 from app.application.run_summary.prompt_builder import RunSummaryPromptBuilder
 from app.application.run_summary.validator import RunSummaryValidator
 from app.application.transcripts.models import (
+    ContentVisibility,
     GenerationStatus,
     MessageEndReason,
     ParseStatus,
@@ -22,6 +25,12 @@ from app.application.transcripts.registry import (
     UnsupportedTranscriptContentError,
     create_production_registry,
 )
+from app.application.transcripts.read_models import (
+    ReadView,
+    StoredRunHeader,
+    StoredRunRead,
+)
+from app.application.transcripts.reader import TranscriptReader
 from tests.application.analysis_runs.test_topology_result_models import (
     _manifest,
     _topology_result,
@@ -119,6 +128,34 @@ def test_all_seven_m7_v1_contents_round_trip_with_reference_extractors() -> None
     )
     assert registry.encode("run_summary_result", 1, result).references
 
+    for content_type, raw, secrets in (
+        (
+            "run_summary_model_request",
+            registry.encode("run_summary_model_request", 1, request).safe_body,
+            (request.system_prompt, request.messages[0].text, "response_schema"),
+        ),
+        (
+            "run_summary_model_response",
+            registry.encode("run_summary_model_response", 1, response).safe_body,
+            (response.structured_output, response.visible_text),
+        ),
+    ):
+        parsed = registry.parse(_stored(content_type, raw), raw)
+        public_text = registry.public_content_body(content_type, 1, raw)
+        assert registry.visibility_from_read(parsed) is ContentVisibility.HISTORY_ONLY
+        assert public_text == registry.public_safe_body(content_type, 1, raw)
+        assert all(secret not in public_text for secret in secrets)
+
+    projected_response = json.loads(
+        registry.public_content_body(
+            "run_summary_model_response",
+            1,
+            registry.encode("run_summary_model_response", 1, response).safe_body,
+        )
+    )
+    assert projected_response["structured_output_present"] is True
+    assert projected_response["visible_text_present"] is True
+
 
 def test_summary_message_uses_the_existing_message_lifecycle_and_unknown_v2_fails() -> None:
     registry = create_production_registry()
@@ -150,3 +187,49 @@ def test_summary_message_uses_the_existing_message_lifecycle_and_unknown_v2_fail
     assert finalized.generation_status is GenerationStatus.COMPLETED
     with pytest.raises(UnsupportedTranscriptContentError):
         registry.encode("run_summary_result", 2, {})
+
+
+def test_full_content_reader_applies_summary_request_projection() -> None:
+    registry = create_production_registry()
+    request = RunSummaryPromptBuilder().build(
+        summary_input(),
+        model=MODEL,
+        input_ref=TranscriptContentRef(run_id=RUN_ID, item_id=INPUT_ITEM_ID),
+        operation_id=UUID("a5a64a52-c1e2-4725-88ee-6c83f105e633"),
+        deadline=NOW + timedelta(minutes=1),
+    )
+    encoded = registry.encode("run_summary_model_request", 1, request)
+    stored_item = _stored("run_summary_model_request", encoded.safe_body)
+
+    class Store:
+        async def read_run(self, run_id):
+            assert run_id == RUN_ID
+            return StoredRunRead(
+                run=StoredRunHeader(
+                    run_id=RUN_ID,
+                    status=RunStatus.COMPLETED,
+                    created_at=NOW,
+                    updated_at=NOW,
+                    query="Summarize COMID 300.",
+                    request_item_id=INPUT_ITEM_ID,
+                    created_item_id=UUID("b5a64a52-c1e2-4725-88ee-6c83f105e634"),
+                ),
+                items=(stored_item,),
+            )
+
+    reader = TranscriptReader(
+        object(),
+        Store(),
+        registry,
+        error_id_factory=lambda: RUN_ID,
+        inline_content_bytes=64 * 1024,
+        preview_bytes=1024,
+    )
+    content = asyncio.run(
+        reader.get_content(RUN_ID, stored_item.item_id, ReadView.HISTORY)
+    )
+
+    assert request.system_prompt not in content.text
+    assert request.messages[0].text not in content.text
+    assert "response_schema" not in content.text
+    assert content.content_bytes == len(content.text.encode("utf-8"))

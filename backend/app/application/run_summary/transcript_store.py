@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from uuid import UUID
 
-from app.application.analysis_runs.models import PublicError, TranscriptItemIdentity
+from app.application.analysis_runs.models import PublicError
 from app.application.analysis_runs.workflow import WorkflowOperations
 from app.application.reasoning.model_models import (
     RefusalCompleted,
@@ -25,17 +24,17 @@ from app.application.run_summary.models import (
     RunSummaryModelResponse,
     RunSummaryResult,
 )
+from app.application.run_summary.runner import RunSummaryModelPort
 from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
     TranscriptContentRef,
 )
 from app.domain import ModelUsageSummary
-from app.application.run_summary.runner import RunSummaryModelPort
 
 
 class RunSummaryTranscriptStore:
-    """Use the existing workflow writer and visible-message stream for M6."""
+    """Store model audit data and publish only validated summary content."""
 
     def __init__(
         self,
@@ -66,68 +65,6 @@ class RunSummaryTranscriptStore:
             operation_id=value.operation_id,
         )
 
-    async def start_agent_message(
-        self,
-        request: RunSummaryModelRequest,
-        message_id: str,
-    ) -> TranscriptItemIdentity:
-        return await self._operations.start_transcript_message(
-            self.run_id,
-            self.session_id,
-            "run_summary_agent_message",
-            1,
-            operation_id=request.operation_id,
-            private_values=self._private_values,
-            initial_body=RunSummaryAgentMessage(
-                run_id=self.run_id,
-                session_id=self.session_id,
-                message_id=message_id,
-                operation_id=request.operation_id,
-                text="",
-                generation_status=GenerationStatus.GENERATING,
-            ),
-        )
-
-    async def append_agent_message_delta(
-        self,
-        identity: TranscriptItemIdentity,
-        text: str,
-    ) -> str:
-        return await self._operations.append_transcript_message_delta(
-            self.run_id,
-            identity.item_id,
-            text,
-        )
-
-    async def finalize_agent_message(
-        self,
-        identity: TranscriptItemIdentity,
-        request: RunSummaryModelRequest,
-        *,
-        message_id: str,
-        text: str,
-        completed: bool,
-        end_reason: MessageEndReason,
-    ) -> TranscriptContentRef:
-        await self._operations.finalize_transcript_message(
-            self.run_id,
-            identity.item_id,
-            RunSummaryAgentMessage(
-                run_id=self.run_id,
-                session_id=self.session_id,
-                message_id=message_id,
-                operation_id=request.operation_id,
-                text=text,
-                generation_status=(
-                    GenerationStatus.COMPLETED
-                    if completed
-                    else GenerationStatus.INCOMPLETE
-                ),
-                end_reason=end_reason,
-            ),
-        )
-        return TranscriptContentRef(run_id=self.run_id, item_id=identity.item_id)
-
     async def write_model_response(
         self,
         value: RunSummaryModelResponse,
@@ -139,12 +76,28 @@ class RunSummaryTranscriptStore:
             operation_id=value.operation_id,
         )
 
-    async def write_result(self, value: RunSummaryResult) -> TranscriptContentRef:
+    async def write_result(
+        self,
+        value: RunSummaryResult,
+        *,
+        operation_id: UUID,
+        message_id: str,
+    ) -> TranscriptContentRef:
         self._require_scope(value.run_id, value.session_id)
+        message = RunSummaryAgentMessage(
+            run_id=self.run_id,
+            session_id=self.session_id,
+            message_id=message_id,
+            operation_id=operation_id,
+            text=value.plain_language_summary,
+            generation_status=GenerationStatus.COMPLETED,
+            end_reason=MessageEndReason.COMPLETED,
+        )
         summary = await self._operations.complete_run_summary_agent_session(
             self.run_id,
             self.session_id,
             value,
+            message=message,
         )
         if summary.result_ref is None:
             raise RuntimeError("completed run summary session has no result reference")
@@ -196,13 +149,6 @@ class RunSummaryTranscriptStore:
             raise ValueError("summary transcript content escaped its session")
 
 
-@dataclass(slots=True)
-class _OpenMessage:
-    identity: TranscriptItemIdentity
-    message_id: str
-    text: str = ""
-
-
 class TranscriptRecordingRunSummaryModelPort:
     def __init__(
         self,
@@ -218,49 +164,13 @@ class TranscriptRecordingRunSummaryModelPort:
         request: RunSummaryModelRequest,
     ) -> AsyncIterator[WaterbodyModelEvent]:
         await self._store.write_model_request(request)
-        messages: dict[str, _OpenMessage] = {}
-        message_refs: list[TranscriptContentRef] = []
+        visible: list[str] = []
         structured: StructuredOutputCompleted | None = None
         usage: ModelUsageSummary | None = None
         terminal: Terminal | None = None
         refusal = False
         unexpected_tool = False
         response_written = False
-
-        async def append(message_id: str, text: str) -> None:
-            message = messages.get(message_id)
-            if message is None:
-                identity = await self._store.start_agent_message(request, message_id)
-                message = _OpenMessage(identity, message_id)
-                messages[message_id] = message
-            await self._store.append_agent_message_delta(message.identity, text)
-            message.text += text
-
-        async def finish(reason: RunSummaryFinishReason) -> None:
-            completed = reason is RunSummaryFinishReason.COMPLETED
-            end_reason = (
-                MessageEndReason.COMPLETED
-                if completed
-                else MessageEndReason.TRUNCATED
-                if reason in {
-                    RunSummaryFinishReason.TRUNCATED,
-                    RunSummaryFinishReason.INCOMPLETE,
-                }
-                else MessageEndReason.CANCELLED
-                if reason is RunSummaryFinishReason.CANCELLED
-                else MessageEndReason.ERROR
-            )
-            for message in messages.values():
-                message_refs.append(
-                    await self._store.finalize_agent_message(
-                        message.identity,
-                        request,
-                        message_id=message.message_id,
-                        text=message.text,
-                        completed=completed,
-                        end_reason=end_reason,
-                    )
-                )
 
         async def write_response(
             reason: RunSummaryFinishReason,
@@ -278,7 +188,6 @@ class TranscriptRecordingRunSummaryModelPort:
                 )
             ):
                 reason = RunSummaryFinishReason.ERROR
-            await finish(reason)
             await self._store.write_model_response(
                 RunSummaryModelResponse(
                     run_id=self._store.run_id,
@@ -286,14 +195,14 @@ class TranscriptRecordingRunSummaryModelPort:
                     operation_id=request.operation_id,
                     model=request.model,
                     finish_reason=reason,
-                    message_refs=tuple(message_refs),
+                    message_refs=(),
                     structured_output=(
                         structured.value
                         if structured is not None
                         and reason is RunSummaryFinishReason.COMPLETED
                         else None
                     ),
-                    visible_text="".join(message.text for message in messages.values()),
+                    visible_text="".join(visible),
                     usage=usage,
                     provider_response_id=provider_response_id,
                 )
@@ -308,10 +217,10 @@ class TranscriptRecordingRunSummaryModelPort:
                     and event.model == request.model
                 )
                 if matches and isinstance(event, VisibleTextDelta):
-                    await append(event.message_id, event.text)
+                    visible.append(event.text)
                 elif matches and isinstance(event, RefusalCompleted):
                     refusal = True
-                    await append(event.message_id, event.text)
+                    visible.append(event.text)
                 elif matches and isinstance(event, ToolCallCompleted):
                     unexpected_tool = True
                 elif matches and isinstance(event, StructuredOutputCompleted):

@@ -18,6 +18,7 @@ from tests.application.analysis_runs._m7_projection_support import (
     HoldingWorkflow,
     coordinator_for,
     prepare_m7_run,
+    summary_message_for,
 )
 from tests.m4_support import WATERBODY_MODEL, create_request_bytes
 
@@ -89,10 +90,12 @@ def test_summary_completion_and_cancel_have_one_terminal_winner() -> None:
                 session.session_id,
             )
             await coordinator.cancel_run(created.run_id)
+            result = _summary_result(created.run_id, session.session_id)
             terminal = await coordinator.complete_run_summary_agent_session(
                 created.run_id,
                 session.session_id,
-                _summary_result(created.run_id, session.session_id),
+                result,
+                message=summary_message_for(result),
             )
 
             assert terminal.status is AgentSessionStatus.CANCELLED
@@ -124,10 +127,12 @@ def test_summary_completion_and_cancel_have_one_terminal_winner() -> None:
                 created.run_id,
                 session.session_id,
             )
+            result = _summary_result(created.run_id, session.session_id)
             terminal = await coordinator.complete_run_summary_agent_session(
                 created.run_id,
                 session.session_id,
-                _summary_result(created.run_id, session.session_id),
+                result,
+                message=summary_message_for(result),
             )
             await coordinator.cancel_run(created.run_id)
 
@@ -140,7 +145,8 @@ def test_summary_completion_and_cancel_have_one_terminal_winner() -> None:
                 await coordinator.complete_run_summary_agent_session(
                     created.run_id,
                     session.session_id,
-                    _summary_result(created.run_id, session.session_id),
+                    result,
+                    message=summary_message_for(result),
                 )
             assert sum(
                 item.content.content_type == "run_summary_result"

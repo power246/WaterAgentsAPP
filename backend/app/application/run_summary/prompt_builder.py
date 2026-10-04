@@ -34,6 +34,8 @@ SUMMARY_SYSTEM_PROMPT = "\n".join(
         "numeric value.",
         "Every notable numeric highlight must copy its exact value, unit, "
         "window_id, and source_ref from the input.",
+        "Use digits or scientific-notation values only inside numeric highlights. "
+        "The plain-language summary may contain scoped COMIDs but no other digits.",
         "Use only the allowed highlight kinds and source references from the input.",
         "Do not emit URLs, provider details, credentials, prompts, logs, hidden "
         "reasoning, or chain-of-thought.",

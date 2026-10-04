@@ -250,9 +250,9 @@ input_digest
 
 沿用 M6 provider-neutral 模式但使用独立 content types：
 
-- `run_summary_model_request v1`：model、messages、strict response schema、deadline、input digest；
-- `run_summary_agent_message v1`：`generating/completed/incomplete` 可见浅显文本；
-- `run_summary_model_response v1`：安全 visible raw response、finish status、usage；
+- `run_summary_model_request v1`：history-only；公开 preview/full content 仅含 model、input ref/digest、deadline 和 request digest，不返回 prompt/messages/schema；
+- `run_summary_agent_message v1`：只有 validator 通过后才以 `completed` typed item 一次性公开，文本等于 validated `plain_language_summary`；
+- `run_summary_model_response v1`：history-only；公开 preview/full content 只返回 finish/usage/provider id 和 raw 字段存在标记，不返回 visible/structured 原文；
 - repair 仍保存第二次真实 request/response，不覆盖第一次。
 
 summary session 不含 tool descriptors/tool calls。
@@ -375,7 +375,7 @@ topology_ready
 
 ## 10. Session SSE
 
-`GET /runs/{run_id}/sessions/{session_id}/events` 对 waterbody 和 run_summarizer 使用同一 envelope、sequence、Last-Event-ID、message started/delta/finalized 与 stream_end 协议。
+`GET /runs/{run_id}/sessions/{session_id}/events` 对 waterbody 和 run_summarizer 使用同一 envelope、sequence、Last-Event-ID 与 stream_end 协议。waterbody 继续复用 message started/delta/finalized；run_summarizer 的 provider delta 不公开，validator 通过后通过既有 `transcript_item` 事件一次性发送 completed summary message 与 result。
 
 客户端根据 session `agent_role` 解释 content types。`run_summarizer` 不绑定地图水体，不能因 `target_comid=null` 拒绝订阅或读取。首次订阅仍回放该 session 已有全部可见过程，然后连续接收新增。
 

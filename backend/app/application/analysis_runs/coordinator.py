@@ -86,7 +86,10 @@ from app.application.analysis_runs.workflow import (
     WorkflowStopped,
 )
 from app.application.correlation import request_id_context
-from app.application.run_summary.models import RunSummaryResult
+from app.application.run_summary.models import (
+    RunSummaryAgentMessage,
+    RunSummaryResult,
+)
 from app.application.transcripts.buffer import TranscriptBuffer
 from app.application.transcripts.models import (
     AnalysisQuery,
@@ -1574,10 +1577,13 @@ class RunCoordinator:
         run_id: UUID | str,
         session_id: UUID | str,
         result: RunSummaryResult,
+        *,
+        message: RunSummaryAgentMessage,
     ) -> SessionSummary:
         runtime = await self._lookup(run_id)
         key = _UUID.validate_python(session_id)
         validated_result = RunSummaryResult.model_validate(result)
+        validated_message = RunSummaryAgentMessage.model_validate(message)
         async with runtime.condition:
             session_runtime = self._lookup_agent_session_locked(runtime, key)
             current = session_runtime.summary
@@ -1585,8 +1591,14 @@ class RunCoordinator:
                 current.agent_role is not AgentRole.RUN_SUMMARIZER
                 or validated_result.run_id != runtime.snapshot.run_id
                 or validated_result.session_id != key
+                or validated_message.run_id != runtime.snapshot.run_id
+                or validated_message.session_id != key
+                or validated_message.text != validated_result.plain_language_summary
+                or validated_message.generation_status
+                is not GenerationStatus.COMPLETED
+                or validated_message.end_reason is not MessageEndReason.COMPLETED
             ):
-                raise ValueError("run summary result does not match its session")
+                raise ValueError("run summary completion does not match its session")
             if current.status is AgentSessionStatus.CANCELLED:
                 return current
             if current.status not in _SESSION_TRANSITIONS:
@@ -1608,6 +1620,24 @@ class RunCoordinator:
                 runtime.condition.notify_all()
             else:
                 timestamp = self._clock.now()
+                message_identity = self._reserve_transcript_item_locked(
+                    runtime,
+                    session_id=key,
+                    request_id=request_id_context.get(),
+                    operation_id=validated_message.operation_id,
+                    created_at=timestamp,
+                )
+                message_item = runtime.transcript_buffer.append(
+                    message_identity,
+                    "run_summary_agent_message",
+                    1,
+                    validated_message,
+                )
+                self._append_transcript_process_locked(
+                    runtime,
+                    message_item,
+                    timestamp,
+                )
                 result_identity = self._reserve_transcript_item_locked(
                     runtime,
                     session_id=key,
@@ -1642,7 +1672,10 @@ class RunCoordinator:
                     timestamp,
                     result_ref=result_ref,
                     result_summary=result_summary,
-                    additional_item_ids=(result_identity.item_id,),
+                    additional_item_ids=(
+                        message_identity.item_id,
+                        result_identity.item_id,
+                    ),
                 )
                 runtime.condition.notify_all()
         self._log_agent_session_transition(runtime, previous, summary, event)

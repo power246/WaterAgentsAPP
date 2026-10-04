@@ -297,13 +297,18 @@ class TranscriptReader:
         if checked is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
         safe_item, text, _ = checked
+        public_text = self._registry.public_content_body(
+            safe_item.content_type,
+            safe_item.content_schema_version,
+            text,
+        )
         return TranscriptContentResponse(
             run_id=run_id,
             item_id=item_id,
             content_type=safe_item.content_type,
             content_schema_version=safe_item.content_schema_version,
-            content_bytes=safe_item.content_bytes,
-            text=text,
+            content_bytes=len(public_text.encode("utf-8")),
+            text=public_text,
             source=selected.source,
             persistence=selected.persistence,
             issues=self._issues((item,), ()),

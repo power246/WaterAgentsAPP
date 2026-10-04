@@ -89,6 +89,7 @@ class RunSummaryRunOutcome:
 
 @dataclass(frozen=True, slots=True)
 class _CompletedCall:
+    output_id: str
     structured_output: str
     visible_text: str
     usage: ModelUsageSummary | None
@@ -102,7 +103,13 @@ class _Clock:
 class RunSummaryTranscript(Protocol):
     async def write_input(self, value: RunSummaryInput) -> TranscriptContentRef: ...
     def recording_port(self, delegate: RunSummaryModelPort) -> RunSummaryModelPort: ...
-    async def write_result(self, value: RunSummaryResult) -> TranscriptContentRef: ...
+    async def write_result(
+        self,
+        value: RunSummaryResult,
+        *,
+        operation_id: UUID,
+        message_id: str,
+    ) -> TranscriptContentRef: ...
     async def fail(self, error: PublicError): ...
     async def cancel(self): ...
 
@@ -179,6 +186,8 @@ class RunSummaryRunner:
                     usage=_combined_usage(usage),
                     generated_at=self._clock.now(),
                 )
+                accepted_request = request
+                accepted_call = completed
             except RunSummaryValidationError as initial_error:
                 repair = self._prompt_builder.build_repair(
                     summary_input,
@@ -187,9 +196,7 @@ class RunSummaryRunner:
                         NAMESPACE_URL,
                         f"run-summary-repair:{request.operation_id}",
                     ),
-                    original_output=(
-                        completed.structured_output or completed.visible_text
-                    ),
+                    original_output=completed.structured_output,
                     issues=initial_error.issues,
                 )
                 calls += 1
@@ -203,6 +210,8 @@ class RunSummaryRunner:
                     usage=_combined_usage(usage),
                     generated_at=self._clock.now(),
                 )
+                accepted_request = repair
+                accepted_call = repaired
         except WaterbodyModelCancelledError:
             if self._transcript is not None:
                 await self._transcript.cancel()
@@ -245,7 +254,11 @@ class RunSummaryRunner:
                 repaired=calls == 2,
             )
         if self._transcript is not None:
-            await self._transcript.write_result(result)
+            await self._transcript.write_result(
+                result,
+                operation_id=accepted_request.operation_id,
+                message_id=accepted_call.output_id,
+            )
         return RunSummaryRunOutcome(
             status=RunSummaryRunStatus.COMPLETED,
             result=result,
@@ -327,10 +340,11 @@ async def _consume(
         raise _port_error(error_type, request)
     if refusal:
         raise _port_error(WaterbodyModelProtocolError, request)
+    if structured is None:
+        raise _port_error(WaterbodyModelProtocolError, request)
     return _CompletedCall(
-        structured_output=(
-            structured.value if structured is not None else "".join(visible)
-        ),
+        output_id=structured.output_id,
+        structured_output=structured.value,
         visible_text="".join(visible),
         usage=usage,
     )

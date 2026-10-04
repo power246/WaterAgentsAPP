@@ -55,7 +55,11 @@ def test_summary_and_topology_results_share_their_terminal_writer_groups() -> No
                 for item in summary_batch.transcript.items
                 if item.item_id in summary_group.item_ids
             }
-            assert summary_types == {"run_summary_result", "lifecycle_event"}
+            assert summary_types == {
+                "run_summary_agent_message",
+                "run_summary_result",
+                "lifecycle_event",
+            }
 
             run_batch = next(
                 batch

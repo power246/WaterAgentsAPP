@@ -106,6 +106,7 @@ class ContentRegistration:
     errors: ErrorExtractor = _no_references
     public_projection: PublicProjection | None = None
     history_only_possible: bool = False
+    project_full_content: bool = False
     writable: bool = True
     preserve_unset: bool = False
 
@@ -400,6 +401,24 @@ class TranscriptRegistry:
         body = registration.adapter.validate_json(safe_body)
         return _serialize_safe_json(registration.public_projection(body))
 
+    def public_content_body(
+        self,
+        content_type: str,
+        content_schema_version: int,
+        safe_body: str,
+    ) -> str:
+        registration = self._registrations.get(
+            (content_type, content_schema_version)
+        )
+        if registration is None or not registration.project_full_content:
+            return safe_body
+        if registration.public_projection is None:
+            raise UnsupportedTranscriptContentError(
+                "full-content projection requires a public projection"
+            )
+        body = registration.adapter.validate_json(safe_body)
+        return _serialize_safe_json(registration.public_projection(body))
+
     def references_from_read(self, item: ReadTranscriptItem) -> tuple[UUID, ...]:
         registration = self._registrations.get(
             (item.item.content_type, item.item.content_schema_version)
@@ -458,6 +477,11 @@ def _runtime_visibility(body: object) -> ContentVisibility:
         if isinstance(body, (LateMessageOutputFact, SuppressedTranscriptItemFact))
         else ContentVisibility.AUTO
     )
+
+
+def _history_only_visibility(body: object) -> ContentVisibility:
+    del body
+    return ContentVisibility.HISTORY_ONLY
 
 
 def _lifecycle_errors(body: object) -> tuple[UUID, ...]:
@@ -701,6 +725,45 @@ def _waterbody_response_projection(body: object) -> JsonValue:
     }
 
 
+def _run_summary_request_projection(body: object) -> JsonValue:
+    from app.application.run_summary.models import RunSummaryModelRequest
+
+    if not isinstance(body, RunSummaryModelRequest):
+        raise TypeError("run summary request projection received another type")
+    value = body.model_dump(mode="json")
+    return {
+        key: value[key]
+        for key in (
+            "schema_version",
+            "operation_id",
+            "model",
+            "input_ref",
+            "input_digest",
+            "deadline",
+            "request_digest",
+        )
+    }
+
+
+def _run_summary_response_projection(body: object) -> JsonValue:
+    from app.application.run_summary.models import RunSummaryModelResponse
+
+    if not isinstance(body, RunSummaryModelResponse):
+        raise TypeError("run summary response projection received another type")
+    value = body.model_dump(mode="json")
+    return {
+        "schema_version": value["schema_version"],
+        "operation_id": value["operation_id"],
+        "model": value["model"],
+        "finish_reason": value["finish_reason"],
+        "message_refs": value["message_refs"],
+        "usage": value["usage"],
+        "provider_response_id": value["provider_response_id"],
+        "structured_output_present": body.structured_output is not None,
+        "visible_text_present": bool(body.visible_text),
+    }
+
+
 _PUBLIC_SOURCE_HOST_SUFFIXES = (
     ".epa.gov",
     ".usgs.gov",
@@ -937,6 +1000,10 @@ def create_production_registry() -> TranscriptRegistry:
         adapter=TypeAdapter(RunSummaryModelRequest),
         references=_run_summary_request_references,
         metadata=_static_metadata("run_summary", "model_request"),
+        visibility=_history_only_visibility,
+        public_projection=_run_summary_request_projection,
+        history_only_possible=True,
+        project_full_content=True,
     ))
     registry.register(ContentRegistration(
         content_type="run_summary_agent_message",
@@ -952,6 +1019,10 @@ def create_production_registry() -> TranscriptRegistry:
         adapter=TypeAdapter(RunSummaryModelResponse),
         references=_run_summary_response_references,
         metadata=_static_metadata("run_summary", "model_response"),
+        visibility=_history_only_visibility,
+        public_projection=_run_summary_response_projection,
+        history_only_possible=True,
+        project_full_content=True,
     ))
     registry.register(ContentRegistration(
         content_type="run_summary_result",

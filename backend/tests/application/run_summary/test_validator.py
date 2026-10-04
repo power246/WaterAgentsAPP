@@ -82,3 +82,50 @@ def test_non_numeric_special_finding_is_allowed_with_an_input_ref() -> None:
     )
     _, result = validate(payload)
     assert result.highlights[0].kind == "topology_limit"
+
+
+@pytest.mark.parametrize(
+    "summary",
+    (
+        "COMID 300 has a fabricated value of 2 mg/L.",
+        "COMID 300 changed by 2e3 units.",
+    ),
+)
+def test_plain_summary_rejects_numeric_facts_even_when_digits_exist_in_input(
+    summary,
+) -> None:
+    with pytest.raises(RunSummaryValidationError) as captured:
+        validate(draft_payload(summary=summary))
+    assert ("unsupported_numeric_assertion", "$.plain_language_summary") in (
+        captured.value.issues
+    )
+
+
+def test_highlight_text_must_match_its_exact_display_value() -> None:
+    payload = draft_payload()
+    payload["highlights"][0]["text"] = "COMID 300 has the value 2 mg/L in w1."
+    with pytest.raises(RunSummaryValidationError) as captured:
+        validate(payload)
+    assert ("unsupported_numeric_assertion", "$.highlights[0].text") in (
+        captured.value.issues
+    )
+
+
+def test_non_numeric_highlight_cannot_smuggle_a_numeric_fact() -> None:
+    payload = draft_payload(
+        highlights=[
+            {
+                "kind": "topology_limit",
+                "text": "COMID 300 has 2 unavailable upstream branches.",
+                "source_ref": TOPOLOGY_SOURCE.model_dump(mode="json"),
+                "display_value": None,
+                "display_unit": None,
+                "window_id": None,
+            }
+        ]
+    )
+    with pytest.raises(RunSummaryValidationError) as captured:
+        validate(payload)
+    assert ("unsupported_numeric_assertion", "$.highlights[0].text") in (
+        captured.value.issues
+    )

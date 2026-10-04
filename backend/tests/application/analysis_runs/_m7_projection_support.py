@@ -18,7 +18,8 @@ from app.application.analysis_runs.topology_result_models import (
     WaterbodyRunEntry,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
-from app.application.run_summary.models import RunSummaryResult
+from app.application.run_summary.models import RunSummaryAgentMessage, RunSummaryResult
+from app.application.transcripts.models import GenerationStatus, MessageEndReason
 from app.domain import InferenceResult
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from tests.application.analysis_runs._topology_scheduler_support import topology
@@ -71,6 +72,18 @@ def coordinator_for(store, workflow: HoldingWorkflow, **options) -> RunCoordinat
         ),
         live_state_grace_period=options.pop("live_state_grace_period", 60),
         **options,
+    )
+
+
+def summary_message_for(result: RunSummaryResult) -> RunSummaryAgentMessage:
+    return RunSummaryAgentMessage(
+        run_id=result.run_id,
+        session_id=result.session_id,
+        message_id="validated-summary",
+        operation_id=UUID("d5a64a52-c1e2-4725-88ee-6c83f105e636"),
+        text=result.plain_language_summary,
+        generation_status=GenerationStatus.COMPLETED,
+        end_reason=MessageEndReason.COMPLETED,
     )
 
 
@@ -197,18 +210,20 @@ async def prepare_m7_run(
             public_error=summary_error,
         )
     else:
+        summary_result = RunSummaryResult(
+            run_id=created.run_id,
+            session_id=summary_session.session_id,
+            input_digest="sha256:m7-projection",
+            model=WATERBODY_MODEL,
+            language="en",
+            plain_language_summary="The target result is available.",
+            generated_at=datetime(2026, 10, 3, 8, 30, tzinfo=UTC),
+        )
         completed_summary = await coordinator.complete_run_summary_agent_session(
             created.run_id,
             summary_session.session_id,
-            RunSummaryResult(
-                run_id=created.run_id,
-                session_id=summary_session.session_id,
-                input_digest="sha256:m7-projection",
-                model=WATERBODY_MODEL,
-                language="en",
-                plain_language_summary="The target result is available.",
-                generated_at=datetime(2026, 10, 3, 8, 30, tzinfo=UTC),
-            ),
+            summary_result,
+            message=summary_message_for(summary_result),
         )
         summary = TopologySummaryResult(
             status="completed",

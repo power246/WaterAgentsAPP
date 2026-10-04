@@ -25,7 +25,10 @@ _URL = re.compile(
     r"(?i)(?:https?://|www\.|\b[a-z0-9][a-z0-9.-]*\.(?:com|org|net|io|gov|edu)(?:/|\b))"
 )
 _COMID = re.compile(r"(?i)\bCOMID\s*[:#]?\s*([A-Za-z0-9._-]+)")
-_NUMBER = re.compile(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?(?![A-Za-z])")
+_NUMBER = re.compile(
+    r"(?<![A-Za-z0-9_.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+    r"(?![A-Za-z0-9_.])"
+)
 _RISK_CLAIM = re.compile(
     r"(?i)(?:\b(none|low|medium|high|indeterminate)[ -]risk\b|"
     r"\brisk\s+(?:is|was|=|:)\s*(none|low|medium|high|indeterminate)\b)"
@@ -85,12 +88,6 @@ class RunSummaryValidator:
                 for window in projection.window_summaries
             ),
         }
-        input_text = json.dumps(
-            summary_input.model_dump(mode="json"),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
         for path, text in (
             ("$.plain_language_summary", draft.plain_language_summary),
             *(
@@ -106,8 +103,6 @@ class RunSummaryValidator:
             unknown = set(_COMID.findall(text)) - allowed_comids
             if unknown:
                 issues.append(("comid_outside_scope", path))
-            if any(token not in input_text for token in _NUMBER.findall(text)):
-                issues.append(("unsupported_numeric_assertion", path))
             claimed_risks = {
                 next(value for value in match.groups() if value is not None).casefold()
                 for match in _RISK_CLAIM.finditer(text)
@@ -117,17 +112,26 @@ class RunSummaryValidator:
 
         allowed_refs = set(summary_input.allowed_source_refs)
         numeric_facts = _numeric_fact_catalog(summary_input)
+        if _numbers_without_comids(draft.plain_language_summary):
+            issues.append(
+                ("unsupported_numeric_assertion", "$.plain_language_summary")
+            )
         for index, item in enumerate(draft.highlights):
             path = f"$.highlights[{index}]"
             if item.source_ref not in allowed_refs:
                 issues.append(("source_ref_outside_input", path + ".source_ref"))
                 continue
             numeric = item.display_value is not None
+            numeric_tokens = _numbers_without_comids(item.text)
             if numeric:
                 expected = numeric_facts.get(item.source_ref)
                 actual = (item.display_value, item.display_unit, item.window_id)
                 if expected is None or actual != expected:
                     issues.append(("numeric_fact_mismatch", path))
+                if any(token != item.display_value for token in numeric_tokens):
+                    issues.append(("unsupported_numeric_assertion", path + ".text"))
+            elif numeric_tokens:
+                issues.append(("unsupported_numeric_assertion", path + ".text"))
 
         if issues:
             raise RunSummaryValidationError(tuple(issues))
@@ -178,6 +182,10 @@ class RunSummaryValidator:
 
 def query_language(query: str) -> str:
     return "zh-CN" if _CJK.search(query) else "en"
+
+
+def _numbers_without_comids(text: str) -> tuple[str, ...]:
+    return tuple(_NUMBER.findall(_COMID.sub("", text)))
 
 
 def _numeric_fact_catalog(

@@ -20,7 +20,10 @@ if TYPE_CHECKING:
         DependencyOutcome,
         TopologyRunResult,
     )
-    from app.application.run_summary.models import RunSummaryResult
+    from app.application.run_summary.models import (
+        RunSummaryAgentMessage,
+        RunSummaryResult,
+    )
     from app.application.transcripts.models import (
         AnalysisRequestV1,
         TranscriptContentRef,
@@ -140,6 +143,8 @@ class WorkflowOperations(Protocol):
         run_id: UUID | str,
         session_id: UUID | str,
         result: "RunSummaryResult",
+        *,
+        message: "RunSummaryAgentMessage",
     ) -> SessionSummary: ...
 
     async def complete_run(

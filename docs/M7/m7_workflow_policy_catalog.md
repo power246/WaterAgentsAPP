@@ -236,7 +236,7 @@ insufficient_evidence | invalid_branch | topology_limit
 
 ### 11.3 禁止内容
 
-- 输入不存在的数字、单位、时间或 COMID；
+- plain-language summary 中除 scope 内 COMID 外的任何数字；numeric highlight 文本中与其 exact display value 不一致的数字；非 numeric highlight 中的任何数字；
 - “全部安全”之类超过 coverage 的表述；
 - 把 `low/none + partial` 写成整个水体安全；
 - 把 upstream inferred 写成本地实测；
@@ -252,7 +252,7 @@ insufficient_evidence | invalid_branch | topology_limit
 | invalid output，one repair 后仍失败 | failed | completed，no summary text |
 | input cannot fit complete cards | failed/non-retryable | completed，no summary text |
 | reference/value mismatch | repair once；仍错则 failed | completed，no summary text |
-| cancel wins | cancelled/incomplete visible message | run cancelled |
+| cancel wins | cancelled，no public summary message；raw late output 仅保留 history-only 审计 | run cancelled |
 | persistence warning after valid summary | completed，原 result 保留 | 沿用 M3 persistence warning |
 
 任何 failure 都不触发固定模板、其他模型 fallback 或旧 summary 复用。前端可继续读取 target/waterbody results。

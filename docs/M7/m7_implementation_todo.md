@@ -294,10 +294,10 @@
 ### 工作
 
 - [x] 实现 `application/run_summary` prompt builder、runner、validator 与 transcript adapter；全部 active waterbody outcomes settle 后才创建 `run_summarizer` session，`target_comid=null`。
-- [x] 复用本 run 精确 `waterbody_model` selection 与现有 provider adapter/可见消息流；summary 无 tools、无第三模型设置、无 fallback，主调用一次，schema repair 至多一次且同模型/同 scope。
+- [x] 复用本 run 精确 `waterbody_model` selection 与现有 provider adapter；provider visible output 仅作内部候选/审计，summary 无 tools、无第三模型设置、无 fallback，主调用一次，schema repair 至多一次且同模型/同 scope。
 - [x] input builder 只读持久化安全业务投影：target 一份 full projection，其他每个 active node 恰好一张 compact card，稳定 topology 顺序；technical details、secrets、原始 provider envelope 和隐藏 reasoning 不进入 prompt。
 - [x] prompt 要求用浅显语言说明全流程、目标结论、分支覆盖/限制和特殊值；不得改变水体科学结论、重新评分、补造缺失数字或把 insufficient 猜成 0。
-- [x] validator 对任何数字 highlight 强制 exact value、unit、window、source refs，并验证 refs 属于输入；允许非数字特殊发现带 refs。拒绝 Agent URL、scope 外 COMID/ref、遗漏 target/coverage 和不支持的断言。
+- [x] validator 对任何数字 highlight 强制 exact value、unit、window、source refs，并验证文本中的数字只等于 display value；plain summary 除 scope 内 COMID 外不允许数字，非数字 highlight 不允许数字。拒绝 Agent URL、scope 外 COMID/ref、遗漏 target/coverage 和不支持的断言。
 - [x] summary 失败保存 failed session 和安全 public failure，详细异常只进 backend log/audit；不生成固定模板、拼接 fallback 或旧 summary。target 有效时仍允许后续 run completed。
 
 ### Tests
@@ -317,7 +317,7 @@
 
 提交边界：仅 run_summary application、复用现有 provider/transcript 的最小 adapter、fixtures 与 tests；不得新增 provider、route、SSE 或 frontend URL。
 
-- 实现：新增 canonical summary input/prompt、严格 draft validator、一次同模型 repair runner、现有 visible-message transcript adapter 与 direct application stage。输入固定为稳定顺序的非 target cards + 末尾 target full safe result；highlight 只接受允许 kind/ref，数值必须逐项匹配原 value/unit/window。OpenAI Responses adapter 仅扩展接受同一 provider-neutral summary request，tools 始终为空；未新增 provider、route、SSE、frontend URL 或 fallback。
+- 实现：新增 canonical summary input/prompt、严格 draft validator、一次同模型 repair runner、provider response 审计 adapter 与 direct application stage。输入固定为稳定顺序的非 target cards + 末尾 target full safe result；highlight 只接受允许 kind/ref，数值必须逐项匹配原 value/unit/window。OpenAI Responses adapter 仅扩展接受同一 provider-neutral summary request，tools 始终为空；未新增 provider、route、SSE、frontend URL 或 fallback。
 - 验证：指定 summary prompt/runner/validator `15 passed`，provider adapter `32 passed`，summary transcript `2 passed`；M4–M7 application/provider 宽回归 `344 passed`，port/M7 architecture + summary 回归 `81 passed`，`compileall` 与 `git diff --check` 通过。专用 `wateragents_test` 下除既有 45 秒 session SSE 超时用例外的完整套件为 `1940 passed, 1 deselected, 1 warning`；该 SSE 用例单独复跑仍在打开首个 stream 时 `54.78s` 外层超时、尚未进入业务断言。warning 为既有 Starlette/httpx 弃用提示；Docker PostgreSQL 17 healthy。真实外部 provider 与三平台 CI `not run`。
 - 修复与边界：完整收集发现并修复测试模块同名冲突及多余 summary port 的架构违规。Milestone 7 的 production typed-content registry、summary completed/result 原子提交、API/SSE/history 与最终 run completion 尚未接线；当前阶段出口仅为 direct application harness，M1–M9 仍等待 M9 后统一验收。
 - 提交：本完成记录与 M6 summary application/provider adapter/tests 由当前本地提交保存。
@@ -327,7 +327,7 @@
 ### 工作
 
 - [x] 在 production registry 注册且只注册 M7 七类当前 V1 内容：`waterbody_dependency_manifest`、`run_summary_input`、`run_summary_model_request`、`run_summary_agent_message`、`run_summary_model_response`、`run_summary_result`、`topology_run_result`。
-- [x] summarizer 可见文本继续使用 M3 `message_started / message_delta / message_finalized`，其他内容使用 `transcript_item`；跨 chunk 脱敏、item identity、generation status、Last-Event-ID 和 late audit 全部复用原能力。
+- [x] summarizer 的 provider delta/structured candidate 只保存为 history-only 审计内容；validator 通过后，以既有 `transcript_item` 一次性发布 completed `run_summary_agent_message` 与 result。item identity、Last-Event-ID、late audit 和两层 SSE 全部复用原能力，不增加第三条流。
 - [x] summary result 与 summary `session_completed(result_ref + discriminated result_summary)` 同一必需提交批次；`topology_run_result`、run result ref/summary projection 与 run completed lifecycle 同一等价原子边界。
 - [x] 扩展 run snapshot/detail/history：waterbody node 五态、phase、partial coverage、summary status/ref/safe failure、topology result ref；读取只投影持久化事实，不重新调度、推理或重算。
 - [x] 保持现有 run SSE 与 session SSE。run stream 只发轻量快照；waterbody/summarizer 真实过程在对应 session stream；不复制完整 result/prompt/tool 内容到 run stream。
@@ -412,7 +412,7 @@
 
 - [x] fake E2E 对 session 创建时机、topology start/completed、dependency manifest、model/tool counts、target/partial/run status 和 summary refs 做业务断言。
 - [x] M7 policy、scheduler、store、gate、summary、七类 typed content、lifecycle/history/runtime/cancel 均有独立可执行 gate。
-- [x] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部错误和 unbounded arrays 的 logs/API/SSE/history 全出口扫描通过。
+- [x] secrets、provider envelope、hidden reasoning、raw arguments/URL、内部错误和 unbounded arrays 的 logs/API/SSE/history 全出口扫描通过；request/response 的 preview 与 full content 都使用安全投影，raw provider text 不先于 validation 公开。
 - [x] contract ID 集合与覆盖矩阵双向一致；所有勾选项均有本分支实际证据，未执行项保持未勾选或 `not run`。
 
 ### Verify
@@ -432,8 +432,8 @@
 
 #### Milestone 9 完成记录（2026-10-04）
 
-- 实现：新增固定 M7 production-workflow smoke、最大 128-node 边界和专用 PostgreSQL restart 用例；审计时修复 dependency manifest 未写入 transcript、fake result closure 未引用本 run topology，以及合法大汇流的直接上游上限过小/部分 M7 collection 未显式有界三个缺口。同步当前 OpenAPI、七类 typed registry、CI smoke 入口、README 与项目级状态；M8/M9 只获得稳定 handoff refs，没有加入 RAG、页面、URL、settings/admin、V2、feature flag、第三条 SSE 或 run-wide quota。
-- 验证：Docker PostgreSQL 17 healthy；专用 `wateragents_test` 完整 backend `1979 passed, 1 warning`，persistence 独立门 `63 passed`，M7 workflow smoke `54 passed`，M7 PostgreSQL workflow/restart focused gate `2 passed`，离线出口/协议审计 `200 passed`；run SSE 返回 `completed/cancelled passed`，history smoke 返回 `history/independent_process_restart/restart_repair passed`；154 项 capability 审计、`compileall` 与 `git diff --check` 通过。warning 为既有 Starlette/httpx 弃用提示。
+- 实现：新增固定 M7 production-workflow smoke、最大 128-node 边界和专用 PostgreSQL restart 用例；审计时修复 dependency manifest 未写入 transcript、fake result closure 未引用本 run topology，以及合法大汇流的直接上游上限过小/部分 M7 collection 未显式有界三个缺口。最终审查又收紧 summary 发布边界：raw provider candidate 只作 history-only 安全投影，strict structured event 与数字事实校验通过后才原子提交 completed message/result。同步当前 OpenAPI、七类 typed registry、CI smoke 入口、README 与项目级状态；M8/M9 只获得稳定 handoff refs，没有加入 RAG、页面、URL、settings/admin、V2、feature flag、第三条 SSE 或 run-wide quota。
+- 验证：Docker PostgreSQL 17 healthy；最终审查复验为 focused `33 passed`、专用 `wateragents_test` 完整 backend `1984 passed, 1 warning`、persistence 独立门 `63 passed`、M7 workflow smoke `54 passed`，`compileall` 与 `git diff --check` 通过；原 M9 验收的 M7 PostgreSQL workflow/restart focused gate `2 passed`、离线出口/协议审计 `200 passed`、run SSE `completed/cancelled passed`、history smoke `history/independent_process_restart/restart_repair passed` 和 154 项 capability 审计仍保留。warning 为既有 Starlette/httpx 弃用提示。
 - 风险：未获得真实 provider 计费/联网授权，因此 `requests=0 / events=0 / responses=0`，明确记为 `not run`；Ubuntu/macOS/Windows workflow 已包含 M7 smoke，但本提交的远程三平台作业未执行，GLOBAL-C08/C11 仍为 `partial`。M8 transcript RAG 与 M9 frontend/settings/admin 仍由后续阶段实现，M7 本机施工完成不等于中心外部验收完成。
 - 提交：本完成记录与 M9 集成修复、E2E/审计/持久化测试和文档同步由当前本地提交保存。
 
@@ -462,8 +462,8 @@
 | M7-C08 | 本机已验证 | topology result assembler、run lifecycle/history | target/partial/failure/ref tests | topology result、run completed lifecycle 与轻量 summary/ref 在同一必需提交组保存，partial/failure/history/reload 已验证。 |
 | M7-C09 | 本机已验证 | node launch policy、local preflight、zero-model assembler | station-backed/stationless call counts | stationless 全不可用形成正式 insufficient result，0 planning/final/optional 且不传播 evidence。 |
 | M7-C10 | 本机已验证 | dependency prompt block、M6 validator/registry | source roles、directional/numeric boundary | source role、usable-only result ref、invalid redaction、mode/window 与 deterministic numeric boundary 已通过 focused/full regression。 |
-| M7-C11 | 本机已验证 | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M6 runner 与 M7 transcript/lifecycle 集成已验证 all-node input、same-model/no-tools、strict refs 与 result reload。 |
-| M7-C12 | 本机已验证 | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary failed 仅投影安全 PublicError，无 fallback；target/waterbody results 保持且 run 可 completed。 |
+| M7-C11 | 本机已验证 | run summary input/prompt/runner/transcript | all-nodes input、same model、highlights refs | M6 runner 与 M7 transcript/lifecycle 集成已验证 all-node input、same-model/no-tools、strict structured event、exact numeric text/refs 与 result reload。 |
+| M7-C12 | 本机已验证 | summary failure mapping、public projection/logging | no-fallback、safe error、run completed fixture | summary request/response 为 history-only 安全投影；validation 前无公开 summary message，失败无 fallback；target/waterbody results 保持且 run 可 completed。 |
 | M7-A01 | 本机已验证 | production workflow fake topology | 3+ nodes、event/session order、exact once | chain/diamond production workflow harness 已验证 phase 顺序、session 延迟创建、每 node 一次与 outcome 全收敛。 |
 | M7-A02 | 本机已验证 | manifest/upstream bundle | status/evidence/ref/merge fixtures | M2 provider/M3 launch 与 M5 完整 workflow orchestration 已验证 direct-upstream publish、invalid+usable merge、all-insufficient 零模型。 |
 | M7-A03 | 本机已验证 | cancel coordinator/scheduler/quiescence | all checkpoints、one run cancel | 单 run 取消后不新建 session、不调用 tool/model、不发布 outcome/result/summary，并最终 quiesced。 |

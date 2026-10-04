@@ -35,7 +35,7 @@ app/application/run_summary/
   models.py                          # report card、prompt input、strict draft/result
   prompt_builder.py                  # simple-language summary policy renderer
   runner.py                          # one provider call + one repair at most
-  transcript_store.py               # summary typed contents/message streaming
+  transcript_store.py               # internal model audit + validated summary publish
 
 app/infrastructure/runtime/
   m7.py                              # M4 stages + M5/M6 + scheduler + summarizer composition
@@ -458,13 +458,15 @@ summary failed 也必须先保存 summary session failed，再保存带 `summary
 |---|---|---|
 | `waterbody_dependency_manifest v1` | waterbody session | 直接上游终态与可传证据边界 |
 | `run_summary_input v1` | summarizer session | 实际发送前的 canonical summary 输入 |
-| `run_summary_model_request v1` | summarizer session | provider-neutral request/schema/model/deadline/digest |
-| `run_summary_agent_message v1` | summarizer session | 用户可见流式浅显总结消息 |
-| `run_summary_model_response v1` | summarizer session | 安全 raw visible response 与 usage |
+| `run_summary_model_request v1` | summarizer session | history-only provider-neutral request；公开读取只返回安全投影 |
+| `run_summary_agent_message v1` | summarizer session | validator 通过后一次性提交的用户可见浅显总结 |
+| `run_summary_model_response v1` | summarizer session | history-only provider 审计记录；raw visible/structured output 不进入公开投影 |
 | `run_summary_result v1` | summarizer session | validated summary + highlights + refs |
 | `topology_run_result v1` | run | target/ref、node outcomes、coverage、summary status/ref |
 
 全部类型 strict、canonical serialization、unknown field reject，并注册 reference extractor、安全 metadata、全文/preview、secret scan 和 public projection。完整正文只保存一份。
+
+provider 的 visible delta/structured output 在校验前只属于内部候选与审计数据，不创建公开 message。`run_summary_agent_message` 与 `run_summary_result` 在同一 summary terminal writer group 中提交；取消、协议错误或校验失败均不留下公开 summary text。
 
 ## 16. 配置
 
