@@ -50,8 +50,10 @@ from app.application.reasoning.sufficiency import (
 from app.application.reasoning.task import ValidatedWaterbodyAgentTask
 from app.application.reasoning.working_context import (
     BoundedEvidenceSummary,
+    DependencyPromptWindow,
     WorkingContextFact,
     WorkingContextFactKind,
+    build_dependency_prompt_block,
     build_working_context_projection,
     require_safe_prompt_text,
 )
@@ -206,11 +208,16 @@ class EvidencePlanningLoop:
         task: ValidatedWaterbodyAgentTask,
         *,
         deadline: datetime,
+        initial_handoff: EvidenceAcquisitionHandoff | None = None,
     ) -> EvidencePlanningOutcome:
         if deadline.tzinfo is None or deadline.utcoffset() is None:
             raise ValueError("planning deadline must be timezone-aware")
         scope = task.task.evidence_scope
-        handoff = await self._acquisition.start(scope)
+        handoff = (
+            await self._acquisition.start(scope)
+            if initial_handoff is None
+            else self._acquisition.seal(scope, initial_handoff)
+        )
         bundle_refs = [handoff.bundle_ref]
         preflight_calls = len(handoff.tool_result_refs)
         planning_calls = 0
@@ -638,6 +645,21 @@ async def _working_context(
         recent_messages=(),
         facts=tuple(facts),
         evidence_summaries=tuple(summaries),
+        dependency_context=(
+            build_dependency_prompt_block(
+                task.task.dependency_manifest,
+                mode=task.context.mode,
+                windows=tuple(
+                    DependencyPromptWindow(
+                        window_id=window.window_id,
+                        mode=task.context.time_segments[window.segment_index].mode,
+                    )
+                    for window in scope.time_windows
+                ),
+            )
+            if task.task.dependency_manifest is not None
+            else None
+        ),
     )
 
 

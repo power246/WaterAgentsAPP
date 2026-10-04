@@ -90,18 +90,19 @@ python scripts/run_history_smoke.py
 
 Expected final stdout is `{"history":"passed","independent_process_restart":"passed","restart_repair":"passed","database":"<test DB>"}`. The history smoke fully stops its first Uvicorn child process before starting a freshly imported application in a second child process against the same database. Both smoke scripts use cross-platform process APIs with terminate, bounded wait, and kill fallback; they do not invoke a shell or GNU utility. They bypass environment proxies and fail clearly if the test database variable or connection is missing.
 
-The standalone run/SSE and M4 workflow smokes are deterministic and do not require PostgreSQL or external credentials. The M4 smoke uses the same composition seam as production with fixed model, geocoding, NLDI, WDFN, and Samples fixtures:
+The standalone run/SSE, M4 workflow, and M7 topology workflow smokes are deterministic and do not require PostgreSQL or external credentials. The M4 smoke uses the same composition seam as production with fixed model, geocoding, NLDI, WDFN, and Samples fixtures. The M7 smoke exercises production topology scheduling, dependency propagation, summary composition, failure/cancellation convergence, and the maximum-topology boundary with fixed fixtures:
 
 ```text
 python scripts/run_sse_smoke.py
 python scripts/m4_workflow_smoke.py
+python scripts/m7_topology_workflow_smoke.py
 ```
 
 Audit the checked-in 154-item capability manifest offline with `python scripts/audit_parameter_capabilities.py`. The optional `--refresh-official` flag performs a bounded read of the official USGS Water Data OGC API v1 parameter catalog and reports drift; it never modifies or enables manifest entries.
 
 The `python -m app` entry point explicitly uses one Uvicorn worker and ignores `WEB_CONCURRENCY`. On Windows it passes Uvicorn an explicit Selector loop factory compatible with psycopg async connections; macOS and Linux retain Uvicorn's `auto` selection. The run/history smoke gives its independent Uvicorn children the same platform-specific loop choice. Direct `asyncio.run()` callers keep the existing pre-start policy initialization. The entry point disables Uvicorn's default access log and gives active HTTP/SSE connections 2 seconds to finish during shutdown before entering application cleanup. Lifespan connects to PostgreSQL, requires the exact Alembic head, repairs saved non-terminal run/session state as `failed/service_interrupted`, and only then accepts traffic; it never runs DDL or resumes Agents automatically. User cancellation freezes active message prefixes and stores any later safe tail as history-only audit. Terminal live state is released only after workflow quiescence, required persistence, and the configured full grace period; saved history remains readable and SSE returns HTTP 410 afterward.
 
-The `Backend M1-M9` GitHub Actions workflow installs the same `backend/uv.lock`, provisions PostgreSQL 17, runs the complete test suite, the offline M4 audit, and all four smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation. The matrix is the reproducible CI entry; platform support is recorded as partial until each remote job has an actual passing result.
+The `Backend M1-M9` GitHub Actions workflow installs the same `backend/uv.lock`, provisions PostgreSQL 17, runs the complete test suite, the offline M4 audit, and all five smoke checks with Python 3.11 on Ubuntu, macOS, and Windows. Smoke steps also run with unusable environment proxies to verify local connection isolation. The matrix is the reproducible CI entry; platform support is recorded as partial until each remote job has an actual passing result.
 
 ## Test
 
@@ -112,6 +113,7 @@ PowerShell:
 ```powershell
 $env:WATERAGENTS_TEST_DB_NAME = 'wateragents_test'
 python -m pytest -q
+python scripts/m7_topology_workflow_smoke.py
 python scripts/health_smoke.py
 python scripts/run_history_smoke.py
 Remove-Item Env:WATERAGENTS_TEST_DB_NAME
@@ -122,6 +124,7 @@ bash:
 ```bash
 export WATERAGENTS_TEST_DB_NAME='wateragents_test'
 python -m pytest -q
+python scripts/m7_topology_workflow_smoke.py
 python scripts/health_smoke.py
 python scripts/run_history_smoke.py
 unset WATERAGENTS_TEST_DB_NAME
@@ -144,6 +147,8 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `12` |
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
 | `WATERAGENTS_TOPOLOGY_MAX_CONCURRENCY` | `8` |
+| `WATERAGENTS_WATERBODY_WORKFLOW_MAX_CONCURRENCY` | `4`; shared waterbody-session limit, valid range `1..32` |
+| `WATERAGENTS_RUN_SUMMARY_TIMEOUT_SECONDS` | `120`; one run-summary request deadline, valid range `(0, 300]` |
 | `WATERAGENTS_PREDICTION_BASELINE_HOURS` | `48` |
 | `WATERAGENTS_MAX_TARGET_PARAMETERS` | `6` |
 | `WATERAGENTS_QUERY_PARSER_TIMEOUT_SECONDS` | `45` |
@@ -179,7 +184,7 @@ Each waterbody token limit belongs to that exact provider/model entry. Copy the 
 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
-Production startup builds the complete M4 runtime before opening the database. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry with explicit token limits, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
+Production startup builds and binds the complete topology workflow before accepting traffic. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry with explicit token limits, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The run summarizer uses the run's exact waterbody model and its catalog token limits; it has no separate model setting or tools. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
 
 ### Local PostgreSQL with Compose
 
@@ -216,7 +221,7 @@ WATERAGENTS_DB_SSLMODE=verify-full
 WATERAGENTS_DB_SSLROOTCERT=/absolute/path/to/provider-ca.pem
 ```
 
-Run `wateragents-db upgrade` as an explicit deployment step, followed by `wateragents-db check`, before starting the application. Never grant the application more database privileges than its deployment model requires. Do not run multiple application workers or replicas: the first M3 release intentionally keeps live coordination and persistence ownership in one process.
+Run `wateragents-db upgrade` as an explicit deployment step, followed by `wateragents-db check`, before starting the application. Never grant the application more database privileges than its deployment model requires. Do not run multiple application workers or replicas: the scheduler, concurrency limiter, run-local upstream-result registry, live cancellation, and workflow quiescence are owned by one process and are not shared across workers.
 
 When moving to another OS or machine, check out the source and committed `backend/uv.lock`, create a fresh environment with either setup path above, enter `backend/`, activate that environment, recreate the uncommitted UTF-8 `.env`, start or select PostgreSQL 17, and run `wateragents-db upgrade` followed by `wateragents-db check`. Never copy an old virtual environment or database data directory between platforms.
 

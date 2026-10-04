@@ -42,7 +42,7 @@ def test_schema_columns_do_not_duplicate_config_results_or_full_content() -> Non
     }
 
 
-def test_schema_has_only_the_initial_query_indexes() -> None:
+def test_schema_has_only_the_current_query_indexes() -> None:
     index_names = {
         index.name
         for table in metadata.tables.values()
@@ -53,6 +53,7 @@ def test_schema_has_only_the_initial_query_indexes() -> None:
         "ix_analysis_runs_history",
         "ix_analysis_sessions_directory",
         "uq_analysis_sessions_parser_per_run",
+        "uq_analysis_sessions_run_summarizer_per_run",
         "uq_analysis_sessions_waterbody_per_run_comid",
         "ix_transcript_items_session_transcript",
     }

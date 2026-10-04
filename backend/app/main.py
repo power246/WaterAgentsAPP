@@ -23,6 +23,10 @@ from app.application.analysis_runs.persistence import (
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import AnalysisContext
+from app.application.evidence_tools import (
+    RunLocalUpstreamResultRegistry,
+    TranscriptUpstreamInferenceResultReader,
+)
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
 from app.application.transcripts.stream_models import RunSnapshotEvent
@@ -47,6 +51,7 @@ from app.infrastructure.runtime import (
     build_m4_runtime,
     build_m5_runtime,
     build_m6_runtime,
+    compose_m7_execution_stage,
     safe_m6_metadata,
 )
 from app.ports.clock import ClockPort
@@ -163,12 +168,29 @@ def create_app(
                     inline_content_bytes=resolved_settings.transcript_inline_max_bytes,
                     preview_bytes=resolved_settings.transcript_preview_bytes // 2,
                 )
+                query_topology_workflow = runtime.query_topology_workflow
+                result_reader = (
+                    TranscriptUpstreamInferenceResultReader(transcript_reader)
+                    if query_topology_workflow is not None
+                    else None
+                )
+                upstream_results = (
+                    RunLocalUpstreamResultRegistry(result_reader)
+                    if result_reader is not None
+                    else None
+                )
+                m5_options = (
+                    {"upstream_results": upstream_results}
+                    if upstream_results is not None
+                    else {}
+                )
                 async with build_m5_runtime(
                     resolved_settings,
                     operations=coordinator,
                     transcript_reader=transcript_reader,
                     capability_registry=resolved_parameter_capabilities,
                     clock=resolved_clock,
+                    **m5_options,
                 ) as m5_runtime:
                     coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
                     active_m6_builder = m6_runtime_builder or build_m6_runtime
@@ -183,6 +205,31 @@ def create_app(
                         result_id_factory=lambda: str(id_factory()),
                         error_id_factory=id_factory,
                     ) as m6_runtime:
+                        if (
+                            query_topology_workflow is not None
+                            and upstream_results is not None
+                            and result_reader is not None
+                        ):
+                            query_topology_workflow.bind_execution_stage(
+                                compose_m7_execution_stage(
+                                    resolved_settings,
+                                    operations=coordinator,
+                                    m5_runtime=m5_runtime,
+                                    m6_runtime=m6_runtime,
+                                    upstream_results=upstream_results,
+                                    result_reader=result_reader,
+                                    capability_registry=(
+                                        resolved_parameter_capabilities
+                                    ),
+                                    model_catalog=(
+                                        resolved_model_catalog.snapshot()
+                                    ),
+                                    clock=resolved_clock,
+                                    result_id_factory=lambda: str(id_factory()),
+                                    error_id_factory=id_factory,
+                                    operation_id_factory=id_factory,
+                                )
+                            )
                         application.state.run_coordinator = coordinator
                         application.state.transcript_reader = transcript_reader
                         application.state.transcript_store = active_store

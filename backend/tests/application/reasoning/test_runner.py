@@ -7,6 +7,11 @@ from uuid import UUID
 
 import pytest
 
+from app.application.analysis_runs.models import (
+    AgentSessionStatus,
+    SessionResultReference,
+    WaterbodySessionResultSummary,
+)
 from app.application.reasoning import (
     InferenceAssemblyError,
     ModelFitCapability,
@@ -46,6 +51,46 @@ from tests.application.reasoning.test_task_and_skeleton import _catalog
 
 
 ERROR_ID = UUID("90000000-0000-4000-8000-000000000001")
+RESULT_ITEM_ID = UUID("90000000-0000-4000-8000-000000000002")
+
+
+class RecordingTranscriptStore:
+    def __init__(self) -> None:
+        self.inputs = []
+        self.results = []
+        self.exchanges = []
+
+    async def write_agent_input(
+        self,
+        task,
+        *,
+        initial_evidence_bundle_ref=None,
+    ) -> None:
+        self.inputs.append((task, initial_evidence_bundle_ref))
+
+    async def complete_with_result(self, result):
+        self.results.append(result)
+        task = self.inputs[-1][0]
+        return task.session.model_copy(
+            update={
+                "status": AgentSessionStatus.COMPLETED,
+                "updated_at": result.generated_at,
+                "result_ref": SessionResultReference(
+                    run_id=task.task.run_id,
+                    item_id=RESULT_ITEM_ID,
+                ),
+                "result_summary": WaterbodySessionResultSummary(
+                    result_id=result.result_id,
+                    target_comid=result.target_comid,
+                    risk_level=result.overall_assessment.risk_level,
+                    availability=result.overall_assessment.availability,
+                    overall_confidence=result.overall_confidence,
+                ),
+            }
+        )
+
+    async def write_validated_exchange(self, audit) -> None:
+        self.exchanges.append(audit)
 
 
 class AdaptiveWaterbodyModelPort:
@@ -258,7 +303,7 @@ class AdaptiveWaterbodyModelPort:
         }
 
 
-def _runner(loop, port, *, planner=None, clock=None):
+def _runner(loop, port, *, planner=None, clock=None, transcript_store=None):
     prompt_builder = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY)
     model_fit = ModelFitCapability(
         model=MODEL,
@@ -280,6 +325,7 @@ def _runner(loop, port, *, planner=None, clock=None):
         result_id_factory=lambda: "result:m8:fixture",
         error_id_factory=lambda: ERROR_ID,
         clock=clock or FixedClock(),
+        transcript_store=transcript_store,
     )
 
 
@@ -322,6 +368,36 @@ def test_runner_executes_planning_batches_synthesis_and_deterministic_assembly()
     asyncio.run(exercise())
 
 
+def test_runner_reuses_m7_preflight_handoff_without_duplicate_collection() -> None:
+    async def exercise() -> None:
+        port = AdaptiveWaterbodyModelPort()
+        scope, store, loop, task = await _fixture(port, water_mode="full")
+        handoff = await loop._acquisition.start(scope)
+        preflight_calls = len(store.calls)
+        transcript = RecordingTranscriptStore()
+
+        outcome = await _runner(
+            loop,
+            port,
+            transcript_store=transcript,
+        ).run(
+            task,
+            deadline=FixedClock().now() + timedelta(minutes=5),
+            initial_handoff=handoff,
+        )
+
+        assert outcome.status is WaterbodyAgentRunStatus.COMPLETED
+        assert len(store.calls) == preflight_calls
+        assert outcome.planning_counts is not None
+        assert outcome.planning_counts.preflight_tool_calls == len(
+            handoff.tool_result_refs
+        )
+        assert transcript.inputs == [(task, handoff.bundle_ref)]
+        assert transcript.results == [outcome.result]
+
+    asyncio.run(exercise())
+
+
 def test_runner_all_fixed_station_path_skips_batch_and_synthesis():
     async def exercise():
         port = AdaptiveWaterbodyModelPort()
@@ -344,7 +420,7 @@ def test_runner_all_fixed_station_path_skips_batch_and_synthesis():
     asyncio.run(exercise())
 
 
-def test_stationless_natural_absence_records_planning_but_skips_final_reasoning():
+def test_stationless_natural_absence_skips_all_model_reasoning():
     async def exercise():
         port = AdaptiveWaterbodyModelPort()
         _scope, _store, loop, task = await _fixture(
@@ -363,10 +439,8 @@ def test_stationless_natural_absence_records_planning_but_skips_final_reasoning(
 
         assert outcome.status is WaterbodyAgentRunStatus.COMPLETED, outcome.error
         assert outcome.result is not None
-        assert [call.phase for call in port.calls] == [
-            WaterbodyModelPhase.EVIDENCE_PLANNING
-        ]
-        assert outcome.result.model_execution_summary.planning_calls == 1
+        assert port.calls == []
+        assert outcome.result.model_execution_summary.planning_calls == 0
         assert outcome.result.model_execution_summary.reasoning_batches == 0
         assert outcome.result.model_execution_summary.synthesis_calls == 0
 
@@ -607,7 +681,7 @@ def test_budget_exhaustion_with_all_required_cells_blocked_is_not_natural_empty(
         _scope, _store, loop, task = await _fixture(
             port,
             with_station=False,
-            with_upstream=False,
+            with_upstream=True,
         )
         outcome = await _runner(BudgetExhaustedLoop(loop), port).run(
             task,

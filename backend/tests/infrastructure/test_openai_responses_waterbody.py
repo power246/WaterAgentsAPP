@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from app.application.analysis_runs.workflow import CancellationToken
+from app.application.canonical_json import canonical_json_digest
 from app.application.reasoning.model_models import (
     RefusalCompleted,
     StructuredOutputCompleted,
@@ -26,6 +27,12 @@ from app.application.reasoning.model_models import (
     WaterbodyToolDescriptor,
 )
 from app.application.reasoning.model_protocol import consume_waterbody_model_stream
+from app.application.run_summary.models import (
+    RunSummaryJsonSchema,
+    RunSummaryModelMessage,
+    RunSummaryModelRequest,
+)
+from app.application.transcripts.models import TranscriptContentRef
 from app.domain import ItemReference, ModelSelection
 from app.infrastructure.adapters import OpenAIResponsesWaterbodyAdapter
 from app.infrastructure.http import ProviderHttpClient
@@ -115,6 +122,45 @@ def model_request(
     )
 
 
+def summary_model_request() -> RunSummaryModelRequest:
+    values = {
+        "schema_version": 1,
+        "run_id": UUID("10000000-0000-4000-8000-000000000001"),
+        "session_id": UUID("20000000-0000-4000-8000-000000000001"),
+        "operation_id": OPERATION_ID,
+        "model": MODEL,
+        "input_ref": TranscriptContentRef(
+            run_id=UUID("10000000-0000-4000-8000-000000000001"),
+            item_id=UUID("40000000-0000-4000-8000-000000000001"),
+        ),
+        "input_digest": "sha256:summary-input",
+        "system_prompt": "Explain only the supplied run summary facts.",
+        "messages": (
+            RunSummaryModelMessage(
+                message_id="summary-input",
+                role="user",
+                text='{"target_comid":"300"}',
+            ),
+        ),
+        "response_schema": RunSummaryJsonSchema(
+            name="run_summary",
+            schema_text=json.dumps(
+                {
+                    "type": "object",
+                    "properties": {"decision": {"const": "evidence_ready"}},
+                    "required": ["decision"],
+                    "additionalProperties": False,
+                }
+            ),
+        ),
+        "deadline": datetime.now(UTC) + timedelta(seconds=2),
+    }
+    return RunSummaryModelRequest(
+        **values,
+        request_digest=canonical_json_digest(values),
+    )
+
+
 def load_fixture(name: str):
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
@@ -180,7 +226,7 @@ def client(
 
 async def collect(
     http: ProviderHttpClient,
-    request: WaterbodyModelRequest,
+    request: WaterbodyModelRequest | RunSummaryModelRequest,
     *,
     api_key: str = "fixture-api-key",
     base_url: str = "https://api.openai.test/v1",
@@ -300,6 +346,33 @@ def test_non_planning_phases_send_exact_empty_tool_roster(
     events = run(exercise())
     assert not any(isinstance(item, UsageReported) for item in events)
     assert json.loads(requests[0].content)["tools"] == []
+
+
+def test_run_summary_request_reuses_adapter_with_an_exact_empty_tool_roster() -> None:
+    requests: list[httpx.Request] = []
+    outcome = load_fixture("openai_waterbody_terminal_outcomes.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return response_for(request, (encode_events(outcome["completed_without_usage"]),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(http, summary_model_request())
+
+    events = run(exercise())
+    payload = json.loads(requests[0].content)
+    assert isinstance(events[-1], Terminal)
+    assert payload["model"] == MODEL.model
+    assert payload["tools"] == []
+    assert payload["input"] == [
+        {
+            "type": "message",
+            "role": "user",
+            "content": '{"target_comid":"300"}',
+        }
+    ]
+    assert payload["text"]["format"]["name"] == "run_summary"
 
 
 def test_tool_result_message_is_sent_as_function_call_output() -> None:

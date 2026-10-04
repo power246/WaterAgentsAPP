@@ -10,9 +10,12 @@ from uuid import UUID
 
 from app.application.analysis_runs.models import (
     AgentRole,
+    RunCompletedEvent,
     RunCreatedEvent,
     SessionSummary,
+    TopologyRunResultSummary,
 )
+from app.application.analysis_runs.topology_result_models import TopologyRunResult
 from app.application.analysis_runs.persistence import PersistenceInfo
 from app.application.query_understanding.context_models import AnalysisContext
 from app.application.transcripts.buffer import locate_content
@@ -23,6 +26,7 @@ from app.application.transcripts.models import (
     StoredTranscriptContent,
     StoredTranscriptItem,
     TranscriptItem,
+    TranscriptContentRef,
 )
 from app.application.transcripts.read_models import (
     AnalysisContextSummary,
@@ -293,13 +297,18 @@ class TranscriptReader:
         if checked is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
         safe_item, text, _ = checked
+        public_text = self._registry.public_content_body(
+            safe_item.content_type,
+            safe_item.content_schema_version,
+            text,
+        )
         return TranscriptContentResponse(
             run_id=run_id,
             item_id=item_id,
             content_type=safe_item.content_type,
             content_schema_version=safe_item.content_schema_version,
-            content_bytes=safe_item.content_bytes,
-            text=text,
+            content_bytes=len(public_text.encode("utf-8")),
+            text=public_text,
             source=selected.source,
             persistence=selected.persistence,
             issues=self._issues((item,), ()),
@@ -316,13 +325,21 @@ class TranscriptReader:
         selected = await self._select(run_id, view)
         if session_id is not None:
             self._session(selected.stored, session_id)
-        item = next(
+        stored_item = next(
             (
                 candidate
-                for candidate in self._parse_items(selected.stored)
-                if candidate.item.item_id == item_id
+                for candidate in sorted(
+                    selected.stored.items,
+                    key=lambda candidate: candidate.transcript_sequence,
+                )
+                if candidate.item_id == item_id
             ),
             None,
+        )
+        item = (
+            self._parse_item(selected.stored, stored_item)
+            if stored_item is not None
+            else None
         )
         if (
             item is None
@@ -333,6 +350,23 @@ class TranscriptReader:
         if item.body is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
         return item
+
+    async def read_registered_session_items(
+        self,
+        run_id: UUID,
+        session_id: UUID,
+        view: ReadView,
+    ) -> tuple[ReadTranscriptItem, ...]:
+        selected = await self._select(run_id, view)
+        self._session(selected.stored, session_id)
+        return tuple(
+            item
+            for item in self._visible_items(
+                self._parse_items(selected.stored),
+                view,
+            )
+            if item.item.session_id == session_id and item.body is not None
+        )
 
     async def get_historical_status(self, run_id: UUID) -> RunStatusResponse:
         selected = await self._select(run_id, ReadView.HISTORY)
@@ -447,6 +481,13 @@ class TranscriptReader:
             for item in stored_items
             if item.session_id is None and item.transcript_sequence == 2
         )
+        terminal_items = tuple(
+            item
+            for item in stored_items
+            if item.session_id is None
+            and item.content_type == "lifecycle_event"
+            and item.transcript_sequence > 2
+        )
         return StoredRunRead(
             run=StoredRunHeader(
                 run_id=live.run.run_id,
@@ -456,6 +497,9 @@ class TranscriptReader:
                 query=live.query,
                 request_item_id=request_item.item_id,
                 created_item_id=created_item.item_id,
+                terminal_item_id=(
+                    terminal_items[-1].item_id if terminal_items else None
+                ),
             ),
             sessions=live.sessions,
             items=tuple(stored_items),
@@ -504,6 +548,11 @@ class TranscriptReader:
             ))
         context_summary, context_issues = self._context_summary(stored, parsed)
         issues.extend(context_issues)
+        result_ref, result_summary, result_issues = self._result_summary(
+            stored,
+            parsed,
+        )
+        issues.extend(result_issues)
         return RunSummary(
             run_id=stored.run.run_id,
             status=stored.run.status,
@@ -512,7 +561,95 @@ class TranscriptReader:
             query=stored.run.query,
             configuration=configuration,
             context_summary=context_summary,
+            result_ref=result_ref,
+            result_summary=result_summary,
         ), tuple(issues)
+
+    def _result_summary(
+        self,
+        stored: StoredRunRead,
+        parsed: tuple[ReadTranscriptItem, ...],
+    ) -> tuple[
+        TranscriptContentRef | None,
+        TopologyRunResultSummary | None,
+        tuple[ReadIssue, ...],
+    ]:
+        terminal_id = stored.run.terminal_item_id
+        if terminal_id is None:
+            return None, None, ()
+        terminal = next(
+            (item for item in parsed if item.item.item_id == terminal_id),
+            None,
+        )
+        if terminal is None or terminal.parse_error is not None:
+            return None, None, (ReadIssue(
+                item_id=terminal_id,
+                error=(
+                    terminal.parse_error
+                    if terminal is not None and terminal.parse_error is not None
+                    else self._read_error(
+                        "transcript_content_corrupt",
+                        "The run terminal record is unavailable.",
+                    )
+                ),
+            ),)
+        if not isinstance(terminal.body, RunCompletedEvent):
+            return None, None, ()
+        payload = terminal.body.payload
+        if payload.result_ref is None or payload.result_summary is None:
+            return None, None, ()
+        result = next(
+            (
+                item
+                for item in parsed
+                if item.item.item_id == payload.result_ref.item_id
+            ),
+            None,
+        )
+        invalid = (
+            result is None
+            or result.parse_error is not None
+            or result.item.session_id is not None
+            or not isinstance(result.body, TopologyRunResult)
+            or result.body.run_id != stored.run.run_id
+        )
+        if invalid:
+            return None, None, (ReadIssue(
+                item_id=payload.result_ref.item_id,
+                error=(
+                    result.parse_error
+                    if result is not None and result.parse_error is not None
+                    else self._read_error(
+                        "transcript_content_corrupt",
+                        "The topology run result is invalid.",
+                    )
+                ),
+            ),)
+        expected = TopologyRunResultSummary(
+            target_comid=result.body.target_comid,
+            target_result_summary=result.body.target_result_summary,
+            graph_coverage=result.body.graph_coverage,
+            outcome_counts=result.body.outcome_counts,
+            summary_status=result.body.summary.status,
+            summary_result_ref=result.body.summary.result_ref,
+            summary_error=result.body.summary.public_error,
+        )
+        if expected != payload.result_summary:
+            return None, None, (ReadIssue(
+                item_id=terminal_id,
+                error=self._read_error(
+                    "transcript_content_corrupt",
+                    "The run result projection does not match its stored result.",
+                ),
+            ),)
+        return (
+            TranscriptContentRef(
+                run_id=payload.result_ref.run_id,
+                item_id=payload.result_ref.item_id,
+            ),
+            expected,
+            (),
+        )
 
     def _context_summary(
         self,
@@ -608,44 +745,46 @@ class TranscriptReader:
         ), ()
 
     def _parse_items(self, stored: StoredRunRead) -> tuple[ReadTranscriptItem, ...]:
-        parsed: list[ReadTranscriptItem] = []
-        for item in sorted(
-            stored.items,
-            key=lambda candidate: candidate.transcript_sequence,
-        ):
-            checked = self._checked_body(stored, item)
-            if checked is None:
-                parsed.append(ReadTranscriptItem(
-                    item=item,
-                    content_ref={"run_id": item.run_id, "item_id": item.item_id},
-                    parse_status=ParseStatus.CORRUPT,
-                    parse_error=self._read_error(
-                        "transcript_content_corrupt",
-                        "This transcript item's full content is unavailable.",
-                    ),
-                ))
-            else:
-                safe_item, safe_body, stored_bytes_match = checked
-                if not stored_bytes_match:
-                    parsed.append(ReadTranscriptItem(
-                        item=safe_item,
-                        content_ref={
-                            "run_id": item.run_id,
-                            "item_id": item.item_id,
-                        },
-                        parse_status=ParseStatus.CORRUPT,
-                        parse_error=self._read_error(
-                            "transcript_content_corrupt",
-                            "This transcript item contains invalid content.",
-                        ),
-                    ))
-                else:
-                    parsed.append(self._registry.parse(
-                        safe_item,
-                        safe_body,
-                        error_id_factory=self._error_id_factory,
-                    ))
-        return tuple(parsed)
+        return tuple(
+            self._parse_item(stored, item)
+            for item in sorted(
+                stored.items,
+                key=lambda candidate: candidate.transcript_sequence,
+            )
+        )
+
+    def _parse_item(
+        self,
+        stored: StoredRunRead,
+        item: StoredTranscriptItem,
+    ) -> ReadTranscriptItem:
+        checked = self._checked_body(stored, item)
+        if checked is None:
+            return ReadTranscriptItem(
+                item=item,
+                content_ref={"run_id": item.run_id, "item_id": item.item_id},
+                parse_status=ParseStatus.CORRUPT,
+                parse_error=self._read_error(
+                    "transcript_content_corrupt",
+                    "This transcript item's full content is unavailable.",
+                ),
+            )
+        safe_item, safe_body, stored_bytes_match = checked
+        if not stored_bytes_match:
+            return ReadTranscriptItem(
+                item=safe_item,
+                content_ref={"run_id": item.run_id, "item_id": item.item_id},
+                parse_status=ParseStatus.CORRUPT,
+                parse_error=self._read_error(
+                    "transcript_content_corrupt",
+                    "This transcript item contains invalid content.",
+                ),
+            )
+        return self._registry.parse(
+            safe_item,
+            safe_body,
+            error_id_factory=self._error_id_factory,
+        )
 
     def _checked_body(
         self,

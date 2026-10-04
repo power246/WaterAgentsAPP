@@ -62,6 +62,18 @@ from app.application.evidence_tools.scope import (
     assemble_evidence_session_scope,
     with_evidence_rule_plan,
 )
+from app.application.evidence_tools.upstream_projection import (
+    ResolvedInferenceResult,
+    TranscriptUpstreamInferenceResultReader,
+    UpstreamInferenceResultReader,
+)
+from app.application.evidence_tools.upstream_result_store import (
+    OutcomeAlreadyPublishedError,
+    OutcomeIdentityError,
+    OutcomesNotReadyError,
+    RunLocalUpstreamResultStore,
+    RunLocalUpstreamResultRegistry,
+)
 from app.application.evidence_tools.authorization import (
     AuthorizedEvidenceRequest,
     authorize_evidence_tool_request,
@@ -113,6 +125,14 @@ __all__ = [
     "EvidenceWindow",
     "WaterbodyGeometryUnavailableError",
     "RunLocalSingleFlight",
+    "RunLocalUpstreamResultStore",
+    "RunLocalUpstreamResultRegistry",
+    "ResolvedInferenceResult",
+    "TranscriptUpstreamInferenceResultReader",
+    "UpstreamInferenceResultReader",
+    "OutcomeAlreadyPublishedError",
+    "OutcomeIdentityError",
+    "OutcomesNotReadyError",
     "StoredPolicyObservations",
     "assemble_evidence_session_scope",
     "with_evidence_rule_plan",

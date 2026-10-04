@@ -54,6 +54,7 @@ class AppSettings(BaseSettings):
     topology_max_hops: int = Field(default=12, ge=1, le=100)
     topology_max_nodes: int = Field(default=128, ge=1, le=10000)
     topology_max_concurrency: int = Field(default=8, ge=1, le=64)
+    waterbody_workflow_max_concurrency: int = Field(default=4, ge=1, le=32)
     prediction_baseline_hours: int = Field(default=48, ge=1, le=168)
     max_target_parameters: int = Field(default=6, ge=1, le=6)
     query_parser_timeout_seconds: float = Field(
@@ -131,6 +132,12 @@ class AppSettings(BaseSettings):
         le=600,
         allow_inf_nan=False,
     )
+    run_summary_timeout_seconds: float = Field(
+        default=120,
+        gt=0,
+        le=300,
+        allow_inf_nan=False,
+    )
     nws_user_agent_project: str = Field(default="WaterAgents", min_length=1)
     nws_user_agent_contact: str = Field(
         default="wateragents@example.invalid",
@@ -206,6 +213,7 @@ class AppSettings(BaseSettings):
         "topology_max_hops",
         "topology_max_nodes",
         "topology_max_concurrency",
+        "waterbody_workflow_max_concurrency",
         "prediction_baseline_hours",
         "max_target_parameters",
         "provider_http_max_response_bytes",
@@ -245,6 +253,7 @@ class AppSettings(BaseSettings):
         "evidence_total_deadline_seconds",
         "reasoning_model_timeout_seconds",
         "reasoning_session_deadline_seconds",
+        "run_summary_timeout_seconds",
         "topology_stage_timeout_seconds",
         mode="before",
     )

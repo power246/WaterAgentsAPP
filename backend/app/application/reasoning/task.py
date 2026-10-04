@@ -8,6 +8,9 @@ from app.application.analysis_runs.models import (
     RunStatus,
     SessionSummary,
 )
+from app.application.analysis_runs.topology_result_models import (
+    WaterbodyDependencyManifest,
+)
 from app.application.analysis_runs.workflow import CancellationToken
 from app.application.evidence_tools import (
     EvidenceScopeViolationError,
@@ -38,6 +41,7 @@ class WaterbodyAgentTask:
     waterbody_model: ModelSelection
     memory_mode: MemoryMode
     cancellation_token: CancellationToken
+    dependency_manifest: WaterbodyDependencyManifest | None = None
     agent_role: AgentRole = AgentRole.WATERBODY
 
     def __post_init__(self) -> None:
@@ -115,6 +119,8 @@ async def validate_waterbody_agent_task(
         "task_run_context_timezone_mismatch",
     )
     _validate_scope_facts(scope, context=context, topology=topology)
+    if task.dependency_manifest is not None:
+        _validate_dependency_manifest(task, task.dependency_manifest)
 
     try:
         session = await session_reader.read_agent_session(scope, scope.session_id)
@@ -210,6 +216,30 @@ def _validate_scope_facts(
     _require(
         scope.direct_upstream_comids == direct_upstreams,
         "task_scope_upstreams_mismatch",
+    )
+
+
+def _validate_dependency_manifest(
+    task: WaterbodyAgentTask,
+    manifest: WaterbodyDependencyManifest,
+) -> None:
+    _require(manifest.run_id == task.run_id, "task_dependency_run_mismatch")
+    _require(
+        manifest.session_id == task.session_id,
+        "task_dependency_session_mismatch",
+    )
+    _require(
+        manifest.target_comid == task.target_comid,
+        "task_dependency_comid_mismatch",
+    )
+    _require(
+        str(manifest.topology_ref.item_id) == task.topology_ref.item_id,
+        "task_dependency_topology_mismatch",
+    )
+    _require(
+        tuple(item.upstream_comid for item in manifest.dependencies)
+        == task.evidence_scope.direct_upstream_comids,
+        "task_dependency_scope_mismatch",
     )
 
 

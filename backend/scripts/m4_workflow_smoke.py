@@ -85,6 +85,18 @@ class FixedClock:
         return NOW
 
 
+class CompleteM4SmokeAfterTopology:
+    async def execute(
+        self,
+        context,
+        analysis_context,
+        graph,
+        *,
+        topology_item_id,
+    ) -> None:
+        del context, analysis_context, graph, topology_item_id
+
+
 class FixtureParser:
     def __init__(self, *, query_fallback: bool) -> None:
         self.query_fallback = query_fallback
@@ -385,17 +397,19 @@ def build_runtime(profile: FixtureProfile, *, query_fallback: bool):
         analysis_timezone="America/New_York",
         log_level="warning",
     )
+    workflow = compose_m4_workflow(
+        settings,
+        parser=parser,
+        context_resolver=context_resolver,
+        topology_builder=topology_builder,
+        parameter_capabilities=registry,
+        error_id_factory=uuid4,
+    )
+    workflow.bind_execution_stage(CompleteM4SmokeAfterTopology())
     application = create_app(
         settings,
         clock=FixedClock(),
-        workflow=compose_m4_workflow(
-            settings,
-            parser=parser,
-            context_resolver=context_resolver,
-            topology_builder=topology_builder,
-            parameter_capabilities=registry,
-            error_id_factory=uuid4,
-        ),
+        workflow=workflow,
         transcript_store=store,
         model_catalog=MODEL_CATALOG,
         parameter_capability_registry=registry,

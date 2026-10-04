@@ -14,6 +14,9 @@ from app.application.analysis_runs.models import (
     SessionSummary,
 )
 from app.application.analysis_runs.persistence import PersistenceInfo
+from app.application.analysis_runs.topology_result_models import (
+    TopologyRunResultSummary,
+)
 from app.application.query_understanding.context_models import ParameterIntentSource
 from app.application.transcripts.models import (
     ParseStatus,
@@ -86,6 +89,8 @@ class RunSummary(DomainModel):
     query: NonEmptyString
     configuration: AnalysisConfigurationSnapshot | None = None
     context_summary: AnalysisContextSummary | None
+    result_ref: TranscriptContentRef | None
+    result_summary: TopologyRunResultSummary | None
 
 
 class RunHistoryItem(RunSummary):
@@ -105,10 +110,9 @@ class TranscriptScope(DomainModel):
             return self
         if self.agent_role is None:
             raise ValueError("session-owned transcript scope requires an Agent role")
-        if self.agent_role is AgentRole.QUERY_PARSER and self.target_comid is not None:
-            raise ValueError("query_parser scope must not have target_comid")
-        if self.agent_role is AgentRole.WATERBODY and self.target_comid is None:
-            raise ValueError("waterbody scope requires target_comid")
+        requires_comid = self.agent_role is AgentRole.WATERBODY
+        if requires_comid != (self.target_comid is not None):
+            raise ValueError("only waterbody scope requires target_comid")
         return self
 
 

@@ -225,8 +225,8 @@ async def _wait_persistence(
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
     postgres_settings: AppSettings,
 ) -> None:
-    assert asyncio.run(check_database_schema(postgres_settings)) == "20260913_01"
-    assert upgrade_database(postgres_settings) == "20260913_01"
+    assert asyncio.run(check_database_schema(postgres_settings)) == "20261003_01"
+    assert upgrade_database(postgres_settings) == "20261003_01"
 
     async def inspect_schema() -> tuple[set[str], set[str], list[object]]:
         engine = create_database_engine(postgres_settings)
@@ -403,6 +403,70 @@ def test_database_rejects_duplicate_key_sequence_and_agent_identity(
                             session_id=duplicate_waterbody_id,
                             item_id=duplicate_waterbody_item_id,
                             sequence=6,
+                            content_type="lifecycle_event",
+                        ),
+                    ),
+                ),
+            )
+
+    asyncio.run(exercise())
+
+
+def test_database_allows_exactly_one_run_summarizer_without_comid(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, run_batch = _run_batch()
+        now = datetime.now(UTC)
+        session_id = uuid4()
+        created_item_id = uuid4()
+        summarizer = PersistedSessionRecord(
+            session_id=session_id,
+            run_id=run_id,
+            agent_role="run_summarizer",
+            status="pending",
+            created_at=now,
+            updated_at=now,
+            created_item_id=created_item_id,
+        )
+        await _commit(
+            postgres_settings,
+            PersistenceBatch(
+                runs=run_batch.runs,
+                sessions=(summarizer,),
+                items=(
+                    *run_batch.items,
+                    _item(
+                        run_id=run_id,
+                        session_id=session_id,
+                        item_id=created_item_id,
+                        sequence=3,
+                        content_type="lifecycle_event",
+                    ),
+                ),
+            ),
+        )
+
+        duplicate_session_id = uuid4()
+        duplicate_created_item_id = uuid4()
+        with pytest.raises(IntegrityError):
+            await _commit(
+                postgres_settings,
+                PersistenceBatch(
+                    sessions=(
+                        summarizer.model_copy(
+                            update={
+                                "session_id": duplicate_session_id,
+                                "created_item_id": duplicate_created_item_id,
+                            }
+                        ),
+                    ),
+                    items=(
+                        _item(
+                            run_id=run_id,
+                            session_id=duplicate_session_id,
+                            item_id=duplicate_created_item_id,
+                            sequence=4,
                             content_type="lifecycle_event",
                         ),
                     ),

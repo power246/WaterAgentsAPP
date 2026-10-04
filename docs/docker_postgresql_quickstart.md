@@ -16,6 +16,44 @@
 
 实际值可由 `backend/.env` 覆盖。密码只保存在未提交的 `.env` 中，不要打印或写入文档。
 
+### Windows Docker 数据位置
+
+当前 Windows 开发机的 Docker Desktop Linux 数据盘位于
+`D:\DockerData\DockerDesktopWSL\disk\docker_data.vhdx`。镜像、容器和命名卷都在这块
+VHDX 中，因此 PostgreSQL 的 `wateragents_wateragents-postgres-data` 命名卷也随数据盘
+一起迁移。Docker Desktop 程序本体仍由 Windows 安装器管理，默认位于
+`C:\Program Files\Docker\Docker`；项目数据库是否位于 D 盘应以数据盘设置和 VHDX
+实际路径为准，而不是以程序安装目录为准。
+
+迁移或再次变更位置时使用 Docker Desktop 的
+**Settings > Resources > Advanced > Disk image location**，选择 `D:\DockerData` 后，
+当前版本会使用其下的 `DockerDesktopWSL` 子目录。不要在 Docker Desktop 运行时手工
+移动 VHDX，也不要直接猜测或修改 `settings-store.json` 中的内部字段。
+
+迁移前先停止 PostgreSQL 并保留两层回滚材料：不含角色口令的 `pg_dumpall` 逻辑备份，
+以及 Docker Desktop 完全停止后复制的原始 `docker_data.vhdx`。本机 2026-10-03 的回滚
+目录为 `D:\DockerData\MigrationBackup\20261003-173714`；其中 VHDX 已与迁移前源文件
+按 SHA-256 核对一致。确认长期运行稳定前不要删除该目录。
+
+迁移完成后至少检查：
+
+```powershell
+# Docker Desktop 设置中确认 Disk image location 为 D:\DockerData\DockerDesktopWSL
+Test-Path 'D:\DockerData\DockerDesktopWSL\disk\docker_data.vhdx'
+Test-Path "$env:LOCALAPPDATA\Docker\wsl\disk\docker_data.vhdx"  # 应为 False
+
+Set-Location backend
+docker compose --env-file .env -f compose.yaml up -d --wait
+docker compose --env-file .env -f compose.yaml exec postgres `
+  psql -U wateragents -d postgres -Atc `
+  'SELECT datname FROM pg_database WHERE datallowconn AND NOT datistemplate ORDER BY datname;'
+wateragents-db check
+```
+
+本机迁移验收已确认 Docker Desktop 4.93.0 / Engine 29.8.1 重启后仍使用 D 盘；容器为
+`healthy`，`postgres`、`wateragents`、`wateragents_test` 均存在，迁移前后规范化逻辑
+dump 的 SHA-256 一致；M7 Milestone 1 后当前 schema head 为 `20261003_01`（在既有四表上增加 `run_summarizer` session CHECK/唯一索引），health 与 run/history/restart smoke 通过。
+
 ## 首次启动
 
 ```powershell
@@ -103,7 +141,7 @@ docker info
 若 Desktop 已在启动阶段崩溃，导致上述关闭或升级命令无法连接后端，只恢复运行时目录，不要执行 Factory Reset、`docker system prune` 或删除卷：
 
 1. 完全退出 Docker Desktop，确认 `Docker Desktop`、`com.docker.backend`、`com.docker.build` 和 `docker-model` 进程均已停止，`com.docker.service` 与 `docker-desktop` WSL 实例也不在运行。
-2. 将整个 `%LOCALAPPDATA%\Docker\run` 移动为带时间戳的备份，再创建空的 `run` 目录。不要单独删除失效的 `dockerInference` reparse point，也不要触碰 `%LOCALAPPDATA%\Docker\wsl`。
+2. 将整个 `%LOCALAPPDATA%\Docker\run` 移动为带时间戳的备份，再创建空的 `run` 目录。不要单独删除失效的 `dockerInference` reparse point，也不要触碰当前 Disk image location；本机当前为 `D:\DockerData\DockerDesktopWSL`，未迁移的默认环境才是 `%LOCALAPPDATA%\Docker\wsl`。
 3. 启动 Docker Desktop，升级并关闭 Model Runner，然后至少执行一次 `docker desktop restart` 验证可连续启动。
 4. 用 `docker ps -a` 和 `docker volume ls` 确认容器与卷仍在，再重新执行本指南的 Compose 启动命令。
 

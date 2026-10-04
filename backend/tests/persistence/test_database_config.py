@@ -280,7 +280,7 @@ def test_invalid_transcript_thresholds_are_rejected() -> None:
 def test_alembic_has_exactly_one_packaged_head() -> None:
     config = alembic_config(AppSettings(db_password="x"))
     assert Path(config.get_main_option("script_location")).is_absolute()
-    assert expected_schema_head(config) == "20260913_01"
+    assert expected_schema_head(config) == "20261003_01"
 
 
 class _Revision:

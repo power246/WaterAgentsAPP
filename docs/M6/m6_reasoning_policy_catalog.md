@@ -1,8 +1,10 @@
 # M6 Reasoning Policy Catalog
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 > 状态：当前唯一 V1 的 typed reasoning policy、四阶段 prompt、确定性 sufficiency/validation、result assembly 与离线 audit 已完成本机实现和验证。本文件是设计目录；运行时以 `application/reasoning/prompt_policy.py` 的 immutable typed policy 及其 digest 为事实源，不解析 Markdown，也不复制多套规则。
+
+> M7 接力说明：下表仍是当前 M6 runtime 事实。M7 将在调用 M6 planning 前执行独立 dependency gate：stationless 全部直接上游 insufficient/invalid 时直接复用 M6 skeleton/assembler 生成 0-model 不足结果。该 gate 属于 M7，不能把本次文档同步当作已实现证据。
 
 ## 1. Policy 分层
 

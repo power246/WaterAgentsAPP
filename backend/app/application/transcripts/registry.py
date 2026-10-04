@@ -11,6 +11,7 @@ from app.application.analysis_runs.models import (
     PublicError,
     RunCompletedEvent,
     RunFailedEvent,
+    SessionCompletedEvent,
     SessionFailedEvent,
 )
 from app.application.query_understanding.context_models import AnalysisContext
@@ -105,6 +106,7 @@ class ContentRegistration:
     errors: ErrorExtractor = _no_references
     public_projection: PublicProjection | None = None
     history_only_possible: bool = False
+    project_full_content: bool = False
     writable: bool = True
     preserve_unset: bool = False
 
@@ -399,6 +401,24 @@ class TranscriptRegistry:
         body = registration.adapter.validate_json(safe_body)
         return _serialize_safe_json(registration.public_projection(body))
 
+    def public_content_body(
+        self,
+        content_type: str,
+        content_schema_version: int,
+        safe_body: str,
+    ) -> str:
+        registration = self._registrations.get(
+            (content_type, content_schema_version)
+        )
+        if registration is None or not registration.project_full_content:
+            return safe_body
+        if registration.public_projection is None:
+            raise UnsupportedTranscriptContentError(
+                "full-content projection requires a public projection"
+            )
+        body = registration.adapter.validate_json(safe_body)
+        return _serialize_safe_json(registration.public_projection(body))
+
     def references_from_read(self, item: ReadTranscriptItem) -> tuple[UUID, ...]:
         registration = self._registrations.get(
             (item.item.content_type, item.item.content_schema_version)
@@ -459,11 +479,23 @@ def _runtime_visibility(body: object) -> ContentVisibility:
     )
 
 
+def _history_only_visibility(body: object) -> ContentVisibility:
+    del body
+    return ContentVisibility.HISTORY_ONLY
+
+
 def _lifecycle_errors(body: object) -> tuple[UUID, ...]:
     if isinstance(body, (RunFailedEvent, SessionFailedEvent)):
         return (body.payload.error.error_id,)
     if isinstance(body, RunCompletedEvent) and body.payload.warning is not None:
         return (body.payload.warning.error_id,)
+    return ()
+
+
+def _lifecycle_references(body: object) -> tuple[UUID, ...]:
+    if isinstance(body, (RunCompletedEvent, SessionCompletedEvent)):
+        reference = body.payload.result_ref
+        return (reference.item_id,) if reference is not None else ()
     return ()
 
 
@@ -568,6 +600,94 @@ def _inference_result_metadata(body: object) -> TranscriptMetadata:
     )
 
 
+def _waterbody_manifest_references(body: object) -> tuple[UUID, ...]:
+    from app.application.analysis_runs.topology_result_models import (
+        WaterbodyDependencyManifest,
+    )
+
+    if not isinstance(body, WaterbodyDependencyManifest):
+        raise TypeError("dependency manifest reference extractor received another type")
+    return _unique_uuid_references((
+        body.topology_ref.item_id,
+        *(
+            dependency.result_ref.item_id
+            for dependency in body.dependencies
+            if dependency.result_ref is not None
+        ),
+        *(
+            reference.item_id
+            for dependency in body.dependencies
+            for reference in dependency.usable_cell_refs
+        ),
+    ))
+
+
+def _run_summary_input_references(body: object) -> tuple[UUID, ...]:
+    from app.application.run_summary.models import RunSummaryInput
+
+    if not isinstance(body, RunSummaryInput):
+        raise TypeError("run summary input reference extractor received another type")
+    return _unique_uuid_references((
+        body.target_result_projection.result_ref.item_id,
+        *(
+            card.result_ref.item_id
+            for card in body.report_cards
+            if card.result_ref is not None
+        ),
+        *(reference.item_id for reference in body.allowed_source_refs),
+    ))
+
+
+def _run_summary_request_references(body: object) -> tuple[UUID, ...]:
+    from app.application.run_summary.models import RunSummaryModelRequest
+
+    if not isinstance(body, RunSummaryModelRequest):
+        raise TypeError("run summary request reference extractor received another type")
+    return (body.input_ref.item_id,)
+
+
+def _run_summary_response_references(body: object) -> tuple[UUID, ...]:
+    from app.application.run_summary.models import RunSummaryModelResponse
+
+    if not isinstance(body, RunSummaryModelResponse):
+        raise TypeError("run summary response reference extractor received another type")
+    return _unique_uuid_references(tuple(
+        reference.item_id for reference in body.message_refs
+    ))
+
+
+def _run_summary_result_references(body: object) -> tuple[UUID, ...]:
+    from app.application.run_summary.models import RunSummaryResult
+
+    if not isinstance(body, RunSummaryResult):
+        raise TypeError("run summary result reference extractor received another type")
+    return _unique_uuid_references(tuple(
+        highlight.source_ref.item_id for highlight in body.highlights
+    ))
+
+
+def _topology_run_result_references(body: object) -> tuple[UUID, ...]:
+    from app.application.analysis_runs.topology_result_models import TopologyRunResult
+
+    if not isinstance(body, TopologyRunResult):
+        raise TypeError("topology result reference extractor received another type")
+    return _unique_uuid_references((
+        body.analysis_context_ref.item_id,
+        body.topology_ref.item_id,
+        body.target_result_ref.item_id,
+        *(
+            entry.result_ref.item_id
+            for entry in body.node_outcomes
+            if entry.result_ref is not None
+        ),
+        *(
+            (body.summary.result_ref.item_id,)
+            if body.summary.result_ref is not None
+            else ()
+        ),
+    ))
+
+
 def _waterbody_response_projection(body: object) -> JsonValue:
     from app.application.reasoning.transcript_models import WaterbodyModelResponseV1
 
@@ -602,6 +722,45 @@ def _waterbody_response_projection(body: object) -> JsonValue:
             body.usage.model_dump(mode="json") if body.usage is not None else None
         ),
         "provider_response_id": body.provider_response_id,
+    }
+
+
+def _run_summary_request_projection(body: object) -> JsonValue:
+    from app.application.run_summary.models import RunSummaryModelRequest
+
+    if not isinstance(body, RunSummaryModelRequest):
+        raise TypeError("run summary request projection received another type")
+    value = body.model_dump(mode="json")
+    return {
+        key: value[key]
+        for key in (
+            "schema_version",
+            "operation_id",
+            "model",
+            "input_ref",
+            "input_digest",
+            "deadline",
+            "request_digest",
+        )
+    }
+
+
+def _run_summary_response_projection(body: object) -> JsonValue:
+    from app.application.run_summary.models import RunSummaryModelResponse
+
+    if not isinstance(body, RunSummaryModelResponse):
+        raise TypeError("run summary response projection received another type")
+    value = body.model_dump(mode="json")
+    return {
+        "schema_version": value["schema_version"],
+        "operation_id": value["operation_id"],
+        "model": value["model"],
+        "finish_reason": value["finish_reason"],
+        "message_refs": value["message_refs"],
+        "usage": value["usage"],
+        "provider_response_id": value["provider_response_id"],
+        "structured_output_present": body.structured_output is not None,
+        "visible_text_present": bool(body.visible_text),
     }
 
 
@@ -673,6 +832,10 @@ def _evidence_source_records_projection(body: object) -> JsonValue:
 
 
 def create_production_registry() -> TranscriptRegistry:
+    from app.application.analysis_runs.topology_result_models import (
+        TopologyRunResult,
+        WaterbodyDependencyManifest,
+    )
     from app.application.reasoning.transcript_models import (
         ReasoningDecisionV1,
         WaterbodyAgentInputV1,
@@ -681,6 +844,15 @@ def create_production_registry() -> TranscriptRegistry:
         WaterbodyModelResponseV1,
         finalize_waterbody_agent_message,
         waterbody_agent_message_projection,
+    )
+    from app.application.run_summary.models import (
+        RunSummaryAgentMessage,
+        RunSummaryInput,
+        RunSummaryModelRequest,
+        RunSummaryModelResponse,
+        RunSummaryResult,
+        finalize_run_summary_agent_message,
+        run_summary_agent_message_projection,
     )
 
     registry = TranscriptRegistry()
@@ -694,6 +866,7 @@ def create_production_registry() -> TranscriptRegistry:
         content_type="lifecycle_event",
         content_schema_version=2,
         adapter=TypeAdapter(LifecycleEvent),
+        references=_lifecycle_references,
         errors=_lifecycle_errors,
     ))
     registry.register(ContentRegistration(
@@ -806,6 +979,64 @@ def create_production_registry() -> TranscriptRegistry:
         adapter=TypeAdapter(InferenceResult),
         references=_inference_result_references,
         metadata=_inference_result_metadata,
+    ))
+    registry.register(ContentRegistration(
+        content_type="waterbody_dependency_manifest",
+        content_schema_version=1,
+        adapter=TypeAdapter(WaterbodyDependencyManifest),
+        references=_waterbody_manifest_references,
+        metadata=_static_metadata("waterbody", "dependency_manifest"),
+    ))
+    registry.register(ContentRegistration(
+        content_type="run_summary_input",
+        content_schema_version=1,
+        adapter=TypeAdapter(RunSummaryInput),
+        references=_run_summary_input_references,
+        metadata=_static_metadata("run_summary", "input"),
+    ))
+    registry.register(ContentRegistration(
+        content_type="run_summary_model_request",
+        content_schema_version=1,
+        adapter=TypeAdapter(RunSummaryModelRequest),
+        references=_run_summary_request_references,
+        metadata=_static_metadata("run_summary", "model_request"),
+        visibility=_history_only_visibility,
+        public_projection=_run_summary_request_projection,
+        history_only_possible=True,
+        project_full_content=True,
+    ))
+    registry.register(ContentRegistration(
+        content_type="run_summary_agent_message",
+        content_schema_version=1,
+        adapter=TypeAdapter(RunSummaryAgentMessage),
+        metadata=_static_metadata("run_summary", "agent_message"),
+        message_adapter=run_summary_agent_message_projection,
+        message_finalizer=finalize_run_summary_agent_message,
+    ))
+    registry.register(ContentRegistration(
+        content_type="run_summary_model_response",
+        content_schema_version=1,
+        adapter=TypeAdapter(RunSummaryModelResponse),
+        references=_run_summary_response_references,
+        metadata=_static_metadata("run_summary", "model_response"),
+        visibility=_history_only_visibility,
+        public_projection=_run_summary_response_projection,
+        history_only_possible=True,
+        project_full_content=True,
+    ))
+    registry.register(ContentRegistration(
+        content_type="run_summary_result",
+        content_schema_version=1,
+        adapter=TypeAdapter(RunSummaryResult),
+        references=_run_summary_result_references,
+        metadata=_static_metadata("run_summary", "result"),
+    ))
+    registry.register(ContentRegistration(
+        content_type="topology_run_result",
+        content_schema_version=1,
+        adapter=TypeAdapter(TopologyRunResult),
+        references=_topology_run_result_references,
+        metadata=_static_metadata("run", "result"),
     ))
     registry.register(ContentRegistration(
         content_type="lifecycle_event",

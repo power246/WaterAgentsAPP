@@ -43,6 +43,8 @@ from app.application.analysis_runs.models import (
     RunLifecycleEvent,
     RunStateMutation,
     RunStatus,
+    RunSummarySessionResultSummary,
+    RunSummaryStatus,
     SessionCancelledEvent,
     SessionCancelledPayload,
     SessionCompletedEvent,
@@ -57,12 +59,22 @@ from app.application.analysis_runs.models import (
     SessionStateMutation,
     SessionSummary,
     TranscriptItemIdentity,
+    TopologyRunResultSummary,
+    WaterbodySessionResultSummary,
 )
 from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceInfo,
     PersistenceState,
     PersistenceWriteBatch,
+)
+from app.application.analysis_runs.topology_result_models import (
+    DependencyOutcome,
+    DependencyStatus,
+    GraphOutcomeProjection,
+    RunSummaryProjection,
+    TopologyRunResult,
+    WaterbodySchedulingStatus,
 )
 from app.application.analysis_runs.runtime import AgentSessionRuntime, RunRuntime
 from app.application.analysis_runs.writer import TranscriptWriter
@@ -74,6 +86,10 @@ from app.application.analysis_runs.workflow import (
     WorkflowStopped,
 )
 from app.application.correlation import request_id_context
+from app.application.run_summary.models import (
+    RunSummaryAgentMessage,
+    RunSummaryResult,
+)
 from app.application.transcripts.buffer import TranscriptBuffer
 from app.application.transcripts.models import (
     AnalysisQuery,
@@ -110,8 +126,8 @@ from app.application.transcripts.stream_models import (
     TranscriptItemProcessRecord,
     snapshot_from_state,
 )
-from app.domain import InferenceResult
 from app.application.transcripts.streaming import StreamingCredentialFilter
+from app.domain import HydrologyGraph, HydrologyParticipation, InferenceResult
 from app.domain.common import NonEmptyString, normalize_utc_datetime
 from app.domain.model_catalog import ModelRole
 from app.domain.stable_validation_error import stable_validation_error
@@ -1079,7 +1095,10 @@ class RunCoordinator:
             await asyncio.gather(*writer_tasks, return_exceptions=True)
 
     async def _run_workflow(self, runtime: RunRuntime) -> None:
-        token = CancellationToken(runtime.stop_requested)
+        token = CancellationToken(
+            runtime.stop_requested,
+            runtime.workflow_commit_gate,
+        )
         try:
             await runtime.workflow_start.wait()
             token.checkpoint()
@@ -1102,7 +1121,10 @@ class RunCoordinator:
                     raise WorkflowFailed(
                         "The workflow returned before its outputs reached a terminal state."
                     )
-            await self.complete_run(running.run_id)
+            async with runtime.condition:
+                should_complete = runtime.snapshot.status is RunStatus.RUNNING
+            if should_complete:
+                await self.complete_run(running.run_id)
         except (WorkflowStopped, ServiceShuttingDownError) as error:
             if token.is_requested():
                 self._log_activity("workflow_output_suppressed", runtime)
@@ -1311,6 +1333,55 @@ class RunCoordinator:
         async with runtime.condition:
             return self._lookup_agent_session_locked(runtime, key).summary
 
+    async def begin_waterbody_execution(
+        self,
+        run_id: UUID | str,
+    ) -> tuple[TranscriptContentRef, TranscriptContentRef]:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            if (
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status is not RunStatus.RUNNING
+            ):
+                raise InvalidRunTransitionError(
+                    runtime.snapshot,
+                    RunStatus.RUNNING,
+                )
+            if (
+                runtime.analysis_phase is not AnalysisPhase.TOPOLOGY_READY
+                or runtime.context_ref is None
+                or runtime.topology_ref is None
+            ):
+                raise ValueError(
+                    "waterbody execution requires saved context and topology"
+                )
+            runtime.analysis_phase = AnalysisPhase.WATERBODY_EXECUTION
+            runtime.condition.notify_all()
+            return runtime.context_ref, runtime.topology_ref
+
+    async def begin_run_summarization(
+        self,
+        run_id: UUID | str,
+    ) -> None:
+        runtime = await self._lookup(run_id)
+        async with runtime.condition:
+            if (
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status is not RunStatus.RUNNING
+            ):
+                raise InvalidRunTransitionError(
+                    runtime.snapshot,
+                    RunStatus.RUNNING,
+                )
+            if runtime.analysis_phase is not AnalysisPhase.WATERBODY_EXECUTION:
+                raise ValueError(
+                    "run summarization requires settled waterbody execution"
+                )
+            runtime.analysis_phase = AnalysisPhase.RUN_SUMMARIZATION
+            runtime.condition.notify_all()
+
     async def prepare_agent_session(
         self,
         run_id: UUID | str,
@@ -1321,10 +1392,8 @@ class RunCoordinator:
         runtime = await self._lookup(run_id)
         role = _ROLE.validate_python(agent_role)
         comid = _COMID.validate_python(target_comid) if target_comid is not None else None
-        if role is AgentRole.QUERY_PARSER and comid is not None:
-            raise ValueError("query_parser sessions must not have target_comid")
-        if role is AgentRole.WATERBODY and comid is None:
-            raise ValueError("waterbody sessions require target_comid")
+        if (role is AgentRole.WATERBODY) != (comid is not None):
+            raise ValueError("only waterbody sessions require target_comid")
         async with runtime.condition:
             if self._closing:
                 raise ServiceShuttingDownError()
@@ -1334,11 +1403,12 @@ class RunCoordinator:
                 or runtime.snapshot.status not in _RUN_TRANSITIONS
             ):
                 raise InvalidRunTransitionError(runtime.snapshot, RunStatus.RUNNING)
-            existing_id = (
-                runtime.query_parser_session_id
-                if role is AgentRole.QUERY_PARSER
-                else runtime.waterbody_session_ids.get(comid)
-            )
+            if role is AgentRole.QUERY_PARSER:
+                existing_id = runtime.query_parser_session_id
+            elif role is AgentRole.WATERBODY:
+                existing_id = runtime.waterbody_session_ids.get(comid)
+            else:
+                existing_id = runtime.run_summary_session_id
             if existing_id is not None:
                 return runtime.agent_sessions[existing_id].summary
             timestamp = self._clock.now()
@@ -1375,8 +1445,11 @@ class RunCoordinator:
             self._append_transcript_process_locked(runtime, finalized, timestamp)
             if role is AgentRole.QUERY_PARSER:
                 runtime.query_parser_session_id = summary.session_id
-            else:
+            elif role is AgentRole.WATERBODY:
                 runtime.waterbody_session_ids[comid] = summary.session_id
+                runtime.waterbody_ready.discard(comid)
+            else:
+                runtime.run_summary_session_id = summary.session_id
             mutation = SessionStateMutation(
                 mutation_id=mutation_id,
                 run_id=runtime.snapshot.run_id,
@@ -1478,7 +1551,7 @@ class RunCoordinator:
                     run_id=runtime.snapshot.run_id,
                     item_id=result_identity.item_id,
                 )
-                result_summary = SessionResultSummary(
+                result_summary = WaterbodySessionResultSummary(
                     result_id=validated_result.result_id,
                     target_comid=validated_result.target_comid,
                     risk_level=validated_result.overall_assessment.risk_level,
@@ -1494,6 +1567,115 @@ class RunCoordinator:
                     result_ref=result_ref,
                     result_summary=result_summary,
                     additional_item_ids=(result_identity.item_id,),
+                )
+                runtime.condition.notify_all()
+        self._log_agent_session_transition(runtime, previous, summary, event)
+        return summary
+
+    async def complete_run_summary_agent_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        result: RunSummaryResult,
+        *,
+        message: RunSummaryAgentMessage,
+    ) -> SessionSummary:
+        runtime = await self._lookup(run_id)
+        key = _UUID.validate_python(session_id)
+        validated_result = RunSummaryResult.model_validate(result)
+        validated_message = RunSummaryAgentMessage.model_validate(message)
+        async with runtime.condition:
+            session_runtime = self._lookup_agent_session_locked(runtime, key)
+            current = session_runtime.summary
+            if (
+                current.agent_role is not AgentRole.RUN_SUMMARIZER
+                or validated_result.run_id != runtime.snapshot.run_id
+                or validated_result.session_id != key
+                or validated_message.run_id != runtime.snapshot.run_id
+                or validated_message.session_id != key
+                or validated_message.text != validated_result.plain_language_summary
+                or validated_message.generation_status
+                is not GenerationStatus.COMPLETED
+                or validated_message.end_reason is not MessageEndReason.COMPLETED
+            ):
+                raise ValueError("run summary completion does not match its session")
+            if current.status is AgentSessionStatus.CANCELLED:
+                return current
+            if current.status not in _SESSION_TRANSITIONS:
+                raise InvalidAgentSessionTransitionError(
+                    current,
+                    AgentSessionStatus.COMPLETED,
+                )
+            if (
+                runtime.cancel_requested.is_set()
+                or session_runtime.stop_requested.is_set()
+            ):
+                previous, summary, event = self._transition_agent_session_locked(
+                    runtime,
+                    session_runtime,
+                    AgentSessionStatus.CANCELLED,
+                    None,
+                    None,
+                )
+                runtime.condition.notify_all()
+            else:
+                timestamp = self._clock.now()
+                message_identity = self._reserve_transcript_item_locked(
+                    runtime,
+                    session_id=key,
+                    request_id=request_id_context.get(),
+                    operation_id=validated_message.operation_id,
+                    created_at=timestamp,
+                )
+                message_item = runtime.transcript_buffer.append(
+                    message_identity,
+                    "run_summary_agent_message",
+                    1,
+                    validated_message,
+                )
+                self._append_transcript_process_locked(
+                    runtime,
+                    message_item,
+                    timestamp,
+                )
+                result_identity = self._reserve_transcript_item_locked(
+                    runtime,
+                    session_id=key,
+                    request_id=request_id_context.get(),
+                    operation_id=None,
+                    created_at=timestamp,
+                )
+                result_item = runtime.transcript_buffer.append(
+                    result_identity,
+                    "run_summary_result",
+                    1,
+                    validated_result,
+                )
+                self._append_transcript_process_locked(
+                    runtime,
+                    result_item,
+                    timestamp,
+                )
+                result_ref = SessionResultReference(
+                    run_id=runtime.snapshot.run_id,
+                    item_id=result_identity.item_id,
+                )
+                result_summary = RunSummarySessionResultSummary(
+                    highlight_count=len(validated_result.highlights),
+                    language=validated_result.language,
+                )
+                previous, summary, event = self._transition_agent_session_locked(
+                    runtime,
+                    session_runtime,
+                    AgentSessionStatus.COMPLETED,
+                    None,
+                    timestamp,
+                    result_ref=result_ref,
+                    result_summary=result_summary,
+                    additional_item_ids=(
+                        message_identity.item_id,
+                        result_identity.item_id,
+                    ),
                 )
                 runtime.condition.notify_all()
         self._log_agent_session_transition(runtime, previous, summary, event)
@@ -1663,6 +1845,11 @@ class RunCoordinator:
             elif (content_type, content_schema_version) == ("topology_ready", 1):
                 runtime.topology_ref = content_ref
                 runtime.analysis_phase = AnalysisPhase.TOPOLOGY_READY
+                topology = HydrologyGraph.model_validate(body)
+                runtime.waterbody_participation = {
+                    node.comid: node.participation is HydrologyParticipation.ACTIVE
+                    for node in topology.nodes
+                }
             self._transcript_writer.enqueue_locked(
                 runtime,
                 item_ids=(identity.item_id,),
@@ -2107,6 +2294,60 @@ class RunCoordinator:
             runtime.waterbody_participation = validated
             runtime.condition.notify_all()
 
+    async def mark_waterbody_ready(
+        self,
+        run_id: UUID | str,
+        target_comid: str,
+    ) -> None:
+        runtime = await self._lookup(run_id)
+        comid = _COMID.validate_python(target_comid)
+        async with runtime.condition:
+            if (
+                runtime.cancel_requested.is_set()
+                or runtime.stop_requested.is_set()
+                or runtime.snapshot.status is not RunStatus.RUNNING
+                or runtime.analysis_phase is not AnalysisPhase.WATERBODY_EXECUTION
+                or runtime.waterbody_participation.get(comid) is not True
+                or comid in runtime.waterbody_session_ids
+            ):
+                raise ValueError("only an unclaimed active waterbody can become ready")
+            runtime.waterbody_ready.add(comid)
+            runtime.condition.notify_all()
+
+    async def record_waterbody_dependency_outcome(
+        self,
+        run_id: UUID | str,
+        outcome: DependencyOutcome,
+    ) -> None:
+        runtime = await self._lookup(run_id)
+        validated = DependencyOutcome.model_validate(outcome)
+        async with runtime.condition:
+            session_id = runtime.waterbody_session_ids.get(validated.target_comid)
+            if (
+                validated.run_id != runtime.snapshot.run_id
+                or session_id != validated.session_id
+            ):
+                raise ValueError("waterbody outcome does not match the running workflow")
+            session = runtime.agent_sessions[session_id].summary
+            expected_status = {
+                AgentSessionStatus.COMPLETED: {
+                    DependencyStatus.USABLE,
+                    DependencyStatus.INSUFFICIENT,
+                },
+                AgentSessionStatus.FAILED: {DependencyStatus.INVALID},
+                AgentSessionStatus.CANCELLED: {DependencyStatus.CANCELLED},
+            }.get(session.status, set())
+            if (
+                validated.status not in expected_status
+                or validated.result_ref != session.result_ref
+                or validated.result_summary != session.result_summary
+            ):
+                raise ValueError("waterbody outcome is not a committed session projection")
+            runtime.waterbody_dependency_statuses[validated.target_comid] = (
+                validated.status
+            )
+            runtime.condition.notify_all()
+
     def _append_transcript_process_locked(
         self,
         runtime: RunRuntime,
@@ -2186,11 +2427,20 @@ class RunCoordinator:
     async def mark_running(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         return await self._transition_run(run_id, RunStatus.RUNNING)
 
-    async def complete_run(self, run_id: UUID | str) -> AnalysisRunSnapshot:
+    async def complete_run(
+        self,
+        run_id: UUID | str,
+        result: TopologyRunResult | None = None,
+    ) -> AnalysisRunSnapshot:
         runtime = await self._lookup(run_id)
+        validated_result = (
+            TopologyRunResult.model_validate(result) if result is not None else None
+        )
         async with runtime.condition:
             if runtime.snapshot.status is not RunStatus.RUNNING:
                 raise InvalidRunTransitionError(runtime.snapshot, RunStatus.COMPLETED)
+            if validated_result is not None:
+                self._validate_topology_result_locked(runtime, validated_result)
             required_items = frozenset(
                 item.item_id for item in runtime.transcript_buffer.items
             )
@@ -2206,12 +2456,65 @@ class RunCoordinator:
             if runtime.snapshot.status is RunStatus.CANCELLED:
                 return runtime.snapshot
         if warning is None:
-            return await self._transition_run(run_id, RunStatus.COMPLETED)
+            return await self._transition_run(
+                run_id,
+                RunStatus.COMPLETED,
+                topology_result=validated_result,
+            )
         return await self._transition_run(
             run_id,
             RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR,
             warning,
+            topology_result=validated_result,
         )
+
+    @staticmethod
+    def _validate_topology_result_locked(
+        runtime: RunRuntime,
+        result: TopologyRunResult,
+    ) -> None:
+        if (
+            result.run_id != runtime.snapshot.run_id
+            or result.analysis_context_ref != runtime.context_ref
+            or result.topology_ref != runtime.topology_ref
+            or runtime.analysis_phase is not AnalysisPhase.RUN_SUMMARIZATION
+        ):
+            raise ValueError("topology result does not match the running workflow")
+        active = {
+            comid
+            for comid, participating in runtime.waterbody_participation.items()
+            if participating
+        }
+        if active != {entry.target_comid for entry in result.node_outcomes}:
+            raise ValueError("topology result must exactly cover active waterbodies")
+        for entry in result.node_outcomes:
+            session_id = runtime.waterbody_session_ids.get(entry.target_comid)
+            if session_id != entry.session_id:
+                raise ValueError("topology result waterbody session identity changed")
+            summary = runtime.agent_sessions[entry.session_id].summary
+            if (
+                summary.status != entry.session_status
+                or summary.result_ref != entry.result_ref
+                or summary.result_summary != entry.result_summary
+            ):
+                raise ValueError("topology result waterbody projection is not committed")
+        summary_runtime = runtime.agent_sessions.get(result.summary.session_id)
+        if (
+            summary_runtime is None
+            or summary_runtime.summary.agent_role is not AgentRole.RUN_SUMMARIZER
+        ):
+            raise ValueError("topology result summary session is unavailable")
+        if result.summary.status is RunSummaryStatus.COMPLETED:
+            if (
+                summary_runtime.summary.status is not AgentSessionStatus.COMPLETED
+                or summary_runtime.summary.result_ref != result.summary.result_ref
+            ):
+                raise ValueError("topology result summary is not committed")
+        elif (
+            summary_runtime.summary.status is not AgentSessionStatus.FAILED
+            or summary_runtime.last_error != result.summary.public_error
+        ):
+            raise ValueError("topology result summary failure is not committed")
 
     async def fail_run(
         self,
@@ -2226,8 +2529,9 @@ class RunCoordinator:
 
     async def cancel_run(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         runtime = await self._lookup(run_id)
-        runtime.cancel_requested.set()
-        runtime.stop_requested.set()
+        async with runtime.workflow_commit_gate:
+            runtime.cancel_requested.set()
+            runtime.stop_requested.set()
         try:
             return await self._transition_run(
                 runtime.snapshot.run_id,
@@ -2298,9 +2602,22 @@ class RunCoordinator:
             RunWaterbodySummary(
                 target_comid=comid,
                 participating=participating,
+                scheduling_status=self._waterbody_scheduling_status_locked(
+                    runtime,
+                    comid,
+                    participating,
+                ),
+                dependency_status=runtime.waterbody_dependency_statuses.get(comid),
                 session_id=runtime.waterbody_session_ids.get(comid),
                 session_status=(
                     runtime.agent_sessions[runtime.waterbody_session_ids[comid]].summary.status
+                    if comid in runtime.waterbody_session_ids
+                    else None
+                ),
+                result_ref=(
+                    runtime.agent_sessions[
+                        runtime.waterbody_session_ids[comid]
+                    ].summary.result_ref
                     if comid in runtime.waterbody_session_ids
                     else None
                 ),
@@ -2315,7 +2632,79 @@ class RunCoordinator:
             sessions,
             waterbodies,
             self._transcript_writer.info_locked(runtime),
+            runtime.result_ref,
+            self._run_summary_projection_locked(runtime),
+            self._graph_outcome_projection_locked(runtime),
         )
+
+    @staticmethod
+    def _run_summary_projection_locked(runtime: RunRuntime) -> RunSummaryProjection:
+        session_id = runtime.run_summary_session_id
+        if session_id is None:
+            return RunSummaryProjection()
+        session_runtime = runtime.agent_sessions[session_id]
+        summary = session_runtime.summary
+        if summary.status in {
+            AgentSessionStatus.PENDING,
+            AgentSessionStatus.RUNNING,
+        }:
+            return RunSummaryProjection(
+                status=RunSummaryStatus.RUNNING,
+                session_id=session_id,
+            )
+        if summary.status is AgentSessionStatus.COMPLETED:
+            return RunSummaryProjection(
+                status=RunSummaryStatus.COMPLETED,
+                session_id=session_id,
+                result_ref=summary.result_ref,
+            )
+        if summary.status is AgentSessionStatus.FAILED:
+            if session_runtime.last_error is None:
+                raise RuntimeError("failed run summary session has no public error")
+            return RunSummaryProjection(
+                status=RunSummaryStatus.FAILED,
+                session_id=session_id,
+                error=session_runtime.last_error,
+            )
+        return RunSummaryProjection(
+            status=RunSummaryStatus.CANCELLED,
+            session_id=session_id,
+        )
+
+    @staticmethod
+    def _graph_outcome_projection_locked(runtime: RunRuntime) -> GraphOutcomeProjection:
+        summary = runtime.result_summary
+        if summary is None:
+            return GraphOutcomeProjection()
+        counts = summary.outcome_counts
+        return GraphOutcomeProjection(
+            coverage=summary.graph_coverage,
+            usable_nodes=counts.usable,
+            insufficient_nodes=counts.insufficient,
+            invalid_nodes=counts.invalid,
+            cancelled_nodes=counts.cancelled,
+        )
+
+    @staticmethod
+    def _waterbody_scheduling_status_locked(
+        runtime: RunRuntime,
+        comid: str,
+        participating: bool,
+    ) -> WaterbodySchedulingStatus:
+        if not participating:
+            return WaterbodySchedulingStatus.EXCLUDED
+        session_id = runtime.waterbody_session_ids.get(comid)
+        if session_id is None:
+            if comid in runtime.waterbody_ready:
+                return WaterbodySchedulingStatus.READY
+            return WaterbodySchedulingStatus.WAITING
+        if runtime.agent_sessions[session_id].summary.status in {
+            AgentSessionStatus.COMPLETED,
+            AgentSessionStatus.FAILED,
+            AgentSessionStatus.CANCELLED,
+        }:
+            return WaterbodySchedulingStatus.TERMINAL
+        return WaterbodySchedulingStatus.RUNNING
 
     def _run_stream_closed_locked(self, runtime: RunRuntime) -> bool:
         return bool(
@@ -2423,6 +2812,8 @@ class RunCoordinator:
         run_id: UUID | str,
         target: RunStatus,
         error: PublicError | None = None,
+        *,
+        topology_result: TopologyRunResult | None = None,
     ) -> AnalysisRunSnapshot:
         runtime = await self._lookup(run_id)
         session_transitions: list[
@@ -2444,6 +2835,14 @@ class RunCoordinator:
             if resolved is None:
                 raise InvalidRunTransitionError(current, target)
             timestamp = self._clock.now()
+            if topology_result is not None:
+                if resolved not in {
+                    RunStatus.COMPLETED,
+                    RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR,
+                }:
+                    topology_result = None
+                else:
+                    self._validate_topology_result_locked(runtime, topology_result)
             snapshot = AnalysisRunSnapshot(
                 run_id=current.run_id,
                 status=resolved,
@@ -2451,10 +2850,42 @@ class RunCoordinator:
                 updated_at=timestamp,
                 configuration=current.configuration,
             )
+            result_identity = None
+            result_ref = None
+            result_summary = None
+            if topology_result is not None:
+                result_identity = self._reserve_transcript_item_locked(
+                    runtime,
+                    session_id=None,
+                    request_id=request_id_context.get(),
+                    operation_id=None,
+                    created_at=timestamp,
+                )
+                runtime.transcript_buffer.append(
+                    result_identity,
+                    "topology_run_result",
+                    1,
+                    topology_result,
+                )
+                result_ref = SessionResultReference(
+                    run_id=snapshot.run_id,
+                    item_id=result_identity.item_id,
+                )
+                result_summary = TopologyRunResultSummary(
+                    target_comid=topology_result.target_comid,
+                    target_result_summary=topology_result.target_result_summary,
+                    graph_coverage=topology_result.graph_coverage,
+                    outcome_counts=topology_result.outcome_counts,
+                    summary_status=topology_result.summary.status,
+                    summary_result_ref=topology_result.summary.result_ref,
+                    summary_error=topology_result.summary.public_error,
+                )
             event = self._run_terminal_event(
                 snapshot,
                 len(runtime.events) + 1,
                 error,
+                result_ref=result_ref,
+                result_summary=result_summary,
             )
             mutation_id = self._new_record_id()
             item = None
@@ -2473,6 +2904,16 @@ class RunCoordinator:
                     event,
                 )
             runtime.snapshot = snapshot
+            if result_identity is not None:
+                runtime.result_ref = TranscriptContentRef(
+                    run_id=snapshot.run_id,
+                    item_id=result_identity.item_id,
+                )
+                runtime.result_summary = result_summary
+                runtime.waterbody_dependency_statuses = {
+                    outcome.target_comid: outcome.dependency_status
+                    for outcome in topology_result.node_outcomes
+                }
             if resolved is RunStatus.RUNNING:
                 runtime.analysis_phase = AnalysisPhase.QUERY_UNDERSTANDING
             elif resolved not in _RUN_TRANSITIONS:
@@ -2494,7 +2935,10 @@ class RunCoordinator:
             runtime.state_mutations.append(mutation)
             self._transcript_writer.enqueue_locked(
                 runtime,
-                item_ids=(item.item_id,) if item is not None else (),
+                item_ids=(
+                    *((result_identity.item_id,) if result_identity is not None else ()),
+                    *((item.item_id,) if item is not None else ()),
+                ),
                 mutation_ids=(mutation.mutation_id,),
             )
             if resolved in {RunStatus.FAILED, RunStatus.CANCELLED}:
@@ -2563,10 +3007,10 @@ class RunCoordinator:
             session_runtime = self._lookup_agent_session_locked(runtime, key)
             if (
                 target is AgentSessionStatus.COMPLETED
-                and session_runtime.summary.agent_role is AgentRole.WATERBODY
+                and session_runtime.summary.agent_role is not AgentRole.QUERY_PARSER
             ):
                 raise ValueError(
-                    "waterbody sessions must complete with an inference result"
+                    "result sessions must complete with a typed result"
                 )
             if (
                 session_runtime.summary.status is AgentSessionStatus.CANCELLED
@@ -2716,6 +3160,9 @@ class RunCoordinator:
         snapshot: AnalysisRunSnapshot,
         sequence: int,
         error: PublicError | None,
+        *,
+        result_ref: SessionResultReference | None = None,
+        result_summary: TopologyRunResultSummary | None = None,
     ) -> RunLifecycleEvent | None:
         if snapshot.status is RunStatus.RUNNING:
             return None
@@ -2731,6 +3178,8 @@ class RunCoordinator:
                     status=snapshot.status,
                     completed_at=snapshot.updated_at,
                     warning=error,
+                    result_ref=result_ref,
+                    result_summary=result_summary,
                 ),
             )
         if snapshot.status is RunStatus.FAILED:

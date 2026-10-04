@@ -1,10 +1,13 @@
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal, Self, TypeAlias
 from uuid import UUID
 
 from pydantic import (
+    Discriminator,
     Field,
     StrictBool,
+    StrictInt,
     StringConstraints,
+    Tag,
     field_validator,
     model_validator,
 )
@@ -43,6 +46,8 @@ class AnalysisPhase(DomainEnum):
     QUERY_UNDERSTANDING = "query_understanding"
     TOPOLOGY_BUILDING = "topology_building"
     TOPOLOGY_READY = "topology_ready"
+    WATERBODY_EXECUTION = "waterbody_execution"
+    RUN_SUMMARIZATION = "run_summarization"
     TERMINAL = "terminal"
 
 
@@ -57,6 +62,21 @@ class AgentSessionStatus(DomainEnum):
 class AgentRole(DomainEnum):
     QUERY_PARSER = "query_parser"
     WATERBODY = "waterbody"
+    RUN_SUMMARIZER = "run_summarizer"
+
+
+class GraphCoverage(DomainEnum):
+    COMPLETE = "complete"
+    PARTIAL = "partial"
+    NONE = "none"
+
+
+class RunSummaryStatus(DomainEnum):
+    NOT_STARTED = "not_started"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class AnalysisConfigurationSnapshot(DomainModel):
@@ -104,12 +124,49 @@ class SessionResultReference(DomainModel):
     item_id: UUID
 
 
-class SessionResultSummary(DomainModel):
+class WaterbodySessionResultSummary(DomainModel):
+    result_kind: Literal["waterbody"] = "waterbody"
     result_id: NonEmptyString
     target_comid: NonEmptyString
     risk_level: RiskLevel
     availability: AssessmentAvailability
     overall_confidence: Annotated[DomainFloat, Field(ge=0, le=1)]
+
+
+class RunSummarySessionResultSummary(DomainModel):
+    result_kind: Literal["run_summary"] = "run_summary"
+    highlight_count: Annotated[StrictInt, Field(ge=0)]
+    language: NonEmptyString
+
+
+class OutcomeCounts(DomainModel):
+    usable: Annotated[StrictInt, Field(ge=0)] = 0
+    insufficient: Annotated[StrictInt, Field(ge=0)] = 0
+    invalid: Annotated[StrictInt, Field(ge=0)] = 0
+    cancelled: Annotated[StrictInt, Field(ge=0)] = 0
+
+
+def _session_result_kind(value: object) -> str | None:
+    if isinstance(value, WaterbodySessionResultSummary):
+        return "waterbody"
+    if isinstance(value, RunSummarySessionResultSummary):
+        return "run_summary"
+    if isinstance(value, dict):
+        explicit = value.get("result_kind")
+        if explicit is not None:
+            return str(explicit)
+        if "result_id" in value or "target_comid" in value:
+            return "waterbody"
+        if "highlight_count" in value or "language" in value:
+            return "run_summary"
+    return None
+
+
+SessionResultSummary: TypeAlias = Annotated[
+    Annotated[WaterbodySessionResultSummary, Tag("waterbody")]
+    | Annotated[RunSummarySessionResultSummary, Tag("run_summary")],
+    Discriminator(_session_result_kind),
+]
 
 
 class SessionSummary(DomainModel):
@@ -124,10 +181,9 @@ class SessionSummary(DomainModel):
 
     @model_validator(mode="after")
     def validate_role_and_timestamps(self) -> "SessionSummary":
-        if self.agent_role is AgentRole.QUERY_PARSER and self.target_comid is not None:
-            raise ValueError("query_parser sessions must not have target_comid")
-        if self.agent_role is AgentRole.WATERBODY and self.target_comid is None:
-            raise ValueError("waterbody sessions require target_comid")
+        requires_comid = self.agent_role is AgentRole.WATERBODY
+        if requires_comid != (self.target_comid is not None):
+            raise ValueError("only waterbody sessions require target_comid")
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not precede created_at")
         result_pair = (self.result_ref is not None, self.result_summary is not None)
@@ -135,12 +191,18 @@ class SessionSummary(DomainModel):
             raise ValueError("result_ref and result_summary must appear together")
         if self.agent_role is AgentRole.QUERY_PARSER and any(result_pair):
             raise ValueError("query_parser sessions must not have a result")
-        if self.agent_role is AgentRole.WATERBODY:
+        if self.agent_role is not AgentRole.QUERY_PARSER:
             completed = self.status is AgentSessionStatus.COMPLETED
             if completed != all(result_pair):
-                raise ValueError("completed waterbody sessions require a result")
-            if completed and self.result_summary.target_comid != self.target_comid:
+                raise ValueError("completed result sessions require a result")
+        if self.agent_role is AgentRole.WATERBODY and all(result_pair):
+            if not isinstance(self.result_summary, WaterbodySessionResultSummary):
+                raise ValueError("waterbody sessions require a waterbody result")
+            if self.result_summary.target_comid != self.target_comid:
                 raise ValueError("waterbody result summary must match the session")
+        if self.agent_role is AgentRole.RUN_SUMMARIZER and all(result_pair):
+            if not isinstance(self.result_summary, RunSummarySessionResultSummary):
+                raise ValueError("run_summarizer sessions require a run summary result")
         return self
 
 
@@ -150,6 +212,27 @@ class PublicError(DomainModel):
     message: NonEmptyString
     failed_stage: StableCode | None = None
     retryable: StrictBool
+
+
+class TopologyRunResultSummary(DomainModel):
+    target_comid: NonEmptyString
+    target_result_summary: WaterbodySessionResultSummary
+    graph_coverage: GraphCoverage
+    outcome_counts: OutcomeCounts
+    summary_status: Literal[RunSummaryStatus.COMPLETED, RunSummaryStatus.FAILED]
+    summary_result_ref: SessionResultReference | None = None
+    summary_error: PublicError | None = None
+
+    @model_validator(mode="after")
+    def validate_summary_projection(self) -> Self:
+        if self.target_result_summary.target_comid != self.target_comid:
+            raise ValueError("target result summary must match target_comid")
+        completed = self.summary_status is RunSummaryStatus.COMPLETED
+        if completed != (self.summary_result_ref is not None):
+            raise ValueError("summary result ref must match summary status")
+        if completed == (self.summary_error is not None):
+            raise ValueError("summary error must match failed summary status")
+        return self
 
 
 class CorrelationContext(DomainModel):
@@ -219,6 +302,8 @@ class RunCompletedPayload(DomainModel):
     ]
     completed_at: UtcDatetime
     warning: PublicError | None = None
+    result_ref: SessionResultReference | None = None
+    result_summary: TopologyRunResultSummary | None = None
 
     @model_validator(mode="after")
     def validate_warning(self) -> "RunCompletedPayload":
@@ -227,6 +312,8 @@ class RunCompletedPayload(DomainModel):
         )
         if has_persistence_error != (self.warning is not None):
             raise ValueError("warning must match persistence-error completion status")
+        if (self.result_ref is None) != (self.result_summary is None):
+            raise ValueError("result_ref and result_summary must appear together")
         return self
 
 
@@ -301,6 +388,15 @@ class RunCreatedEvent(_RunLifecycleEventEnvelope):
 class RunCompletedEvent(_RunLifecycleEventEnvelope):
     type: Literal[LifecycleEventType.RUN_COMPLETED] = LifecycleEventType.RUN_COMPLETED
     payload: RunCompletedPayload
+
+    @model_validator(mode="after")
+    def validate_result_run(self) -> "RunCompletedEvent":
+        if (
+            self.payload.result_ref is not None
+            and self.payload.result_ref.run_id != self.run_id
+        ):
+            raise ValueError("run result reference must remain in the run")
+        return self
 
 
 class RunFailedEvent(_RunLifecycleEventEnvelope):

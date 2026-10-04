@@ -19,7 +19,7 @@ RunStatusValue = Literal[
     "completed_with_persistence_error",
 ]
 SessionStatusValue = Literal["pending", "running", "completed", "failed", "cancelled"]
-AgentRoleValue = Literal["query_parser", "waterbody"]
+AgentRoleValue = Literal["query_parser", "waterbody", "run_summarizer"]
 
 _RUN_TERMINAL = {
     "completed",
@@ -95,12 +95,9 @@ class PersistedSessionRecord(DomainModel):
 
     @model_validator(mode="after")
     def validate_session_invariants(self) -> "PersistedSessionRecord":
-        if self.agent_role == "query_parser" and self.target_comid is not None:
-            raise ValueError("query_parser sessions must not have target_comid")
-        if self.agent_role == "waterbody" and (
-            self.target_comid is None or not self.target_comid.strip()
-        ):
-            raise ValueError("waterbody sessions require target_comid")
+        requires_comid = self.agent_role == "waterbody"
+        if requires_comid != (self.target_comid is not None):
+            raise ValueError("only waterbody sessions require target_comid")
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not precede created_at")
         if self.terminal_item_id == self.created_item_id:

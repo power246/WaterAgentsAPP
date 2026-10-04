@@ -201,6 +201,10 @@ def test_production_openapi_has_no_tool_invocation_or_test_route() -> None:
             "/reasoning",
             "/agents/run",
             "/models/complete",
+            "/m7",
+            "/scheduler",
+            "/summary",
+            "/topology-workflow",
         )
     )
 

@@ -11,7 +11,9 @@ from app.application.analysis_runs.models import (
     SessionSummary,
     StateMutation,
     TranscriptItemIdentity,
+    TopologyRunResultSummary,
 )
+from app.application.analysis_runs.topology_result_models import DependencyStatus
 from app.application.analysis_runs.persistence import (
     PersistenceGroup,
     PersistenceWriteBatch,
@@ -39,13 +41,20 @@ class RunRuntime:
     analysis_phase: AnalysisPhase = AnalysisPhase.QUEUED
     context_ref: TranscriptContentRef | None = None
     topology_ref: TranscriptContentRef | None = None
+    result_ref: TranscriptContentRef | None = None
+    result_summary: TopologyRunResultSummary | None = None
     events: list[RunLifecycleEvent] = field(default_factory=list)
     transcript_items: list[TranscriptItemIdentity] = field(default_factory=list)
     state_mutations: list[StateMutation] = field(default_factory=list)
     agent_sessions: dict[UUID, AgentSessionRuntime] = field(default_factory=dict)
     query_parser_session_id: UUID | None = None
+    run_summary_session_id: UUID | None = None
     waterbody_session_ids: dict[str, UUID] = field(default_factory=dict)
     waterbody_participation: dict[str, bool] = field(default_factory=dict)
+    waterbody_ready: set[str] = field(default_factory=set)
+    waterbody_dependency_statuses: dict[str, DependencyStatus] = field(
+        default_factory=dict
+    )
     streaming_messages: dict[UUID, StreamingMessage] = field(default_factory=dict)
     late_streaming_messages: dict[UUID, StreamingMessage] = field(default_factory=dict)
     suppressed_transcript_items: dict[UUID, TranscriptItemIdentity] = field(
@@ -57,6 +66,7 @@ class RunRuntime:
     stop_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     workflow_start: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     workflow_quiesced: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    workflow_commit_gate: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     workflow_task: asyncio.Task[None] | None = field(default=None, repr=False)
     last_error: PublicError | None = None
     persistence_groups: list[PersistenceGroup] = field(default_factory=list)

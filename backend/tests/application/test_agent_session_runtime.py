@@ -119,15 +119,32 @@ def test_sessions_are_created_only_at_prepare_boundary_and_deduplicated() -> Non
             agent_role=AgentRole.WATERBODY,
             target_comid="009999",
         )
+        summarizer_results = await asyncio.gather(
+            *(
+                coordinator.prepare_agent_session(
+                    run_id,
+                    agent_role=AgentRole.RUN_SUMMARIZER,
+                )
+                for _ in range(8)
+            )
+        )
 
         assert all(item is parser_results[0] for item in parser_results)
         assert all(item is waterbody_results[0] for item in waterbody_results)
+        assert all(item is summarizer_results[0] for item in summarizer_results)
         assert waterbody_results[0].target_comid == "001234"
-        assert len({parser_results[0].session_id, waterbody_results[0].session_id, other.session_id}) == 3
+        assert summarizer_results[0].target_comid is None
+        assert len({
+            parser_results[0].session_id,
+            waterbody_results[0].session_id,
+            other.session_id,
+            summarizer_results[0].session_id,
+        }) == 4
         assert await coordinator.list_sessions(run_id) == (
             parser_results[0],
             waterbody_results[0],
             other,
+            summarizer_results[0],
         )
 
     run_test(exercise)
@@ -180,6 +197,7 @@ def test_waterbody_session_is_created_and_claimed_once_after_all_upstream_gates(
         (AgentRole.QUERY_PARSER, "001234"),
         (AgentRole.WATERBODY, None),
         (AgentRole.WATERBODY, "  "),
+        (AgentRole.RUN_SUMMARIZER, "001234"),
     ],
 )
 def test_prepare_rejects_invalid_role_comid_without_creating_context(role, comid) -> None:
@@ -193,6 +211,26 @@ def test_prepare_rejects_invalid_role_comid_without_creating_context(role, comid
             )
         assert await coordinator.list_sessions(run_id) == ()
         assert clock.calls == before
+
+    run_test(exercise)
+
+
+@pytest.mark.parametrize(
+    ("role", "comid"),
+    [
+        (AgentRole.WATERBODY, "001234"),
+        (AgentRole.RUN_SUMMARIZER, None),
+    ],
+)
+def test_result_sessions_cannot_complete_without_a_typed_result(role, comid) -> None:
+    async def exercise(coordinator, clock, run_id) -> None:
+        session = await coordinator.prepare_agent_session(
+            run_id,
+            agent_role=role,
+            target_comid=comid,
+        )
+        with pytest.raises(ValueError, match="typed result"):
+            await coordinator.complete_agent_session(run_id, session.session_id)
 
     run_test(exercise)
 

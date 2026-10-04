@@ -18,8 +18,8 @@ from app.application.analysis_runs.models import (
     SessionLifecycleEvent,
     SessionSummary,
     SessionResultReference,
-    SessionResultSummary,
     TranscriptItemIdentity,
+    WaterbodySessionResultSummary,
 )
 
 RUN_ID = UUID("10ef14bd-d0e7-4a70-9728-1fbb4ca7a83c")
@@ -60,7 +60,11 @@ def test_run_and_agent_session_status_sets_are_distinct() -> None:
     assert RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR.value not in {
         status.value for status in AgentSessionStatus
     }
-    assert [role.value for role in AgentRole] == ["query_parser", "waterbody"]
+    assert [role.value for role in AgentRole] == [
+        "query_parser",
+        "waterbody",
+        "run_summarizer",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -149,7 +153,7 @@ def test_session_lifecycle_v2_requires_run_and_session_scope() -> None:
 
 def test_completed_waterbody_summary_requires_one_matching_result_projection() -> None:
     reference = SessionResultReference(run_id=RUN_ID, item_id=ITEM_ID)
-    summary = SessionResultSummary(
+    summary = WaterbodySessionResultSummary(
         result_id="result:001234",
         target_comid="001234",
         risk_level="low",

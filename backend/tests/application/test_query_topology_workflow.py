@@ -350,6 +350,18 @@ class FailingTopologyBuilder:
         raise self.failure
 
 
+class CompleteAfterTopologyStage:
+    async def execute(
+        self,
+        context,
+        analysis_context,
+        graph,
+        *,
+        topology_item_id,
+    ) -> None:
+        del context, analysis_context, graph, topology_item_id
+
+
 @asynccontextmanager
 async def workflow_runtime(
     builder,
@@ -367,17 +379,19 @@ async def workflow_runtime(
         transcript_inline_max_bytes=inline_bytes,
         transcript_preview_bytes=min(64, inline_bytes // 2),
     )
+    workflow = compose_m4_workflow(
+        settings,
+        parser=parser,
+        context_resolver=resolver,
+        topology_builder=builder,
+        parameter_capabilities=load_parameter_capability_registry(),
+        error_id_factory=uuid4,
+    )
+    workflow.bind_execution_stage(CompleteAfterTopologyStage())
     application = create_test_app(
         settings=settings,
         clock=FixedClock(),
-        workflow=compose_m4_workflow(
-            settings,
-            parser=parser,
-            context_resolver=resolver,
-            topology_builder=builder,
-            parameter_capabilities=load_parameter_capability_registry(),
-            error_id_factory=uuid4,
-        ),
+        workflow=workflow,
         transcript_store=store,
     )
     async with application.router.lifespan_context(application):
@@ -423,8 +437,9 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
             assert ready_snapshot.analysis_phase is AnalysisPhase.TOPOLOGY_READY
             assert ready_snapshot.context_ref == runtime.context_ref
             assert ready_snapshot.topology_ref == runtime.topology_ref
-            assert "nodes" not in ready_snapshot.model_dump_json()
-            assert "edges" not in ready_snapshot.model_dump_json()
+            serialized_snapshot = ready_snapshot.model_dump_json()
+            assert '"nodes":' not in serialized_snapshot
+            assert '"edges":' not in serialized_snapshot
 
             store.release_topology_write.set()
             await wait_quiesced(coordinator, created.run_id)
@@ -445,7 +460,10 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
             assert sessions[0].agent_role is AgentRole.QUERY_PARSER
             assert sessions[0].status is AgentSessionStatus.COMPLETED
             assert runtime.waterbody_session_ids == {}
-            assert runtime.waterbody_participation == {}
+            assert runtime.waterbody_participation == {
+                "100": True,
+                "200": True,
+            }
             assert len(parser.calls) == len(resolver.calls) == 1
             assert inventory.calls == [TARGET, UPSTREAM]
             assert topology.calls == [TARGET]

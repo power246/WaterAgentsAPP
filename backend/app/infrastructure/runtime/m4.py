@@ -40,6 +40,7 @@ from app.ports.clock import ClockPort
 @dataclass(frozen=True)
 class RuntimeComponents:
     workflow: AnalysisWorkflow
+    query_topology_workflow: QueryTopologyWorkflow | None = None
 
 
 def compose_m4_workflow(
@@ -51,7 +52,7 @@ def compose_m4_workflow(
     parameter_capabilities: ParameterCapabilityRegistry,
     error_id_factory: Callable[[], UUID],
     private_values: tuple[str, ...] = (),
-) -> AnalysisWorkflow:
+) -> QueryTopologyWorkflow:
     parser_workflow = QueryParserWorkflow(
         parser,
         context_resolver,
@@ -163,16 +164,18 @@ async def build_m4_runtime(
         private_values = tuple(
             value for value in (openai_key, google_key, usgs_key) if value
         )
+        workflow = compose_m4_workflow(
+            settings,
+            parser=parser,
+            context_resolver=context_resolver,
+            topology_builder=topology_builder,
+            parameter_capabilities=parameter_capabilities,
+            error_id_factory=error_id_factory,
+            private_values=private_values,
+        )
         yield RuntimeComponents(
-            workflow=compose_m4_workflow(
-                settings,
-                parser=parser,
-                context_resolver=context_resolver,
-                topology_builder=topology_builder,
-                parameter_capabilities=parameter_capabilities,
-                error_id_factory=error_id_factory,
-                private_values=private_values,
-            )
+            workflow=workflow,
+            query_topology_workflow=workflow,
         )
 
 

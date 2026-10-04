@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -368,8 +368,8 @@ Contract changes:
 
 ### 必须实现
 
-- **M7-C01 — DAG 调度**：按 D50/`HydrologyGraph` DAG 从推理源头向目标水体推进；每个水体 Agent 等待所有上游推理完成后只触发一次，从接收输入、获取证据到输出结果形成一个独立 session，全部归属于本次 run。按 D59，满足执行条件并准备开始该 loop 时才创建 session，DAG 确定时不预建全部会话；未执行节点由 run 过程表示，已创建会话失败或取消仍保留。上游结果沿 DAG 传递，禁止无约束 Agent 互聊；上游失败或不足时的调度语义在 M7 定型。
-- **M7-C02 — 上游证据**：下游只接收直接上游依赖的 result、confidence、evidence summary、uncertainty、逐窗口 discharge 状态及 evidence closure refs，并将其作为 current-session evidence；不授权下游直接查询上游 station。上游正常全 indeterminate、failed、cancelled 都是已收敛 dependency outcome，汇流节点等待全部直接依赖后再决定是否继续。
+- **M7-C01 — DAG 调度**：按 D50/`HydrologyGraph` DAG 从推理源头向目标水体推进；每个水体等待全部直接上游 dependency outcome 收敛后只判定和执行一次，从接收输入、获取证据到输出结果形成一个独立 session，全部归属于本次 run。按 D59，真正准备执行 Agent loop 或生成确定性正式结果时才创建 session，DAG 确定时不预建全部会话；未执行节点由 run 过程表示，已创建会话失败或取消仍保留。上游结果沿 DAG 单向传递，禁止无约束 Agent 互聊。
+- **M7-C02 — 上游依赖分类与证据**：每条直接上游依赖确定性分类为 `usable / insufficient / invalid / cancelled`。只有 usable 才把 result、confidence、evidence summary、uncertainty、逐窗口 discharge 状态及 evidence closure refs 作为 current-session evidence；正常全 indeterminate 属于 insufficient，只传状态；技术失败属于 invalid，后端保留详细日志，但不向下游传错误正文、结果或 evidence。汇流节点等待全部直接依赖后再判定，至少一个其他直接上游 usable 时可以继续；下游无权直接查询上游 station。
 - **M7-C03 — 模式传播**：支持 `gap_filling / prediction / mixed` 的拓扑传播。
 - **M7-C04 — Cancel 边界**：在每个真实阶段边界检查 cancellation token；cancel 后不得启动新 agent/tool，也不得传播晚到结果。
   - 流式正文按 D84 以服务端受理 run cancel 为界固定原消息；实际回调中的晚到新增内容交给原 transcript 审计路径，不继续拼接原消息或传给下游，已完成消息和 session 终态保持。
@@ -377,21 +377,28 @@ Contract changes:
   - 按 D60，各 Agent session 终态不因 run 后续取消而改写，已经完成的 session 保持 completed；保存重试不改变执行终态。活跃 session 的取消传递按最终执行流程接入，不能用 run 状态直接覆盖所有会话。
 - **M7-C05 — 在途结果**：无法强杀的 LLM/HTTP 调用可自然返回；其结果只进入 cancelled transcript/日志，不触发前端 result 或下游传播。
 - **M7-C06 — Workflow 收敛**：记录 `cancel_accepted` 和最终 `workflow_quiesced`；M3 live-state cleanup 必须等待 quiesced。
-- **M7-C07 — 并发策略**：基于真实 topology/workload 定义并发上限、排队、资源配额或明确保持无限制；不能让 M2 的“未预设”变成无意识生产默认。
-- **M7-C08 — Topology final result**：按 D50/D53，聚合本次 run 下各水体 session 的真实结果，形成属于 run 的原最终结果/摘要记录；允许汇总表达整个分析的业务结论，并引用各水体原结果。run 汇总与单水体结果表达不同层级，不完整复制同义水体结果或 transcript。保留每个参与水体的 COMID、所属 session、结果或原内容引用，以及 AnalysisDetail/transcript 关联；历史先选择 run，再按水体查阅 session。
+- **M7-C07 — 有界 ready queue 与运行规模**：使用依赖感知 ready queue；同层无依赖节点可并行，后端配置全局并发上限并为其提供边界测试。整次运行规模只受后端已冻结的 topology 最大上游距离、hop 和 node 范围约束，不另设 run-wide token 或模型调用次数上限；每个 session 的 planning、repair、timeout 和 deadline 预算继续生效。
+- **M7-C08 — Topology final result**：按 D50/D53，聚合本次 run 下各水体 session 的真实结果，形成属于 run 的原最终结果记录。目标水体结果是主科学结论；非目标分支失败但目标有效时 run 仍可 completed，同时明确 `partial`/覆盖不完整并保留失败水体状态。目标 session 技术失败才使 run failed；目标确定性 indeterminate 是正常 completed 业务结果。run 结果保留每个参与水体的 COMID、所属 session、结果或原内容引用，以及 AnalysisDetail/transcript 关联；历史先选择 run，再按水体查阅 session。
   - 按 D46 保存实际推理产生的原业务消息和已有引用；原消息中的位置/拓扑等内容正常保留，不因地图展示增加额外采集、连线字段或独立地图快照。地图连线由前端设计，实际推理所需的水文拓扑职责保持不变。
   - 若多水体实际查询首次需要 D33 的关联索引，按 M6-C10 同一规则建设并验收；已有索引则复用，不另建一套。是否建索引不改变按 scope + 显式引用读取全部过程、原全文复用及事务一致性要求。
+- **M7-C09 — 水体启动与零模型收敛**：station-backed 水体先查询本地目标参数和 discharge；本地目标值缺失时，只要本地 discharge 等允许的支持证据与至少一个 usable 上游结果存在，仍可进入 Agent planning。stationless 水体不制造本地空查询，必须至少有一个 usable 直接上游结果才进入 planning；全部直接上游 insufficient/invalid 时立即创建完整 `indeterminate / insufficient_evidence` 结果，0 planning、0 final reasoning，也不查询天气/设施等 optional evidence。该结果保留水体 session 供审计和最终汇总，但不作为 evidence 向下游传播。
+- **M7-C10 — 上游语义与数值边界**：后端不对上游结果再做自定义评分、权重或内容改写；prompt 明确上游值是对上游水体的推理结果，当前水体同参数站点读数才是直接观测。Agent 自行判断证据关系，但后端验证来源角色、scope 和引用闭包。上游推理与本地间接证据默认只允许方向、趋势或风险判断；仅 capability registry 已注册可执行确定性公式/工具时允许输出具体推断数值，Agent 不得自行发明公式或系数。
+- **M7-C11 — 最终汇总 Agent**：全部 active 水体收敛后创建一个 `agent_role=run_summarizer`、`target_comid=null` 的独立 session，复用本 run 的 `waterbody_model`，不增加第三种模型设置或 failover。输入为目标水体完整安全业务投影和其他每个 active 水体的紧凑结构化报告卡；只调用一次主汇总，输出浅显的全流程说明、目标结论、分支限制和特殊值。所有数字带单位、时间窗及稳定原结果引用；Agent 不生成 URL。汇总沿用现有 session transcript/SSE，不新增第三条流。
+- **M7-C12 — 汇总失败与前端信息**：汇总调用或验证失败时，summary session 为 failed，后端记录详细错误并向前端提供安全失败信息；不生成固定模板、拼接式 fallback 或假总结。目标结果有效时 run 仍 completed，各水体结果仍可读取；run final result 明确 summary 不可用。未来 M9 可把稳定引用渲染为可点击内部 URL，首版 M7 不要求实现。
 
 ### 验收重点
 
 - **M7-A01**：fake topology 稳定执行至少 3 个节点，Agent start/completed 事件顺序符合拓扑。
   - 按 D59 验证 DAG 确定时未预建全部水体 session；汇流节点等待全部上游完成、准备执行时才创建自己的 session，实际执行一次且保持原身份。执行准备前被停止的节点不补造空会话，已经创建后失败或取消的 session 仍保留状态与已有过程。
-- **M7-A02**：下游 EvidenceBundle 可见直接上游证据、分支缺口与逐窗口 discharge 状态，但不覆盖下游当前有效观测；upstream indeterminate 不被猜成 0，也不冒充 allowed-indirect evidence。
+- **M7-A02**：下游 dependency manifest 可见所有直接上游的 usable/insufficient/invalid/cancelled 状态；EvidenceBundle 只包含 usable 上游证据、逐窗口 discharge 状态和闭合 refs，不覆盖下游当前有效观测。upstream indeterminate 不被猜成 0，invalid 不带证据或错误正文；一个分支 invalid 且另一分支 usable 时下游仍只执行一次。
 - **M7-A03**：在各关键阶段触发 cancel 后没有新下游调用或前端 result，且最终出现 workflow_quiesced。
   - 按 D66/D67 验证一次 run cancel 覆盖未查看或未订阅的 Agent，后端先阻止后续调度再通知已有未终态 session；run 自身过程和尚未创建 session 的下游节点不再继续推进。验证取消先被接受时，并发准备的新 Agent 也不能启动；前端不需要遍历 session 取消，首版无独立 Agent cancel HTTP 路由。受理取消与实际收敛区分，取消不丢弃已有过程或停止必要的保存补写。
 - **M7-A04**：已完成 Agent 的结果和 transcript item 保留，晚到结果只在 cancelled transcript 可审计。
   - 按 D84 覆盖真实模型生成中取消与取消后继续返回片段：原消息保留边界前正文及 incomplete，晚到部分进入关联审计；两部分不重复、不遗漏实际收到的内容，晚到正文不回流当前读取或下游，补写沿用原规则。
   - 按 D60 验证 run 后续取消时已完成 session 仍为 completed，失败/取消等原终态也不被晚到输出覆盖；各 session 自身状态、结果和过程保持一致。
+- **M7-A05**：stationless 全部直接上游 insufficient/invalid 时为 0 planning/0 final reasoning/0 optional tool；station-backed 本地目标缺失但有本地 discharge 和 usable upstream 时可进入一次 Agent loop。两条路径都保存完整水体正式结果和 session。
+- **M7-A06**：ready queue 不超过配置并发上限；运行只覆盖 topology 已纳入的最大上游范围，不存在第二套 run-wide token/model-call quota。拓扑上限、并发边界与 per-session budget 分别有 fixture。
+- **M7-A07**：`run_summarizer` 仅在全部 active 水体收敛后创建，使用与水体相同的模型，输入恰好为目标完整投影和其他水体报告卡；输出数字均有单位/窗口/ref，特殊值明确。汇总失败时无 fallback 文本、前端可见安全失败、后端日志可排查，目标有效的 run 仍 completed。
 
 ## 10. M8：Memory/RAG from Transcript
 
@@ -429,7 +436,7 @@ Contract changes:
   - 按 D75，首次查看未结束 Agent 直接无游标订阅 session SSE，消费已有全部可见记录后继续接收新增；无需先 GET transcript。重连按 D73 携带原消费游标，已结束 Agent/历史仍用统一 GET；共享客户端与内容模型，不新增第二套过程读取模型。
   - 按 D74 实现当前状态来源优先级：收到 run SSE 状态后，迟到的 GET 不覆盖；首次尚无 SSE 状态可使用 GET，断线核对与历史读取保留。不为此设计快照版本协议或时间戳比较。session 续传游标与内容 schema version 保持原义。
 - **M9-C09 — Demo 单 worker**：启动说明明确 demo 单进程、单 worker；不得通过未实现的共享状态暗示支持多 worker。
-- **M9-C10 — 地图结果与上下文阅读**：承接 M3 D21 与 M6-C14/M6-C18，分析完成后地图展示所有实际参与推理的水体；点击水体展示分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由。从结果入口进入对应 waterbody Agent session 的真实消息、tool、evidence、decision 与 result 上下文，skill/tool/hook 等按语义默认折叠、用户点击展开，与内容大小和是否已下载无关。前端不另造推理摘要流，不请求隐藏思维链，也不把后端四种查询职责直接变成四层页面导航。
+- **M9-C10 — 地图结果、汇总与上下文阅读**：承接 M3 D21、M6-C14/M6-C18 与 M7-C08/M7-C11/M7-C12，分析完成后地图展示所有实际参与推理的水体；点击水体展示分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由。从结果入口进入对应 waterbody Agent session 的真实消息、tool、evidence、decision 与 result 上下文，skill/tool/hook 等按语义默认折叠、用户点击展开，与内容大小和是否已下载无关。run 页面另展示 `run_summarizer` 生成的浅显全流程总结、特殊值和 partial/失败分支提示；汇总失败时显示后端安全失败信息，不用前端模板假造总结。特殊值的稳定 refs 可在 M9 评估渲染为可点击内部上下文 URL，首版不是硬验收项。前端不另造推理摘要流，不请求隐藏思维链，也不把后端四种查询职责直接变成四层页面导航。
   - 按 D66，run 执行中也允许选中已有 session 的水体观看实时上报，不要求先有最终结果；用户不能给 Agent 追加消息，但保留取消整个 run 的操作。SSE 连接时机按 D68，独立 session 的具体订阅协议继续定型，关闭查看连接不取消分析，历史读取不重新执行。
   - 按 [D68](M3/m3_transcript_history_design.md#d68按查看需要订阅水体-session已结束与历史使用统一读取)，前端打开水体实时过程时才订阅对应 session，切换水体或关闭过程视图时关闭旧订阅，不在进入 run 页面时连接所有 Agent。未被查看的 Agent 正常执行和保存，打开前的全部可见过程也必须能读全。已结束 Agent 和历史通过统一接口读取，auto 与严格 history 语义保留；完整记录与实时流的衔接协议继续定型。
   - 按 D69，当前 run 页面同时建立一条轻量 run 通知流，更新 run 状态、新 session、各 Agent 状态和保存变化。切换水体保持 run 连接，通常一页为一条 run 流加一条当前 session 流，离开页面才关闭两类连接；run 通知不承载完整 Agent 消息，历史不订阅实时流。
@@ -553,6 +560,14 @@ M6 Milestone 0–13 已完成 Windows 本机实现与契约审计；这里只索
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、`M6-C01`–`M6-C19`、`M6-A01`–`M6-A10` | [M6 契约覆盖矩阵](M6/m6_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M6/m6_single_agent_reasoning_design.md)、[实施设计](M6/m6_single_agent_reasoning_implementation_design.md)、[Reasoning Policy Catalog](M6/m6_reasoning_policy_catalog.md)、[API/读取契约](M6/m6_single_agent_reasoning_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 fake E2E、官方 Responses fixtures、五级风险/三态结果、sealed gate/batch/repair、六类 typed content、现有两层 SSE、production OpenAPI、专用 `wateragents_test` history/restart/startup-repair 及完整 M1–M6 regression 已在 Windows 本机通过。 | 取得明确授权和安全 model 配置后执行真实 OpenAI waterbody contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的同库跨系统迁移证据后，再评估中心最终承接表的 `implemented` 记录。 |
+
+### M7 待验收索引
+
+M7 Milestone 0–9 已完成 Windows 本机实现与契约审计；这里只索引固定 fake、专用 PostgreSQL 与离线审计证据，不把缺少的真实 provider 请求或 Ubuntu/macOS/Windows 同提交 CI 冒充中心最终承接。M7 交付当前唯一 production DAG workflow、直接上游依赖、M6 waterbody 复用、run summarizer 和 topology final result，但不实现 M8 transcript RAG 或 M9 frontend/settings/admin。
+
+| 范围 | 实现、测试与文档证据 | 剩余验收 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M7-C01`–`M7-C12`、`M7-A01`–`M7-A07` | [M7 契约覆盖矩阵](M7/m7_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API/读取契约](M7/m7_topology_driven_multi_agent_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 chain/diamond/失败/取消/max-topology E2E、七类 typed content、production OpenAPI、专用 `wateragents_test` workflow/history/restart/startup-repair 与完整 M1–M7 regression 已在 Windows 本机通过。 | 获得明确计费/联网授权和安全 model 配置后执行真实 provider contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的实际三平台证据后，再评估中心最终承接表的 `implemented` 记录。 |
 
 M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 

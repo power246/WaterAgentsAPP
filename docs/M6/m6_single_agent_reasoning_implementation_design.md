@@ -1,8 +1,10 @@
 # M6 Single-Agent Reasoning 实施设计
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 > 状态：当前唯一 V1 已完成 M6 Milestone 0–13 本机实现与集成审计。本文描述已落地的代码结构与可执行契约；分阶段提交、验证证据、外部 `not run` 项和剩余风险见 [M6 Implementation TODO](m6_implementation_todo.md)。
+
+> M7 接力说明：本文 2026-10-03 只在第 16 节登记 dependency manifest、stationless 0-model 调度和 `run_summarizer` 接缝；前文仍描述已实现的 M6 单水体 runtime，新增目标由 M7 后续阶段实现和验证。
 
 ## 1. 核心结论与范围
 
@@ -702,10 +704,11 @@ production app 不增加 M6 direct route。test composition 可以直接注入 f
 M7 只需：
 
 - 为 ready DAG node 创建 waterbody session；
-- 实现 `UpstreamResultPort`；
+- 实现 `UpstreamResultPort` 与直接上游 dependency manifest；
 - 传入相同 `RunSingleWaterbodyAgent`；
 - 等待 dependency outcome 并决定下游调度；
-- 保存 run-level result refs。
+- 在 stationless 无 usable upstream 时复用现有 M6 skeleton/assembler 生成 0-model 不足结果；
+- 保存 target/run-level result refs，并执行独立 `run_summarizer` session。
 
 M8 实现 `TranscriptEvidencePort`；M6 prompt/policy 不因 memory mode 改写历史 evidence 的 contextual eligibility。
 

@@ -1,8 +1,10 @@
 # M5 Evidence Tools + EvidenceBundle 设计决策记录
 
-更新日期：2026-10-01
+更新日期：2026-10-03
 
 > 状态：设计方向与实施模式已完成对齐，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收证据和未运行边界见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
+
+> M7 接力说明：本文 2026-10-03 同步的 dependency manifest、stationless 零模型截断及本地/上游组合规则是最终产品目标，须由 M7 接入实现；不属于既有 M5 Milestone 0–13 的完成证据。
 
 本文承接：
 
@@ -424,11 +426,11 @@ M5/M6/M7 必须按当前 HydrologyNode 是否具有合格本地 station/series r
 - 只查询当前节点关联的 station/series refs 和其 qualified coverage units；
 - 查询所有适用的用户目标 ParameterKey，并始终包含 required-support `usgs:00060` discharge 的本地可执行通道；
 - M4 metadata 只决定候选与 conditional-mandatory plan，M5 actual response 决定真实 evidence；
-- 若查询成功但全部目标参数与 discharge 在全部适用窗口都没有 usable direct evidence，则生成逐 cell 的 empty/invalid/quality facts，当前水流分支停止，不进入该水体的推理模型；
+- 本地 preflight 后仍须读取 M7 已收敛的直接上游 outcome；如果没有任何本地目标参数 direct evidence，且上游也没有与目标参数相关的 usable result，则即使本地只有 discharge 等 supporting evidence，也只生成逐 cell 的 empty/invalid/quality facts 并停止，不进入该水体的推理模型；
 - provider unavailable/timeout/invalid protocol 仍按 D05 作为技术失败处理，不得冒充“完全没有证据”后自然停止；
-- 只要至少一个目标参数或 discharge 的至少一个窗口存在 usable direct evidence，分支可以继续；缺失参数/窗口保留 blocker，由后续允许的间接关系和逐 cell gate 处理，不要求整分支全有或全无。
+- 只要至少一个目标参数存在 usable 本地 direct evidence，或 M7 注入至少一个与目标参数相关的 usable direct-upstream result，分支可以继续；本地 discharge 等 supporting evidence 可参与已登记关系，但不能单独充当目标参数起点。缺失参数/窗口保留 blocker，由后续允许的间接关系和逐 cell gate 处理，不要求整分支全有或全无。
 
-对 stationless waterbody，不调用 `collect_water_observations` 制造注定为空的本地查询。其初始 evidence 来自同一 run 的直接上游 Agent results；Agent 可根据任务和证据缺口按需调用天气、设施、inspection、aggregation 等 optional tools。没有上游结果的目标水体仍可进入有界的 optional evidence acquisition，但只有 D13 的 direct/allowed-indirect evidence 能让对应 cell 通过，contextual-only evidence 不能解锁水质判断。
+对 stationless waterbody，不调用 `collect_water_observations` 制造注定为空的本地查询。其 mandatory evidence 起点来自同一 run 的直接上游 Agent results；至少一个直接上游具有 usable result 时，Agent 可根据任务和缺口按需调用天气、设施、inspection、aggregation 等 optional tools。全部直接上游均为 `indeterminate/insufficient_evidence` 或 invalid 时，M7 后端不启动 optional planning，而由 M6 确定性生成完整不足结果；contextual-only evidence 不能单独解锁水质判断。
 
 discharge 是每个实际执行水体、每个最终时间窗口的 mandatory supporting parameter，不因为用户未显式请求或当前节点无监测站而省略：
 
@@ -443,7 +445,7 @@ mandatory/conditional-mandatory/optional 仍由同一 registry、executor、tran
 
 ### D16：无实际观测导致的分支停止是可审计业务结果，不是技术失败或假推理
 
-station-backed waterbody 在准备执行时创建真实 waterbody session，随后执行 D15 的 conditional-mandatory observation tools。若成功查询后全部适用窗口均无 usable target/discharge direct evidence，session 不调用水体模型，但不得删除、跳过或伪造其执行过程。
+station-backed waterbody 在准备执行时创建真实 waterbody session，随后执行 D15 的 conditional-mandatory observation tools 并读取 M7 direct-upstream outcomes。若成功查询后全部适用窗口均无 usable local target direct evidence，且全部直接上游也无与目标参数相关的 usable result，session 不调用水体模型；本地仅有 discharge 等 supporting evidence 不改变该结论，但真实过程不得删除、跳过或伪造。
 
 该路径必须完成：
 
@@ -454,13 +456,13 @@ station-backed waterbody 在准备执行时创建真实 waterbody session，随�
 
 M7 必须将每个直接上游节点的终态视为 DAG 依赖已收敛，包括正常有结果、正常全 indeterminate、failed 和 cancelled；汇流节点等待全部直接依赖收敛后再决定执行，不能因一条分支无 evidence 就忽略其存在或提前启动。
 
-`get_upstream_results` 对正常无 evidence 分支返回其确定性 result/bundle references 和结构化不足事实，但这些 refs 不满足任何 `upstream_to_downstream` 动态规则。下游 Agent/context 必须知道该自然缺口；只允许其余 direct/allowed-indirect evidence 进入 gate，并在适用结果中保留 branch coverage 不完整事实。
+`get_upstream_results` 对正常无 evidence 分支保留结构化 `insufficient` dependency fact，但不将其 result/bundle refs 作为下游 evidence 返回，也不满足任何 `upstream_to_downstream` 动态规则。若其他 usable 分支使下游继续，Agent/context 只知道该分支无 usable evidence；只允许其余 direct/allowed-indirect evidence 进入 gate，并在适用结果中保留 branch coverage 不完整事实。
 
-汇流处只要其他上游分支或本地/允许侧面 evidence 仍能支持部分 cell，就可以继续；缺失分支不使其他 cell 自动失败。单链或全部分支均无 usable evidence 时，下游无站节点仍可按 D15 执行有界 optional evidence acquisition，但 contextual-only 内容不能解锁 gate，最终不足则同样确定性收敛。
+汇流处只要其他上游分支或本地/允许侧面 evidence 仍能支持部分 cell，就可以继续；缺失分支不使其他 cell 自动失败。单链或全部分支均无 usable evidence 时，下游无站节点不启动 optional planning，直接以 0 model calls 确定性收敛为完整 `indeterminate/insufficient_evidence`；后续有站节点仍须执行自己的本地 preflight。
 
 上游 result handoff 必须为 required-support discharge 保留每个窗口的 observed/inferred/indeterminate 状态及 evidence refs，即使 discharge 不是用户目标。下游不得因字段缺省猜测 discharge，也不得把 upstream indeterminate 当作流量为零或正常基线。
 
-provider timeout、rate limit、认证失败、协议损坏等仍是 D05 的 `failed + unavailable` 技术路径，不进入上述正常无 evidence 分支；failed/cancelled 如何影响下游 session/run 终态由 M7 定型，但不得降级成 completed empty。
+provider timeout、rate limit、认证失败、协议损坏等仍是 D05 的 `failed + unavailable` 技术路径，不进入上述正常无 evidence 分支。M7 将 failed upstream 对继续执行的下游表示为 `invalid` 且不传 evidence；只要 target 仍能正常产出，非 target failure 形成 partial coverage 而不强制整个 run failed。cancelled outcome 不启动下游，且不得降级成 completed empty。
 
 ### D17：production 不公开直接 tool invocation；提供复用真实执行链的测试接口
 

@@ -5,6 +5,8 @@ from uuid import UUID
 import pytest
 from pydantic import ValidationError
 
+from app.application.analysis_runs.models import SessionResultReference
+from app.application.analysis_runs.topology_result_models import DependencyStatus
 from app.application.evidence_tools import create_evidence_tool_registry
 from app.application.reasoning.model_models import (
     WaterbodyJsonSchema,
@@ -36,6 +38,9 @@ from app.application.reasoning.sufficiency import (
 )
 from app.application.reasoning.working_context import (
     BoundedEvidenceSummary,
+    DependencyPromptEntry,
+    DependencyPromptWindow,
+    WaterbodyDependencyPromptBlock,
     WorkingContextFact,
     WorkingContextFactKind,
     build_working_context_projection,
@@ -43,6 +48,7 @@ from app.application.reasoning.working_context import (
 from app.domain import (
     AggregationMethod,
     EvidenceCellStatus,
+    InferenceMode,
     ItemReference,
     ModelSelection,
     OutcomeStatus,
@@ -69,6 +75,7 @@ OPERATION_IDS = {
 MODEL = ModelSelection(provider="openai", model="waterbody-test")
 PARAMETER = ParameterKey(code_system="usgs", code="00010")
 DEADLINE = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+RUN_ID = UUID("10000000-0000-4000-8000-000000000001")
 
 
 def response_schema(name: str, *, reverse: bool = False) -> WaterbodyJsonSchema:
@@ -91,7 +98,7 @@ def response_schema(name: str, *, reverse: bool = False) -> WaterbodyJsonSchema:
     )
 
 
-def working_context(*, outside_summary: bool = False):
+def working_context(*, outside_summary: bool = False, dependency_context=None):
     evidence_ref = "outside-evidence" if outside_summary else "evidence-1"
     allowlist = (
         "cell-1",
@@ -102,7 +109,7 @@ def working_context(*, outside_summary: bool = False):
     if outside_summary:
         allowlist = (*allowlist, evidence_ref)
     return build_working_context_projection(
-        run_id=UUID("10000000-0000-4000-8000-000000000001"),
+        run_id=RUN_ID,
         session_id=UUID("20000000-0000-4000-8000-000000000001"),
         target_comid="12345678",
         scope_digest="sha256:scope",
@@ -129,6 +136,7 @@ def working_context(*, outside_summary: bool = False):
                 truncated=False,
             ),
         ),
+        dependency_context=dependency_context,
     )
 
 
@@ -390,6 +398,88 @@ def test_synthesis_keeps_server_bounded_contextual_summary_for_attribution() -> 
     assert body["bounded_reference_summaries"][0]["evidence_ref"] == (
         "outside-evidence"
     )
+
+
+def test_dependency_prompt_locks_source_roles_numeric_boundary_and_windows() -> None:
+    dependency_context = WaterbodyDependencyPromptBlock(
+        manifest_digest="sha256:dependency-manifest",
+        current_waterbody_comid="12345678",
+        mode=InferenceMode.MIXED,
+        windows=(
+            DependencyPromptWindow(
+                window_id="window-gap",
+                mode=InferenceMode.GAP_FILLING,
+            ),
+            DependencyPromptWindow(
+                window_id="window-prediction",
+                mode=InferenceMode.PREDICTION,
+            ),
+        ),
+        dependencies=(
+            DependencyPromptEntry(
+                upstream_comid="100",
+                dependency_status=DependencyStatus.USABLE,
+                result_ref=SessionResultReference(
+                    run_id=RUN_ID,
+                    item_id=UUID("40000000-0000-0000-0000-000000000100"),
+                ),
+            ),
+            DependencyPromptEntry(
+                upstream_comid="200",
+                dependency_status=DependencyStatus.INVALID,
+            ),
+        ),
+    )
+    payload = common(WaterbodyModelPhase.EVIDENCE_PLANNING, "planning_decision")
+    payload["context"] = working_context(dependency_context=dependency_context)
+    request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_evidence_planning(
+        EvidencePlanningPromptInput(
+            **payload,
+            station_kind=WaterbodyStationKind.STATION_BACKED,
+            gates=(supported_gate(),),
+            budget=PromptBudgetRemaining(
+                collection_calls=1,
+                transform_calls=1,
+                planning_turns=1,
+                calls_this_turn=1,
+            ),
+            authorized_tools=(),
+        )
+    )
+
+    body = json.loads(request.messages[-1].text)
+    block = body["dependency_context"]
+    assert block["mode"] == "mixed"
+    assert block["windows"] == [
+        {"window_id": "window-gap", "mode": "gap_filling"},
+        {"window_id": "window-prediction", "mode": "prediction"},
+    ]
+    assert block["local_same_parameter_role"] == "direct_observation"
+    assert block["local_supporting_role"] == "supporting_indirect_evidence"
+    assert block["upstream_role"] == "cross_waterbody_inferred_evidence"
+    assert block["quantified_value_policy"] == "registered_deterministic_tool_only"
+    assert block["dependencies"][0]["result_ref"] == {
+        "run_id": str(RUN_ID),
+        "item_id": "40000000-0000-0000-0000-000000000100",
+    }
+    invalid = block["dependencies"][1]
+    assert invalid == {
+        "upstream_comid": "200",
+        "dependency_status": "invalid",
+        "source_role": "cross_waterbody_inferred_evidence",
+    }
+    rendered = request.system_prompt.lower()
+    for phrase in (
+        "current-waterbody",
+        "direct observation",
+        "upstream-waterbody",
+        "inferred evidence",
+        "local discharge",
+        "directional",
+        "registered deterministic",
+        "never invent",
+    ):
+        assert phrase in rendered
 
 
 def test_reasoning_batch_rejects_scope_external_evidence_before_rendering() -> None:

@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-02
+更新日期：2026-10-03
 
 本文档是当前后端架构骨架的最终版，也是给后续设计/实现 agent 阅读的架构引入文档。它只回答最高层问题：WaterAgents 后端要解决什么问题、第一版需要哪些大功能、系统分成哪些层、层与层之间如何协作。
 
@@ -16,9 +16,9 @@ M1–M9 是同一套第一版系统的内部实施切片，不是九个可独立
 
 M3 工程文档入口：[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md)、[Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、run/session 状态、history、十个 run 根路由与两层 SSE；Milestone 0–16 保留历史验证证据，原 D01–D86 保留为决策依据。Milestone 17–18 已完成 Windows 正式入口及统一脱敏/性能功能包，Milestone 19 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已本机复审通过，`request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同一 PostgreSQL 跨系统迁移另缺完整证据，因此 GLOBAL-C11 和中心最终承接仍保持 `partial`。
 
-实时交互按 [M3 D69](M3/m3_transcript_history_design.md#d69run-通知与-session-过程使用两层-sse) 使用两层 SSE：当前 run 页面连接轻量 run 通知流，用户打开水体实时过程时再按 D68 连接对应 session 流。run 通知整体状态、新 session、各 Agent 状态和保存情况，session 上报具体过程；GET 用于首次加载、断线核对和历史。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。D65 路由表已同步两条流，关闭时机按 D70，恢复语义按 D73；具体事件、消费身份及握手规则见 M3 API 指南。
+实时交互按 [M3 D69](M3/m3_transcript_history_design.md#d69run-通知与-session-过程使用两层-sse) 使用两层 SSE：当前 run 页面连接轻量 run 通知流，用户打开某个水体或最终汇总的实时过程时再按 D68 连接对应 session 流。run 通知整体状态、新 session、各 Agent 状态和保存情况，session 上报具体过程；GET 用于首次加载、断线核对和历史。用户不能给 Agent 追加消息，停止整次分析只调用 D67 的 run cancel。D65 路由表已同步两条流，关闭时机按 D70，恢复语义按 D73；具体事件、消费身份及握手规则见 M3 API 指南。
 
-领域边界按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)：run 覆盖一次用户提交的完整分析，是历史分页对象；session 是单个 Agent 的独立上下文与完整执行 loop，包括问题解析 session 和各水体 session。水体 Agent 等待所有上游推理结束后只触发一次。此前整次分析的创建幂等、整体状态、SSE、取消、保存重试和清理职责归到 run；四表职责与两层记录归属已按 D53 确认，路径按 D65 确认，具体列与身份约束见 M3 实施详细设计。完整业务流程见下文第 1.2 节。
+领域边界按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)：run 覆盖一次用户提交的完整分析，是历史分页对象；session 是单个 Agent 的独立上下文与完整执行 loop，包括问题解析 session、各水体 session 和一次最终汇总 session。水体 Agent 等待所有直接上游依赖收敛后只触发一次；汇总 Agent 等全部 active 水体收敛后只触发一次。此前整次分析的创建幂等、整体状态、SSE、取消、保存重试和清理职责归到 run；四表职责与两层记录归属已按 D53 确认，路径按 D65 确认，具体列与身份约束见 M3 实施详细设计。完整业务流程见下文第 1.2 节。
 
 M2 的旧整体 session 模型只保留为历史实现证据；当前 `backend/` 已迁移到 M3 的 run 根协议，Agent session 是 run 下的独立上下文，旧 `/api/analysis/sessions` 不提供兼容别名。新后端的需求和契约只以本文档与后续新架构设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
 
@@ -67,17 +67,18 @@ WaterAgents 要解决的问题是：在美国，并不是每条河流或水体�
 | run | 一次用户提交所开启的完整分析，从问题解析、拓扑查找到各 Agent 输出结束。创建幂等、整次分析状态、SSE、取消、保存重试及历史列表分页归到这一层。run 从提交时就存在，不等分析完成后才创建。 |
 | 问题解析 session | 属于该 run 的独立 Agent 上下文，保存输入、调用过程和结构化输出；会话职责不绑定水体 COMID，但解析结果可以包含目标 COMID、坐标等业务事实。 |
 | 水体 session | 属于该 run 并绑定一个 COMID 的独立 Agent 上下文；从接收输入、获取证据到输出最终结果是一个完整 loop。同一 run 内每个水体 Agent 等所有上游推理完成后只触发一次。 |
+| 汇总 session | 属于该 run、但不绑定 COMID 的独立 Agent 上下文；角色为 `run_summarizer`。它在全部 active 水体依赖收敛后读取目标水体完整安全业务投影和其他水体紧凑报告卡，用浅显文字总结整条水流分析，只触发一次。 |
 | COMID | 水体的业务身份。同一水体可以参与不同 run，每次使用所属 run 中的独立 session，不因 COMID 或 query 相同而复用本次执行上下文。 |
 
-身份字段按 [M3 D52](M3/m3_transcript_history_design.md#d52session_id-统一标识-agent-执行取消重复-agent_id)：run_id 关联整次分析，session_id 统一标识一个 Agent 的独立上下文和本次完整执行；取消原先同义的执行 agent_id。agent_role 表达问题解析或水体推理职责，target_comid 表达适用水体，operation_id 标识一次模型/工具等调用。保存重试与历史读取保留原身份，同一调用的开始、结束和直接关联 hook 复用 operation_id。
+身份字段按 [M3 D52](M3/m3_transcript_history_design.md#d52session_id-统一标识-agent-执行取消重复-agent_id)：run_id 关联整次分析，session_id 统一标识一个 Agent 的独立上下文和本次完整执行；取消原先同义的执行 agent_id。agent_role 表达问题解析、水体推理或整次汇总职责；问题解析与 `run_summarizer` 的 target_comid 为 null，水体推理绑定适用 COMID。operation_id 标识一次模型/工具等调用。保存重试与历史读取保留原身份，同一调用的开始、结束和直接关联 hook 复用 operation_id。
 
-按 [M3 D53](M3/m3_transcript_history_design.md#d53四张核心表会话状态与两层记录归属)，每个 Agent session 保存自身必要状态和时间，用于判断是否开始、是否结束、是否失败；run 整体状态不能替代各 session 的状态。用户原始请求、run 创建事件和后端 BFS 等记录属于 run，问题解析及水体 Agent 的实际消息属于各自 session，公共记录不能全部塞进解析 session。角色与水体归属优先从 session 取得，完整请求、配置、过程和结果保留于原记录；run 汇总可以表达整体结论并引用水体结果。
+按 [M3 D53](M3/m3_transcript_history_design.md#d53四张核心表会话状态与两层记录归属)，每个 Agent session 保存自身必要状态和时间，用于判断是否开始、是否结束、是否失败；run 整体状态不能替代各 session 的状态。用户原始请求、run 创建事件和后端 BFS 等记录属于 run，问题解析、水体及最终汇总 Agent 的实际消息属于各自 session，公共记录不能全部塞进解析 session。角色与水体归属优先从 session 取得，完整请求、配置、过程和结果保留于原记录；run 最终结果表达整体结论并引用水体与汇总原结果。
 
 按 [M3 D54](M3/m3_transcript_history_design.md#d54所有业务表的每条记录都保留时间信息) 和 [D55](M3/m3_transcript_history_design.md#d55通用时间最多两列occurred_at-复用创建时间)，所有业务表每条记录都保留时间信息；M3 的 run/session 表使用 created_at、updated_at，追加后不可变的原记录/大正文表仅使用 created_at。transcript 的 API occurred_at 从原记录 created_at 装配，数据库不再独立保存同义时间列。时间在原创建或真实变更时确定，读取和补写不刷新；观测时间、预测窗口等真实业务时间仍保留于正文。
 
-session 表示真实的上下文边界。各 Agent 只接收流程明确传入的消息、上游结果与证据；统一存储 transcript 不意味着把整次 run 的消息都放入每个 Agent 的上下文。BFS 等确定性后端步骤属于 run 的过程记录，本身不另建 Agent session。公共内容通过原记录引用复用，问题解析 session 与水体 session 共用记录模型、内容解析及全文读取能力。
+session 表示真实的上下文边界。各 Agent 只接收流程明确传入的消息、上游结果与证据；统一存储 transcript 不意味着把整次 run 的消息都放入每个 Agent 的上下文。BFS 等确定性后端步骤属于 run 的过程记录，本身不另建 Agent session。公共内容通过原记录引用复用，问题解析、水体与最终汇总 session 共用记录模型、内容解析及全文读取能力。
 
-创建时机按 [M3 D59](M3/m3_transcript_history_design.md#d59agent-准备执行时创建-session)：问题解析 Agent 在准备解析时创建 session；水体 Agent 等所有上游推理完成、满足执行条件并准备开始自己的 loop 时才创建 session。DAG 确定时不预建全部会话，尚未执行的节点由 run 拓扑及实际过程记录表示，没有 Agent 会话可读。已创建 session 随后失败或取消仍保留自身身份、状态和已有记录；运行中创建沿用增量持久化规则，保存重试不重新创建或执行 Agent。
+创建时机按 [M3 D59](M3/m3_transcript_history_design.md#d59agent-准备执行时创建-session)：问题解析 Agent 在准备解析时创建 session；水体 Agent 等所有直接上游依赖收敛、满足执行条件并准备开始自身 loop 时才创建 session；最终汇总 Agent 在全部 active 水体收敛且准备汇总时创建 session。DAG 确定时不预建全部会话，尚未执行的节点由 run 拓扑及实际过程记录表示，没有 Agent 会话可读。确定性零模型收敛也会在真正生成该水体正式结果时创建一个水体 session。已创建 session 随后失败或取消仍保留自身身份、状态和已有记录；运行中创建沿用增量持久化规则，保存重试不重新创建或执行 Agent。
 
 session 状态按 [M3 D60](M3/m3_transcript_history_design.md#d60agent-session-使用五种执行状态) 使用 pending、running、completed、failed、cancelled。pending 表示已经创建并准备执行，不包含等待上游；准备失败或取消可直接结束，running 则以完成、失败或取消结束。终态不改写，run 后续取消也保留各已完成 session 的 completed。保存进度和警告继续按 run 管理，session 不增加 completed_with_persistence_error；业务完成不能代替全部保存确认。
 
@@ -94,10 +95,10 @@ schema 版本按 [M3 D63](M3/m3_transcript_history_design.md#d63schema-版本严
 1. **用户提交问题，创建 run。** 用户输入 query，在地图选择 COMID/坐标、日期、时间粒度，并分别选择解析模型和水体模型；前端不提供参数表单。一次新的提交创建一个新的 run；即使 query 相同，新的用户操作也使用新的创建 key。只有请求重试才原样复用 key 和请求体，重试返回原创建回执，不重新执行分析。
 2. **准备解析时创建问题解析 session。** 问题解析 Agent 从 query 提取或自主推测参数，并在前端 target/date 缺失时给出候选；它没有 geocoding、NLDI 或参数搜索工具权限。随后确定性 resolver 验证 CONUS/COMID、日期、实际粒度、mode 与 ParameterKey。该 session 的安全输入、实际模型过程及唯一 `AnalysisContext` 归属于本次 run；缺失、冲突、歧义、unsupported 或越界在 topology 前失败。
 3. **后端向上游寻找推理源头。** 以解析出的目标水体为基准，沿水文网络向上游做有界稳定 BFS。NLDI 提供河网/站点关联，WDFN v1 metadata 按“参数 × 时间段”判断候选 inlet；每条支流找到最近充分来源后只停止已覆盖单元。完整搜索范围、active path union、自然无源和上限停止均保留，技术故障不冒充无数据。
-4. **组织 DAG 并按依赖调度。** 后端依据水文网络构建有向无环图，组织水体 Agent 之间的信息传递。从推理源头开始执行；一个水体 Agent 必须等所有上游推理完成后才开始，同一 run 中只触发一次。汇流节点不能收到一个上游结果就提前执行，其他上游结果也不触发第二次 session。
-5. **准备执行时创建水体 session，完成自己的推理 loop。** 该水体满足执行条件后创建独立 session，接收输入与上游结果，通过工具等外部能力收集证据，完成推理并输出该水体结果。过程中的真实消息、调用、证据、错误和最终结果保留稳定身份及引用；结果沿 DAG 传给下游。各 session 的结果保持各自归属，整次 run 的汇总引用这些原结果。尚未进入执行准备的水体不预建空 session，已创建会话失败或取消仍保留已有事实。
-6. **完成整次分析并保存过程。** 当本次分析的各 Agent 输出结束，形成 run 的整体结果。记录在执行过程中按持久化规则持续保存，不等结束后才一次性保存。创建幂等、状态与适用记录原子提交、补写重试、凭据脱敏和清理门槛沿用 M3 契约；保存重试不会重跑问题解析或水体 Agent，业务完成也不能代替全部保存确认。
-7. **用户在地图上查看本次结果。** 完成后，地图显示每个实际参与推理的水体。用户点击水体，查看其分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由；再从结果入口进入该 waterbody Agent session 的完整真实上下文。skill、tool、hook 等内容按语义默认折叠，用户可以展开具体内容。
+4. **组织 DAG 并按依赖调度。** 后端依据水文网络构建有向无环图，以有界 ready queue 从推理源头向目标水体推进；同层无依赖节点可在后端并发上限内运行。一个水体必须等全部直接上游收敛后才判定启动路径，同一 run 中只收敛一次。正常但全为 `insufficient_evidence` 的依赖不算可用证据；技术失败依赖标为 `invalid`，只把状态写进下游提示，不传结果或 evidence。只要至少一个其他直接上游仍有可用结果，下游就可以继续。
+5. **准备执行时创建水体 session，完成推理或确定性收敛。** 有站点的水体先查本站目标参数和 discharge；本站缺少目标值但有 discharge 等本地支持证据、且上游结果可用时，Agent 可以组合判断。无站水体必须至少有一个可用直接上游结果才进入可选取证和模型推理；全部直接上游都不足或 invalid 时，后端直接创建完整的 `indeterminate / insufficient_evidence` 水体结果，0 次 planning、0 次 final reasoning。过程中的真实消息、调用、证据、错误和最终结果保留稳定身份及引用；只有可用水体结果沿 DAG 作为 evidence 传给下游，不足结果只传依赖状态。
+6. **运行最终汇总 Agent 并完成整次分析。** 全部 active 水体收敛后，创建一个 `run_summarizer` session，复用本 run 的 `waterbody_model`。它读取目标水体完整安全业务投影和其他水体的紧凑结构化报告卡，以浅显语言说明分析怎样沿上游走到目标、主要结论、证据限制和特殊值；数字必须带单位、时间窗及稳定来源引用。汇总调用失败时该 session 为 failed，后端向前端发送安全失败信息并记录详细日志，不生成固定模板或假总结；若目标结果有效，run 仍可 completed。随后形成引用原水体结果与汇总结果的 run 最终结果。记录在执行过程中按持久化规则持续保存，不等结束后才一次性保存。
+7. **用户查看汇总和地图结果。** run 页面先显示最终汇总、特殊值与覆盖限制；用户可进入 `run_summarizer` session 的真实上下文。地图同时显示每个实际参与推理的水体；点击水体查看其分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由，再进入对应 waterbody Agent session 的完整真实上下文。skill、tool、hook 等内容按语义默认折叠，用户可以展开具体内容。
 8. **用户从历史列表重新打开某次 run。** query 历史列表按 run 分页，一行代表一次用户提交的分析，同 query 的不同 run 不合并。用户选择某个历史 run，前端根据当次已保存的消息、业务结果及引用展示地图标点和连线；再点击水体，查看该 run 下对应 session 的结果和多层过程。历史链路只读取 PostgreSQL 已保存的事实，不重新解析或推理，不用当前结果替换旧结果，也不从内存补齐后宣称已经保存。
 
 **执行中的观察与停止。** 按 D66，上述执行过程进行中，用户就可以选中已有 session 的水体观看实时上报，无需等待第 6 步完成，也无需先有最终预测才能进入过程。此时仅展示已经产生的可见内容，未创建 session 的节点不补造会话。用户不能向 Agent 追加消息，但可通过 run 级 cancel 停止整次分析。按 [D67](M3/m3_transcript_history_design.md#d67只公开-run-取消由后端传递到各-session)，前端只调用一次 run cancel；后端先阻止解析、BFS 和后续 DAG 调度，再调用内部取消能力通知所有已创建的未终态 session，不额外公开单独 Agent cancel HTTP 接口。已终态 session 保留原状态，晚到输出不继续向前端或下游传播；受理取消与在途调用实际收敛区分，已有过程保存及补写继续进行。具体 SSE 协议继续对齐，关闭查看连接本身不取消分析。
@@ -124,10 +125,11 @@ flowchart TD
     R --> P[问题解析 session：输出结构化需求]
     P --> B[以目标水体为基准向上游 BFS]
     B --> D[确定推理源头并组织水文 DAG]
-    D --> S[水体节点等待全部上游，准备执行时创建 session，各执行一次]
+    D --> S[ready queue：等待直接上游收敛，水体各收敛一次]
     S -. 执行中可查看 .-> L[选中水体，实时观看对应 session 上报]
     R -. run SSE 通知整体与各 Agent 状态 .-> N[当前 run 页面更新状态与保存情况]
-    S --> F[形成各水体结果与 run 汇总]
+    S --> A[最终汇总 session：浅显总结全流程]
+    A --> F[形成引用原结果的 run 最终结果]
     F --> M[前端展示本次地图]
     H[分页查询历史 run 列表] --> V[选择 run，读取已保存消息与结果]
     V --> M
@@ -141,7 +143,7 @@ flowchart TD
 
 run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要信息、保存情况及上述水体参与/执行情况。GET 与通知复用原事实装配，不另存地图状态或颜色副本；历史读取使用当次已保存的 BFS、调度和 session 事实，不重新分析。具体条目与引用组织随 DTO 去重原则定型，完整请求、配置、过程与结果正文仍从原记录读取。
 
-完整分析记录必须在用户选中水体后展示；未选水体时不展示混合的全 run 过程。进入水体上下文时，接口一次返回该 session 的完整有序记录列表，再读取其中显式引用的公共上下文，不能只取最终总结挑选的几条记录。Agent 记录在接口和前端都不分页；分页只用于 run 历史列表。
+水体完整分析记录必须在用户选中该水体后展示；未选水体时不展示混合的全 run 过程。最终汇总是单独的 `run_summarizer` session，可从 run 汇总入口查看，但也不能把所有水体 transcript 混入其中。进入任一 session 上下文时，接口一次返回该 session 的完整有序记录列表，再读取其中显式引用的公共上下文，不能只取最终总结挑选的几条记录。Agent 记录在接口和前端都不分页；分页只用于 run 历史列表。
 
 定位按 [M3 D64](M3/m3_transcript_history_design.md#d64run-详情提供会话信息按-run-与-session-定位水体过程)：run 详情提供已创建 session 的 session_id、角色、适用 COMID 和自身状态；前端选中水体后取得对应 session_id，用 run_id + session_id 读取结果和完整过程，后端校验所属 run。对应信息从原 session 装配，不另存目录或映射表，不再增加按 COMID 定位同一 Agent 过程的第二套接口。历史只返回已保存的会话信息，未创建的节点不补造空会话；解析 session 不绑定 COMID，也不成为地图水体节点。
 
@@ -177,17 +179,19 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 3. Hydrology Topology
    - 以目标 COMID 为基准，按参数 × 时间段向上游 BFS，寻找每条支流最近的合格 evidence source。
    - 默认限制 100 km/路径、12 hop/路径、128 node/图和 8 并发，稳定生成完整范围、active/excluded、排除原因与 DAG 顺序。
+   - M7 的整次运行规模只由后端 topology 最大上游范围约束；不另设 run-wide token 或模型调用次数配额。每个 session 原有的模型超时、deadline 与有界 loop 预算继续生效。
    - M4 availability metadata 只是候选资格；M5 仍须读取并校验真实数据。
 
 4. Evidence System
    - 以当前水体 session 为 scope，通过统一 evidence tools 按需获取、组织和追踪证据，不在 topology 后对整图预取。
-   - 有合格本地站点的水体先查询本站目标参数和 discharge；无站水体不制造本地空查询，而是消费直接上游结果并按需取证。
+   - 有合格本地站点的水体先查询本站目标参数和 discharge；目标值缺失时，本地 discharge 等支持证据可与可用上游推理结果共同进入判断。无站水体不制造本地空查询，至少一个直接上游结果可用时才按需取证；全部直接上游不足或 invalid 时确定性零模型收敛。
    - discharge 是每个水体、每个最终窗口的必需支持参数；天气/预报、EPA facility 和历史 transcript/RAG 始终按任务与 evidence relation 按需调用。
 
 5. Agent Reasoning
    - 按 DAG 运行水体 Agent；各自在独立 session 中等待所有上游完成后执行一次完整 loop。
    - 同一流程支持补全、预测和混合时间段。
    - 每次结果必须带读数或趋势/风险判断、置信度、证据链、具体分析和归因总结。
+   - 全部水体收敛后运行一个独立 `run_summarizer` session，以面向普通用户的语言总结整条流程；它不是水体科学结论的替代品。
 
 6. Result Model
    - 支持 `6h / 12h / 24h` 时间粒度。
@@ -233,7 +237,7 @@ M5 不跨 observation series 自动判定“明显冲突”或选择赢家。Age
 
 如果目标 COMID 没有直接检测站读数，但 capability registry 明确允许使用同参数上游、相邻时间基线或特定环境关系等侧面证据，可以输出受限的趋势/风险判断；必须展示证据限制，不能伪装为 observed。confidence 由 Agent 根据证据质量、覆盖和推理跨度判断，后端不设置“侧面证据固定减多少”的公式。
 
-如果某个“参数 × 时间段”完全没有直接或允许的侧面证据，则不将它放入 final reasoning，由确定性逻辑输出 `indeterminate / insufficient_evidence`。station-backed preflight 成功但全部范围自然无证据时不启动 planning 或 final reasoning；stationless 缺少本地观测是正常起点，可以先用有界 Agent planning 寻找上游、天气、设施或其他允许的证据，最终全部不足时只保证 0 次 final reasoning。外部服务 unavailable/invalid 不是“无证据”，必须按技术 blocker 处理。
+如果某个“参数 × 时间段”完全没有直接或允许的侧面证据，则不将它放入 final reasoning，由确定性逻辑输出 `indeterminate / insufficient_evidence`。station-backed 会先查询本地目标参数和 discharge：即使本地目标值缺失，只要有 discharge 等本地支持证据且至少一个直接上游结果可用，仍可进入有界 planning；本地与上游都不能提供可用证据时不启动模型。stationless 缺少本地观测是正常事实，但必须至少有一个可用直接上游结果才进入 planning；全部直接上游为 insufficient/invalid 时直接 0 planning、0 final reasoning 收敛。外部服务 unavailable/invalid 不是自然 empty；后端保留详细错误，跨依赖传递时只标记 invalid，不把失败内容伪装成 evidence。
 
 ### 3.4 Evidence 是 agent 推理的中心
 
@@ -245,6 +249,7 @@ M5 不跨 observation series 自动判定“明显冲突”或选择赢家。Age
 
 - conditional-mandatory tools：当前水体有合格本地 station refs 时，模型推理前必须先查询本地 observation/discharge；无站水体不注册该调用。
 - mandatory evidence requirement：每个目标参数窗口都必须有 discharge direct 或 capability 允许的 indirect evidence；它不等于每个水体都能调用本地 discharge provider。
+- mandatory dependency start：无站水体必须至少有一个可用的直接上游结果才进入 Agent planning；全部直接上游不足或 invalid 时由后端直接生成完整不足结果。
 - optional tools：agent 根据任务和证据缺口按需调用。
 
 天气 observation/forecast、EPA facility 和历史检索均是 optional。直接上游结果由 M7 在依赖收敛后注入，不允许下游 Agent 越权查询上游站点。
@@ -436,9 +441,11 @@ M3 的完成判定按 [D38](M3/m3_transcript_history_design.md#d38终态选定�
 
 Application 层负责编排 waterbody Agent loop、模型调用前的确定性 evidence gate、完整结果骨架、分批计划、draft validation 和 final assembly。Agent 只对通过门禁的范围进行推理，不能自行绕过完全无证据的停止规则、修改 cell/window identity 或扩张 evidence/tool 权限。
 
-M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 upstream 与 M8 transcript-RAG producer 仍按后续责任保持 unavailable；真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
+M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 已通过 production workflow 实现 upstream-result producer；M8 transcript-RAG producer 仍按后续责任保持 unavailable。真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
 
-M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 DAG/direct-upstream、M8 transcript RAG 和 M9 frontend/settings/admin 仍由后续阶段实现。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
+M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 已在唯一 production workflow 中按每个 waterbody session 复用该 runner，M8 transcript RAG 和 M9 frontend/settings/admin 仍由后续阶段实现。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
+
+M7 已完成 Milestone 0–9 Windows 本机实现与集成审计：DAG ready queue、直接上游依赖 manifest、run-local outcome store、零模型收敛、M6 waterbody 调用、同模型 run summarizer、topology final result、取消/quiescence、typed transcript/history 与专用 PostgreSQL restart 路径已落到当前 `backend/`。它继续复用 M3 的 run/session、writer/reader 和两层 SSE，不新增 route、第三条流或 run-wide 模型配额；真实 provider 请求为 `not run`，三平台 CI 为 `partial`，M8 RAG 与 M9 前端尚未实现，详见 [M7 Implementation TODO](M7/m7_implementation_todo.md)。
 
 ## 7. Domain Layer
 
@@ -720,8 +727,9 @@ memory_mode
 
 ```text
 receive agent task
-  -> if station-backed: deterministic local observation/discharge preflight
-  -> receive settled direct-upstream results when M7 schedules the node
+  -> receive settled direct-upstream dependency manifest when M7 schedules the node
+  -> if station-backed: deterministic local target/discharge preflight
+  -> deterministically decide model path or zero-model insufficient result
   -> if allowed: bounded Agent evidence-planning + optional evidence tools
   -> rebuild and seal reference-complete EvidenceBundle
   -> deterministic target + discharge sufficiency gate per cell
@@ -731,7 +739,7 @@ receive agent task
   -> backend assembles and atomically publishes InferenceResult
 ```
 
-station-backed preflight 成功但完全没有 usable local target/discharge evidence 时，保留真实 session/tool/bundle 并装配固定结果，不启动 planning 或 final reasoning。部分 evidence 允许继续；stationless 水体没有本地 observation 是正常事实，先读取上游结果，再允许有界 Agent planning 决定是否调用 optional tools。一个水体从 planning 到 synthesis 始终属于同一个 session；supported cells 按参数和连续窗口分批，不为每个 cell 新建 session 或模型人格。
+station-backed 始终先执行本地 target/discharge preflight。即使本地目标值缺失，只要本地 discharge 等支持证据与至少一个可用直接上游结果能够形成允许的侧面证据，仍可进入 planning；本地和上游均不能支持时，保留真实 session/tool/bundle 并装配固定结果，不启动 planning 或 final reasoning。stationless 水体没有本地 observation 是正常事实，但至少一个直接上游必须有可用结果；全部依赖为 insufficient/invalid 时直接装配完整不足结果，不查询天气、设施等 optional evidence。一个水体从 planning 到 synthesis 始终属于同一个 session；supported cells 按参数和连续窗口分批，不为每个 cell 新建 session 或模型人格。
 
 ### 9.3 Evidence sufficiency
 
@@ -763,7 +771,9 @@ none | low | medium | high | indeterminate
 
 ### 9.5 上游到下游传递
 
-下游 agent 不应只接收上游裸值，而应接收：
+下游 Agent 接收后端生成的直接上游依赖清单。`usable` 上游保留原结果与引用；`insufficient` 只传不足状态；技术失败为 `invalid`，后端保留详细日志，但不向下游传错误正文、结果或 evidence。提示词明确：上游结果是为上游水体推理出的数据，当前水体自己的同参数站点读数才是直接观测。后端不再给上游结果做自定义评分、权重或改写。
+
+可用上游记录至少包含：
 
 ```text
 upstream_result
@@ -772,7 +782,7 @@ upstream_evidence_summary
 upstream_uncertainty
 ```
 
-这些内容作为 current-session upstream evidence 进入下游 EvidenceBundle。
+这些内容作为 current-session upstream evidence 进入下游 EvidenceBundle。跨水体结果和本地间接证据默认只支持方向、趋势或风险判断；只有 capability registry 注册了可执行、确定性的公式/工具时才允许生成具体推断数值，Agent 不能自行发明公式或系数。
 
 ## 10. Transcript / Memory / RAG Layer
 
@@ -933,14 +943,17 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 3. 准备解析时创建 query_parser session，按需订阅其 session SSE
 4. Parser LLM 只输出候选意图；deterministic resolver 生成唯一 AnalysisContext
 5. Hydrology Topology 按参数 × 时间段构建有界 COMID 图，保存候选 inlet、active/excluded 和原图引用
-6. M7 按 active DAG 在真正准备执行某水体时创建 session，并等待/注入全部直接上游已收敛结果
-7. station-backed 水体由确定性 policy 先调用 M5 本地 observation/discharge preflight；stationless 水体跳过本地 observation query
-8. station-backed 全空时直接固定收敛；其他允许路径由 Agent 在硬预算内规划天气、设施、inspection/aggregation 等 optional tools，每轮后重建 bundle
-9. seal 后按目标参数 × 时间窗口同时检查 target 与 discharge cell；不足 cell 写固定 indeterminate，supported cells 形成稳定有界 batches
-10. 同一 waterbody model 逐批输出受约束 draft，全部验证后做一次窗口/日期范围总体 synthesis；后端装配 risk、confidence、availability、analysis_detail 和 attribution_summary
-11. 每个结构化调用最多一次同 scope repair；仍无效则 whole waterbody session failed，不向 M7 传播 partial final result
-12. Application 始终经 M3 统一入口写 transcript；run SSE 推送轻量快照，session SSE 实时推送 Agent 消息和 typed tool/evidence/decision/result 上下文
-13. waterbody result 与 session completed 原子发布；完成后由 M7 向下游传播，历史 run、原 graph、结果与 session transcript 从数据库读取
+6. M7 在 topology 最大上游范围内，用有界 ready queue 调度 active DAG；同层节点可在后端并发上限内运行，不再增加 run-wide token/模型调用配额
+7. 节点等待全部直接上游收敛后读取 dependency manifest：usable 传结果与引用，insufficient 只传状态，技术失败标 invalid 且不传 evidence
+8. station-backed 先调用 M5 本地 target/discharge preflight；本地目标缺失但有 discharge 等支持证据和 usable 上游时仍可继续。stationless 跳过本地查询，必须有 usable 上游才进入 planning
+9. 不满足启动证据条件的水体创建完整确定性 indeterminate 结果，0 planning/0 final reasoning；其他路径由 Agent 在单 session 硬预算内规划 optional tools，每轮后重建 bundle
+10. seal 后按目标参数 × 时间窗口同时检查 target 与 discharge cell；不足 cell 写固定 indeterminate，supported cells 形成稳定有界 batches
+11. 同一 waterbody model 逐批输出受约束 draft，全部验证后做一次窗口/日期范围总体 synthesis；后端装配 risk、confidence、availability、analysis_detail 和 attribution_summary
+12. 每个结构化调用最多一次同 scope repair；仍无效则 whole waterbody session failed，不向 M7 传播 partial final result
+13. 全部 active 水体收敛后创建 `run_summarizer` session，复用相同 waterbody model，以目标完整安全投影 + 其他水体报告卡调用一次汇总；突出特殊值并保留稳定引用
+14. 汇总失败则 summary session failed，前端收到安全失败信息、后端记录详情，不生成固定 fallback；目标结果有效时 run 仍 completed，但标明汇总不可用或非目标覆盖不完整
+15. Application 始终经 M3 统一入口写 transcript；run SSE 推送轻量快照，session SSE 实时推送 Agent 消息和 typed tool/evidence/decision/result 上下文
+16. waterbody result 与 session completed 原子发布；usable 结果由 M7 向下游传播，run 最终结果引用目标、水体报告卡与可用 summary，历史从数据库读取
 ```
 
 ### 13.1 成功标准
@@ -952,14 +965,14 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 后端创建 run；参数由解析模型自主推测并通过确定性能力校验，
 构建水流拓扑，
 收集基础证据，
-无证据范围不进入 final reasoning，对通过门禁的范围按拓扑运行 agent，
+无证据范围不进入模型，对通过启动门禁的范围按拓扑运行 waterbody agent，
 返回带证据链、Agent 风险理由、confidence 和 availability 的 6h/12h/24h 结果，
-并允许用户实时及历史查看同一份 Agent session 上下文。
+再由独立汇总 Agent 用浅显语言总结整条流程，并允许用户实时及历史查看各自 Agent session 上下文。
 ```
 
 如果证据足够，结果包含具体数值。
 如果只有明确允许的侧面证据，结果可以返回降级的趋势/风险判断并说明限制。
-如果最终完全没有证据，结果为确定性 indeterminate，并明确没有执行 final reasoning；stationless 可能在此之前已执行有界 evidence-planning 调用。
+如果最终完全没有证据，结果为确定性 indeterminate。stationless 在全部直接上游不足或 invalid 时不执行 evidence planning 或 final reasoning；station-backed 先完成本地 preflight，再根据本地支持证据和上游结果决定是否调用模型。
 
 ## 14. 建议目录骨架
 

@@ -60,7 +60,13 @@ EVENT_CASES = (
     (
         RunCompletedEvent,
         "run_completed",
-        {"status": "completed", "completed_at": LOCAL_TIME, "warning": None},
+        {
+            "status": "completed",
+            "completed_at": LOCAL_TIME,
+            "warning": None,
+            "result_ref": None,
+            "result_summary": None,
+        },
     ),
     (
         RunFailedEvent,

@@ -202,6 +202,20 @@ class InMemoryTranscriptStore:
                 item for item in run_items
                 if item.item_id == candidate.created_item_id
                 or item.content_type == "query_understood"
+                or item.item_id == next(
+                    (
+                        candidate.item_id
+                        for candidate in reversed(run_items)
+                        if candidate.session_id is None
+                        and candidate.content_type == "lifecycle_event"
+                        and candidate.transcript_sequence > 2
+                    ),
+                    None,
+                )
+                or (
+                    item.session_id is None
+                    and item.content_type == "topology_run_result"
+                )
             ]
         item_ids = {item.item_id for item in run_items}
         session_ids = {

@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
@@ -11,9 +15,19 @@ from app.application.analysis_runs.models import (
     SessionSummary,
     TranscriptItemIdentity,
 )
-
 if TYPE_CHECKING:
-    from app.application.transcripts.models import AnalysisRequestV1
+    from app.application.analysis_runs.topology_result_models import (
+        DependencyOutcome,
+        TopologyRunResult,
+    )
+    from app.application.run_summary.models import (
+        RunSummaryAgentMessage,
+        RunSummaryResult,
+    )
+    from app.application.transcripts.models import (
+        AnalysisRequestV1,
+        TranscriptContentRef,
+    )
     from app.domain import InferenceResult
 
 
@@ -39,8 +53,13 @@ class WorkflowFailed(Exception):
 
 
 class CancellationToken:
-    def __init__(self, stop_requested: asyncio.Event) -> None:
+    def __init__(
+        self,
+        stop_requested: asyncio.Event,
+        commit_gate: asyncio.Lock | None = None,
+    ) -> None:
         self._stop_requested = stop_requested
+        self._commit_gate = commit_gate
 
     def is_requested(self) -> bool:
         return self._stop_requested.is_set()
@@ -52,8 +71,46 @@ class CancellationToken:
     async def wait(self) -> None:
         await self._stop_requested.wait()
 
+    @asynccontextmanager
+    async def commit_section(self) -> AsyncIterator[None]:
+        if self._commit_gate is None:
+            self.checkpoint()
+            yield
+            return
+        async with self._commit_gate:
+            self.checkpoint()
+            yield
+
 
 class WorkflowOperations(Protocol):
+    async def begin_waterbody_execution(
+        self,
+        run_id: UUID | str,
+    ) -> tuple[TranscriptContentRef, TranscriptContentRef]: ...
+
+    async def begin_run_summarization(
+        self,
+        run_id: UUID | str,
+    ) -> None: ...
+
+    async def mark_waterbody_ready(
+        self,
+        run_id: UUID | str,
+        target_comid: str,
+    ) -> None: ...
+
+    async def record_waterbody_dependency_outcome(
+        self,
+        run_id: UUID | str,
+        outcome: "DependencyOutcome",
+    ) -> None: ...
+
+    async def get_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+    ) -> SessionSummary: ...
+
     async def prepare_agent_session(
         self,
         run_id: UUID | str,
@@ -80,6 +137,21 @@ class WorkflowOperations(Protocol):
         session_id: UUID | str,
         result: "InferenceResult",
     ) -> SessionSummary: ...
+
+    async def complete_run_summary_agent_session(
+        self,
+        run_id: UUID | str,
+        session_id: UUID | str,
+        result: "RunSummaryResult",
+        *,
+        message: "RunSummaryAgentMessage",
+    ) -> SessionSummary: ...
+
+    async def complete_run(
+        self,
+        run_id: UUID | str,
+        result: "TopologyRunResult | None" = None,
+    ) -> AnalysisRunSnapshot: ...
 
     async def cancel_agent_session(
         self,

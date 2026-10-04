@@ -9,6 +9,7 @@ from math import ceil
 from uuid import UUID, uuid4
 
 from app.application.analysis_runs.workflow import WorkflowOperations
+from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning import (
     EvidencePlanningLoop,
     ModelFitCapability,
@@ -82,23 +83,31 @@ class OpenAIResponsesSizeEstimator:
         del model
         try:
             shape = json.loads(serialized_response_shape)
-            cell_ids = shape["cell_ids"]
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise ValueError("model response shape is invalid") from error
-        if not isinstance(cell_ids, list) or not all(
-            isinstance(item, str) and item for item in cell_ids
-        ):
-            raise ValueError("model response cell identities are invalid")
-        cell_count = len(cell_ids)
+        if not isinstance(shape, dict):
+            raise ValueError("model response shape is invalid")
+        if "cell_ids" in shape:
+            cell_ids = shape["cell_ids"]
+            if not isinstance(cell_ids, list) or not all(
+                isinstance(item, str) and item for item in cell_ids
+            ):
+                raise ValueError("model response cell identities are invalid")
+            output_units = len(cell_ids)
+        else:
+            highlight_limit = shape.get("summary_highlight_limit")
+            if type(highlight_limit) is not int or not 0 < highlight_limit <= 32:
+                raise ValueError("model summary response shape is invalid")
+            output_units = highlight_limit
         return ModelSizeEstimate(
             input_tokens=ceil(len(serialized_request) / 3),
             output_tokens=(
                 ceil(len(serialized_response_shape) / 3)
-                + cell_count * _ESTIMATED_OUTPUT_TOKENS_PER_CELL
+                + output_units * _ESTIMATED_OUTPUT_TOKENS_PER_CELL
             ),
             estimated_output_bytes=(
                 len(serialized_response_shape)
-                + cell_count * _ESTIMATED_OUTPUT_BYTES_PER_CELL
+                + output_units * _ESTIMATED_OUTPUT_BYTES_PER_CELL
             ),
         )
 
@@ -263,6 +272,7 @@ class M6RunnerService:
         task: ValidatedWaterbodyAgentTask,
         *,
         deadline: datetime,
+        initial_handoff: EvidenceAcquisitionHandoff | None = None,
     ) -> WaterbodyAgentRunOutcome:
         if deadline.tzinfo is None or deadline.utcoffset() is None:
             raise ValueError("waterbody reasoning deadline must be timezone-aware")
@@ -271,7 +281,11 @@ class M6RunnerService:
             raise ValueError("waterbody reasoning deadline has been reached")
         if deadline > now + timedelta(seconds=self._limits.session_deadline_seconds):
             raise ValueError("waterbody reasoning deadline exceeds the runtime limit")
-        return await self.build_runner(task).run(task, deadline=deadline)
+        return await self.build_runner(task).run(
+            task,
+            deadline=deadline,
+            initial_handoff=initial_handoff,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +293,7 @@ class M6Runtime:
     runner: M6RunnerService
     model_port_router: WaterbodyModelRouter
     limits: M6RuntimeLimits
+    private_values: tuple[str, ...] = ()
 
     def safe_metadata(self) -> dict[str, object]:
         return _build_safe_m6_metadata(
@@ -345,6 +360,7 @@ def compose_m6_runtime(
         runner=runner,
         model_port_router=router,
         limits=limits,
+        private_values=private_values,
     )
 
 

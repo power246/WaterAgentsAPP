@@ -1,35 +1,16 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-from enum import Enum
-from hashlib import sha256
 from typing import Self
-from uuid import UUID
 
 from pydantic import StrictBool, field_validator, model_validator
 
+from app.application.canonical_json import canonical_json_digest, canonical_json_text
 from app.application.reasoning.model_models import (
     ModelItemName,
     NonBlankText,
     WaterbodyModelPhase,
 )
 from app.domain import DomainModel, NonEmptyString, ensure_unique_tuple
-
-
-def canonical_json_text(value: object) -> str:
-    return json.dumps(
-        _json_value(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-def canonical_json_digest(value: object) -> str:
-    return f"sha256:{sha256(canonical_json_text(value).encode('utf-8')).hexdigest()}"
-
 
 class PromptPolicyRule(DomainModel):
     rule_id: ModelItemName
@@ -123,6 +104,7 @@ _REQUIRED_BASE_RULE_IDS = frozenset(
         "absence_is_not_none",
         "attribution_eligibility",
         "confidence_semantics",
+        "cross_waterbody_sources",
         "evidence_eligibility",
         "outcome_semantics",
         "reference_integrity",
@@ -191,6 +173,16 @@ def audit_prompt_policy(policy: ReasoningPromptPolicy) -> PromptPolicyAuditRepor
             "correlated",
             "inferred",
             "hypothesized",
+        ),
+        "cross_waterbody_sources": (
+            "current-waterbody",
+            "direct observation",
+            "upstream-waterbody",
+            "inferred evidence",
+            "local discharge",
+            "directional",
+            "registered deterministic",
+            "never invent",
         ),
     }
     for rule_id, anchors in required_anchors.items():
@@ -288,6 +280,10 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         _rule(
             "source_eligibility",
             "Use observed only for one direct current source record. Mark aggregates, cross-series selection, upstream interpretation, and gap fill inferred; forecasts are predicted and indeterminate has no source.",
+        ),
+        _rule(
+            "cross_waterbody_sources",
+            "Treat a current-waterbody same-parameter station reading as a direct observation. Treat an upstream-waterbody result as cross-waterbody inferred evidence, and local discharge, weather, or facility facts as supporting indirect evidence. Ordinary upstream and supporting evidence may support only directional trend or risk; a quantified inferred value requires an executed registered deterministic formula or tool. Never invent a formula, weight, coefficient, or specific value.",
         ),
         _rule(
             "outcome_semantics",
@@ -420,24 +416,5 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         **values,
         policy_digest=canonical_json_digest(values),
     )
-
-
-def _json_value(value: object) -> object:
-    if isinstance(value, DomainModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        if value.tzinfo is None or value.utcoffset() is None:
-            raise ValueError("canonical datetime must include timezone information")
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_value(item) for item in value]
-    return value
-
 
 DEFAULT_REASONING_PROMPT_POLICY = _build_default_policy()
