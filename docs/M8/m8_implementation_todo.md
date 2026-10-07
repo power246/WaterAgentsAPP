@@ -1,8 +1,8 @@
 # M8 Memory/RAG from Transcript Implementation TODO
 
-更新日期：2026-10-07
+更新日期：2026-10-08
 
-> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0 的基线/guards 与 Milestone 1 的当前 V1 类型、ports、catalog/tool schema 已于 2026-10-07 完成，Milestone 2–10 的 production 实现尚未开始。placeholder port、预期红灯或历史测试不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
+> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0–5 已完成，Milestone 6–10 尚未开始。placeholder port、预期红灯或历史测试不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
 
 本清单执行以下已确认文档：
 
@@ -276,34 +276,34 @@
 
 ### 工作
 
-- [ ] 实现同一个幂等 discovery query：只发现 run/session completed、persistence-confirmed、`rag_eligible=true`、allowlisted result roots；discovery 只创建 job，不读全文、不调用 embedding。
-- [ ] 将 run-terminal post-commit wake signal 仅作为降延迟提示；周期性 bounded reconciliation 必须在信号丢失、进程重启和历史 backfill 时仍能发现遗漏，不增加第二套 source truth。
-- [ ] 建立 first-generation workflow：创建 building generation 与稳定 `(created_at,item_id)` cutoff、为 cutoff 内 candidates 建 jobs、处理 completed/excluded/failed、验证完整性、原子激活、再追赶 cutoff 后 delta。
-- [ ] job 执行时重新读取 source 并执行 Milestone 3 final eligibility；稳定不合格转 `excluded/source_no_longer_eligible`，不得写 projection 或恢复旧内容。
-- [ ] 实现有界 claim batch、embedding batch、worker concurrency、attempt deadline、lease、最多 5 次 retry 和有上限指数 backoff；只有 timeout/rate-limit/临时 unavailable 可 retry。
-- [ ] source/schema/profile/dimension/non-finite/ref closure 等非 retryable 错误立即 failed；错误码安全可审计，失败 generation 不得被激活或伪装 complete。
-- [ ] 每批 embedding 返回后逐 row 验证；case/windows/fragments 与 job completed 必须在同一事务提交，任一 row 失败都不暴露 partial ready projection。
-- [ ] 实现 profile-change backfill：旧 active 继续服务，新 building 始终从原 transcript 重建；cutoff 后新 source 先进入旧 active，并由 delta reconciliation 纳入新 generation。
-- [ ] activation gate 验证 cutoff 内 candidate/job/source counts、excluded reasons、无 pending/retry/failed 缺口、projection digests、dimensions/profile/FK 与 sample ranking fixtures；不得只检查“队列为空”。
-- [ ] worker shutdown 先停止 claim，再让在途事务有界收敛；超时后 lease 可由下次启动恢复。worker/provider/database 故障绝不能改写 run/session terminal。
+- [x] 实现同一个幂等 discovery query：只发现 run/session completed、persistence-confirmed、`rag_eligible=true`、allowlisted result roots；discovery 只创建 job，不读全文、不调用 embedding。
+- [x] 将 run-terminal post-commit wake signal 仅作为降延迟提示；周期性 bounded reconciliation 必须在信号丢失、进程重启和历史 backfill 时仍能发现遗漏，不增加第二套 source truth。
+- [x] 建立 first-generation workflow：创建 building generation 与稳定 `(created_at,item_id)` cutoff、为 cutoff 内 candidates 建 jobs、处理 completed/excluded/failed、验证完整性、原子激活、再追赶 cutoff 后 delta。
+- [x] job 执行时重新读取 source 并执行 Milestone 3 final eligibility；稳定不合格转 `excluded/source_no_longer_eligible`，不得写 projection 或恢复旧内容。
+- [x] 实现有界 claim batch、embedding batch、worker concurrency、attempt deadline、lease、最多 5 次 retry 和有上限指数 backoff；只有 timeout/rate-limit/临时 unavailable 可 retry。
+- [x] source/schema/profile/dimension/non-finite/ref closure 等非 retryable 错误立即 failed；错误码安全可审计，失败 generation 不得被激活或伪装 complete。
+- [x] 每批 embedding 返回后逐 row 验证；case/windows/fragments 与 job completed 必须在同一事务提交，任一 row 失败都不暴露 partial ready projection。
+- [x] 实现 profile-change backfill：旧 active 继续服务，新 building 始终从原 transcript 重建；cutoff 后新 source 先进入旧 active，并由 delta reconciliation 纳入新 generation。
+- [x] activation gate 验证 cutoff 内 candidate/job/source counts、excluded reasons、无 pending/retry/failed 缺口、projection digests、dimensions/profile/FK 与 sample ranking fixtures；不得只检查“队列为空”。
+- [x] worker shutdown 先停止 claim，再让在途事务有界收敛；超时后 lease 可由下次启动恢复。worker/provider/database 故障绝不能改写 run/session terminal。
 
 ### Tests
 
-- [ ] discovery 在重复 wake、丢失 wake、周期 reconciliation、重启和并发调用下为同一 generation/source 创建恰好一个 job。
-- [ ] cutoff/backfill 测试覆盖 cutoff 前、构建期间、cutoff 后新 source、delta race 和激活边界；激活后没有 source 因切换窗口永久遗漏。
-- [ ] lease tests 使用可控 clock/gate 覆盖两个 claimers、worker crash、lease expiry/reclaim、attempt deadline、retry/backoff 上限和 non-retryable immediate failed，不使用真实 sleep 证明竞态。
-- [ ] batch 原子性测试覆盖 embedding 缺项/错序/非法 vector、DB commit failure、source 中途删除/失去资格；任何失败都不产生 ready 半成品。
-- [ ] run lifecycle 测试证明 run completed 不等待 job，worker/provider 失败不改 run terminal；首代 building 期间当前主链照常运行且 historical search 为 typed unavailable。
-- [ ] generation validation 故意制造 pending/retry/failed/count/digest/dimension/FK 缺口时拒绝激活，修复后可重复验证并只激活一次。
+- [x] discovery 在重复 wake、丢失 wake、周期 reconciliation、重启和并发调用下为同一 generation/source 创建恰好一个 job。
+- [x] cutoff/backfill 测试覆盖 cutoff 前、构建期间、cutoff 后新 source、delta race 和激活边界；激活后没有 source 因切换窗口永久遗漏。
+- [x] lease tests 使用可控 clock/gate 覆盖两个 claimers、worker crash、lease expiry/reclaim、attempt deadline、retry/backoff 上限和 non-retryable immediate failed，不使用真实 sleep 证明竞态。
+- [x] batch 原子性测试覆盖 embedding 缺项/错序/非法 vector、DB commit failure、source 中途删除/失去资格；任何失败都不产生 ready 半成品。
+- [x] run lifecycle 测试证明 run completed 不等待 job，worker/provider 失败不改 run terminal；首代 building 期间当前主链照常运行且 historical search 为 typed unavailable。
+- [x] generation validation 故意制造 pending/retry/failed/count/digest/dimension/FK 缺口时拒绝激活，修复后可重复验证并只激活一次。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_discovery.py backend/tests/application/transcript_memory/test_worker.py backend/tests/application/transcript_memory/test_backfill.py -q`
-- [ ] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_jobs.py backend/tests/persistence/test_rag_generations.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcripts -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_discovery.py backend/tests/application/transcript_memory/test_worker.py backend/tests/application/transcript_memory/test_backfill.py -q`
+- [x] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_jobs.py backend/tests/persistence/test_rag_generations.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcripts -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：first generation 可以从原 transcript durable backfill、严格验证并原子激活；job 能在丢信号、重复、失败、取消 shutdown 和重启后收敛，且任何 indexing 状态都不改变原 run 终态。
 
@@ -311,7 +311,10 @@
 
 #### Milestone 5 完成记录
 
-- [ ] 完成后填写：cutoff/source/job/projection 计数、重启/竞态/失败证据、PG 命令、改动路径、commit SHA、剩余风险。
+- [x] 2026-10-08 在 `codex/m8-m0-foundation` 完成。单 source PostgreSQL fixture 的 cutoff/source/job/ready projection 为 `1/1/1/1`；两个 repository 并发 discovery、重复/丢失 wake、周期 reconciliation、进程内 service 重建、lease expiry/reclaim、5 次上限退避、非法 batch、失去资格、shutdown 超时与 digest 破坏/修复均有回归，且 indexing 代码不持有 run/session 终态写入口。
+- [x] production 改动位于 `application/transcript_memory/{discovery,backfill,worker,source_reader}.py`、transcript registered-run 读取、`ports/rag_jobs.py`、PostgreSQL RAG repository 与 validated settings；复用既有 `20261007_01` 六表 schema，本阶段无新 migration。实现提交 `13a7a2bc4390c637c59e9e277ccaf055c5830f89`。
+- [x] 验证结果：focused `13 passed`；专用 `wateragents_test` PostgreSQL jobs/generations `10 passed`（全部 RAG persistence `16 passed`）；analysis-runs/transcripts `60 passed`；architecture `150 passed`；完整 backend `2186 passed, 1 warning`；compileall 与 diff check 通过。真实 embedding provider、生产容量与 Linux/macOS：`not run`。
+- [x] 剩余边界严格留给 M6 ranking/search、M7 historical producer、M8 production composition/真实 worker 启停接线及 M9 cleanup；M5 不新增 route、SQL ranking、producer 或真实 provider 请求，也不作为 M1–M9 最终验收结论。
 
 ## Milestone 6：五种 search policy、ranking 与 bounded hydration
 
