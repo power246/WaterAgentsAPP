@@ -22,12 +22,15 @@ from app.domain import (
 )
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
 from app.infrastructure.persistence.schema import (
+    analysis_runs,
+    analysis_sessions,
     rag_case_projections,
     rag_case_windows,
     rag_consumption_links,
     rag_fragment_projections,
     rag_index_generations,
     rag_index_jobs,
+    transcript_items,
 )
 from app.ports.errors import PortUnavailableError
 
@@ -176,6 +179,10 @@ class PostgresRAGRepository:
                     raise RAGPersistenceConflictError(
                         "only an existing building generation can be activated"
                     )
+                await self._validate_generation_ready_for_activation(
+                    connection,
+                    row,
+                )
                 await connection.execute(
                     update(rag_index_generations)
                     .where(
@@ -286,6 +293,10 @@ class PostgresRAGRepository:
             )
         )
         async with self._transaction() as connection:
+            await self._require_writable_generation(
+                connection,
+                values["generation_id"],
+            )
             await connection.execute(statement)
             row = (
                 await connection.execute(
@@ -327,6 +338,7 @@ class PostgresRAGRepository:
             raise ValueError("lease_until must be in the future")
         identifier = _uuid(generation_id, "generation_id")
         async with self._transaction() as connection:
+            await self._require_writable_generation(connection, identifier)
             rows = tuple(
                 (
                     await connection.execute(
@@ -383,6 +395,10 @@ class PostgresRAGRepository:
         identifier = _uuid(job.job_id, "job_id")
         values = self._job_values(job)
         async with self._transaction() as connection:
+            await self._require_writable_generation(
+                connection,
+                values["generation_id"],
+            )
             row = (
                 await connection.execute(
                     select(rag_index_jobs)
@@ -423,6 +439,7 @@ class PostgresRAGRepository:
         now = datetime.now(UTC)
         try:
             async with self._transaction() as connection:
+                await self._require_writable_generation(connection, generation_id)
                 existing = (
                     await connection.execute(
                         select(rag_case_projections.c.projection_digest).where(
@@ -813,6 +830,187 @@ class PostgresRAGRepository:
                 .with_for_update()
             )
         ).mappings().one_or_none()
+
+    async def _require_writable_generation(
+        self,
+        connection: AsyncConnection,
+        generation_id: UUID,
+    ):
+        row = await self._locked_generation(connection, generation_id)
+        if row is None or row["status"] not in {
+            RAGIndexGenerationStatus.BUILDING.value,
+            RAGIndexGenerationStatus.ACTIVE.value,
+        }:
+            raise RAGPersistenceConflictError(
+                "RAG jobs and projections require a building or active generation"
+            )
+        return row
+
+    @staticmethod
+    async def _validate_generation_ready_for_activation(
+        connection: AsyncConnection,
+        generation,
+    ) -> None:
+        generation_id = generation["generation_id"]
+        incomplete_jobs = await connection.scalar(
+            select(func.count())
+            .select_from(rag_index_jobs)
+            .where(
+                rag_index_jobs.c.generation_id == generation_id,
+                rag_index_jobs.c.status.not_in(
+                    (
+                        RAGIndexJobStatus.COMPLETED.value,
+                        RAGIndexJobStatus.EXCLUDED.value,
+                    )
+                ),
+            )
+        )
+        completed_jobs = await connection.scalar(
+            select(func.count())
+            .select_from(rag_index_jobs)
+            .where(
+                rag_index_jobs.c.generation_id == generation_id,
+                rag_index_jobs.c.status == RAGIndexJobStatus.COMPLETED.value,
+            )
+        )
+
+        source_item = transcript_items.alias("rag_activation_source_item")
+        context_item = transcript_items.alias("rag_activation_context_item")
+        window_count = (
+            select(func.count())
+            .select_from(rag_case_windows)
+            .where(
+                rag_case_windows.c.generation_id
+                == rag_case_projections.c.generation_id,
+                rag_case_windows.c.case_id == rag_case_projections.c.case_id,
+            )
+            .correlate(rag_case_projections)
+            .scalar_subquery()
+        )
+        case_rows = await connection.execute(
+            select(
+                func.count().label("case_count"),
+                func.count()
+                .filter(
+                    and_(
+                        rag_index_jobs.c.job_id.is_not(None),
+                        rag_index_jobs.c.status
+                        == RAGIndexJobStatus.COMPLETED.value,
+                        rag_index_jobs.c.projection_schema_version
+                        == generation["projection_schema_version"],
+                        rag_case_projections.c.profile_id == generation["profile_id"],
+                        rag_case_projections.c.embedding_dimensions
+                        == generation["output_dimensions"],
+                        func.public.vector_dims(rag_case_projections.c.embedding)
+                        == generation["output_dimensions"],
+                        rag_case_projections.c.source_content_type
+                        == "inference_result",
+                        rag_case_projections.c.source_content_schema_version == 1,
+                        source_item.c.content_type == "inference_result",
+                        source_item.c.content_schema_version == 1,
+                        source_item.c.rag_eligible.is_(True),
+                        context_item.c.content_type == "analysis_context",
+                        context_item.c.content_schema_version == 1,
+                        analysis_runs.c.status == "completed",
+                        analysis_sessions.c.status == "completed",
+                        window_count
+                        == func.cardinality(rag_case_projections.c.window_ids),
+                    )
+                )
+                .label("valid_case_count"),
+            )
+            .select_from(
+                rag_case_projections.outerjoin(
+                    rag_index_jobs,
+                    and_(
+                        rag_index_jobs.c.generation_id
+                        == rag_case_projections.c.generation_id,
+                        rag_index_jobs.c.source_run_id
+                        == rag_case_projections.c.source_run_id,
+                        rag_index_jobs.c.source_session_id
+                        == rag_case_projections.c.source_session_id,
+                        rag_index_jobs.c.source_result_item_id
+                        == rag_case_projections.c.source_result_item_id,
+                    ),
+                )
+                .outerjoin(
+                    source_item,
+                    and_(
+                        source_item.c.run_id == rag_case_projections.c.source_run_id,
+                        source_item.c.session_id
+                        == rag_case_projections.c.source_session_id,
+                        source_item.c.item_id
+                        == rag_case_projections.c.source_result_item_id,
+                    ),
+                )
+                .outerjoin(
+                    context_item,
+                    and_(
+                        context_item.c.run_id == rag_case_projections.c.source_run_id,
+                        context_item.c.item_id
+                        == rag_case_projections.c.analysis_context_item_id,
+                    ),
+                )
+                .outerjoin(
+                    analysis_runs,
+                    analysis_runs.c.run_id == rag_case_projections.c.source_run_id,
+                )
+                .outerjoin(
+                    analysis_sessions,
+                    and_(
+                        analysis_sessions.c.run_id
+                        == rag_case_projections.c.source_run_id,
+                        analysis_sessions.c.session_id
+                        == rag_case_projections.c.source_session_id,
+                    ),
+                )
+            )
+            .where(rag_case_projections.c.generation_id == generation_id)
+        )
+        counts = case_rows.mappings().one()
+
+        fragment_item = transcript_items.alias("rag_activation_fragment_item")
+        invalid_fragments = await connection.scalar(
+            select(func.count())
+            .select_from(
+                rag_fragment_projections.outerjoin(
+                    fragment_item,
+                    and_(
+                        fragment_item.c.run_id
+                        == rag_fragment_projections.c.source_run_id,
+                        fragment_item.c.session_id
+                        == rag_fragment_projections.c.source_session_id,
+                        fragment_item.c.item_id
+                        == rag_fragment_projections.c.source_fragment_item_id,
+                    ),
+                )
+            )
+            .where(
+                rag_fragment_projections.c.generation_id == generation_id,
+                or_(
+                    rag_fragment_projections.c.projection_schema_version
+                    != generation["projection_schema_version"],
+                    rag_fragment_projections.c.source_content_type
+                    != "evidence_fragment",
+                    rag_fragment_projections.c.source_content_schema_version != 1,
+                    fragment_item.c.item_id.is_(None),
+                    fragment_item.c.content_type != "evidence_fragment",
+                    fragment_item.c.content_schema_version != 1,
+                    fragment_item.c.rag_eligible.is_not(True),
+                ),
+            )
+        )
+        case_count = counts["case_count"] or 0
+        valid_case_count = counts["valid_case_count"] or 0
+        if (
+            incomplete_jobs
+            or completed_jobs != case_count
+            or valid_case_count != case_count
+            or invalid_fragments
+        ):
+            raise RAGPersistenceConflictError(
+                "generation activation requires complete validated jobs and projections"
+            )
 
     async def _read_one(self, statement):
         rows = await self._read_all(statement)

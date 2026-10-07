@@ -5,6 +5,7 @@ from app.infrastructure.adapters.nws_weather import NwsWeatherAdapter
 from app.infrastructure.adapters.openai_responses_parser import (
     OpenAIResponsesParserAdapter,
 )
+from app.infrastructure.adapters.openai_embeddings import OpenAIEmbeddingAdapter
 from app.infrastructure.adapters.openai_responses_waterbody import (
     OpenAIResponsesWaterbodyAdapter,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "NldiAdapter",
     "NwsWeatherAdapter",
     "OpenAIResponsesParserAdapter",
+    "OpenAIEmbeddingAdapter",
     "OpenAIResponsesWaterbodyAdapter",
     "UsgsObservationAdapter",
     "UsgsWaterDataAdapter",

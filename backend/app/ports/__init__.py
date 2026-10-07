@@ -1,6 +1,7 @@
 from app.ports.cache import CachePort
 from app.ports.clock import ClockPort
 from app.ports.errors import (
+    EmbeddingCancelledError,
     InvalidPortResponseError,
     PortAuthenticationError,
     PortConfigurationError,
@@ -49,6 +50,7 @@ __all__ = [
     "ClockPort",
     "ComidLookupPort",
     "EmbeddingCancellationPort",
+    "EmbeddingCancelledError",
     "EmbeddingPort",
     "EventPublisherPort",
     "FacilityEvidencePort",
