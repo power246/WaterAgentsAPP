@@ -404,32 +404,32 @@
 
 ### 工作
 
-- [ ] 按唯一顺序重组 production startup：DB/Alembic/vector/catalog validation → transcript/coordinator/M4 → M8 ports/profile/search/worker → producer 注入 M5 → M6/M7 → 单次 execution-stage bind → worker ready 后接收流量。
-- [ ] M8 runtime 必须在 M5 runtime 前构建并传入真实 producer；删除/替换 placeholder `None` 或泛化 stub 的 production 路径，不保留“有配置走新路径、无配置走旧路径”的双行为。
-- [ ] startup 对缺 migration/extension、重复/非法 desired profile、损坏 active generation/profile/dimensions fail closed；合法首代 building 则允许应用启动，producer 稳定返回 `index_building` unavailable。
-- [ ] 默认单进程/单 worker；settings 只暴露 worker batch/concurrency、embedding timeout、lease/backoff/reconciliation、retired retention 等基础设施预算，未知/越界值 fail startup，不静默默认。
-- [ ] lifespan startup 启动一个 bounded worker，shutdown 先停止新 claim、等待有界事务、释放资源，再按既有顺序停止 coordinator/dispose engine；shutdown 不是用户 cancel，不发布伪 lifecycle event。
-- [ ] 将 run-terminal post-commit wake 接到 worker，但保持信号可丢、无业务权威；取消 run 只影响当前 workflow/tool，不能取消或改写已经 durable 的其他历史 indexing jobs。
-- [ ] 增加结构化日志/metrics：generation state/age、job pending/lease/retry/failed/lag、embedding latency/error、strategy/empty/failure/latency/candidate-return counts、hydration invalid、active profile digest。
-- [ ] 日志/metrics 使用 bounded labels 与安全 correlation/hash；不得记录 run/session/item/COMID 为无界 metric label，也不得输出 raw query、canonical text、vector、credential、provider body、source payload 或 traceback 到公开错误。
-- [ ] 更新 runtime builders/fakes/smoke composition，使测试 fake 只替换外部 embedding/时序，不需要 production hidden switch、特殊 header/query 或 direct M8 endpoint。
-- [ ] architecture guards 锁定唯一 worker/search owner、唯一 M5 producer injection、无 route/parser/summarizer/zero-model 旁路和 domain/application 依赖方向。
+- [x] 按唯一顺序重组 production startup：DB/Alembic/vector/catalog validation → transcript/coordinator/M4 → M8 ports/profile/search/worker → producer 注入 M5 → M6/M7 → 单次 execution-stage bind → worker ready 后接收流量。
+- [x] M8 runtime 必须在 M5 runtime 前构建并传入真实 producer；删除/替换 placeholder `None` 或泛化 stub 的 production 路径，不保留“有配置走新路径、无配置走旧路径”的双行为。
+- [x] startup 对缺 migration/extension、重复/非法 desired profile、损坏 active generation/profile/dimensions fail closed；合法首代 building 则允许应用启动，producer 稳定返回 `index_building` unavailable。
+- [x] 默认单进程/单 worker；settings 只暴露 worker batch/concurrency、embedding timeout、lease/backoff/reconciliation、retired retention 等基础设施预算，未知/越界值 fail startup，不静默默认。
+- [x] lifespan startup 启动一个 bounded worker，shutdown 先停止新 claim、等待有界事务、释放资源，再按既有顺序停止 coordinator/dispose engine；shutdown 不是用户 cancel，不发布伪 lifecycle event。
+- [x] 将 run-terminal post-commit wake 接到 worker，但保持信号可丢、无业务权威；取消 run 只影响当前 workflow/tool，不能取消或改写已经 durable 的其他历史 indexing jobs。
+- [x] 增加结构化日志/metrics：generation state/age、job pending/lease/retry/failed/lag、embedding latency/error、strategy/empty/failure/latency/candidate-return counts、hydration invalid、active profile digest。
+- [x] 日志/metrics 使用 bounded labels 与安全 correlation/hash；不得记录 run/session/item/COMID 为无界 metric label，也不得输出 raw query、canonical text、vector、credential、provider body、source payload 或 traceback 到公开错误。
+- [x] 更新 runtime builders/fakes/smoke composition，使测试 fake 只替换外部 embedding/时序，不需要 production hidden switch、特殊 header/query 或 direct M8 endpoint。
+- [x] architecture guards 锁定唯一 worker/search owner、唯一 M5 producer injection、无 route/parser/summarizer/zero-model 旁路和 domain/application 依赖方向。
 
 ### Tests
 
-- [ ] production composition test 从真实 app factory/lifespan 证明构建顺序、一个 worker、真实 M5 producer、单 M7 execution owner 和完整 shutdown 顺序。
-- [ ] startup matrix 覆盖 schema/extension/catalog/profile/active corruption 与 legitimate first-build；前者拒绝服务，后者主链可用且历史 tool 返回 typed unavailable。
-- [ ] cancellation/shutdown 竞争使用可控 gate 覆盖 claim 前、embedding 中、DB commit 前、activation 前和 lifespan stop；无新业务动作越过取消/stop 边界，无伪 run terminal。
-- [ ] log/metric capture 证明必需状态可定位，同时 raw/canonical query、vector、secret、provider/source body、traceback 和高基数 labels 不出现。
-- [ ] production app 的 OpenAPI route 集合与 M7 基线相同；不存在 direct search/job/generation/reindex/embedding route 或第三 SSE。
+- [x] production composition test 从真实 app factory/lifespan 证明构建顺序、一个 worker、真实 M5 producer、单 M7 execution owner 和完整 shutdown 顺序。
+- [x] startup matrix 覆盖 schema/extension/catalog/profile/active corruption 与 legitimate first-build；前者拒绝服务，后者主链可用且历史 tool 返回 typed unavailable。
+- [x] cancellation/shutdown 竞争使用可控 gate 覆盖 claim 前、embedding 中、DB commit 前、activation 前和 lifespan stop；无新业务动作越过取消/stop 边界，无伪 run terminal。
+- [x] log/metric capture 证明必需状态可定位，同时 raw/canonical query、vector、secret、provider/source body、traceback 和高基数 labels 不出现。
+- [x] production app 的 OpenAPI route 集合与 M7 基线相同；不存在 direct search/job/generation/reindex/embedding route 或第三 SSE。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m8_runtime.py backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcript_memory -q`
-- [ ] 使用专用测试数据库运行 production lifespan/factory integration tests，并记录实际命令与 basetemp
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m8_runtime.py backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcript_memory -q`
+- [x] 使用专用测试数据库运行 production lifespan/factory integration tests，并记录实际命令与 basetemp
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：真实 app factory 只装配一个 M8 runtime/worker，并在 M5 之前提供 production historical producer；startup/shutdown/failure/observability 都遵守 M1–M8 边界且不新增公共 surface。
 
@@ -437,7 +437,8 @@
 
 #### Milestone 8 完成记录
 
-- [ ] 完成后填写：factory/lifespan/startup matrix、日志隐私/OpenAPI 证据、改动路径、commit SHA、剩余风险。
+- [x] 2026-10-08 在 `codex/m8-m0-foundation` 完成：production app 按 DB foundation → M4/coordinator → 单一 M8 runtime → M5 producer → M6/M7 bind → worker ready 的顺序装配；post-commit wake、bounded shutdown/stop gates、generation/job/search/embedding 安全观测及无新增 route 的 guards 已落在 `backend/app/{main.py,application/{analysis_runs,transcript_memory},infrastructure/{config,observability,persistence,runtime}}` 与对应 tests/smoke，实施提交 `7b975bd088357e316e2a08e75a678b5dcc7e140d`、stop-gate 修正提交 `ba85c0517c8a535b903052080609e493c5c8a9ec`。
+- [x] 验证为指定 runtime/OpenAPI/architecture `158 passed`、analysis-runs/transcript-memory `183 passed`；Docker `wateragents-postgres-1` healthy，专用 `wateragents_test` 实际命令为 `$env:WATERAGENTS_TEST_DB_NAME='wateragents_test'; backend/.venv/Scripts/python.exe -m dotenv -f backend/.env run --no-override -- backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_m8_production_lifespan.py -q --basetemp backend/target/m8-m8-production-pg-escalated-20261008-02`，结果 `1 passed`；完整 backend+PostgreSQL `2243 passed, 1 warning`，compileall/diff check 通过。真实 embedding provider、生产容量及 Linux/macOS 为 `not run`；M9 与 M1–M9 最终验收尚未开始。
 
 ## Milestone 9：history/SSE、cleanup 与 M9 handoff
 
