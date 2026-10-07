@@ -1,6 +1,6 @@
 # 前端接入约定
 
-更新日期：2026-10-07
+更新日期：2026-10-08
 
 本文集中记录新前端必须遵守的跨 Milestone 约定，不复制所有 API 字段和 SSE raw frame。
 
@@ -16,8 +16,8 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M5 evidence | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run`/`partial` | production 不新增 direct tool route，前端只沿现有 transcript/reference/SSE 读取 evidence；正式消费仍由 M9 接入。 |
 | M6 reasoning/result | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run` / `partial` | 以现有 result summary/ref、session transcript/SSE、history 与 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md) 作为 M9 接入输入；正式前端仍由 M9 实现，不调用 direct prompt/model/tool surface。 |
 | M7 workflow/summary | Windows 本机实现与集成审计已完成；真实 provider 与三平台 CI 仍为 `not run` / `partial` | M9 直接消费当前 snapshot/history、topology/waterbody/summary refs 与安全失败投影；M7 不提前实现页面、地图连线或 settings/admin。 |
-| M8 transcript memory/RAG | 设计、policy、目标读取DTO与 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md) 已冻结且全部待办；代码、migration、runtime OpenAPI验收尚未实施 | 不新增direct RAG route或第三条SSE。M9按 [M8 API/读取契约](M8/m8_memory_rag_api.md) 消费既有tool/source/fragment/result transcript，区分historical、empty、unavailable与invalid。 |
-| M9 frontend/settings/admin | 只有跨Milestone硬约束，最终页面与admin API尚未冻结 | 等M8实现证据和M9产品/API设计完成后统一接入、联调和验收。 |
+| M8 transcript memory/RAG | Windows 本机 production implementation、deterministic fake/PG E2E、history/SSE 与 runtime OpenAPI 验收已完成；外部 supplier/容量/Ubuntu/macOS 仍按事实为 `not run` / `partial`，见 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md) | 不新增direct RAG route或第三条SSE。M9按 [M8 API/读取契约](M8/m8_memory_rag_api.md) 消费既有tool/source/fragment/result transcript，区分historical、empty、unavailable与invalid。 |
+| M9 frontend/settings/admin | M8 后端接力证据已具备；最终页面与admin API尚未冻结或实现 | 等M9产品/API设计完成后统一接入、联调和验收。 |
 
 正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
 
@@ -376,7 +376,7 @@ live state 默认在“终态已确定、workflow 已完全收尾、全部必需
 
 ## 5. M4–M9 的前端接力边界
 
-M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完成 evidence typed content、引用、读取、policy、provider adapter 与 production/test composition 的本机实现和集成审计。M6 已完成单水体 reasoning、typed content、result summary/ref、session transcript/SSE、history 和 production composition 的本机实现与集成审计。M7 已完成后端workflow；M8已冻结设计但尚未实现。新前端仍由 M9 统一实现并开始正式联调；M8不增加direct search/model/tool route或第三条流。
+M4 已冻结并实现后端语义、运行时 schema 和事件示例；M5 已完成 evidence typed content、引用、读取、policy、provider adapter 与 production/test composition 的本机实现和集成审计。M6 已完成单水体 reasoning、typed content、result summary/ref、session transcript/SSE、history 和 production composition 的本机实现与集成审计。M7 已完成后端 workflow；M8 已完成 Windows 本机后端实现与 fake/PG/full 验收。新前端仍由 M9 统一实现并开始正式联调；M8 不增加 direct search/model/tool route 或第三条流。
 
 | Milestone | 前端必须遵守的语义 |
 |---|---|

@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-07
+更新日期：2026-10-08
 
 本文档是当前后端架构骨架的最终版，也是给后续设计/实现 agent 阅读的架构引入文档。它只回答最高层问题：WaterAgents 后端要解决什么问题、第一版需要哪些大功能、系统分成哪些层、层与层之间如何协作。
 
@@ -899,7 +899,7 @@ M8 在同一 PostgreSQL database 中使用结构化索引、full-text/GIN 与 pg
 
 首版只实现远程 supplier `EmbeddingPort` adapter；tests使用 deterministic fake。发送内容只能是版本化、脱敏、有界的 canonical query projection，不能包含完整 transcript、raw query/prompt、provider envelope、secret或无界 payload。
 
-详细契约见 [M8 总体设计](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md) 与 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md)。TODO 当前全部未完成，不能作为 M8 已有运行能力的证据。
+详细契约见 [M8 总体设计](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md) 与 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md)。Milestone 0–10 已完成 Windows 本机 production、fake/PG/full 验证；真实 supplier、生产容量和 Ubuntu/macOS 仍按完成记录保持 `not run` / `partial`。
 
 ## 11. Ports
 

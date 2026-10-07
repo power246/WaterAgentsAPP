@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0–5 已完成，Milestone 6–10 尚未开始。placeholder port、预期红灯或历史测试不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
+> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0–10 已完成 Windows 本机实现、专用 PostgreSQL、deterministic fake E2E 与全量后端回归。真实 embedding supplier 请求和生产容量为 `not run`，Ubuntu/macOS 同提交验证为 `partial`，不得把本机结果外推为这些外部边界已通过。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
 
 本清单执行以下已确认文档：
 
@@ -62,19 +62,19 @@
 
 ## M8 完成标准
 
-- [ ] 当前唯一 V1 能表达 embedding profile/generation/job、完整 `HistoricalCaseRef`、五种 typed strategy、score components、bounded historical case/fragment 和三态安全失败；全部 producer/consumer/fixture 原子一致。
-- [ ] 现有四表数据库可升级到 pgvector schema；fresh install、upgrade、约束/索引、repository round-trip、重启恢复和 migration check 使用专用测试库通过。
-- [ ] final eligibility、canonical query bytes、projection identity/digest 和 source closure 有正反 fixture；message/reasoning/prompt/summary/tool/raw/error/bundle/cancelled/incomplete/unknown content 永远不进入 ready index。
-- [ ] supplier embedding adapter 只收到 canonical text；维度/数量/顺序/finite/timeout/cancel/error 都经验证，deterministic fake 可重复，profile 变化建立新 generation 并原子切换。
-- [ ] durable jobs 能发现 completed + persistence-confirmed sources，支持 lease/retry/restart/backfill/delta；原 run 终态不等待 worker，search 不读取 building/failed/incomplete rows。
-- [ ] 五种策略先做 server-owned hard filters，再按 catalog 的 exact structured/FTS/vector 公式和 stable tie-break 排序；限额、去重、多样性、session embedding cache 和 prompt 裁剪均有 fixture。
-- [ ] semantic query-to-query 在多水体历史 run 中按完整 case ref 回读正确 session/result；hydrator 重验 active projection、source ownership、schema、scope 和参数/window，绝不串答案或返回完整历史。
-- [ ] `stateless` 不暴露历史 tool；`memory_augmented` 由 Agent 显式选择调用或不调用。非法输入严格 0/0/0，合法 empty/unavailable/invalid 均沿 M5 审计且不使主分析失败。
-- [ ] historical case/fragment 作为 contextual-only source 写入当前 transcript，生成闭合 refs 与 consumption links；当前直接观测和 M6/M7 authority 不被历史内容改变。
-- [ ] production composition 先建立 M8 search producer 再注入 M5，worker 生命周期、startup fail-closed、首代 backfill unavailable、graceful shutdown、取消和日志/指标隐私边界都可执行验证。
-- [ ] 既有 run/session/item history、两层 SSE 与 result projection 可 round-trip M8 typed contents；OpenAPI route 集合不增加，frontend/M9 功能不被提前实现。
-- [ ] selective source deletion 的 conflict/授权级联、index-only cleanup、inactive generation cleanup 和 transcript-source rebuild 均无悬空引用、无事实改写，并给 M9 留下明确内部操作契约。
-- [ ] fake embedding E2E、PostgreSQL integration、M1–M8 full regression、architecture、OpenAPI、smoke、`compileall`、docs audits 与 `git diff --check` 有实际证据；真实 supplier、生产规模与三平台状态按事实报告。
+- [x] 当前唯一 V1 能表达 embedding profile/generation/job、完整 `HistoricalCaseRef`、五种 typed strategy、score components、bounded historical case/fragment 和三态安全失败；全部 producer/consumer/fixture 原子一致。
+- [x] 现有四表数据库可升级到 pgvector schema；fresh install、upgrade、约束/索引、repository round-trip、重启恢复和 migration check 使用专用测试库通过。
+- [x] final eligibility、canonical query bytes、projection identity/digest 和 source closure 有正反 fixture；message/reasoning/prompt/summary/tool/raw/error/bundle/cancelled/incomplete/unknown content 永远不进入 ready index。
+- [x] supplier embedding adapter 只收到 canonical text；维度/数量/顺序/finite/timeout/cancel/error 都经验证，deterministic fake 可重复，profile 变化建立新 generation 并原子切换。
+- [x] durable jobs 能发现 completed + persistence-confirmed sources，支持 lease/retry/restart/backfill/delta；原 run 终态不等待 worker，search 不读取 building/failed/incomplete rows。
+- [x] 五种策略先做 server-owned hard filters，再按 catalog 的 exact structured/FTS/vector 公式和 stable tie-break 排序；限额、去重、多样性、session embedding cache 和 prompt 裁剪均有 fixture。
+- [x] semantic query-to-query 在多水体历史 run 中按完整 case ref 回读正确 session/result；hydrator 重验 active projection、source ownership、schema、scope 和参数/window，绝不串答案或返回完整历史。
+- [x] `stateless` 不暴露历史 tool；`memory_augmented` 由 Agent 显式选择调用或不调用。非法输入严格 0/0/0，合法 empty/unavailable/invalid 均沿 M5 审计且不使主分析失败。
+- [x] historical case/fragment 作为 contextual-only source 写入当前 transcript，生成闭合 refs 与 consumption links；当前直接观测和 M6/M7 authority 不被历史内容改变。
+- [x] production composition 先建立 M8 search producer 再注入 M5，worker 生命周期、startup fail-closed、首代 backfill unavailable、graceful shutdown、取消和日志/指标隐私边界都可执行验证。
+- [x] 既有 run/session/item history、两层 SSE 与 result projection 可 round-trip M8 typed contents；OpenAPI route 集合不增加，frontend/M9 功能不被提前实现。
+- [x] selective source deletion 的 conflict/授权级联、index-only cleanup、inactive generation cleanup 和 transcript-source rebuild 均无悬空引用、无事实改写，并给 M9 留下明确内部操作契约。
+- [x] fake embedding E2E、PostgreSQL integration、M1–M8 full regression、architecture、OpenAPI、smoke、`compileall`、docs audits 与 `git diff --check` 有实际证据；真实 supplier、生产规模与三平台状态按事实报告。
 
 ## Milestone 0：基线、真实接缝与红线
 
@@ -485,34 +485,34 @@
 
 ### 工作
 
-- [ ] 新增 `backend/scripts/m8_memory_rag_smoke.py`（或仓库约定的等价路径）和对应 smoke test，只通过真实 app/runtime entrypoint，以 deterministic fake embedding 驱动，不开放 test-only production switch。
-- [ ] 构造至少两个历史 runs，其中一个是多 waterbody run；等待 durable jobs/build 激活后创建新的 memory-augmented run，证明 query-to-query 命中正确 session/result、写入 historical source/fragment/bundle/consumption link 并完成当前 reasoning。
-- [ ] 同一 E2E 覆盖 stateless 不见 tool、memory-augmented 选择不调用、正常 empty、first-build unavailable、embedding unavailable/protocol invalid、source invalid、cancel 和当前观测冲突优先级。
-- [ ] 端到端执行 profile 新 generation build/validate/atomic switch、并发 search pin、worker crash/restart/lease recovery、source conflict/授权级联、index-only rebuild，证明无 run 终态改写或 dangling ref。
-- [ ] 从生产 create-run entrypoint 沿 scope preparation、M5 executor、search/ranking/hydration、transcript persistence、M6/M7 assembly、history/SSE 和 cleanup 做一次 contract sweep，搜索旧 placeholder/free-query/第二路径。
-- [ ] 运行 M1–M8 focused、完整 non-PG、专用 PostgreSQL、architecture、OpenAPI、smoke、compileall 和 docs audits；逐项记录命令与真实 pass/fail/skip/not-run，不复制旧里程碑数字。
-- [ ] 只有在用户明确授权、凭据 preflight 成功且可接受可能计费时才运行 supplier smoke；只验证 adapter contract/维度/安全错误，不发送原始 query/transcript，不把一次成功当作质量或容量证明。
-- [ ] 将本文件实际完成项、完成记录、contract matrix、总 milestones、deferred 承接记录、架构/API/frontend handoff 同步为真实状态；未运行的三平台/真实 provider/生产容量保持 `partial` 或 `not run`。
-- [ ] 审查 staged/unstaged/untracked 范围、migration head、dependency lock 与生成物；不得提交 secret、数据库 volume、pytest cache、真实 provider response、vector dump 或无关用户文件。
+- [x] 新增 `backend/scripts/m8_memory_rag_smoke.py`（或仓库约定的等价路径）和对应 smoke test，只通过真实 app/runtime entrypoint，以 deterministic fake embedding 驱动，不开放 test-only production switch。
+- [x] 构造至少两个历史 runs，其中一个是多 waterbody run；等待 durable jobs/build 激活后创建新的 memory-augmented run，证明 query-to-query 命中正确 session/result、写入 historical source/fragment/bundle/consumption link 并完成当前 reasoning。
+- [x] 同一 M10 smoke suite 覆盖 stateless 不见 tool、memory-augmented 选择不调用、正常 empty、first-build unavailable、embedding unavailable/protocol invalid、source invalid、cancel 和当前观测冲突优先级。
+- [x] M10 smoke/PG suites 执行 profile 新 generation build/validate/atomic switch、并发 search pin、worker crash/restart/lease recovery、source conflict/授权级联、index-only rebuild，证明无 run 终态改写或 dangling ref。
+- [x] 从生产 create-run entrypoint 沿 scope preparation、M5 executor、search/ranking/hydration、transcript persistence、M6/M7 assembly、history/SSE 和 cleanup 做一次 contract sweep，搜索旧 placeholder/free-query/第二路径。
+- [x] 运行 M1–M8 focused、完整 non-PG、专用 PostgreSQL、architecture、OpenAPI、smoke、compileall 和 docs audits；逐项记录命令与真实 pass/fail/skip/not-run，不复制旧里程碑数字。
+- [x] 只有在用户明确授权、凭据 preflight 成功且可接受可能计费时才运行 supplier smoke；本阶段未获真实供应商调用授权，按约束记录为 `not run`。
+- [x] 将本文件实际完成项、完成记录、contract matrix、总 milestones、deferred 承接记录、架构/API/frontend handoff 同步为真实状态；未运行的三平台/真实 provider/生产容量保持 `partial` 或 `not run`。
+- [x] 审查 staged/unstaged/untracked 范围、migration head、dependency lock 与生成物；不得提交 secret、数据库 volume、pytest cache、真实 provider response、vector dump 或无关用户文件。
 
 ### Tests
 
-- [ ] fake E2E 对 source identity、完整 case ref、strategy/components/score、授权 cells/fragments、current-priority、consumption link、history/SSE 与 final result 做业务断言，而非只断言 HTTP 200/worker exit 0。
-- [ ] PostgreSQL E2E 从现有四表 migration 开始，跨至少一次进程 restart 验证 generation/job/projection/read/cleanup，不使用业务数据库。
-- [ ] fault E2E 对每种 typed failure 明确断言主链是否继续、写入哪些审计项、不会出现哪些 source/result/fallback；取消后无新 search/source publish。
-- [ ] contract matrix 中 GLOBAL-C01–C11、M8-C01–C16、M8-A01–A10 每项都有实现位置、具体测试和文档状态；`partial` 不标记完成。
-- [ ] docs link/fence/checkbox/contract-ID audits 通过；本文件不存在被误勾选、重复 ID、缺失 stage exit 或无法执行的虚构命令。
+- [x] fake E2E 对 source identity、完整 case ref、strategy/components/score、授权 cells/fragments、current-priority、consumption link、history/SSE 与 final result 做业务断言，而非只断言 HTTP 200/worker exit 0。
+- [x] PostgreSQL E2E 从现有四表 migration 开始，跨至少一次进程 restart 验证 generation/job/projection/read/cleanup，不使用业务数据库。
+- [x] fault E2E 对每种 typed failure 明确断言主链是否继续、写入哪些审计项、不会出现哪些 source/result/fallback；取消后无新 search/source publish。
+- [x] contract matrix 中 GLOBAL-C01–C11、M8-C01–C16、M8-A01–A10 每项都有实现位置、具体测试和文档状态；`partial` 不标记完成。
+- [x] docs link/fence/checkbox/contract-ID audits 通过；本文件不存在被误勾选、重复 ID、缺失 stage exit 或无法执行的虚构命令。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m8_memory_rag_smoke.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application backend/tests/domain backend/tests/ports backend/tests/infrastructure backend/tests/api backend/tests/smoke -q`
-- [ ] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
-- [ ] `backend/.venv/Scripts/python.exe -B backend/scripts/m8_memory_rag_smoke.py`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] 执行 docs link/fence/contract-ID/unchecked-count audits，并保存实际输出
-- [ ] `git diff --check`
-- [ ] `git status --short --branch`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/smoke/test_m8_memory_rag_smoke.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application backend/tests/domain backend/tests/ports backend/tests/infrastructure backend/tests/api backend/tests/smoke -q`
+- [x] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
+- [x] `backend/.venv/Scripts/python.exe -B backend/scripts/m8_memory_rag_smoke.py`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] 执行 docs link/fence/contract-ID/unchecked-count audits，并保存实际输出
+- [x] `git diff --check`
+- [x] `git status --short --branch`
 
 阶段出口：M8 的 production 路径、数据库、worker、五种 strategy、Agent tool、history/SSE、failure/cancel、profile switch 与 cleanup 有可复现的 fake/PG 证据；适用契约全部承接，剩余外部验证边界如实记录，可以交给 M9 而不留下模糊 TODO。
 
@@ -520,51 +520,53 @@
 
 #### Milestone 10 完成记录
 
-- [ ] 完成后填写：fake/PG/full/smoke/docs 命令和计数、provider/三平台/容量状态、contract audit、文件范围、commit SHA、剩余风险与 M9 接力项。
+- [x] 2026-10-08 在 `codex/m8-m0-foundation` 完成：新增 production-entrypoint fake/PG E2E 与可复现 smoke runner；实现提交为 `4d85c28`。E2E 覆盖两个历史 run（含多水体）、完整 case identity、scope/strategy/score/cells/fragments、contextual-only materialization、current-priority、consumption links、history/SSE、final result、restart 与 cleanup。
+- [x] 验证实录：M8 smoke `1 passed`；脚本聚合 `152 passed`；M10 architecture/application/domain/ports/infrastructure/api/smoke 宽门禁为 `2092 passed, 1 warning`；完整专用 PostgreSQL 后端回归在修正新增 parser lifecycle fixture sequence 后为 `2253 passed, 1 warning`；architecture/OpenAPI 为 `152 passed`；另有 focused `55 passed`、prompt/acquisition `38 passed`、PG search `7 passed`、相邻 fixture `14 passed`。最终 CLI check 发现测试套件将专用库留在旧 revision `20261003_01`，仅升级 `wateragents_test` 后复查为 `current at 20261007_01`。`compileall` 与 `git diff --check` 通过；docs audit 覆盖 9 文件、381 个本地链接、108 个 fence、37 个 contract ID 与 11 个阶段出口，broken/trailing/重复/缺失/未勾选均为 0。
+- [x] 边界实录：真实 embedding supplier 请求与生产容量 `not run`；Windows 本机已验证，Ubuntu/macOS 同提交验证 `partial`。`GLOBAL-C11` 因此外部边界保持 `partial`，没有误标为 `implemented`；M9 只接收既有 typed history/SSE 与内部 cleanup/rebuild 能力，不新增 M9 public API/frontend/admin 实现。
 
 ## Contract 承接矩阵（全部完成后填写）
 
-状态只能使用 `pending / partial / implemented`。只有 production implementation、对应测试、文档和本阶段完成证据齐全时才能改为 `implemented`；`partial` 不能满足 M8 完成标准。
+状态只能使用 `pending / partial / implemented`。只有 production implementation、对应测试、文档和本阶段完成证据齐全时才能改为 `implemented`；`partial` 不能冒充对应外部边界已验收，但在如实记录时不阻塞 Windows 本机 M10 交付。
 
-| Contract | 初始状态 | 计划实现阶段 | 最低验收证据 |
-|---|---|---|---|
-| GLOBAL-C01 | pending | M0/M10 | archive isolation guard + 全链搜索审计 |
-| GLOBAL-C02 | pending | M1/M8/M10 | 当前唯一 V1 原子更新；无 V2/flag/兼容路径 |
-| GLOBAL-C03 | pending | M1/M6 | COMID-only typed scope 与策略 tests |
-| GLOBAL-C04 | pending | M2/M3/M6 | UTC storage、saved IANA timezone/season tests |
-| GLOBAL-C05 | pending | M3/M6 | DST/重复当地时间 window identity fixtures |
-| GLOBAL-C06 | pending | M3/M7/M9 | result/fragment/historical ref closure round-trip |
-| GLOBAL-C07 | pending | M3/M4/M8/M9 | secret/raw/canonical/vector 日志与公开面负测试 |
-| GLOBAL-C08 | pending | M0/M9 | 无归档前端依赖；只同步最终 frontend contract |
-| GLOBAL-C09 | pending | M1/M7/M9 | 单一 typed fact 贯穿 tool/transcript/history/SSE |
-| GLOBAL-C10 | pending | M9/M10 | M9 handoff 有 owner、约束、observable tests |
-| GLOBAL-C11 | pending | M2/M8/M10 | 锁定依赖/迁移/路径编码；三平台按实记录 |
-| M8-C01 | pending | M3/M5 | eligibility allowlist/denylist + ready projection |
-| M8-C02 | pending | M7/M10 | stateless 与 memory-augmented E2E |
-| M8-C03 | pending | M6 | 五种 strategy focused/PG fixtures |
-| M8-C04 | pending | M1/M7/M9 | historical provenance DTO 与 history round-trip |
-| M8-C05 | pending | M7/M10 | current observation conflict/gate priority fixture |
-| M8-C06 | pending | M3/M5 | source allowlist、typed reader、source-first rebuild |
-| M8-C07 | pending | M3/M6/M10 | canonical query-to-query + 多水体正确 ref E2E |
-| M8-C08 | pending | M1/M6/M7 | typed preflight、hard filters、严格 0/0/0 |
-| M8-C09 | pending | M2/M4/M6 | pgvector exact search、单 active generation/switch |
-| M8-C10 | pending | M4/M8 | port/adapter/fake、privacy 与协议验证 |
-| M8-C11 | pending | M5/M8 | durable job/lease/restart/atomic ready；run 非阻塞 |
-| M8-C12 | pending | M7/M8 | 唯一 M5 producer、roster、每 session 最多 2 calls |
-| M8-C13 | pending | M6/M7/M10 | empty/unavailable/invalid/cancel typed matrix |
-| M8-C14 | pending | M6 | source revalidation、授权 cells、5/2/2/16 KiB limits |
-| M8-C15 | pending | M7/M9 | 既有 typed audit/history/两层 SSE；无新 route |
-| M8-C16 | pending | M7/M9/M10 | consumption links、conflict/cascade/rebuild 无悬空 |
-| M8-A01 | pending | M3/M5 | eligible indexed、non-eligible never searchable |
-| M8-A02 | pending | M1/M7/M9 | identity/version/score/confidence/provenance 可读 |
-| M8-A03 | pending | M7/M10 | 当前观测冲突优先级 production fixture |
-| M8-A04 | pending | M6/M7 | 五策略 filters/formula/tie-break/limits/0-0-0 |
-| M8-A05 | pending | M3/M6/M10 | 两历史 runs + 多水体 query-to-query/hydration |
-| M8-A06 | pending | M2/M4/M5 | migration/backfill/lease/restart/switch PG evidence |
-| M8-A07 | pending | M4/M5/M6/M7 | typed failure/cancel 与 current reasoning continuity |
-| M8-A08 | pending | M7/M8/M9 | route 不增、roster 分流、typed round-trip |
-| M8-A09 | pending | M9/M10 | cleanup conflict/cascade/retired/rebuild/API-key isolation |
-| M8-A10 | pending | M10 | fake E2E、focused/PG/full/audit 与外部边界实录 |
+| Contract | 状态 | Production 实现位置 | 具体测试 | 文档状态 |
+|---|---|---|---|---|
+| GLOBAL-C01 | implemented | `backend/app/` 当前树；archive isolation guards | `tests/architecture/test_current_v1_contracts.py` | 当前树唯一来源已审计 |
+| GLOBAL-C02 | implemented | `domain/memory_rag/`、`application/analysis_runs/runtime.py`、`api/schemas/analysis_runs.py` | `tests/application/transcript_memory/test_m8_contracts.py`、`tests/architecture/test_m8_boundaries.py` | 唯一 V1，无 flag/V2 |
+| GLOBAL-C03 | implemented | `domain/memory_rag/authorized_rag_search_query.py`、`search_policies.py` | `tests/application/transcript_memory/test_search_policies.py` | COMID-only scope 已落实 |
+| GLOBAL-C04 | implemented | `projection_builder.py`、`search_policies.py`、RAG schema | `test_projection.py`、`test_ranking.py`、`tests/persistence/test_rag_projections.py` | UTC/IANA/season 已落实 |
+| GLOBAL-C05 | implemented | `domain/memory_rag/canonical_case_query.py`、`projection_builder.py` | `test_projection.py`、`test_search_policies.py` | DST/window identity 已落实 |
+| GLOBAL-C06 | implemented | `source_closure.py`、`producer.py`、typed contents | `test_source_closure.py`、`tests/application/transcripts/test_m8_history_registry.py` | ref closure 可 round-trip |
+| GLOBAL-C07 | implemented | `infrastructure/observability/`、embedding adapter、API schema | `tests/application/transcript_memory/test_m8_contracts.py`、`tests/infrastructure/embeddings/test_openai_embeddings.py` | secret/raw/vector 不进入公开面 |
+| GLOBAL-C08 | implemented | 当前 `backend/` composition；无 archive import | `tests/architecture/test_current_v1_contracts.py`、`test_m8_boundaries.py` | 只同步当前 frontend contract |
+| GLOBAL-C09 | implemented | `producer.py`、transcript registry/history/SSE | `tests/application/transcripts/test_m8_history_registry.py`、`tests/smoke/test_m8_memory_rag_smoke.py` | 单一 typed fact 链已落实 |
+| GLOBAL-C10 | implemented | `maintenance.py`、M9 internal handoff | `test_maintenance.py`、`tests/persistence/test_rag_cleanup.py` | owner/约束/observable tests 已记录 |
+| GLOBAL-C11 | partial | migration、Compose、dependency lock、lifespan | `tests/persistence/test_rag_migration.py`、`test_schema_contract.py`、`test_m8_production_lifespan.py` | Windows 已验证；Ubuntu/macOS/容量未运行 |
+| M8-C01 | implemented | `eligibility.py`、`projection_builder.py`、`worker.py` | `test_eligibility.py`、`test_projection.py`、`test_worker.py` | allow/deny/ready 已落实 |
+| M8-C02 | implemented | `evidence_tools/acquisition.py`、M6 orchestration | `tests/smoke/test_m8_memory_rag_smoke.py` | stateless/显式调用或不调用已落实 |
+| M8-C03 | implemented | `search_policies.py`、`search.py` | `test_search_policies.py`、`test_ranking.py` | 五种 strategy 已落实 |
+| M8-C04 | implemented | `domain/evidence/` historical DTO、`producer.py`、history registry | `tests/application/transcripts/test_m8_history_registry.py`、M10 E2E | provenance DTO 可 round-trip |
+| M8-C05 | implemented | M6 gates/result assembler、historical producer | `tests/smoke/test_m8_memory_rag_smoke.py` | current observation 优先 |
+| M8-C06 | implemented | `source_reader.py`、`source_closure.py`、`maintenance.py` | `test_source_reader.py`、`test_source_closure.py`、`test_maintenance.py` | source-first/rebuild 已落实 |
+| M8-C07 | implemented | `domain/memory_rag/canonical_case_query.py`、`search.py`、hydration path | `test_projection.py`、`test_hydration.py`、M10 E2E | 多水体完整 case ref 已验证 |
+| M8-C08 | implemented | `authorized_rag_search_query.py`、`search_policies.py`、M5 executor | `test_search_policies.py`、`tests/application/evidence_tools/test_acquisition_workflow.py` | preflight hard filters 与 0/0/0 已落实 |
+| M8-C09 | implemented | PG schema/repository、`generations.py` | `tests/persistence/test_rag_search.py`、`test_rag_generations.py`、`test_generations.py` | exact search/atomic switch 已落实 |
+| M8-C10 | implemented | `ports/embedding.py`、`infrastructure/adapters/openai_embeddings.py` | `tests/infrastructure/embeddings/test_openai_embeddings.py`、`test_deterministic_embedding.py` | adapter/privacy/protocol 已落实 |
+| M8-C11 | implemented | `discovery.py`、`worker.py`、`backfill.py` | `test_discovery.py`、`test_worker.py`、`test_backfill.py` | lease/restart/ready/non-blocking 已落实 |
+| M8-C12 | implemented | `producer.py`、`evidence_tools/acquisition.py`、runtime composition | `test_producer.py`、acquisition tests、M10 E2E | 唯一 producer/roster/call budget 已落实 |
+| M8-C13 | implemented | `search.py`、`producer.py`、embedding adapter | `test_search_policies.py`、`test_producer.py`、M10 smoke suite | typed failure/cancel 已落实 |
+| M8-C14 | implemented | `search.py`、hydration/ranking limits | `test_hydration.py`、`test_ranking.py`、`test_priority.py` | revalidation 与 5/2/2/16 KiB 已落实 |
+| M8-C15 | implemented | transcript registry/history/SSE；既有 routes | `tests/application/transcripts/test_m8_history_registry.py`、architecture/OpenAPI tests | 无新 route/第三条 SSE |
+| M8-C16 | implemented | `maintenance.py`、consumption-link repository | `test_maintenance.py`、`tests/persistence/test_rag_consumption_links.py`、M10 E2E | conflict/cascade/rebuild 无悬空 |
+| M8-A01 | implemented | eligibility/discovery/worker ready pipeline | `test_eligibility.py`、`test_worker.py` | 正反资格已验证 |
+| M8-A02 | implemented | typed case/source/fragment/result DTO | `tests/application/transcripts/test_m8_history_registry.py`、M10 E2E | identity/score/confidence/provenance 可读 |
+| M8-A03 | implemented | current-priority reasoning assembly | `tests/smoke/test_m8_memory_rag_smoke.py` | production fixture 已验证 |
+| M8-A04 | implemented | policies/ranking/preflight | `test_search_policies.py`、`test_ranking.py`、`test_acquisition_workflow.py` | 五策略与 0/0/0 已验证 |
+| M8-A05 | implemented | canonical query/search/hydration | `tests/smoke/test_m8_memory_rag_smoke.py` | 两历史 run/多水体已验证 |
+| M8-A06 | implemented | migration/repository/generation/worker | `test_rag_migration.py`、`test_rag_jobs.py`、`test_rag_generations.py`、M10 restart E2E | PG migration/backfill/restart/switch 已验证 |
+| M8-A07 | implemented | typed search/producer failures and cancellation | `test_producer.py`、embedding tests、M10 smoke suite | 主 reasoning continuity 已验证 |
+| M8-A08 | implemented | production composition、roster、history/SSE | architecture/OpenAPI、history registry、M10 E2E | route 不增且 typed round-trip |
+| M8-A09 | implemented | maintenance/cleanup/rebuild | `test_maintenance.py`、`test_rag_cleanup.py`、`test_rag_consumption_links.py`、M10 E2E | conflict/cascade/API-key isolation 已验证 |
+| M8-A10 | implemented | smoke runner 与全部 M8 production paths | `scripts/m8_memory_rag_smoke.py`、full backend suite、docs audit | fake/PG/full 已通过；外部边界实录 |
 
 ## 每个 Milestone 的完成记录模板
 
