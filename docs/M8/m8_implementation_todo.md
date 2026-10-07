@@ -198,29 +198,29 @@
 
 ### 工作
 
-- [ ] 实现纯函数 final eligibility：先验证 run/session completed、persistence-confirmed、typed schema/ownership/ref closure，再只允许 `inference_result v1` root 与直接关联、仍符合 D01 的 `evidence_fragment v1`。
-- [ ] 显式拒绝 message、planning/reasoning、prompt、provider request/response、repair/raw output、tool call/result、inspection、error、empty/unavailable/invalid、bundle、dependency manifest、summary/topology aggregate、cancelled/incomplete/unknown content。
-- [ ] 实现 typed source reader，按单个已注册 item 精确读取/解析/redact；不得扫描或反序列化整个 transcript，也不得为未知 schema 提供通用 JSON/text fallback。
-- [ ] 从已验证 `AnalysisContext`、目标 waterbody session/result 与已保存 graph metadata 构建 case projection、windows、eligible fragments 和完整 case ref；保持原 risk/confidence/availability/quality/provenance，不重算科学结论。
-- [ ] 实现 canonical case-query builder，输入只含冻结的 normalized intent、requested/supporting parameter keys、mode、time/season/resolution 与 schema/projection version；排除完整原始 query、rationale、message 和 result body。
-- [ ] 冻结 canonical bytes 的排序、大小写/枚举、时间/season、缺省值、UTF-8 和 version 表达；同一输入跨进程产生完全相同 bytes/digest，不依赖 locale、hash seed 或 dict order。
-- [ ] 定义 append-only projection identity/digest：同 source item + generation 重放幂等，新历史永远生成新 source projection，不按 COMID/参数/window/topic latest-wins 覆盖。
-- [ ] hydration 前置所需的 source closure validator 必须可复用，能重验 source run/session/result ownership、schema、active projection identity 和当前 scope，而不是信任索引 row。
+- [x] 实现纯函数 final eligibility：先验证 run/session completed、persistence-confirmed、typed schema/ownership/ref closure，再只允许 `inference_result v1` root 与直接关联、仍符合 D01 的 `evidence_fragment v1`。
+- [x] 显式拒绝 message、planning/reasoning、prompt、provider request/response、repair/raw output、tool call/result、inspection、error、empty/unavailable/invalid、bundle、dependency manifest、summary/topology aggregate、cancelled/incomplete/unknown content。
+- [x] 实现 typed source reader，按单个已注册 item 精确读取/解析/redact；不得扫描或反序列化整个 transcript，也不得为未知 schema 提供通用 JSON/text fallback。
+- [x] 从已验证 `AnalysisContext`、目标 waterbody session/result 与已保存 graph metadata 构建 case projection、windows、eligible fragments 和完整 case ref；保持原 risk/confidence/availability/quality/provenance，不重算科学结论。
+- [x] 实现 canonical case-query builder，输入只含冻结的 normalized intent、requested/supporting parameter keys、mode、time/season/resolution 与 schema/projection version；排除完整原始 query、rationale、message 和 result body。
+- [x] 冻结 canonical bytes 的排序、大小写/枚举、时间/season、缺省值、UTF-8 和 version 表达；同一输入跨进程产生完全相同 bytes/digest，不依赖 locale、hash seed 或 dict order。
+- [x] 定义 append-only projection identity/digest：同 source item + generation 重放幂等，新历史永远生成新 source projection，不按 COMID/参数/window/topic latest-wins 覆盖。
+- [x] hydration 前置所需的 source closure validator 必须可复用，能重验 source run/session/result ownership、schema、active projection identity 和当前 scope，而不是信任索引 row。
 
 ### Tests
 
-- [ ] eligibility 正反矩阵覆盖所有 allowlist/denylist content、run/session 状态、persistence 状态、rag candidate、schema version、source ownership 和 ref closure。
-- [ ] property/golden tests 锁定 canonical bytes/digest；字段顺序、进程/hash seed、等价输入顺序不改变结果，版本或语义字段变化必须改变 identity。
-- [ ] privacy tests 证明 canonical text/projection 不含 raw user query、prompt、reasoning、provider envelope、secret、错误正文或无界 source arrays。
-- [ ] multi-waterbody fixture 为同一 run 产生各自正确 case ref/projection；fragment 只能挂到直接关联 result，不能跨 session/waterbody 串联。
-- [ ] typed single-item reader 只解析目标 item；malformed/unknown/non-eligible item fail closed 且不会导致完整 transcript scan。
+- [x] eligibility 正反矩阵覆盖所有 allowlist/denylist content、run/session 状态、persistence 状态、rag candidate、schema version、source ownership 和 ref closure。
+- [x] property/golden tests 锁定 canonical bytes/digest；字段顺序、进程/hash seed、等价输入顺序不改变结果，版本或语义字段变化必须改变 identity。
+- [x] privacy tests 证明 canonical text/projection 不含 raw user query、prompt、reasoning、provider envelope、secret、错误正文或无界 source arrays。
+- [x] multi-waterbody fixture 为同一 run 产生各自正确 case ref/projection；fragment 只能挂到直接关联 result，不能跨 session/waterbody 串联。
+- [x] typed single-item reader 只解析目标 item；malformed/unknown/non-eligible item fail closed 且不会导致完整 transcript scan。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcripts backend/tests/application/transcript_memory backend/tests/domain -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcripts backend/tests/application/transcript_memory backend/tests/domain -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：给定一个已持久化 source，系统可在无数据库写入和无网络的纯测试中稳定决定“能否索引”和“索引什么”；canonical bytes、case ref、projection/ref closure 可复现且不泄露原始 query/推理文本。
 
@@ -228,7 +228,10 @@
 
 #### Milestone 3 完成记录
 
-- [ ] 完成后填写：allowlist/denylist fixture 数、canonical golden/version、隐私断言、改动路径、commit SHA、剩余风险。
+- [x] allowlist 固定为 `inference_result v1` root 与直接关联 `evidence_fragment v1` 两类，25 类注册/未知 content denylist 及 lifecycle、persistence、candidate、schema、ownership、ref closure 负矩阵均已覆盖；实现提交 `e931586e46f181869ddcbf19c859cda516c1d5bd`。
+- [x] canonical schema/template/projection version 均为 V1；golden digest 为 `sha256:e6eb4684faad50a02b97c096602e9a096bc23e582fa0ee3cc87124570b1e738b`，跨进程/hash seed、等价顺序、版本/语义变化、append-only identity、多水体隔离和 active/scope closure 均有纯测试。
+- [x] 隐私断言覆盖 raw query、prompt/reasoning、provider envelope/record、credential、错误正文、result summary 与 source arrays；改动集中于 `backend/app/application/transcript_memory/`、`backend/app/domain/memory_rag/`、RAG window persistence mapper 及对应测试。验证为指定 M3 suite `459 passed, 1 warning`、architecture `150 passed`、PostgreSQL projection `4 passed`、完整 suite `2138 passed, 1 warning`，compileall/diff check 通过。
+- [x] 剩余边界：M4 embedding/provider/generation、M5 worker/discovery、M6–M9 search/hydration/composition/运维仍未开始；真实 embedding supplier 与三平台 CI 未验证，M3 不作为独立发布或最终验收结论。
 
 ## Milestone 4：EmbeddingPort adapter 与 generation 切换
 
