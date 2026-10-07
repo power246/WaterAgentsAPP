@@ -237,30 +237,30 @@
 
 ### 工作
 
-- [ ] 实现首版远程 supplier `EmbeddingPort` adapter，复用当前 provider HTTP/config/credential 边界；application/domain 只依赖 port，不依赖供应商 SDK/response 类型。
-- [ ] adapter 只接受 canonical text batch，并验证输出数量、输入顺序、dimensions、finite numeric values 和可接受 norm；任何缺项、重复、NaN/Inf、维度漂移或供应商结构变化都 fail closed。
-- [ ] 定义 timeout、调用取消和安全错误映射；adapter 不自行无限 retry、不决定 job attempt/backoff、不记录 request text/vector/secret/provider body。
-- [ ] 实现 deterministic fake embedding，显式由测试 composition 注入；相同 canonical bytes/profile 必须跨进程返回相同 vector，不使用 Python 随机 hash。
-- [ ] 实现 desired profile validation 与 stable profile identity/digest；provider/model/dimensions/distance/semantic threshold/projection/canonical version 任一变化都产生新 generation identity。
-- [ ] 实现 generation lifecycle primitives：`building → active → inactive` 或 `building → failed`；只有通过完整计数/维度/source-closure 验证的 generation 可以在单事务中接管 active。
-- [ ] profile 切换期间 search 每次只 pin 一个 active generation；旧 generation/credential 在 reader lease 结束和 M9 可见切换完成前不得清理。
-- [ ] startup 能区分损坏/缺失基础 schema/profile（fail closed）与合法首代 generation 尚在 building（应用可启动、historical producer unavailable）。
+- [x] 实现首版远程 supplier `EmbeddingPort` adapter，复用当前 provider HTTP/config/credential 边界；application/domain 只依赖 port，不依赖供应商 SDK/response 类型。
+- [x] adapter 只接受 canonical text batch，并验证输出数量、输入顺序、dimensions、finite numeric values 和可接受 norm；任何缺项、重复、NaN/Inf、维度漂移或供应商结构变化都 fail closed。
+- [x] 定义 timeout、调用取消和安全错误映射；adapter 不自行无限 retry、不决定 job attempt/backoff、不记录 request text/vector/secret/provider body。
+- [x] 实现 deterministic fake embedding，显式由测试 composition 注入；相同 canonical bytes/profile 必须跨进程返回相同 vector，不使用 Python 随机 hash。
+- [x] 实现 desired profile validation 与 stable profile identity/digest；provider/model/dimensions/distance/semantic threshold/projection/canonical version 任一变化都产生新 generation identity。
+- [x] 实现 generation lifecycle primitives：`building → active → inactive` 或 `building → failed`；只有通过完整计数/维度/source-closure 验证的 generation 可以在单事务中接管 active。
+- [x] profile 切换期间 search 每次只 pin 一个 active generation；旧 generation/credential 在 reader lease 结束和 M9 可见切换完成前不得清理。
+- [x] startup 能区分损坏/缺失基础 schema/profile（fail closed）与合法首代 generation 尚在 building（应用可启动、historical producer unavailable）。
 
 ### Tests
 
-- [ ] adapter contract tests 覆盖 batch ordering、dimensions、finite、timeout、cancel、HTTP/供应商错误、安全异常正文和零输入不发请求。
-- [ ] fake 的 determinism/golden 测试跨实例与进程稳定，并能制造相似/不相似 query 用于后续 ranking，不冒充真实模型质量证明。
-- [ ] profile identity 测试覆盖每个字段变化与 secret 不参与 identity/持久化；不同 profile vector 绝不混写/互比。
-- [ ] generation 竞争测试覆盖两个 builder、激活/失败竞争、reader pin、切换瞬间和 inactive cleanup guard；任一 search 观察到且仅观察到一个 generation。
-- [ ] startup 状态测试区分 schema/profile 损坏、无 active 但 building、active ready、active dimensions 不匹配四种情况。
+- [x] adapter contract tests 覆盖 batch ordering、dimensions、finite、timeout、cancel、HTTP/供应商错误、安全异常正文和零输入不发请求。
+- [x] fake 的 determinism/golden 测试跨实例与进程稳定，并能制造相似/不相似 query 用于后续 ranking，不冒充真实模型质量证明。
+- [x] profile identity 测试覆盖每个字段变化与 secret 不参与 identity/持久化；不同 profile vector 绝不混写/互比。
+- [x] generation 竞争测试覆盖两个 builder、激活/失败竞争、reader pin、切换瞬间和 inactive cleanup guard；任一 search 观察到且仅观察到一个 generation。
+- [x] startup 状态测试区分 schema/profile 损坏、无 active 但 building、active ready、active dimensions 不匹配四种情况。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/embeddings backend/tests/application/transcript_memory/test_generations.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence backend/tests/domain/test_model_catalog.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/embeddings backend/tests/application/transcript_memory/test_generations.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence backend/tests/domain/test_model_catalog.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：supplier adapter 与 deterministic fake 遵守相同严格 port；profile/generation 可验证、可失败、可原子切换，search 可 pin 单一 active generation；尚不运行 durable worker，也不把 historical tool 接入 Agent。
 
@@ -268,7 +268,9 @@
 
 #### Milestone 4 完成记录
 
-- [ ] 完成后填写：adapter/fake/profile/generation 测试、真实 provider 是否 `not run`、改动路径、commit SHA、剩余风险。
+- [x] OpenAI Embeddings adapter 复用 `ProviderHttpClient` 的 credential/deadline/response-limit/error 边界，固定单次 `POST /embeddings` 并严格验证 canonical batch、model/index/count/dimension/finite/norm；deterministic fake 使用 SHA-256 特征映射，跨实例/进程 golden 与相似/不相似 fixture 已覆盖。真实 provider/付费 smoke：`not run`。
+- [x] desired profile、startup readiness、单 generation reader pin 与 inactive cleanup guard 位于 `backend/app/application/transcript_memory/`；adapter 位于 `backend/app/infrastructure/adapters/`，原子 activation gate 位于 PostgreSQL RAG repository，测试位于 `backend/tests/infrastructure/embeddings/`、`backend/tests/application/transcript_memory/test_generations.py` 与 persistence generation suite；实现提交 `dc9235a993b95418781a7b029ec6c8b4d366879a`。
+- [x] 验证为指定 focused `25 passed`、PostgreSQL persistence/domain `82 passed`、architecture `150 passed`、完整 backend `2165 passed, 1 warning`，compileall/diff check 通过。剩余边界仍归 M5 discovery/cutoff/worker 与完整 backfill gate、M6 search/ranking、M8 production composition、M9 可见切换/retention cleanup；本阶段不作为独立发布或最终验收结论。
 
 ## Milestone 5：durable jobs、worker 与 backfill
 
