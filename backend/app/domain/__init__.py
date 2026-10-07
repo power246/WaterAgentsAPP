@@ -177,6 +177,7 @@ from app.domain.evidence import (
     load_source_record_json,
 )
 from app.domain.memory_rag import (
+    AuthorizedRAGComid,
     AuthorizedRAGSearchQuery,
     CanonicalCaseQueryV1,
     CanonicalIntentToken,
@@ -305,6 +306,7 @@ __all__ = [
     "JsonValue",
     "ItemReference",
     "AuthorizedRAGSearchQuery",
+    "AuthorizedRAGComid",
     "EmbeddingBatch",
     "EmbeddingDistanceMetric",
     "EmbeddingProfile",

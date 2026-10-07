@@ -29,6 +29,7 @@ class EvidenceWindow:
     window_id: str
     time_range: TimeRange
     segment_index: int
+    window_kind: InferenceMode | None = None
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -156,6 +157,7 @@ def assemble_evidence_session_scope(
             window_id=f"window-{index:03d}",
             time_range=value,
             segment_index=_segment_index(context, value),
+            window_kind=context.time_segments[_segment_index(context, value)].mode,
         )
         for index, value in enumerate(
             build_time_windows(

@@ -53,6 +53,13 @@ from app.application.transcript_memory.source_reader import (
     TypedRAGSourceReader,
 )
 from app.application.transcript_memory.worker import RAGIndexWorker
+from app.application.transcript_memory.search import (
+    RAGSearchError,
+    RAGSearchInvalidError,
+    RAGSearchService,
+    RAGSearchSession,
+    RAGSearchUnavailableError,
+)
 
 __all__ = [
     "ConfirmedSourceReference",
@@ -76,6 +83,11 @@ __all__ = [
     "RAGIndexWorker",
     "RAGReconciliationSignal",
     "RAGReconciliationRunner",
+    "RAGSearchError",
+    "RAGSearchInvalidError",
+    "RAGSearchService",
+    "RAGSearchSession",
+    "RAGSearchUnavailableError",
     "RAGSourceClosureError",
     "RAGSourceReadError",
     "RAGSourceUnavailableError",

@@ -21,6 +21,7 @@ from app.domain.evidence.evidence_fragment import EvidenceFragment
 from app.domain.hydrology.hydrology_graph import HydrologyGraph
 from app.domain.inference.inference_result import InferenceResult
 from app.domain.memory_rag.rag_index_job import RAGIndexJob
+from app.domain.memory_rag.historical_case_ref import HistoricalCaseRef
 
 SourceBodyT = TypeVar("SourceBodyT", bound=DomainModel)
 
@@ -181,10 +182,33 @@ class TranscriptRAGCaseSourceReader:
         self._registry = registry
 
     async def load_case_source(self, job: RAGIndexJob) -> RAGCaseSource:
+        return await self._load_case_source(
+            run_id_text=job.source_run_id,
+            session_id_text=job.source_session_id,
+            result_item_id_text=job.source_result_item_id,
+        )
+
+    async def load_historical_case_source(
+        self,
+        case_ref: HistoricalCaseRef,
+    ) -> RAGCaseSource:
+        return await self._load_case_source(
+            run_id_text=case_ref.run_id,
+            session_id_text=case_ref.session_id,
+            result_item_id_text=case_ref.result_item_id,
+        )
+
+    async def _load_case_source(
+        self,
+        *,
+        run_id_text: str,
+        session_id_text: str,
+        result_item_id_text: str,
+    ) -> RAGCaseSource:
         try:
-            run_id = UUID(job.source_run_id)
-            session_id = UUID(job.source_session_id)
-            result_item_id = UUID(job.source_result_item_id)
+            run_id = UUID(run_id_text)
+            session_id = UUID(session_id_text)
+            result_item_id = UUID(result_item_id_text)
         except ValueError as error:
             raise RAGSourceReadError("historical_source_identity_invalid") from error
 

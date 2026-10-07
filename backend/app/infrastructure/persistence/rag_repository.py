@@ -5,13 +5,37 @@ import json
 from uuid import UUID, uuid4
 
 from psycopg.types.range import Range
-from sqlalchemy import and_, delete, func, insert, or_, select, tuple_, update
+from sqlalchemy import (
+    Float,
+    and_,
+    case,
+    cast,
+    delete,
+    exists,
+    func,
+    insert,
+    literal,
+    or_,
+    select,
+    tuple_,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.domain import (
+    AuthorizedRAGSearchQuery,
+    CanonicalCaseQueryV1,
     EmbeddingProfile,
+    HistoricalCaseRef,
+    HistoricalResultProjection,
+    HistoricalSearchStrategy,
+    InferenceMode,
+    ParameterKey,
+    PreparedRAGCaseProjectionV1,
+    RAGCandidateRow,
+    RAGCaseWindowV1,
     RAGCaseProjectionV1,
     RAGFragmentProjectionV1,
     RAGIndexGeneration,
@@ -19,7 +43,14 @@ from app.domain import (
     RAGIndexJob,
     RAGIndexJobStatus,
     RAGJobCounts,
+    RAGQualityTier,
     RAGSourceCutoff,
+    TimeRange,
+    TimeResolution,
+)
+from app.application.transcript_memory.search_policies import (
+    rank_projection,
+    stable_candidate_order,
 )
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
 from app.infrastructure.persistence.schema import (
@@ -106,6 +137,109 @@ def _job_from_row(row) -> RAGIndexJob:
     )
 
 
+def _prepared_projection_from_rows(
+    row,
+    window_rows: tuple,
+) -> PreparedRAGCaseProjectionV1:
+    case_ref = HistoricalCaseRef(
+        generation_id=str(row["generation_id"]),
+        case_id=str(row["case_id"]),
+        run_id=str(row["source_run_id"]),
+        session_id=str(row["source_session_id"]),
+        target_comid=row["target_comid"],
+        analysis_context_item_id=str(row["analysis_context_item_id"]),
+        result_item_id=str(row["source_result_item_id"]),
+    )
+    mode = InferenceMode(row["mode"])
+    canonical = CanonicalCaseQueryV1.model_validate_json(row["canonical_query"])
+    by_window_id = {item["window_id"]: item for item in window_rows}
+    windows = tuple(
+        RAGCaseWindowV1(
+            window_id=window_id,
+            time_range=TimeRange(
+                start=by_window_id[window_id]["time_range"].lower,
+                end=by_window_id[window_id]["time_range"].upper,
+            ),
+            window_kind=(
+                mode
+                if mode is not InferenceMode.MIXED
+                else _matching_window_kind(canonical, by_window_id[window_id])
+            ),
+            local_months=tuple(by_window_id[window_id]["local_months"]),
+            season_buckets=(by_window_id[window_id]["season_bucket"],),
+            season_year=by_window_id[window_id]["season_year"],
+            duration_seconds=by_window_id[window_id]["duration_seconds"],
+            resolution=TimeResolution(by_window_id[window_id]["resolution"]),
+            parameter_keys=tuple(
+                ParameterKey.model_validate_json(item)
+                for item in by_window_id[window_id]["parameter_keys"]
+            ),
+        )
+        for window_id in row["window_ids"]
+    )
+    values = dict(
+        case_ref=case_ref,
+        profile_id=row["profile_id"],
+        projection_schema_version=row["projection_schema_version"],
+        source_content_type=row["source_content_type"],
+        source_content_schema_version=row["source_content_schema_version"],
+        mode=mode,
+        parameter_keys=tuple(
+            ParameterKey.model_validate_json(item) for item in row["parameter_keys"]
+        ),
+        window_ids=tuple(row["window_ids"]),
+        windows=windows,
+        source_completed_at=row["source_completed_at"],
+        canonical_query=row["canonical_query"],
+        canonical_query_digest=row["canonical_query_digest"],
+        result_projection=HistoricalResultProjection.model_validate(
+            row["result_projection"]
+        ),
+        projection_digest=row["projection_digest"],
+    )
+    if mode is InferenceMode.MIXED:
+        # The V1 normalized table stores case mode plus descriptor facts, not a
+        # per-row mode. Hydration rebuilds and authenticates the exact source
+        # projection; ranking only needs the persisted structured signals.
+        return PreparedRAGCaseProjectionV1.model_construct(**values)
+    return PreparedRAGCaseProjectionV1(**values)
+
+
+def _matching_window_kind(canonical, row) -> InferenceMode:
+    seasons = (row["season_bucket"],)
+    matches = tuple(
+        descriptor.window_kind
+        for descriptor in canonical.window_descriptors
+        if descriptor.local_months == tuple(row["local_months"])
+        and tuple(season.value for season in descriptor.season_buckets) == seasons
+        and descriptor.resolution.value == row["resolution"]
+        and round(float(descriptor.duration_days) * 86_400)
+        == row["duration_seconds"]
+    )
+    if not matches:
+        raise ValueError("persisted RAG window has no canonical descriptor")
+    return matches[0]
+
+
+def _topology_preliminary_score(query, scope) -> float:
+    assert scope.topology_hops is not None
+    assert scope.topology_path_distance_km is not None
+    assert scope.topology_relation is not None
+    assert query.topology_max_hops is not None
+    assert query.topology_max_distance_km is not None
+    hop = 1 - min(
+        (scope.topology_hops - 1) / max(query.topology_max_hops - 1, 1),
+        1,
+    )
+    distance = 1 - min(
+        scope.topology_path_distance_km / query.topology_max_distance_km,
+        1,
+    )
+    topology = 0.6 * hop + 0.4 * distance
+    upstream = scope.topology_relation.value == "ancestor"
+    return 0.55 * topology + 0.25 * float(upstream)
+
+
 class PostgresRAGRepository:
     """Transaction owner for M8 generation, job, projection, and ownership rows."""
 
@@ -166,6 +300,428 @@ class PostgresRAGRepository:
             )
         )
         return None if row is None else _generation_from_row(row)
+
+    async def search_candidates(
+        self,
+        query: AuthorizedRAGSearchQuery,
+    ) -> tuple[RAGCandidateRow, ...]:
+        """Apply generation/scope/lifecycle hard filters before exact ranking."""
+
+        generation_id = _uuid(query.generation_id, "generation_id")
+        requested_parameters = sorted(
+            {_parameter_key_text(item) for item in query.intent.parameter_keys}
+        )
+        source_item = transcript_items.alias("rag_search_source_item")
+        context_item = transcript_items.alias("rag_search_context_item")
+        source = (
+            rag_case_projections.join(
+                rag_index_jobs,
+                and_(
+                    rag_index_jobs.c.generation_id
+                    == rag_case_projections.c.generation_id,
+                    rag_index_jobs.c.source_run_id
+                    == rag_case_projections.c.source_run_id,
+                    rag_index_jobs.c.source_session_id
+                    == rag_case_projections.c.source_session_id,
+                    rag_index_jobs.c.source_result_item_id
+                    == rag_case_projections.c.source_result_item_id,
+                ),
+            )
+            .join(
+                source_item,
+                and_(
+                    source_item.c.run_id == rag_case_projections.c.source_run_id,
+                    source_item.c.session_id
+                    == rag_case_projections.c.source_session_id,
+                    source_item.c.item_id
+                    == rag_case_projections.c.source_result_item_id,
+                ),
+            )
+            .join(
+                context_item,
+                and_(
+                    context_item.c.run_id == rag_case_projections.c.source_run_id,
+                    context_item.c.session_id.is_(None),
+                    context_item.c.item_id
+                    == rag_case_projections.c.analysis_context_item_id,
+                ),
+            )
+            .join(
+                analysis_runs,
+                analysis_runs.c.run_id == rag_case_projections.c.source_run_id,
+            )
+            .join(
+                analysis_sessions,
+                and_(
+                    analysis_sessions.c.run_id
+                    == rag_case_projections.c.source_run_id,
+                    analysis_sessions.c.session_id
+                    == rag_case_projections.c.source_session_id,
+                ),
+            )
+        )
+        predicates = [
+            rag_case_projections.c.generation_id == generation_id,
+            rag_case_projections.c.profile_id == query.profile_id,
+            rag_case_projections.c.projection_schema_version == 1,
+            rag_case_projections.c.source_content_type == "inference_result",
+            rag_case_projections.c.source_content_schema_version == 1,
+            rag_case_projections.c.target_comid.in_(query.candidate_comids),
+            rag_case_projections.c.parameter_keys.op("&&")(requested_parameters),
+            rag_index_jobs.c.status == RAGIndexJobStatus.COMPLETED.value,
+            analysis_runs.c.status == "completed",
+            analysis_sessions.c.status == "completed",
+            source_item.c.content_type == "inference_result",
+            source_item.c.content_schema_version == 1,
+            source_item.c.rag_eligible.is_(True),
+            context_item.c.content_type == "analysis_context",
+            context_item.c.content_schema_version == 1,
+        ]
+        strategy = query.intent.strategy
+        if strategy in {
+            HistoricalSearchStrategy.PARAMETER_SEASON,
+            HistoricalSearchStrategy.SEMANTIC_CASE_QUERY,
+        }:
+            predicates.append(
+                rag_case_projections.c.mode
+                == CanonicalCaseQueryV1.model_validate_json(
+                    query.canonical_query
+                ).mode.value
+            )
+        if strategy is HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW:
+            overlaps = or_(
+                *(
+                    rag_case_windows.c.time_range.op("&&")(
+                        Range(
+                            window.time_range.start,
+                            window.time_range.end,
+                            "[)",
+                        )
+                    )
+                    for window in query.query_windows
+                )
+            )
+            predicates.append(
+                exists(
+                    select(literal(1)).where(
+                        rag_case_windows.c.generation_id
+                        == rag_case_projections.c.generation_id,
+                        rag_case_windows.c.case_id
+                        == rag_case_projections.c.case_id,
+                        rag_case_windows.c.parameter_keys.op("&&")(
+                            requested_parameters
+                        ),
+                        overlaps,
+                    )
+                )
+            )
+        elif strategy is HistoricalSearchStrategy.PARAMETER_SEASON:
+            seasons = sorted(
+                {
+                    season.value
+                    for window in query.query_windows
+                    for season in window.season_buckets
+                }
+            )
+            predicates.append(
+                exists(
+                    select(literal(1)).where(
+                        rag_case_windows.c.generation_id
+                        == rag_case_projections.c.generation_id,
+                        rag_case_windows.c.case_id
+                        == rag_case_projections.c.case_id,
+                        rag_case_windows.c.parameter_keys.op("&&")(
+                            requested_parameters
+                        ),
+                        rag_case_windows.c.season_bucket.in_(seasons),
+                    )
+                )
+            )
+
+        raw_lexical = func.ts_rank_cd(
+            rag_case_projections.c.search_document,
+            func.plainto_tsquery("simple", query.canonical_query),
+        )
+        lexical = raw_lexical / (1.0 + raw_lexical)
+        vector_similarity = literal(None)
+        preliminary = lexical
+        if strategy is HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW:
+            overlap_seconds = sum(
+                (
+                    select(
+                        func.coalesce(
+                            func.sum(
+                                func.extract(
+                                    "epoch",
+                                    func.least(
+                                        func.upper(rag_case_windows.c.time_range),
+                                        window.time_range.end,
+                                    )
+                                    - func.greatest(
+                                        func.lower(rag_case_windows.c.time_range),
+                                        window.time_range.start,
+                                    ),
+                                )
+                            ),
+                            0.0,
+                        )
+                    )
+                    .where(
+                        rag_case_windows.c.generation_id
+                        == rag_case_projections.c.generation_id,
+                        rag_case_windows.c.case_id
+                        == rag_case_projections.c.case_id,
+                        rag_case_windows.c.time_range.op("&&")(
+                            Range(
+                                window.time_range.start,
+                                window.time_range.end,
+                                "[)",
+                            )
+                        ),
+                    )
+                    .correlate(rag_case_projections)
+                    .scalar_subquery()
+                    for window in query.query_windows
+                )
+            )
+            requested_seconds = sum(
+                (window.time_range.end - window.time_range.start).total_seconds()
+                for window in query.query_windows
+            )
+            preliminary = (
+                0.75 * overlap_seconds / requested_seconds + 0.25 * lexical
+            )
+        elif strategy is HistoricalSearchStrategy.SEMANTIC_CASE_QUERY:
+            assert query.query_embedding is not None
+            distance = cast(
+                rag_case_projections.c.embedding.op("OPERATOR(public.<=>)")(
+                    list(query.query_embedding.values)
+                ),
+                Float,
+            )
+            vector_similarity = func.greatest(
+                0.0,
+                func.least(1.0, 1.0 - distance / 2.0),
+            )
+            assert query.semantic_min_similarity is not None
+            threshold = query.semantic_min_similarity
+            predicates.append(vector_similarity >= threshold)
+            preliminary = 0.85 * vector_similarity + 0.15 * lexical
+        elif strategy is HistoricalSearchStrategy.NEARBY_COMID_PARAMETER:
+            assert query.spatial_radius_km is not None
+            distance_by_comid = case(
+                *(
+                    (
+                        rag_case_projections.c.target_comid == item.comid,
+                        item.spatial_distance_km,
+                    )
+                    for item in query.comid_scope
+                ),
+                else_=query.spatial_radius_km,
+            )
+            preliminary = (
+                0.70 * (1.0 - distance_by_comid / query.spatial_radius_km)
+                + 0.30 * lexical
+            )
+        elif strategy is HistoricalSearchStrategy.PARAMETER_SEASON:
+            requested_seasons = {
+                season.value
+                for window in query.query_windows
+                for season in window.season_buckets
+            }
+            shared_seasons = (
+                select(func.count(func.distinct(rag_case_windows.c.season_bucket)))
+                .where(
+                    rag_case_windows.c.generation_id
+                    == rag_case_projections.c.generation_id,
+                    rag_case_windows.c.case_id == rag_case_projections.c.case_id,
+                    rag_case_windows.c.season_bucket.in_(requested_seasons),
+                )
+                .correlate(rag_case_projections)
+                .scalar_subquery()
+            )
+            duration_pairs = tuple(
+                (
+                    select(
+                        func.coalesce(
+                            func.max(
+                                cast(
+                                    func.least(
+                                        rag_case_windows.c.duration_seconds,
+                                        window.duration_seconds,
+                                    ),
+                                    Float,
+                                )
+                                / func.greatest(
+                                    rag_case_windows.c.duration_seconds,
+                                    window.duration_seconds,
+                                )
+                            ),
+                            0.0,
+                        )
+                    )
+                    .where(
+                        rag_case_windows.c.generation_id
+                        == rag_case_projections.c.generation_id,
+                        rag_case_windows.c.case_id
+                        == rag_case_projections.c.case_id,
+                        rag_case_windows.c.season_bucket.in_(
+                            tuple(season.value for season in window.season_buckets)
+                        ),
+                    )
+                    .correlate(rag_case_projections)
+                    .scalar_subquery()
+                )
+                for window in query.query_windows
+            )
+            best_duration = (
+                duration_pairs[0]
+                if len(duration_pairs) == 1
+                else func.greatest(*duration_pairs)
+            )
+            preliminary = (
+                case(
+                    (
+                        rag_case_projections.c.target_comid == query.current_comid,
+                        0.35,
+                    ),
+                    else_=0.0,
+                )
+                + 0.35 * shared_seasons / len(requested_seasons)
+                + 0.20 * best_duration
+                + 0.10 * lexical
+            )
+        elif strategy is HistoricalSearchStrategy.TOPOLOGY_NEIGHBORHOOD_PARAMETER:
+            preliminary_by_comid = {
+                item.comid: _topology_preliminary_score(query, item)
+                for item in query.comid_scope
+            }
+            preliminary = case(
+                *(
+                    (
+                        rag_case_projections.c.target_comid == comid,
+                        score,
+                    )
+                    for comid, score in preliminary_by_comid.items()
+                ),
+                else_=0.0,
+            ) + 0.20 * lexical
+
+        matched_parameter_count = sum(
+            case(
+                (
+                    rag_case_projections.c.parameter_keys.op("@>")([parameter]),
+                    1,
+                ),
+                else_=0,
+            )
+            for parameter in requested_parameters
+        )
+        suspicious_quality = exists(
+            select(literal(1)).where(
+                rag_fragment_projections.c.generation_id
+                == rag_case_projections.c.generation_id,
+                rag_fragment_projections.c.case_id
+                == rag_case_projections.c.case_id,
+                rag_fragment_projections.c.quality_tier
+                == RAGQualityTier.SUSPICIOUS.value,
+            )
+        )
+        original_confidence = rag_case_projections.c.result_projection[
+            "overall_confidence"
+        ].as_float()
+        statement = (
+            select(
+                rag_case_projections,
+                lexical.label("lexical_similarity"),
+                vector_similarity.label("vector_similarity"),
+            )
+            .select_from(source)
+            .where(*predicates)
+            .order_by(
+                preliminary.desc(),
+                matched_parameter_count.desc(),
+                case((suspicious_quality, 1), else_=0),
+                original_confidence.desc().nulls_last(),
+                rag_case_projections.c.source_completed_at.desc(),
+                rag_case_projections.c.source_run_id,
+                rag_case_projections.c.source_session_id,
+                rag_case_projections.c.source_result_item_id,
+            )
+            .limit(50)
+        )
+        rows = await self._read_all(statement)
+        if not rows:
+            return ()
+        identities = tuple(
+            (row["generation_id"], row["case_id"]) for row in rows
+        )
+        window_rows = await self._read_all(
+            select(rag_case_windows)
+            .where(
+                tuple_(
+                    rag_case_windows.c.generation_id,
+                    rag_case_windows.c.case_id,
+                ).in_(identities)
+            )
+            .order_by(
+                rag_case_windows.c.generation_id,
+                rag_case_windows.c.case_id,
+                rag_case_windows.c.time_range,
+                rag_case_windows.c.window_id,
+            )
+        )
+        fragment_rows = await self._read_all(
+            select(
+                rag_fragment_projections.c.generation_id,
+                rag_fragment_projections.c.case_id,
+                rag_fragment_projections.c.quality_tier,
+            ).where(
+                tuple_(
+                    rag_fragment_projections.c.generation_id,
+                    rag_fragment_projections.c.case_id,
+                ).in_(identities)
+            )
+        )
+        windows_by_case: dict[tuple[UUID, UUID], list] = {}
+        for row in window_rows:
+            windows_by_case.setdefault(
+                (row["generation_id"], row["case_id"]), []
+            ).append(row)
+        suspicious = {
+            (row["generation_id"], row["case_id"])
+            for row in fragment_rows
+            if row["quality_tier"] == RAGQualityTier.SUSPICIOUS.value
+        }
+        candidates: list[RAGCandidateRow] = []
+        for row in rows:
+            identity = (row["generation_id"], row["case_id"])
+            projection = _prepared_projection_from_rows(
+                row,
+                tuple(windows_by_case.get(identity, ())),
+            )
+            candidate = rank_projection(
+                query,
+                projection,
+                lexical_similarity=float(row["lexical_similarity"] or 0),
+                vector_similarity=(
+                    None
+                    if row["vector_similarity"] is None
+                    else float(row["vector_similarity"])
+                ),
+                quality_tier=(
+                    RAGQualityTier.SUSPICIOUS
+                    if identity in suspicious
+                    else RAGQualityTier.VALID
+                ),
+                original_confidence=(
+                    HistoricalResultProjection.model_validate(
+                        row["result_projection"]
+                    ).overall_confidence
+                ),
+            )
+            candidates.append(candidate)
+        return tuple(sorted(candidates, key=stable_candidate_order))
 
     async def activate_generation(
         self,

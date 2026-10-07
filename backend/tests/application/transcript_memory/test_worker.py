@@ -14,6 +14,7 @@ from app.domain import (
     EmbeddingBatch,
     EmbeddingProfile,
     EmbeddingVector,
+    HistoricalCaseRef,
     RAGIndexGeneration,
     RAGIndexGenerationStatus,
     RAGIndexJob,
@@ -212,12 +213,23 @@ def test_transcript_source_loader_decodes_authoritative_run_once() -> None:
             ),
         )
         reader = _RegisteredRunReader(snapshot)
-        loaded = await TranscriptRAGCaseSourceReader(reader, REGISTRY).load_case_source(
-            _job()
+        loader = TranscriptRAGCaseSourceReader(reader, REGISTRY)
+        loaded = await loader.load_case_source(_job())
+        hydrated = await loader.load_historical_case_source(
+            HistoricalCaseRef(
+                generation_id=GENERATION_ID,
+                case_id="86000000-0000-4000-8000-000000000099",
+                run_id=str(source.result.item.run_id),
+                session_id=str(source.result.item.session_id),
+                target_comid=source.result.body.target_comid,
+                analysis_context_item_id=str(source.analysis_context.item.item_id),
+                result_item_id=str(source.result.item.item_id),
+            )
         )
 
-        assert reader.calls == 1
+        assert reader.calls == 2
         assert loaded.result.item.item_id == source.result.item.item_id
+        assert hydrated.result == loaded.result
         assert loaded.session == source.session
         assert loaded.confirmed_references == source.confirmed_references[:1]
 

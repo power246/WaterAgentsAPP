@@ -1,4 +1,5 @@
 from app.domain.memory_rag.authorized_rag_search_query import AuthorizedRAGSearchQuery
+from app.domain.memory_rag.authorized_rag_comid import AuthorizedRAGComid
 from app.domain.memory_rag.canonical_case_query import CanonicalCaseQueryV1
 from app.domain.memory_rag.canonical_intent_token import CanonicalIntentToken
 from app.domain.memory_rag.canonical_window_descriptor import (
@@ -38,6 +39,7 @@ from app.domain.memory_rag.rag_source_cutoff import RAGSourceCutoff
 
 __all__ = [
     "AuthorizedRAGSearchQuery",
+    "AuthorizedRAGComid",
     "CanonicalCaseQueryV1",
     "CanonicalIntentToken",
     "CanonicalWindowDescriptorV1",
