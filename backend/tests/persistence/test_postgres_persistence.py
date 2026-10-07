@@ -225,13 +225,19 @@ async def _wait_persistence(
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
     postgres_settings: AppSettings,
 ) -> None:
-    assert asyncio.run(check_database_schema(postgres_settings)) == "20261003_01"
-    assert upgrade_database(postgres_settings) == "20261003_01"
+    assert asyncio.run(check_database_schema(postgres_settings)) == "20261007_01"
+    assert upgrade_database(postgres_settings) == "20261007_01"
 
     async def inspect_schema() -> tuple[set[str], set[str], list[object]]:
         engine = create_database_engine(postgres_settings)
         try:
             async with engine.connect() as connection:
+                await connection.execute(
+                    text(
+                        "SELECT set_config("
+                        "'search_path', current_schema() || ',public', false)"
+                    )
+                )
                 tables, constraints, schema_diff = await connection.run_sync(
                     lambda sync_connection: (
                         set(inspect(sync_connection).get_table_names()),
@@ -248,7 +254,19 @@ def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
                             ).get_check_constraints(table)
                         },
                         compare_metadata(
-                            MigrationContext.configure(sync_connection),
+                            MigrationContext.configure(
+                                sync_connection,
+                                opts={
+                                    "compare_type": lambda _context, inspected,
+                                    metadata_type, *_args: (
+                                        False
+                                        if str(metadata_type).casefold() == "vector"
+                                        and str(inspected).casefold()
+                                        in {"null", "public.vector"}
+                                        else None
+                                    )
+                                },
+                            ),
                             metadata,
                         ),
                     )
@@ -264,6 +282,12 @@ def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
         "analysis_sessions",
         "transcript_items",
         "transcript_contents",
+        "rag_index_generations",
+        "rag_index_jobs",
+        "rag_case_projections",
+        "rag_case_windows",
+        "rag_fragment_projections",
+        "rag_consumption_links",
     }
     assert "ck_analysis_runs_terminal_item_matches_status" in constraints
     assert "ck_analysis_sessions_role_comid" in constraints

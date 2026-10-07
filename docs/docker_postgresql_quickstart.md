@@ -6,7 +6,7 @@
 
 | 项目 | 配置 |
 |---|---|
-| 镜像 | `postgres:17` |
+| 镜像 | `pgvector/pgvector:0.8.6-pg17-trixie` |
 | Compose 服务 | `postgres` |
 | 地址 | `127.0.0.1:5432` |
 | 业务数据库 | `wateragents` |
@@ -15,6 +15,9 @@
 | SSL | 本地默认 `disable` |
 
 实际值可由 `backend/.env` 覆盖。密码只保存在未提交的 `.env` 中，不要打印或写入文档。
+该固定镜像保持 PostgreSQL 17，并提供 M8 migration 所需的 pgvector `0.8.6` extension files；
+当前命名卷使用与 `trixie` 镜像一致的 collation 版本，不要擅自改成 `bookworm` tag。
+Python 侧锁定 `pgvector 0.5.0`，只负责 SQLAlchemy/Psycopg vector 类型适配。
 
 ### Windows Docker 数据位置
 
@@ -52,7 +55,9 @@ wateragents-db check
 
 本机迁移验收已确认 Docker Desktop 4.93.0 / Engine 29.8.1 重启后仍使用 D 盘；容器为
 `healthy`，`postgres`、`wateragents`、`wateragents_test` 均存在，迁移前后规范化逻辑
-dump 的 SHA-256 一致；M7 Milestone 1 后当前 schema head 为 `20261003_01`（在既有四表上增加 `run_summarizer` session CHECK/唯一索引），health 与 run/history/restart smoke 通过。
+dump 的 SHA-256 一致；M8 Milestone 2 后当前 schema head 为 `20261007_01`，在既有四表上新增六类 generation/job/projection/consumption 表。migration 受控执行
+`CREATE EXTENSION IF NOT EXISTS vector`，正式应用启动与 `wateragents-db check` 只验证
+extension 版本（`>= 0.8.0`）及 schema head，不在启动路径临时安装扩展。
 
 ## 首次启动
 
@@ -64,6 +69,10 @@ docker compose --env-file .env -f compose.yaml up -d --wait
 wateragents-db upgrade
 wateragents-db check
 ```
+
+若连接外部 PostgreSQL，部署镜像/主机必须预装可创建的 `vector` extension files，且
+migration role 必须具有 `CREATE EXTENSION` 权限；否则 `upgrade` 会 fail closed 并提示使用
+pgvector-enabled image/授权 migration role。不要给正式应用运行角色增加临时安装扩展的权限。
 
 启动应用并检查健康状态：
 

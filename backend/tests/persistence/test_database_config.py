@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.infrastructure.config.settings import (
     AppSettings,
@@ -11,6 +12,7 @@ from app.infrastructure.config.settings import (
     load_app_settings,
 )
 from app.infrastructure.persistence import cli
+from app.infrastructure.persistence import database as database_module
 from app.infrastructure.persistence.database import (
     DatabaseConfigurationError,
     IncompatibleSchemaError,
@@ -18,11 +20,14 @@ from app.infrastructure.persistence.database import (
     MultipleSchemaHeadsError,
     NewerSchemaError,
     OutdatedSchemaError,
+    VectorExtensionError,
+    _validate_vector_extension,
     _validate_database_revisions,
     alembic_config,
     database_url,
     expected_schema_head,
     require_database_password,
+    upgrade_database,
 )
 from scripts import test_database
 
@@ -280,7 +285,7 @@ def test_invalid_transcript_thresholds_are_rejected() -> None:
 def test_alembic_has_exactly_one_packaged_head() -> None:
     config = alembic_config(AppSettings(db_password="x"))
     assert Path(config.get_main_option("script_location")).is_absolute()
-    assert expected_schema_head(config) == "20261003_01"
+    assert expected_schema_head(config) == "20261007_01"
 
 
 class _Revision:
@@ -325,6 +330,33 @@ def test_old_new_and_unknown_database_revisions_are_distinct() -> None:
         _validate_database_revisions(
             ("unrelated",), "20260913_01", script  # type: ignore[arg-type]
         )
+
+
+def test_vector_extension_version_is_required_and_bounded() -> None:
+    _validate_vector_extension("0.8.0")
+    _validate_vector_extension("0.8.6")
+
+    with pytest.raises(VectorExtensionError, match="missing"):
+        _validate_vector_extension(None)
+    with pytest.raises(VectorExtensionError, match="unsupported"):
+        _validate_vector_extension("0.7.4")
+    with pytest.raises(VectorExtensionError, match="not recognized"):
+        _validate_vector_extension("not-a-version")
+
+
+def test_upgrade_reports_vector_extension_install_failure_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        database_module.command,
+        "upgrade",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            SQLAlchemyError("required PostgreSQL extension vector is not available")
+        ),
+    )
+
+    with pytest.raises(VectorExtensionError, match="pgvector-enabled image"):
+        upgrade_database(AppSettings(db_password="test"))
 
 
 def test_cli_missing_password_fails_without_echoing_secrets(
