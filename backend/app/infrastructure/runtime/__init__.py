@@ -22,17 +22,20 @@ from app.infrastructure.runtime.m6 import (
     safe_m6_metadata,
 )
 from app.infrastructure.runtime.m7 import compose_m7_execution_stage
+from app.infrastructure.runtime.m8 import M8Runtime, build_m8_runtime
 
 __all__ = [
     "RuntimeComponents",
     "M5Runtime",
     "M6Runtime",
     "M6RuntimeLimits",
+    "M8Runtime",
     "OpenAIResponsesSizeEstimator",
     "TrustedGeometryCatalog",
     "build_m4_runtime",
     "build_m5_runtime",
     "build_m6_runtime",
+    "build_m8_runtime",
     "compose_m4_workflow",
     "compose_m5_runtime",
     "compose_m6_runtime",

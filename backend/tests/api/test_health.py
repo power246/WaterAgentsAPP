@@ -97,6 +97,7 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "rag_job_backoff_max_seconds": 60.0,
         "rag_reconciliation_interval_seconds": 30.0,
         "rag_worker_shutdown_grace_seconds": 5.0,
+        "rag_retired_generation_retention_seconds": 604800.0,
     }
     assert create_app(settings).state.settings is settings
 

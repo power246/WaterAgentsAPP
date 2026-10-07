@@ -12,6 +12,10 @@ from app.application.query_understanding import (
     SupportingParameterIntent,
     TargetSource,
 )
+from app.application.transcript_memory import (
+    RAGSearchUnavailableError,
+    TranscriptEvidenceProducer,
+)
 from app.domain import (
     EmbeddingProfile,
     GeoPoint,
@@ -89,6 +93,50 @@ async def _build_test_m6_runtime(settings, **kwargs):
 class NoOpWorkflow:
     async def run(self, context) -> None:
         context.cancellation.checkpoint()
+
+
+class _BuildingSearchSession:
+    async def search(self, intent, *, operation_id, deadline=None):
+        del intent, operation_id, deadline
+        raise RAGSearchUnavailableError("index_building")
+
+    def clear(self) -> None:
+        pass
+
+
+class _BuildingSearchService:
+    def bind(self, scope):
+        del scope
+        return _BuildingSearchSession()
+
+
+class FakeM8Runtime:
+    def __init__(self) -> None:
+        self.producer = TranscriptEvidenceProducer(_BuildingSearchService())
+        self.started = False
+        self.stopped = False
+        self.wakes = 0
+
+    async def start(self) -> None:
+        self.started = True
+
+    def notify_run_terminal(self, run_id) -> None:
+        del run_id
+        if not self.stopped:
+            self.wakes += 1
+
+    async def shutdown(self) -> None:
+        self.stopped = True
+
+
+@asynccontextmanager
+async def build_test_m8_runtime(*args, **kwargs):
+    del args, kwargs
+    runtime = FakeM8Runtime()
+    try:
+        yield runtime
+    finally:
+        await runtime.shutdown()
 
 
 def create_request(
@@ -184,6 +232,7 @@ def create_test_app(*args: object, **kwargs: object):
 
     kwargs.setdefault("model_catalog", MODEL_CATALOG)
     kwargs.setdefault("m6_runtime_builder", _build_test_m6_runtime)
+    kwargs.setdefault("m8_runtime_builder", build_test_m8_runtime)
     if kwargs.get("workflow") is None:
         kwargs["workflow"] = NoOpWorkflow()
     return create_app(*args, **kwargs)

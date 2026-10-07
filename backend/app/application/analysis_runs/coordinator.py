@@ -329,6 +329,7 @@ class RunCoordinator:
         self._shutdown_lock = asyncio.Lock()
         self._closing = False
         self._run_cleanup_hook: RunCleanupHook | None = None
+        self._run_terminal_persisted_hook: Callable[[UUID], None] | None = None
         self._cleaned_run_resources: set[UUID] = set()
         self._keepalive_interval = keepalive_interval
         self._idempotency_wait_timeout = idempotency_wait_timeout
@@ -358,6 +359,7 @@ class RunCoordinator:
             attempt_timeout=persistence_attempt_timeout,
             completion_delivery_grace=completion_delivery_grace,
             sleep=persistence_sleep,
+            terminal_persisted=self._notify_run_terminal_persisted,
         )
 
     def register_run_cleanup_hook(self, hook: RunCleanupHook) -> None:
@@ -368,6 +370,22 @@ class RunCoordinator:
         if self._run_cleanup_hook is not None:
             raise RuntimeError("run cleanup hook is already registered")
         self._run_cleanup_hook = hook
+
+    def register_run_terminal_persisted_hook(
+        self,
+        hook: Callable[[UUID], None],
+    ) -> None:
+        if self._closing:
+            raise RuntimeError("cannot register terminal hook during shutdown")
+        if self._runs:
+            raise RuntimeError("terminal hook must be registered before runs")
+        if self._run_terminal_persisted_hook is not None:
+            raise RuntimeError("terminal hook is already registered")
+        self._run_terminal_persisted_hook = hook
+
+    def _notify_run_terminal_persisted(self, run_id: UUID) -> None:
+        if self._run_terminal_persisted_hook is not None:
+            self._run_terminal_persisted_hook(run_id)
 
     async def _cleanup_run_resources(self, run_id: UUID) -> None:
         if (

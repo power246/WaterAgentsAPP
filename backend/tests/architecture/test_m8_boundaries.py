@@ -328,6 +328,27 @@ def test_m8_keeps_one_v1_read_union_tool_and_no_feature_toggle() -> None:
     }
 
 
+def test_production_composes_one_m8_owner_before_m5_m6_m7_and_worker_start() -> None:
+    source = (APP_ROOT / "main.py").read_text(encoding="utf-8")
+    order = tuple(
+        source.index(marker)
+        for marker in (
+            "active_m8_builder(",
+            "build_m5_runtime(",
+            "active_m6_builder(",
+            "bind_execution_stage(",
+            "await m8_runtime.start()",
+        )
+    )
+
+    assert order == tuple(sorted(order))
+    assert source.count("transcript_port=m8_runtime.producer") == 1
+    runtime_sources = tuple((APP_ROOT / "infrastructure" / "runtime").glob("*.py"))
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in runtime_sources)
+    assert combined.count("RAGIndexWorker(") == 1
+    assert combined.count("RAGSearchService(") == 1
+
+
 def test_m8_layer_gate_detects_provider_orm_archive_and_deferred_imports(
     tmp_path: Path,
 ) -> None:

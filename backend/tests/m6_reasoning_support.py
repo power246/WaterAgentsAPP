@@ -123,7 +123,10 @@ def create_reasoning_test_app(
         transcript_reader,
         capability_registry,
         clock,
+        transcript_port,
+        **options,
     ) -> AsyncIterator[object]:
+        del options
         yield compose_m5_runtime(
             active_settings,
             operations=operations,
@@ -133,6 +136,7 @@ def create_reasoning_test_app(
             weather_port=EmptyWeatherPort(),
             facility_port=EmptyFacilityPort(),
             clock=clock,
+            transcript_port=transcript_port,
             operation_id_factory=lambda: str(uuid4()),
         )
 

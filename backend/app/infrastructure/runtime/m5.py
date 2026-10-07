@@ -212,6 +212,7 @@ async def build_m5_runtime(
     transcript_reader: TranscriptReader,
     capability_registry: ParameterCapabilityRegistry,
     clock: ClockPort,
+    transcript_port: TranscriptEvidenceProducer,
     upstream_results: RunLocalUpstreamResultRegistry | None = None,
 ) -> AsyncIterator[M5Runtime]:
     geometry_catalog = TrustedGeometryCatalog()
@@ -264,6 +265,7 @@ async def build_m5_runtime(
             facility_port=facility,
             clock=clock,
             upstream_port=upstream_results,
+            transcript_port=transcript_port,
             scope_preparer=geometry_catalog.register_scope,
             geometry_catalog=geometry_catalog,
             upstream_results=upstream_results,

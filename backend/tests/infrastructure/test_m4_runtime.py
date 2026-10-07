@@ -161,20 +161,31 @@ def test_runtime_factory_wires_real_m4_components_and_configured_limits() -> Non
     run(exercise())
 
 
-def test_default_app_startup_fails_closed_before_database_initialization(
+def test_default_app_validates_database_before_m4_and_still_fails_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    database_calls = 0
+    events: list[str] = []
 
-    def reject_database_startup(*args, **kwargs):
-        nonlocal database_calls
+    class TestEngine:
+        async def dispose(self) -> None:
+            events.append("database_disposed")
+
+    def create_test_engine(*args, **kwargs):
         del args, kwargs
-        database_calls += 1
-        raise AssertionError("database must not start before runtime validation")
+        events.append("database_created")
+        return TestEngine()
+
+    async def validate_test_database(*args, **kwargs) -> None:
+        del args, kwargs
+        events.append("database_validated")
 
     monkeypatch.setattr(
         "app.main.create_database_engine",
-        reject_database_startup,
+        create_test_engine,
+    )
+    monkeypatch.setattr(
+        "app.main.check_database_schema",
+        validate_test_database,
     )
     application = create_app(AppSettings(_env_file=None))
 
@@ -184,4 +195,8 @@ def test_default_app_startup_fails_closed_before_database_initialization(
                 raise AssertionError("misconfigured app started")
 
     run(exercise())
-    assert database_calls == 0
+    assert events == [
+        "database_created",
+        "database_validated",
+        "database_disposed",
+    ]

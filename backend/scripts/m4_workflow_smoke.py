@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from enum import Enum
 from uuid import uuid4
@@ -17,6 +18,10 @@ from app.application.query_understanding import (
     QueryParserResponse,
 )
 from app.application.station_availability import StationAvailabilityService
+from app.application.transcript_memory import (
+    RAGSearchUnavailableError,
+    TranscriptEvidenceProducer,
+)
 from app.application.transcripts.registry import create_production_registry
 from app.domain import (
     AdministrativeLocation,
@@ -109,6 +114,41 @@ class CompleteM4SmokeAfterTopology:
         topology_item_id,
     ) -> None:
         del context, analysis_context, graph, topology_item_id
+
+
+class _BuildingSearchSession:
+    async def search(self, intent, *, operation_id, deadline=None):
+        del intent, operation_id, deadline
+        raise RAGSearchUnavailableError("index_building")
+
+    def clear(self) -> None:
+        pass
+
+
+class _BuildingSearchService:
+    def bind(self, scope):
+        del scope
+        return _BuildingSearchSession()
+
+
+class FixtureM8Runtime:
+    def __init__(self) -> None:
+        self.producer = TranscriptEvidenceProducer(_BuildingSearchService())
+
+    async def start(self) -> None:
+        pass
+
+    def notify_run_terminal(self, run_id) -> None:
+        del run_id
+
+    async def shutdown(self) -> None:
+        pass
+
+
+@asynccontextmanager
+async def build_fixture_m8_runtime(*args, **kwargs):
+    del args, kwargs
+    yield FixtureM8Runtime()
 
 
 class FixtureParser:
@@ -428,6 +468,7 @@ def build_runtime(profile: FixtureProfile, *, query_fallback: bool):
         model_catalog=MODEL_CATALOG,
         parameter_capability_registry=registry,
         m6_runtime_builder=build_fixture_m6_runtime,
+        m8_runtime_builder=build_fixture_m8_runtime,
     )
     return application, store, parser, geocoder, nldi, metadata
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Protocol
+
 from app.application.canonical_json import canonical_json_digest
 from app.application.evidence_tools.scope import EvidenceSessionScope
 from app.application.transcript_memory.search import (
@@ -21,11 +24,32 @@ from app.domain import (
 )
 
 
+class HistoricalSearchObserver(Protocol):
+    def observe_search(
+        self,
+        *,
+        strategy: str,
+        outcome: str,
+        latency_seconds: float,
+        result_count: int,
+    ) -> None: ...
+
+    def observe_hydration_invalid(self, code: str) -> None: ...
+
+
 class TranscriptEvidenceProducer:
     """The sole M5 adapter over session-bound M8 historical search."""
 
-    def __init__(self, search: RAGSearchService) -> None:
+    def __init__(
+        self,
+        search: RAGSearchService,
+        *,
+        observer: HistoricalSearchObserver | None = None,
+        monotonic: Callable[[], float] | None = None,
+    ) -> None:
         self._search = search
+        self._observer = observer
+        self._monotonic = monotonic
         self._scopes: dict[tuple[str, str], EvidenceSessionScope] = {}
         self._sessions: dict[tuple[str, str], RAGSearchSession] = {}
 
@@ -47,6 +71,12 @@ class TranscriptEvidenceProducer:
         *,
         deadline: float | None = None,
     ) -> ProviderCollectionBatch[HistoricalTranscriptRecord]:
+        monotonic = self._monotonic
+        if monotonic is None:
+            import asyncio
+
+            monotonic = asyncio.get_running_loop().time
+        started = monotonic()
         key = (request.run_id, request.session_id)
         scope = self._scopes.get(key)
         session = self._sessions.get(key)
@@ -56,7 +86,9 @@ class TranscriptEvidenceProducer:
             or request.memory_mode is not MemoryMode.MEMORY_AUGMENTED
             or scope.memory_mode is not request.memory_mode
         ):
-            return _failed_batch(request.operation_id, "index_invalid")
+            batch = _failed_batch(request.operation_id, "index_invalid")
+            self._observe(request, batch, monotonic() - started)
+            return batch
         try:
             records = await session.search(
                 request.intent,
@@ -64,22 +96,49 @@ class TranscriptEvidenceProducer:
                 deadline=deadline,
             )
         except RAGSearchUnavailableError as error:
-            return _failed_batch(
+            batch = _failed_batch(
                 request.operation_id,
                 _unavailable_code(error.code),
             )
         except RAGSearchInvalidError as error:
-            return _failed_batch(
+            batch = _failed_batch(
                 request.operation_id,
                 _invalid_code(error.code),
             )
-        return _completed_batch(request.operation_id, records)
+        else:
+            batch = _completed_batch(request.operation_id, records)
+        self._observe(request, batch, monotonic() - started)
+        return batch
 
     def cleanup_run(self, run_id: str) -> None:
         keys = tuple(key for key in self._sessions if key[0] == run_id)
         for key in keys:
             self._sessions.pop(key).clear()
             self._scopes.pop(key, None)
+
+    def _observe(
+        self,
+        request: TranscriptEvidenceRequest,
+        batch: ProviderCollectionBatch[HistoricalTranscriptRecord],
+        latency_seconds: float,
+    ) -> None:
+        if self._observer is None:
+            return
+        outcome = (
+            batch.incomplete_reason
+            if not batch.completion_proof.complete
+            else "available"
+            if batch.records
+            else "empty"
+        )
+        self._observer.observe_search(
+            strategy=request.intent.strategy.value,
+            outcome=outcome or "invalid",
+            latency_seconds=max(latency_seconds, 0),
+            result_count=len(batch.records),
+        )
+        if outcome == "historical_source_invalid":
+            self._observer.observe_hydration_invalid(outcome)
 
 
 def _same_search_scope(

@@ -301,6 +301,43 @@ class PostgresRAGRepository:
         )
         return None if row is None else _generation_from_row(row)
 
+    async def active_projection_dimensions(self) -> tuple[int, ...]:
+        rows = await self._read_all(
+            select(rag_case_projections.c.embedding_dimensions)
+            .join(
+                rag_index_generations,
+                rag_index_generations.c.generation_id
+                == rag_case_projections.c.generation_id,
+            )
+            .where(
+                rag_index_generations.c.status
+                == RAGIndexGenerationStatus.ACTIVE.value
+            )
+            .distinct()
+            .order_by(rag_case_projections.c.embedding_dimensions)
+        )
+        return tuple(row["embedding_dimensions"] for row in rows)
+
+    async def oldest_incomplete_job_at(
+        self,
+        generation_id: str,
+    ) -> datetime | None:
+        identifier = _uuid(generation_id, "generation_id")
+        row = await self._read_one(
+            select(func.min(rag_index_jobs.c.created_at).label("created_at")).where(
+                rag_index_jobs.c.generation_id == identifier,
+                rag_index_jobs.c.status.in_(
+                    (
+                        RAGIndexJobStatus.PENDING.value,
+                        RAGIndexJobStatus.LEASED.value,
+                        RAGIndexJobStatus.RETRY_WAIT.value,
+                        RAGIndexJobStatus.FAILED.value,
+                    )
+                ),
+            )
+        )
+        return None if row is None else row["created_at"]
+
     async def search_candidates(
         self,
         query: AuthorizedRAGSearchQuery,

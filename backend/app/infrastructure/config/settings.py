@@ -236,6 +236,12 @@ class AppSettings(BaseSettings):
         le=120,
         allow_inf_nan=False,
     )
+    rag_retired_generation_retention_seconds: float = Field(
+        default=604800,
+        ge=0,
+        le=31536000,
+        allow_inf_nan=False,
+    )
 
     @field_validator(
         "db_password",
@@ -307,6 +313,7 @@ class AppSettings(BaseSettings):
         "rag_job_backoff_max_seconds",
         "rag_reconciliation_interval_seconds",
         "rag_worker_shutdown_grace_seconds",
+        "rag_retired_generation_retention_seconds",
         mode="before",
     )
     @classmethod
