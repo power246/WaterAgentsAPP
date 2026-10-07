@@ -343,7 +343,9 @@ delete_retired_generation(generation)
 inspect_cleanup_dependencies(run_ids)
 ```
 
-M9 admin/cleanup调用这些 service前必须增加授权、确认、幂等与异步状态。index-only cleanup可删除 retired/active派生 rows，但删除 active后 producer必须 unavailable，直到新 generation激活；它不删除 transcript。profile change必须把“保存期望配置、构建、验证、激活、最后再允许清理旧credential”作为一个可观察workflow。history cleanup先检查 `rag_consumption_links`，按 source-first ownership规则拒绝或显式级联，不改写 retained transcript。API keys完全不在清理图中。
+M9 admin/cleanup调用这些 service前必须增加授权、确认、幂等与异步状态。index-only cleanup只删除 retired/failed generation 的派生 rows；active 必须先由另一完整 generation 原子接管并转为 retired，且 reader drain 与 retention 均满足后才能删除。它不删除 transcript。profile change必须把“保存期望配置、构建、验证、激活、最后再允许清理旧credential”作为一个可观察workflow。history cleanup先检查 `rag_consumption_links`，按 source-first ownership规则拒绝或显式级联，不改写 retained transcript。API keys完全不在清理图中。
+
+实现状态（2026-10-08）：上述 operation 已由 production `M8Runtime.operations` 组合为单一 `RAGMaintenanceOperations`，并与 search 共享同一个 reader-lease owner。generation replacement 通过既有完整性校验与原子 activation 完成；history cleanup 在单事务内重新计算传递 consumption graph，默认稳定 conflict，只有显式参数才按 consumer-first 整 run 级联。该内部 service 另提供 cleanup 执行与 profile handoff readiness 供后续受控调用，但未新增 HTTP route、第三 SSE、frontend/admin surface，也不持有或返回 credential/API key。
 
 ## 13. 测试矩阵
 

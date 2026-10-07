@@ -444,32 +444,32 @@
 
 ### 工作
 
-- [ ] 在现有 production typed-content registry 注册 M8 扩展后的 call/source/fragment/result/bundle schema，保持未知/不支持 schema 的既有 fail-closed 行为。
-- [ ] 更新 session snapshot/detail/item full-content/history readers，使 bounded historical DTO、score components、matched strategy、safe empty/unavailable/invalid 与 stable source refs 可读取；canonical text/vector/job/provider raw response 永不公开。
-- [ ] 复用现有 run SSE 与 session SSE 回放同一已持久化 typed facts；不增加第三 stream、M8-specific event、per-search subscription 或 direct cancel。
-- [ ] 确认 M8 不把 search hit 或 index job 伪装成 lifecycle terminal；SSE reconnect/sequence/keepalive/cancel/late-content 继续遵守 M2/M3 契约。
-- [ ] 实现内部 typed operations：`inspect_index_health`、`build_generation`、安全过滤的 `retry_failed_jobs`、`retire_generation`、`delete_retired_generation`、`inspect_cleanup_dependencies`；M8 不为它们增加 route。
-- [ ] generation/index-only cleanup 只删派生 rows；active 只有另一完整 generation 接管后才能退休，inactive 有 reader lease 时不能删，rebuild 只能从原 transcript allowlist 开始。
-- [ ] history/source cleanup 在删除前查询 consumption graph：无 consumer 可按既有 owner 流程删除；被保留 consumer 引用时稳定 conflict；只有明确授权才级联删除整个 dependent consumer run。
-- [ ] 级联顺序处理 transitive dependencies、consumer/source/index/jobs/links，保证幂等、可重试、无悬空 ref；绝不能改写 retained immutable transcript、只删 source 或静默 tombstone。
-- [ ] 固化 M9 handoff：保存 desired profile → build/validate → atomic activate → reader drain/retire → 最后才允许清理旧 credential；API keys 明确不属于 history/RAG cleanup graph。
-- [ ] 同步 API、frontend integration、architecture、milestones 和 deferred contracts 的最终 M8 表述；不得提前设计 M9 授权/UI/admin endpoint。
+- [x] 在现有 production typed-content registry 注册 M8 扩展后的 call/source/fragment/result/bundle schema，保持未知/不支持 schema 的既有 fail-closed 行为。
+- [x] 更新 session snapshot/detail/item full-content/history readers，使 bounded historical DTO、score components、matched strategy、safe empty/unavailable/invalid 与 stable source refs 可读取；canonical text/vector/job/provider raw response 永不公开。
+- [x] 复用现有 run SSE 与 session SSE 回放同一已持久化 typed facts；不增加第三 stream、M8-specific event、per-search subscription 或 direct cancel。
+- [x] 确认 M8 不把 search hit 或 index job 伪装成 lifecycle terminal；SSE reconnect/sequence/keepalive/cancel/late-content 继续遵守 M2/M3 契约。
+- [x] 实现内部 typed operations：`inspect_index_health`、`build_generation`、安全过滤的 `retry_failed_jobs`、`retire_generation`、`delete_retired_generation`、`inspect_cleanup_dependencies`；M8 不为它们增加 route。
+- [x] generation/index-only cleanup 只删派生 rows；active 只有另一完整 generation 接管后才能退休，inactive 有 reader lease 时不能删，rebuild 只能从原 transcript allowlist 开始。
+- [x] history/source cleanup 在删除前查询 consumption graph：无 consumer 可按既有 owner 流程删除；被保留 consumer 引用时稳定 conflict；只有明确授权才级联删除整个 dependent consumer run。
+- [x] 级联顺序处理 transitive dependencies、consumer/source/index/jobs/links，保证幂等、可重试、无悬空 ref；绝不能改写 retained immutable transcript、只删 source 或静默 tombstone。
+- [x] 固化 M9 handoff：保存 desired profile → build/validate → atomic activate → reader drain/retire → 最后才允许清理旧 credential；API keys 明确不属于 history/RAG cleanup graph。
+- [x] 同步 API、frontend integration、architecture、milestones 和 deferred contracts 的最终 M8 表述；不得提前设计 M9 授权/UI/admin endpoint。
 
 ### Tests
 
-- [ ] tool call/source/fragment/result/bundle 通过 persistence reload、session detail、item full-content、history pagination、session SSE live/replay 与 run projection round-trip 一致。
-- [ ] OpenAPI snapshot/route enumeration 证明 production surface 未增加；公开 DTO/错误不含 canonical/vector/job/provider internals。
-- [ ] source cleanup fixture 覆盖 no consumer、one consumer、transitive consumers、conflict、明确 whole-run cascade、重复/中断重试和并发新 consumption；均无 dangling link/ref。
-- [ ] generation cleanup fixture 覆盖 building/active/inactive/failed、reader lease、切换竞争、index-only delete/rebuild；原 transcript/history 始终不变。
-- [ ] M9 handoff state-machine test 证明新 profile 激活前旧 adapter/credential 仍可用，激活与 reader drain 后才出现旧 credential cleanup readiness。
+- [x] tool call/source/fragment/result/bundle 通过 persistence reload、session detail、item full-content、history pagination、session SSE live/replay 与 run projection round-trip 一致。
+- [x] OpenAPI snapshot/route enumeration 证明 production surface 未增加；公开 DTO/错误不含 canonical/vector/job/provider internals。
+- [x] source cleanup fixture 覆盖 no consumer、one consumer、transitive consumers、conflict、明确 whole-run cascade、重复/中断重试和并发新 consumption；均无 dangling link/ref。
+- [x] generation cleanup fixture 覆盖 building/active/inactive/failed、reader lease、切换竞争、index-only delete/rebuild；原 transcript/history 始终不变。
+- [x] M9 handoff state-machine test 证明新 profile 激活前旧 adapter/credential 仍可用，激活与 reader drain 后才出现旧 credential cleanup readiness。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcripts backend/tests/api/test_analysis_history.py backend/tests/smoke/test_run_sse_smoke.py -q`
-- [ ] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_cleanup.py backend/tests/persistence/test_rag_consumption_links.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcripts backend/tests/api/test_analysis_history.py backend/tests/smoke/test_run_sse_smoke.py -q`
+- [x] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_cleanup.py backend/tests/persistence/test_rag_consumption_links.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：M8 facts 可通过既有 history/SSE 安全回放，公共 surface 不变；index 与 source cleanup ownership 在 conflict/级联/重建中无悬空引用，并给 M9 留下可调用但尚未公开的内部操作与 credential 顺序。
 
@@ -477,7 +477,9 @@
 
 #### Milestone 9 完成记录
 
-- [ ] 完成后填写：round-trip/OpenAPI/cleanup graph/profile handoff 证据、改动路径、commit SHA、剩余风险。
+- [x] 2026-10-08 在 `codex/m8-m0-foundation` 完成：沿用 production registry/readers 与既有 run/session SSE，新增 `RAGMaintenanceOperations`、安全 failed-job retry、原子 generation replacement、retention/reader-lease 删除保护、传递 consumption graph 检查及显式 whole-run 级联；profile handoff 只输出 profile digest、generation 与 reader readiness，API keys 不进入 graph/DTO。主要路径为 `application/transcript_memory`、`domain/memory_rag`、`infrastructure/{persistence,runtime}`，实现提交 `1a8fe767e89b691fe81a52565f2da728b7cb6c09`。
+- [x] 证据：typed history/SSE 指定组 `28 passed`；专用 `wateragents_test` PostgreSQL cleanup/consumption `5 passed`；OpenAPI/architecture `152 passed`（首次发现 domain 多公共类文件约束，拆分后复验通过）；完整 backend `2251 passed, 1 warning`；compileall 与 diff check 通过。API/frontend/architecture/deferred 文档复核后保持“无 direct route/第三 SSE、M9 另行授权/UI/admin 设计”的最终边界。
+- [x] 剩余风险：真实 embedding provider/付费流量、Linux/macOS 与生产容量未运行；跨进程 restart、完整 fake/PG E2E、contract 矩阵最终状态与交付审计仍由 Milestone 10 承接，本阶段不宣称 M1–M9 已完成最终验收。
 
 ## Milestone 10：端到端验收、契约审计与交付证据
 
