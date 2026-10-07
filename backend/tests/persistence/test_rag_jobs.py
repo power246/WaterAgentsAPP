@@ -12,6 +12,61 @@ from tests.persistence.rag_test_support import (
 )
 
 
+def test_concurrent_discovery_creates_exactly_one_job_for_one_source() -> None:
+    async def exercise(settings) -> None:
+        first_engine = create_database_engine(settings)
+        second_engine = create_database_engine(settings)
+        first = PostgresRAGRepository(
+            first_engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        second = PostgresRAGRepository(
+            second_engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            source = await seed_completed_source(first_engine)
+            cutoff = await first.latest_candidate_cutoff()
+            assert cutoff.item_id == source.result_item_id
+            generation = await first.create_building_generation(
+                embedding_profile(),
+                cutoff.created_at,
+                str(cutoff.item_id),
+            )
+            discovered_at = datetime.now(UTC)
+            batches = await asyncio.gather(
+                first.discover_jobs(
+                    generation.generation_id,
+                    through=cutoff,
+                    limit=8,
+                    discovered_at=discovered_at,
+                ),
+                second.discover_jobs(
+                    generation.generation_id,
+                    through=cutoff,
+                    limit=8,
+                    discovered_at=discovered_at,
+                ),
+            )
+
+            assert all(len(batch) <= 1 for batch in batches)
+            counts = await first.counts(generation.generation_id)
+            assert counts.pending == 1
+            assert counts.total == 1
+            assert await first.discover_jobs(
+                generation.generation_id,
+                through=cutoff,
+                limit=8,
+                discovered_at=discovered_at,
+            ) == ()
+        finally:
+            await first_engine.dispose()
+            await second_engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
 def test_two_repositories_claim_one_job_exactly_once_and_preserve_attempts() -> None:
     async def exercise(settings) -> None:
         first_engine = create_database_engine(settings)

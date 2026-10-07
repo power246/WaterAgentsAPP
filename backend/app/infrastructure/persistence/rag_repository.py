@@ -5,7 +5,7 @@ import json
 from uuid import UUID, uuid4
 
 from psycopg.types.range import Range
-from sqlalchemy import and_, delete, func, insert, or_, select, update
+from sqlalchemy import and_, delete, func, insert, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -19,6 +19,7 @@ from app.domain import (
     RAGIndexJob,
     RAGIndexJobStatus,
     RAGJobCounts,
+    RAGSourceCutoff,
 )
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
 from app.infrastructure.persistence.schema import (
@@ -280,6 +281,137 @@ class PostgresRAGRepository:
                     rag_index_generations.c.generation_id == identifier
                 )
             )
+
+    async def latest_candidate_cutoff(self) -> RAGSourceCutoff:
+        row = await self._read_one(
+            select(
+                transcript_items.c.created_at,
+                transcript_items.c.item_id,
+            )
+            .select_from(
+                transcript_items.join(
+                    analysis_runs,
+                    analysis_runs.c.run_id == transcript_items.c.run_id,
+                ).join(
+                    analysis_sessions,
+                    and_(
+                        analysis_sessions.c.run_id == transcript_items.c.run_id,
+                        analysis_sessions.c.session_id == transcript_items.c.session_id,
+                    ),
+                )
+            )
+            .where(*self._candidate_predicates())
+            .order_by(
+                transcript_items.c.created_at.desc(),
+                transcript_items.c.item_id.desc(),
+            )
+            .limit(1)
+        )
+        if row is None:
+            return RAGSourceCutoff(
+                created_at=datetime(1970, 1, 1, tzinfo=UTC),
+                item_id=UUID(int=0),
+            )
+        return RAGSourceCutoff(
+            created_at=row["created_at"],
+            item_id=row["item_id"],
+        )
+
+    async def discover_jobs(
+        self,
+        generation_id: str,
+        *,
+        through: RAGSourceCutoff | None,
+        limit: int,
+        discovered_at: datetime,
+    ) -> tuple[RAGIndexJob, ...]:
+        if type(limit) is not int or limit < 1:
+            raise ValueError("discovery limit must be a positive integer")
+        identifier = _uuid(generation_id, "generation_id")
+        join_condition = and_(
+            rag_index_jobs.c.generation_id == identifier,
+            rag_index_jobs.c.source_result_item_id == transcript_items.c.item_id,
+            rag_index_jobs.c.projection_schema_version == 1,
+        )
+        predicates = [*self._candidate_predicates(), rag_index_jobs.c.job_id.is_(None)]
+        if through is not None:
+            predicates.append(
+                tuple_(transcript_items.c.created_at, transcript_items.c.item_id)
+                <= tuple_(through.created_at, through.item_id)
+            )
+        async with self._transaction() as connection:
+            await self._require_writable_generation(connection, identifier)
+            rows = tuple(
+                (
+                    await connection.execute(
+                        select(
+                            transcript_items.c.run_id,
+                            transcript_items.c.session_id,
+                            transcript_items.c.item_id,
+                            transcript_items.c.created_at,
+                        )
+                        .select_from(
+                            transcript_items.join(
+                                analysis_runs,
+                                analysis_runs.c.run_id == transcript_items.c.run_id,
+                            )
+                            .join(
+                                analysis_sessions,
+                                and_(
+                                    analysis_sessions.c.run_id
+                                    == transcript_items.c.run_id,
+                                    analysis_sessions.c.session_id
+                                    == transcript_items.c.session_id,
+                                ),
+                            )
+                            .outerjoin(rag_index_jobs, join_condition)
+                        )
+                        .where(*predicates)
+                        .order_by(
+                            transcript_items.c.created_at,
+                            transcript_items.c.item_id,
+                        )
+                        .limit(limit)
+                    )
+                ).mappings()
+            )
+            if not rows:
+                return ()
+            for row in rows:
+                job = RAGIndexJob(
+                    job_id=str(uuid4()),
+                    generation_id=generation_id,
+                    source_run_id=str(row["run_id"]),
+                    source_session_id=str(row["session_id"]),
+                    source_result_item_id=str(row["item_id"]),
+                    status=RAGIndexJobStatus.PENDING,
+                    attempts=0,
+                    created_at=discovered_at,
+                    updated_at=discovered_at,
+                )
+                await connection.execute(
+                    postgresql_insert(rag_index_jobs)
+                    .values(**self._job_values(job))
+                    .on_conflict_do_nothing(constraint="uq_rag_jobs_identity")
+                )
+            item_ids = tuple(row["item_id"] for row in rows)
+            persisted = tuple(
+                (
+                    await connection.execute(
+                        select(rag_index_jobs)
+                        .where(
+                            rag_index_jobs.c.generation_id == identifier,
+                            rag_index_jobs.c.source_result_item_id.in_(item_ids),
+                            rag_index_jobs.c.projection_schema_version == 1,
+                        )
+                        .order_by(
+                            rag_index_jobs.c.created_at,
+                            rag_index_jobs.c.job_id,
+                        )
+                    )
+                ).mappings()
+            )
+        return tuple(_job_from_row(row) for row in persisted)
 
     async def enqueue(self, job: RAGIndexJob) -> RAGIndexJob:
         if job.status is not RAGIndexJobStatus.PENDING:
@@ -632,6 +764,18 @@ class PostgresRAGRepository:
         }
 
     @staticmethod
+    def _candidate_predicates() -> tuple:
+        return (
+            analysis_runs.c.status == "completed",
+            analysis_sessions.c.status == "completed",
+            analysis_sessions.c.agent_role == "waterbody",
+            transcript_items.c.session_id.is_not(None),
+            transcript_items.c.content_type == "inference_result",
+            transcript_items.c.content_schema_version == 1,
+            transcript_items.c.rag_eligible.is_(True),
+        )
+
+    @staticmethod
     def _job_values(job: RAGIndexJob) -> dict[str, object]:
         return {
             "job_id": _uuid(job.job_id, "job_id"),
@@ -852,6 +996,89 @@ class PostgresRAGRepository:
         generation,
     ) -> None:
         generation_id = generation["generation_id"]
+        cutoff = tuple_(
+            generation["source_cutoff_created_at"],
+            generation["source_cutoff_item_id"],
+        )
+        source_position = tuple_(
+            transcript_items.c.created_at,
+            transcript_items.c.item_id,
+        )
+        candidate_base = (
+            transcript_items.join(
+                analysis_runs,
+                analysis_runs.c.run_id == transcript_items.c.run_id,
+            ).join(
+                analysis_sessions,
+                and_(
+                    analysis_sessions.c.run_id == transcript_items.c.run_id,
+                    analysis_sessions.c.session_id == transcript_items.c.session_id,
+                ),
+            )
+        )
+        candidate_count = await connection.scalar(
+            select(func.count())
+            .select_from(candidate_base)
+            .where(
+                *PostgresRAGRepository._candidate_predicates(),
+                source_position <= cutoff,
+            )
+        )
+        missing_candidate_jobs = await connection.scalar(
+            select(func.count())
+            .select_from(
+                candidate_base.outerjoin(
+                    rag_index_jobs,
+                    and_(
+                        rag_index_jobs.c.generation_id == generation_id,
+                        rag_index_jobs.c.source_result_item_id
+                        == transcript_items.c.item_id,
+                        rag_index_jobs.c.projection_schema_version
+                        == generation["projection_schema_version"],
+                    ),
+                )
+            )
+            .where(
+                *PostgresRAGRepository._candidate_predicates(),
+                source_position <= cutoff,
+                rag_index_jobs.c.job_id.is_(None),
+            )
+        )
+        total_jobs = await connection.scalar(
+            select(func.count())
+            .select_from(rag_index_jobs)
+            .where(rag_index_jobs.c.generation_id == generation_id)
+        )
+        job_source = transcript_items.alias("rag_activation_job_source")
+        invalid_job_sources = await connection.scalar(
+            select(func.count())
+            .select_from(
+                rag_index_jobs.outerjoin(
+                    job_source,
+                    and_(
+                        job_source.c.run_id == rag_index_jobs.c.source_run_id,
+                        job_source.c.session_id == rag_index_jobs.c.source_session_id,
+                        job_source.c.item_id == rag_index_jobs.c.source_result_item_id,
+                    ),
+                )
+            )
+            .where(
+                rag_index_jobs.c.generation_id == generation_id,
+                or_(
+                    job_source.c.item_id.is_(None),
+                    tuple_(job_source.c.created_at, job_source.c.item_id) > cutoff,
+                    job_source.c.content_type != "inference_result",
+                    job_source.c.content_schema_version != 1,
+                    rag_index_jobs.c.projection_schema_version
+                    != generation["projection_schema_version"],
+                    and_(
+                        rag_index_jobs.c.status == RAGIndexJobStatus.EXCLUDED.value,
+                        rag_index_jobs.c.last_safe_error_code
+                        != "source_no_longer_eligible",
+                    ),
+                ),
+            )
+        )
         incomplete_jobs = await connection.scalar(
             select(func.count())
             .select_from(rag_index_jobs)
@@ -906,6 +1133,12 @@ class PostgresRAGRepository:
                         rag_case_projections.c.source_content_type
                         == "inference_result",
                         rag_case_projections.c.source_content_schema_version == 1,
+                        rag_case_projections.c.canonical_query_digest.op("~")(
+                            r"^sha256:[0-9a-f]{64}$"
+                        ),
+                        rag_case_projections.c.projection_digest.op("~")(
+                            r"^sha256:[0-9a-f]{64}$"
+                        ),
                         source_item.c.content_type == "inference_result",
                         source_item.c.content_schema_version == 1,
                         source_item.c.rag_eligible.is_(True),
@@ -993,6 +1226,9 @@ class PostgresRAGRepository:
                     rag_fragment_projections.c.source_content_type
                     != "evidence_fragment",
                     rag_fragment_projections.c.source_content_schema_version != 1,
+                    ~rag_fragment_projections.c.projection_digest.op("~")(
+                        r"^sha256:[0-9a-f]{64}$"
+                    ),
                     fragment_item.c.item_id.is_(None),
                     fragment_item.c.content_type != "evidence_fragment",
                     fragment_item.c.content_schema_version != 1,
@@ -1000,13 +1236,44 @@ class PostgresRAGRepository:
                 ),
             )
         )
+        sample = (
+            select(
+                rag_case_projections.c.case_id,
+                rag_case_projections.c.embedding,
+            )
+            .where(rag_case_projections.c.generation_id == generation_id)
+            .order_by(rag_case_projections.c.case_id)
+            .limit(8)
+            .subquery("rag_activation_sample")
+        )
+        invalid_sample_vectors = await connection.scalar(
+            select(func.count())
+            .select_from(sample)
+            .where(
+                or_(
+                    sample.c.embedding.op("OPERATOR(public.<=>)")(
+                        sample.c.embedding
+                    ).is_(None),
+                    func.abs(
+                        sample.c.embedding.op("OPERATOR(public.<=>)")(
+                            sample.c.embedding
+                        )
+                    )
+                    > 0.000001,
+                )
+            )
+        )
         case_count = counts["case_count"] or 0
         valid_case_count = counts["valid_case_count"] or 0
         if (
             incomplete_jobs
+            or candidate_count != total_jobs
+            or missing_candidate_jobs
+            or invalid_job_sources
             or completed_jobs != case_count
             or valid_case_count != case_count
             or invalid_fragments
+            or invalid_sample_vectors
         ):
             raise RAGPersistenceConflictError(
                 "generation activation requires complete validated jobs and projections"

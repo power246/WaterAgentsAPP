@@ -1,12 +1,17 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from app.application.analysis_runs.models import RunStatus, SessionSummary
 from app.application.query_understanding.context_models import AnalysisContext
-from app.application.transcript_memory.source_reader import TypedRAGSourceItem
 from app.domain.evidence.evidence_fragment import EvidenceFragment
 from app.domain.hydrology.hydrology_graph import HydrologyGraph
 from app.domain.inference.inference_result import InferenceResult
+
+if TYPE_CHECKING:
+    from app.application.transcript_memory.source_reader import TypedRAGSourceItem
 
 
 @dataclass(frozen=True, slots=True)

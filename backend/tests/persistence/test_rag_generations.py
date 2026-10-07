@@ -1,14 +1,17 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
 import pytest
+from sqlalchemy import update
 
 from app.infrastructure.persistence.database import create_database_engine
 from app.infrastructure.persistence.rag_repository import (
     PostgresRAGRepository,
     RAGPersistenceConflictError,
 )
-from app.domain import RAGIndexGenerationStatus
+from app.infrastructure.persistence.schema import rag_case_projections
+from app.domain import RAGIndexGenerationStatus, RAGIndexJobStatus
 from scripts.test_database import temporary_migrated_schema
 from tests.persistence.rag_test_support import (
     embedding_profile,
@@ -27,17 +30,19 @@ def test_generation_switch_is_atomic_and_normal_read_returns_only_active() -> No
         )
         try:
             source = await seed_completed_source(engine)
+            empty_cutoff = datetime(1970, 1, 1, tzinfo=UTC)
+            empty_item_id = "00000000-0000-0000-0000-000000000000"
             first = await repository.create_building_generation(
                 embedding_profile(),
-                source.completed_at,
-                str(source.result_item_id),
+                empty_cutoff,
+                empty_item_id,
             )
             assert await repository.read_active_generation() is None
             with pytest.raises(RAGPersistenceConflictError):
                 await repository.create_building_generation(
                     embedding_profile(dimensions=4),
-                    source.completed_at,
-                    str(source.result_item_id),
+                    empty_cutoff,
+                    empty_item_id,
                 )
 
             activated_at = datetime.now(UTC)
@@ -49,8 +54,8 @@ def test_generation_switch_is_atomic_and_normal_read_returns_only_active() -> No
 
             second = await repository.create_building_generation(
                 embedding_profile(dimensions=4),
-                source.completed_at,
-                str(source.result_item_id),
+                empty_cutoff,
+                empty_item_id,
             )
             active_second = await repository.activate_generation(
                 second.generation_id,
@@ -147,6 +152,146 @@ def test_activation_requires_terminal_counts_and_validated_projection_closure() 
                 datetime.now(UTC),
             )
             assert active.status is RAGIndexGenerationStatus.ACTIVE
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
+def test_activation_revalidates_projection_digest_before_one_switch() -> None:
+    async def exercise(settings) -> None:
+        engine = create_database_engine(settings)
+        repository = PostgresRAGRepository(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            source = await seed_completed_source(engine)
+            profile = embedding_profile()
+            cutoff = await repository.latest_candidate_cutoff()
+            building = await repository.create_building_generation(
+                profile,
+                cutoff.created_at,
+                str(cutoff.item_id),
+            )
+            jobs = await repository.discover_jobs(
+                building.generation_id,
+                through=cutoff,
+                limit=8,
+                discovered_at=datetime.now(UTC),
+            )
+            assert len(jobs) == 1
+            leased = (
+                await repository.claim(
+                    building.generation_id,
+                    "m5-generation-validator",
+                    datetime.now(UTC) + timedelta(minutes=1),
+                    1,
+                )
+            )[0]
+            case, fragments = ready_projection(source, building.generation_id, profile)
+            await repository.write_ready_projection(leased, case, fragments)
+
+            async with engine.begin() as connection:
+                await connection.execute(
+                    update(rag_case_projections)
+                    .where(
+                        rag_case_projections.c.generation_id
+                        == UUID(building.generation_id)
+                    )
+                    .values(projection_digest="corrupt")
+                )
+            with pytest.raises(RAGPersistenceConflictError, match="validated"):
+                await repository.activate_generation(
+                    building.generation_id,
+                    datetime.now(UTC),
+                )
+
+            async with engine.begin() as connection:
+                await connection.execute(
+                    update(rag_case_projections)
+                    .where(
+                        rag_case_projections.c.generation_id
+                        == UUID(building.generation_id)
+                    )
+                    .values(projection_digest=case.projection_digest)
+                )
+            activated = await repository.activate_generation(
+                building.generation_id,
+                datetime.now(UTC),
+            )
+            assert activated.status is RAGIndexGenerationStatus.ACTIVE
+            with pytest.raises(RAGPersistenceConflictError):
+                await repository.activate_generation(
+                    building.generation_id,
+                    datetime.now(UTC),
+                )
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    (
+        RAGIndexJobStatus.RETRY_WAIT,
+        RAGIndexJobStatus.FAILED,
+        RAGIndexJobStatus.EXCLUDED,
+    ),
+)
+def test_activation_rejects_retry_failed_and_invalid_excluded_gaps(
+    terminal_status: RAGIndexJobStatus,
+) -> None:
+    async def exercise(settings) -> None:
+        engine = create_database_engine(settings)
+        repository = PostgresRAGRepository(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            source = await seed_completed_source(engine)
+            cutoff = await repository.latest_candidate_cutoff()
+            building = await repository.create_building_generation(
+                embedding_profile(),
+                cutoff.created_at,
+                str(cutoff.item_id),
+            )
+            await repository.discover_jobs(
+                building.generation_id,
+                through=cutoff,
+                limit=8,
+                discovered_at=datetime.now(UTC),
+            )
+            leased = (
+                await repository.claim(
+                    building.generation_id,
+                    "m5-gap-validator",
+                    datetime.now(UTC) + timedelta(minutes=1),
+                    1,
+                )
+            )[0]
+            changed_at = datetime.now(UTC) + timedelta(seconds=1)
+            values = {
+                "status": terminal_status,
+                "lease_owner": None,
+                "lease_until": None,
+                "last_safe_error_code": "unexpected_exclusion",
+                "updated_at": changed_at,
+            }
+            if terminal_status is RAGIndexJobStatus.RETRY_WAIT:
+                values["next_attempt_at"] = changed_at + timedelta(seconds=1)
+            else:
+                values["completed_at"] = changed_at
+            await repository.save(leased.model_copy(update=values))
+
+            with pytest.raises(RAGPersistenceConflictError, match="validated"):
+                await repository.activate_generation(
+                    building.generation_id,
+                    datetime.now(UTC),
+                )
         finally:
             await engine.dispose()
 

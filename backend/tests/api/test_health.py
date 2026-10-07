@@ -86,8 +86,32 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "transcript_preview_bytes": 2048,
         "live_state_grace_seconds": 60.0,
         "shutdown_save_grace_seconds": 5.0,
+        "rag_discovery_batch_size": 64,
+        "rag_reconciliation_max_batches": 4,
+        "rag_worker_claim_batch_size": 16,
+        "rag_embedding_batch_size": 16,
+        "rag_worker_max_concurrency": 1,
+        "rag_embedding_timeout_seconds": 30.0,
+        "rag_job_lease_seconds": 60.0,
+        "rag_job_backoff_base_seconds": 1.0,
+        "rag_job_backoff_max_seconds": 60.0,
+        "rag_reconciliation_interval_seconds": 30.0,
+        "rag_worker_shutdown_grace_seconds": 5.0,
     }
     assert create_app(settings).state.settings is settings
+
+
+@pytest.mark.parametrize(
+    "values",
+    (
+        {"rag_worker_claim_batch_size": 1, "rag_embedding_batch_size": 2},
+        {"rag_embedding_timeout_seconds": 30, "rag_job_lease_seconds": 30},
+        {"rag_job_backoff_base_seconds": 2, "rag_job_backoff_max_seconds": 1},
+    ),
+)
+def test_m8_worker_settings_reject_incoherent_budgets(values: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None, **values)
 
 
 def test_settings_use_wateragents_environment_prefix(

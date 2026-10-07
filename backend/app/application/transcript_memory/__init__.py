@@ -10,6 +10,16 @@ from app.application.transcript_memory.embedding_contract import (
     validate_canonical_embedding_texts,
     validated_embedding_batch,
 )
+from app.application.transcript_memory.backfill import (
+    RAGBackfillCoordinator,
+    RAGBackfillReconciliation,
+)
+from app.application.transcript_memory.discovery import (
+    RAGDiscoveryResult,
+    RAGDiscoveryService,
+    RAGReconciliationSignal,
+    RAGReconciliationRunner,
+)
 from app.application.transcript_memory.projection_builder import (
     PreparedRAGProjectionBundle,
     RAGProjectionBuildError,
@@ -37,9 +47,12 @@ from app.application.transcript_memory.source_models import (
 )
 from app.application.transcript_memory.source_reader import (
     RAGSourceReadError,
+    RAGSourceUnavailableError,
+    TranscriptRAGCaseSourceReader,
     TypedRAGSourceItem,
     TypedRAGSourceReader,
 )
+from app.application.transcript_memory.worker import RAGIndexWorker
 
 __all__ = [
     "ConfirmedSourceReference",
@@ -54,13 +67,22 @@ __all__ = [
     "GenerationStartupState",
     "GenerationUnavailableError",
     "PreparedRAGProjectionBundle",
+    "RAGBackfillCoordinator",
+    "RAGBackfillReconciliation",
     "RAGCaseSource",
     "RAGProjectionBuildError",
+    "RAGDiscoveryResult",
+    "RAGDiscoveryService",
+    "RAGIndexWorker",
+    "RAGReconciliationSignal",
+    "RAGReconciliationRunner",
     "RAGSourceClosureError",
     "RAGSourceReadError",
+    "RAGSourceUnavailableError",
     "SourceClosureExpectation",
     "TypedRAGSourceItem",
     "TypedRAGSourceReader",
+    "TranscriptRAGCaseSourceReader",
     "ValidatedRAGCaseSource",
     "build_prepared_projection",
     "assess_generation_startup",

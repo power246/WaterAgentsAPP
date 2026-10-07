@@ -1,9 +1,26 @@
 from typing import Protocol
 
-from app.domain import NonEmptyString, RAGIndexJob, RAGJobCounts, UtcDatetime
+from app.domain import (
+    NonEmptyString,
+    RAGIndexJob,
+    RAGJobCounts,
+    RAGSourceCutoff,
+    UtcDatetime,
+)
 
 
 class RAGJobStorePort(Protocol):
+    async def latest_candidate_cutoff(self) -> RAGSourceCutoff: ...
+
+    async def discover_jobs(
+        self,
+        generation_id: NonEmptyString,
+        *,
+        through: RAGSourceCutoff | None,
+        limit: int,
+        discovered_at: UtcDatetime,
+    ) -> tuple[RAGIndexJob, ...]: ...
+
     async def enqueue(self, job: RAGIndexJob) -> RAGIndexJob: ...
 
     async def claim(

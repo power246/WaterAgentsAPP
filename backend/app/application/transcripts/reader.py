@@ -40,6 +40,7 @@ from app.application.transcripts.read_models import (
     ReadIssue,
     ReadSource,
     ReadView,
+    RegisteredRunRead,
     ReferencedTranscriptContent,
     RunDetailResponse,
     RunHistoryItem,
@@ -350,6 +351,20 @@ class TranscriptReader:
         if item.body is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
         return item
+
+    async def read_registered_run(
+        self,
+        run_id: UUID,
+        view: ReadView,
+    ) -> RegisteredRunRead:
+        """Decode a persisted run once for bounded internal source hydration."""
+
+        selected = await self._select(run_id, view)
+        return RegisteredRunRead(
+            run=selected.stored.run,
+            sessions=selected.stored.sessions,
+            items=self._visible_items(self._parse_items(selected.stored), view),
+        )
 
     async def read_registered_session_items(
         self,

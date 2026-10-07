@@ -20,6 +20,7 @@ from app.application.analysis_runs.topology_result_models import (
 from app.application.query_understanding.context_models import ParameterIntentSource
 from app.application.transcripts.models import (
     ParseStatus,
+    ReadTranscriptItem,
     StoredTranscriptContent,
     StoredTranscriptItem,
     TranscriptContentRef,
@@ -182,6 +183,14 @@ class StoredRunRead(DomainModel):
     sessions: tuple[SessionSummary, ...] = ()
     items: tuple[StoredTranscriptItem, ...] = ()
     contents: tuple[StoredTranscriptContent, ...] = ()
+
+
+class RegisteredRunRead(DomainModel):
+    """One persisted run decoded through the production transcript registry."""
+
+    run: StoredRunHeader
+    sessions: tuple[SessionSummary, ...] = ()
+    items: tuple[ReadTranscriptItem, ...] = ()
 
 
 class StoredRunHistoryPage(DomainModel):

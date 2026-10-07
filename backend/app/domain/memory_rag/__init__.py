@@ -34,6 +34,7 @@ from app.domain.memory_rag.rag_index_job_status import RAGIndexJobStatus
 from app.domain.memory_rag.rag_job_counts import RAGJobCounts
 from app.domain.memory_rag.rag_quality_tier import RAGQualityTier
 from app.domain.memory_rag.rag_score_components import RAGScoreComponentsV1
+from app.domain.memory_rag.rag_source_cutoff import RAGSourceCutoff
 
 __all__ = [
     "AuthorizedRAGSearchQuery",
@@ -64,4 +65,5 @@ __all__ = [
     "RAGJobCounts",
     "RAGQualityTier",
     "RAGScoreComponentsV1",
+    "RAGSourceCutoff",
 ]

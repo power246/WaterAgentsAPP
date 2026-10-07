@@ -205,6 +205,7 @@ from app.domain.memory_rag import (
     RAGJobCounts,
     RAGQualityTier,
     RAGScoreComponentsV1,
+    RAGSourceCutoff,
 )
 from app.domain.model_catalog import (
     ModelCapability,
@@ -363,6 +364,7 @@ __all__ = [
     "RAGJobCounts",
     "RAGQualityTier",
     "RAGScoreComponentsV1",
+    "RAGSourceCutoff",
     "RelationSupportPayload",
     "RiverSegment",
     "TimeSeriesKind",
