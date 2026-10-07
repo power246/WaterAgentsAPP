@@ -3,6 +3,8 @@ from typing import Annotated, Self
 from pydantic import Field, field_validator, model_validator
 
 from app.domain.common import CanonicalDecimal, DomainFloat, DomainModel, NonEmptyString
+from app.domain.common import ensure_unique_tuple
+from app.domain.evidence.data_quality import DataQualityFlag
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.inference.outcome_status import OutcomeStatus
 from app.domain.inference.result_source import ResultSource
@@ -22,6 +24,15 @@ class HistoricalResultCellProjection(DomainModel):
     risk_level: RiskLevel
     confidence: Annotated[DomainFloat, Field(ge=0, le=1)]
     source: ResultSource | None
+    quality_flags: tuple[DataQualityFlag, ...] = ()
+
+    @field_validator("quality_flags")
+    @classmethod
+    def validate_quality_flags(
+        cls,
+        value: tuple[DataQualityFlag, ...],
+    ) -> tuple[DataQualityFlag, ...]:
+        return ensure_unique_tuple(value, field_name="historical cell quality flags")
 
     @field_validator("representative_value", mode="before")
     @classmethod

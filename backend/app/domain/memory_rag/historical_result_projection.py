@@ -2,7 +2,7 @@ from typing import Annotated, Self
 
 from pydantic import Field, field_validator, model_validator
 
-from app.domain.common import DomainModel, UtcDatetime, ensure_unique_tuple
+from app.domain.common import DomainFloat, DomainModel, UtcDatetime, ensure_unique_tuple
 from app.domain.inference.assessment_availability import AssessmentAvailability
 from app.domain.inference.mode import InferenceMode
 from app.domain.inference.outcome_status import OutcomeStatus
@@ -16,6 +16,7 @@ class HistoricalResultProjection(DomainModel):
     mode: InferenceMode
     source_completed_at: UtcDatetime
     overall_risk: RiskLevel
+    overall_confidence: Annotated[DomainFloat, Field(ge=0, le=1)]
     availability: AssessmentAvailability
     cells: Annotated[
         tuple[HistoricalResultCellProjection, ...],

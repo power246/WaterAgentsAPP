@@ -1,5 +1,4 @@
 import asyncio
-from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 import json
@@ -706,35 +705,29 @@ class PostgresRAGRepository:
 
     @staticmethod
     def _window_rows(case: RAGCaseProjectionV1) -> list[dict[str, object]]:
-        cells_by_window: dict[str, list] = defaultdict(list)
-        for cell in case.result_projection.cells:
-            cells_by_window[cell.window_id].append(cell)
         rows: list[dict[str, object]] = []
-        for window_id in case.window_ids:
-            cells = cells_by_window[window_id]
-            time_range = cells[0].time_range
-            if any(cell.time_range != time_range for cell in cells[1:]):
-                raise ValueError("cells in one window must share the same time range")
-            duration = (time_range.end - time_range.start).total_seconds()
-            if not duration.is_integer() or duration <= 0:
-                raise ValueError("window duration must be positive whole seconds")
+        for window in case.windows:
+            if len(window.season_buckets) != 1:
+                raise ValueError("persisted case windows require one season bucket")
             rows.append(
                 {
                     "generation_id": _uuid(
                         case.case_ref.generation_id, "generation_id"
                     ),
                     "case_id": _uuid(case.case_ref.case_id, "case_id"),
-                    "window_id": window_id,
-                    "time_range": Range(time_range.start, time_range.end, "[)"),
-                    # M2 has no typed source timezone/resolution yet; leave the
-                    # structural slots empty rather than inventing UTC seasons.
-                    "local_months": [],
-                    "season_bucket": None,
-                    "season_year": None,
-                    "duration_seconds": int(duration),
-                    "resolution": None,
+                    "window_id": window.window_id,
+                    "time_range": Range(
+                        window.time_range.start,
+                        window.time_range.end,
+                        "[)",
+                    ),
+                    "local_months": list(window.local_months),
+                    "season_bucket": window.season_buckets[0].value,
+                    "season_year": window.season_year,
+                    "duration_seconds": window.duration_seconds,
+                    "resolution": window.resolution.value,
                     "parameter_keys": sorted(
-                        {_parameter_key_text(cell.parameter) for cell in cells}
+                        {_parameter_key_text(item) for item in window.parameter_keys}
                     ),
                 }
             )

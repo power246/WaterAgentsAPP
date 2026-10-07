@@ -6,9 +6,15 @@ from pydantic import ValidationError
 from app.application.analysis_runs.models import AgentRole
 from app.domain import (
     AssessmentAvailability,
+    CanonicalCaseQueryV1,
+    CanonicalIntentToken,
+    CanonicalWindowDescriptorV1,
+    CoverageStatus,
     EmbeddingDistanceMetric,
     EmbeddingProfile,
     EmbeddingVector,
+    EvidenceCoverage,
+    EvidenceResultEligibility,
     HistoricalCaseRef,
     HistoricalMatchReason,
     HistoricalResultCellProjection,
@@ -17,12 +23,14 @@ from app.domain import (
     HistoricalSearchStrategy,
     HistoricalSupportingFragmentProjection,
     InferenceMode,
+    MeteorologicalSeason,
     ModelCapability,
     ModelCatalogSnapshot,
     ModelRole,
     OutcomeStatus,
     ParameterKey,
     RAGCaseProjectionV1,
+    RAGCaseWindowV1,
     RAGFragmentProjectionV1,
     RAGIndexGeneration,
     RAGIndexGenerationStatus,
@@ -33,6 +41,7 @@ from app.domain import (
     ResultSource,
     RiskLevel,
     TimeRange,
+    TimeResolution,
     TrendDirection,
 )
 
@@ -87,6 +96,27 @@ def cell() -> HistoricalResultCellProjection:
         risk_level=RiskLevel.MEDIUM,
         confidence=0.72,
         source=ResultSource.PREDICTED,
+    )
+
+
+def canonical_query() -> CanonicalCaseQueryV1:
+    return CanonicalCaseQueryV1(
+        mode=InferenceMode.PREDICTION,
+        requested_parameter_keys=(PARAMETER,),
+        window_descriptors=(
+            CanonicalWindowDescriptorV1(
+                window_kind=InferenceMode.PREDICTION,
+                duration_days="7",
+                local_months=(7,),
+                season_buckets=(MeteorologicalSeason.JJA,),
+                resolution=TimeResolution.TWENTY_FOUR_HOURS,
+            ),
+        ),
+        normalized_intent_tokens=(
+            CanonicalIntentToken.ANALYZE_CURRENT_STATE,
+            CanonicalIntentToken.PREDICT,
+            CanonicalIntentToken.REQUIRES_DISCHARGE_SUPPORT,
+        ),
     )
 
 
@@ -296,6 +326,7 @@ def test_result_projection_and_supporting_fragments_are_bounded_and_typed() -> N
         mode=InferenceMode.PREDICTION,
         source_completed_at=NOW,
         overall_risk=RiskLevel.MEDIUM,
+        overall_confidence=0.8,
         availability=AssessmentAvailability.PARTIAL,
         cells=(cell(),),
     )
@@ -325,6 +356,7 @@ def test_index_projection_contracts_keep_source_schema_and_safe_typed_fields() -
         mode=InferenceMode.PREDICTION,
         source_completed_at=NOW,
         overall_risk=RiskLevel.MEDIUM,
+        overall_confidence=0.8,
         availability=AssessmentAvailability.PARTIAL,
         cells=(cell(),),
     )
@@ -334,11 +366,23 @@ def test_index_projection_contracts_keep_source_schema_and_safe_typed_fields() -
         mode=InferenceMode.PREDICTION,
         parameter_keys=(PARAMETER,),
         window_ids=(cell().window_id,),
+        windows=(
+            RAGCaseWindowV1(
+                window_id=cell().window_id,
+                time_range=WINDOW,
+                window_kind=InferenceMode.PREDICTION,
+                local_months=(7,),
+                season_buckets=(MeteorologicalSeason.JJA,),
+                season_year=2026,
+                duration_seconds=int((WINDOW.end - WINDOW.start).total_seconds()),
+                resolution=TimeResolution.TWENTY_FOUR_HOURS,
+                parameter_keys=(PARAMETER,),
+            ),
+        ),
         source_completed_at=NOW,
-        canonical_query="schema=1;parameter=usgs:00300",
-        canonical_query_digest="sha256:canonical",
+        canonical_query=canonical_query().canonical_text,
+        canonical_query_digest=canonical_query().canonical_digest,
         result_projection=result,
-        projection_digest="sha256:case-projection",
         embedding=EmbeddingVector(values=(0.0,) * 8),
     )
     fragment = RAGFragmentProjectionV1(
@@ -349,9 +393,18 @@ def test_index_projection_contracts_keep_source_schema_and_safe_typed_fields() -
         window_id=cell().window_id,
         valid_time_range=WINDOW,
         quality_tier=RAGQualityTier.VALID,
+        coverage=EvidenceCoverage(
+            status=CoverageStatus.PARTIAL,
+            observed_count=1,
+            expected_count=None,
+            ratio=None,
+            covered_duration_seconds=0,
+            window_duration_seconds=int((WINDOW.end - WINDOW.start).total_seconds()),
+            largest_gap_seconds=None,
+        ),
         applicability="direct_measurement",
+        result_eligibility=EvidenceResultEligibility.OBSERVED_OR_INFERRED,
         provenance_identity="sha256:provenance",
-        projection_digest="sha256:fragment-projection",
     )
 
     assert case.source_content_type == "inference_result"

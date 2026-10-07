@@ -7,15 +7,23 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.domain import (
     AssessmentAvailability,
+    CanonicalCaseQueryV1,
+    CanonicalIntentToken,
+    CanonicalWindowDescriptorV1,
+    CoverageStatus,
     EmbeddingProfile,
     EmbeddingVector,
+    EvidenceCoverage,
+    EvidenceResultEligibility,
     HistoricalCaseRef,
     HistoricalResultCellProjection,
     HistoricalResultProjection,
     InferenceMode,
+    MeteorologicalSeason,
     OutcomeStatus,
     ParameterKey,
     RAGCaseProjectionV1,
+    RAGCaseWindowV1,
     RAGFragmentProjectionV1,
     RAGIndexJob,
     RAGIndexJobStatus,
@@ -23,6 +31,7 @@ from app.domain import (
     ResultSource,
     RiskLevel,
     TimeRange,
+    TimeResolution,
     TrendDirection,
 )
 from app.infrastructure.persistence.schema import (
@@ -195,8 +204,27 @@ def ready_projection(
         mode=InferenceMode.PREDICTION,
         source_completed_at=source.completed_at,
         overall_risk=RiskLevel.MEDIUM,
+        overall_confidence=0.8,
         availability=AssessmentAvailability.PARTIAL,
         cells=(cell,),
+    )
+    canonical = CanonicalCaseQueryV1(
+        mode=InferenceMode.PREDICTION,
+        requested_parameter_keys=(parameter,),
+        window_descriptors=(
+            CanonicalWindowDescriptorV1(
+                window_kind=InferenceMode.PREDICTION,
+                duration_days="7",
+                local_months=(7,),
+                season_buckets=(MeteorologicalSeason.JJA,),
+                resolution=TimeResolution.TWENTY_FOUR_HOURS,
+            ),
+        ),
+        normalized_intent_tokens=(
+            CanonicalIntentToken.ANALYZE_CURRENT_STATE,
+            CanonicalIntentToken.PREDICT,
+            CanonicalIntentToken.REQUIRES_DISCHARGE_SUPPORT,
+        ),
     )
     case = RAGCaseProjectionV1(
         case_ref=case_ref,
@@ -204,11 +232,23 @@ def ready_projection(
         mode=InferenceMode.PREDICTION,
         parameter_keys=(parameter,),
         window_ids=(cell.window_id,),
+        windows=(
+            RAGCaseWindowV1(
+                window_id=cell.window_id,
+                time_range=time_range,
+                window_kind=InferenceMode.PREDICTION,
+                local_months=(7,),
+                season_buckets=(MeteorologicalSeason.JJA,),
+                season_year=2026,
+                duration_seconds=int((time_range.end - time_range.start).total_seconds()),
+                resolution=TimeResolution.TWENTY_FOUR_HOURS,
+                parameter_keys=(parameter,),
+            ),
+        ),
         source_completed_at=source.completed_at,
-        canonical_query="schema=1;parameter=usgs:00300",
-        canonical_query_digest="sha256:canonical-query",
+        canonical_query=canonical.canonical_text,
+        canonical_query_digest=canonical.canonical_digest,
         result_projection=result,
-        projection_digest="sha256:case-projection",
         embedding=EmbeddingVector(values=tuple(0.1 for _ in range(profile.output_dimensions))),
     )
     fragment = RAGFragmentProjectionV1(
@@ -219,8 +259,17 @@ def ready_projection(
         window_id=cell.window_id,
         valid_time_range=time_range,
         quality_tier=RAGQualityTier.VALID,
+        coverage=EvidenceCoverage(
+            status=CoverageStatus.PARTIAL,
+            observed_count=1,
+            expected_count=None,
+            ratio=None,
+            covered_duration_seconds=0,
+            window_duration_seconds=int((time_range.end - time_range.start).total_seconds()),
+            largest_gap_seconds=None,
+        ),
         applicability="direct_measurement",
+        result_eligibility=EvidenceResultEligibility.OBSERVED_OR_INFERRED,
         provenance_identity="sha256:provenance",
-        projection_digest="sha256:fragment-projection",
     )
     return case, (fragment,)

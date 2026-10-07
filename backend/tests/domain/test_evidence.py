@@ -156,6 +156,7 @@ def historical_result_projection() -> HistoricalResultProjection:
         mode=InferenceMode.PREDICTION,
         source_completed_at=NOW,
         overall_risk=RiskLevel.MEDIUM,
+        overall_confidence=0.8,
         availability=AssessmentAvailability.COMPLETE,
         cells=(historical_cell(),),
     )

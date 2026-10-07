@@ -92,8 +92,28 @@ def test_case_windows_fragments_and_job_completion_are_atomic_and_idempotent() -
                         rag_index_jobs.c.job_id == UUID(job.job_id)
                     )
                 )
+                window = (
+                    await connection.execute(
+                        select(
+                            rag_case_windows.c.local_months,
+                            rag_case_windows.c.season_bucket,
+                            rag_case_windows.c.season_year,
+                            rag_case_windows.c.duration_seconds,
+                            rag_case_windows.c.resolution,
+                            rag_case_windows.c.parameter_keys,
+                        )
+                    )
+                ).one()
             assert counts == (1, 1, 1)
             assert status == RAGIndexJobStatus.COMPLETED.value
+            assert window == (
+                [7],
+                "JJA",
+                2026,
+                604_800,
+                "24h",
+                ['{"code":"00300","code_system":"usgs"}'],
+            )
         finally:
             await engine.dispose()
 
