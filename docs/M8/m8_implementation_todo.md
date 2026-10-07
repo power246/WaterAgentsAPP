@@ -158,31 +158,31 @@
 
 ### 工作
 
-- [ ] 通过项目依赖管理添加并锁定与当前 SQLAlchemy/PostgreSQL 栈兼容的 pgvector Python 依赖；记录实际解析版本，不在文档或代码中假装验证未安装版本。
-- [ ] 将本地 Compose 的 PostgreSQL 服务改为受控、固定 tag 的 pgvector-enabled image，并保持现有数据库名、healthcheck、volume 和快速指南语义；先用 `docker compose config` 验证，不触碰业务库。
-- [ ] 新增单个可审查 Alembic revision：启用/检查 vector extension，并创建 `rag_index_generations`、`rag_index_jobs`、`rag_case_projections`、`rag_case_windows`、`rag_fragment_projections`、`rag_consumption_links`。
-- [ ] 为 source run/session/item、generation/profile、projection identity、job state/lease/attempt、parameter/window、consumer run/session/item 建立必要 PK/FK/unique/check/index；数据库层拒绝跨 generation 混写、重复 source projection、无 source 的 fragment 和悬空 consumption link。
-- [ ] 为 canonical/structured/FTS 建立明确列与 GIN/B-tree 索引；vector 列按设计使用 unconstrained `vector`，以容纳不同 dimensions 的 inactive/building generations，并由每代 profile 在写入/查询时严格验证维度。首版不得创建 HNSW/IVFFlat 或 provider-specific payload 列。
-- [ ] 实现最小 repository primitives：generation/job CRUD 与 claim、case/window/fragment 原子写入、active generation read/switch、consumption link append/read/delete-boundary query；此阶段不实现 policy ranking。
-- [ ] repository 所有写入接受已验证 typed projections，不负责解析 transcript、调用 embedding 或发明 eligibility；所有读写遵守 transaction 和 deterministic ordering。
-- [ ] 更新 database schema contract、migration head/check、测试清理顺序和 Docker PostgreSQL 指南；测试数据库必须通过 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 或等价进程级覆盖与业务库隔离。
+- [x] 通过项目依赖管理添加并锁定与当前 SQLAlchemy/PostgreSQL 栈兼容的 pgvector Python 依赖；记录实际解析版本，不在文档或代码中假装验证未安装版本。
+- [x] 将本地 Compose 的 PostgreSQL 服务改为受控、固定 tag 的 pgvector-enabled image，并保持现有数据库名、healthcheck、volume 和快速指南语义；先用 `docker compose config` 验证，不触碰业务库。
+- [x] 新增单个可审查 Alembic revision：启用/检查 vector extension，并创建 `rag_index_generations`、`rag_index_jobs`、`rag_case_projections`、`rag_case_windows`、`rag_fragment_projections`、`rag_consumption_links`。
+- [x] 为 source run/session/item、generation/profile、projection identity、job state/lease/attempt、parameter/window、consumer run/session/item 建立必要 PK/FK/unique/check/index；数据库层拒绝跨 generation 混写、重复 source projection、无 source 的 fragment 和悬空 consumption link。
+- [x] 为 canonical/structured/FTS 建立明确列与 GIN/B-tree 索引；vector 列按设计使用 unconstrained `vector`，以容纳不同 dimensions 的 inactive/building generations，并由每代 profile 在写入/查询时严格验证维度。首版不得创建 HNSW/IVFFlat 或 provider-specific payload 列。
+- [x] 实现最小 repository primitives：generation/job CRUD 与 claim、case/window/fragment 原子写入、active generation read/switch、consumption link append/read/delete-boundary query；此阶段不实现 policy ranking。
+- [x] repository 所有写入接受已验证 typed projections，不负责解析 transcript、调用 embedding 或发明 eligibility；所有读写遵守 transaction 和 deterministic ordering。
+- [x] 更新 database schema contract、migration head/check、测试清理顺序和 Docker PostgreSQL 指南；测试数据库必须通过 `WATERAGENTS_TEST_DB_NAME=wateragents_test` 或等价进程级覆盖与业务库隔离。
 
 ### Tests
 
-- [ ] fresh database `upgrade head`、现有四表数据库 upgrade、schema check 和受支持 downgrade/upgrade round-trip 均通过；vector extension 缺失/权限不足时错误清晰且 fail closed。
-- [ ] 六类表的 PK/FK/unique/check/index、unconstrained vector 列与 per-generation dimension validation、source ownership、generation isolation 和 cascade/restrict 行为由数据库集成测试直接断言。
-- [ ] job claim 在两个 repository/transaction 竞争时 exact once；lease/attempt/status 更新不丢失，稳定顺序不依赖物理 row 顺序。
-- [ ] case + windows + fragments 写入是原子的；中途失败后不存在 ready 半成品，重复同 source/generation 写入幂等。
-- [ ] active generation switch 是单事务；任一时刻最多一个 active，building/failed generation 不会被普通 read 返回。
+- [x] fresh database `upgrade head`、现有四表数据库 upgrade、schema check 和受支持 downgrade/upgrade round-trip 均通过；vector extension 缺失/权限不足时错误清晰且 fail closed。
+- [x] 六类表的 PK/FK/unique/check/index、unconstrained vector 列与 per-generation dimension validation、source ownership、generation isolation 和 cascade/restrict 行为由数据库集成测试直接断言。
+- [x] job claim 在两个 repository/transaction 竞争时 exact once；lease/attempt/status 更新不丢失，稳定顺序不依赖物理 row 顺序。
+- [x] case + windows + fragments 写入是原子的；中途失败后不存在 ready 半成品，重复同 source/generation 写入幂等。
+- [x] active generation switch 是单事务；任一时刻最多一个 active，building/failed generation 不会被普通 read 返回。
 
 ### Verify
 
-- [ ] `docker compose config`
-- [ ] 使用专用测试数据库运行 `backend/.venv/Scripts/wateragents-db.exe upgrade` 与 `backend/.venv/Scripts/wateragents-db.exe check`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_schema_contract.py backend/tests/persistence/test_database_config.py backend/tests/persistence -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `docker compose config`
+- [x] 使用专用测试数据库运行 `backend/.venv/Scripts/wateragents-db.exe upgrade` 与 `backend/.venv/Scripts/wateragents-db.exe check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_schema_contract.py backend/tests/persistence/test_database_config.py backend/tests/persistence -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：现有数据库可安全升级，六类 RAG 数据的结构、约束和 repository round-trip 可复现，active generation 能原子表达；尚无 transcript projection、embedding、worker 或 search policy。
 
@@ -190,7 +190,9 @@
 
 #### Milestone 2 完成记录
 
-- [ ] 完成后填写：dependency/image/revision、fresh/upgrade DB 证据、约束与竞争测试、改动路径、commit SHA、剩余风险。
+- [x] 已锁定 Python `pgvector 0.5.0`、Compose `pgvector/pgvector:0.8.6-pg17-trixie` 与 Alembic `20261007_01`；实现集中于 `pyproject.toml`/`uv.lock`、`compose.yaml`、persistence schema/database/migration/repository、数据库测试及 Docker 指南，提交 `53ecec44403be4f3e634290363af67993e71b97a`。
+- [x] fresh DB、现有四表 downgrade/upgrade round-trip、CLI upgrade/check、extension 缺失/版本/权限错误映射、六表约束、维度、cascade/restrict、双事务 exact-once claim、原子/幂等写入和 active switch 均已覆盖；验证为 M2 focused `42 passed`、指定 persistence `75 passed`、architecture `150 passed`、完整 suite `2077 passed, 1 warning`，Compose/lock/compile/diff 检查通过。业务库保持 `20261003_01` 且未安装 vector，专用测试库为 `20261007_01` / vector `0.8.6`。
+- [x] 剩余边界：外部非 Docker PostgreSQL 的 migration-role extension 权限与三平台 CI 尚未实测；本阶段不伪造 source timezone/season/resolution，相关填充及 transcript projection、embedding、worker、search policy、provider adapter、M5 wiring 仍由后续 Milestone 完成。
 
 ## Milestone 3：final eligibility、canonical query 与 source projection
 
