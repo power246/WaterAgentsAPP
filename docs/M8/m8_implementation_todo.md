@@ -362,35 +362,35 @@
 
 ### 工作
 
-- [ ] 以现有 M5 `TranscriptEvidencePort`/producer slot 实现唯一 production `search_transcript_evidence` producer；不得创建第二个 executor、另一个 tool loop 或 route/direct caller。
-- [ ] 在 M5 scope preparation 中从 sealed `EvidenceSessionScope` 填写 operation/run/session/memory mode/current COMID/authorized COMIDs/time/season/topology/profile，只接受 Agent 的 strategy、scope 内 parameters/windows、1–5 limit。
-- [ ] `stateless` roster 完全不含 historical tool；`memory_augmented` 且 producer 正常装配时才可见。Agent 可以 0 次、1 次或 2 次调用；server-side budget 最多 2 次且不因 repair/model retry 重置。
-- [ ] 非法 strategy/options/parameters/windows/limit 继续复用 M5 preflight：严格 `0 search / 0 embedding / 0 hydrate / 0 source record`，只保留既有安全 rejection audit。
-- [ ] 将 search completed/empty、unavailable/index-building/embedding、invalid/index/source/protocol 和 cancel 映射进既有 M5 typed collection/result；不得把 unavailable/invalid 伪装 empty、required evidence failure 或普通异常泄漏。
-- [ ] 将每个 hit materialize 为 `HistoricalTranscriptRecord`/`historical_inference` contextual source，保留完整 source identity/schema/original confidence/quality/time/score components/matched_by；普通 `transcript_item_refs` 不跨 run。
-- [ ] 通过既有 M5 source → fragment → tool result → bundle 写入闭环，并在 source-record item 持久化的同一事务确认 `rag_consumption_links`；link 失败不能留下无 ownership registry 的正文。
-- [ ] 保持每个 historical fragment `rag_eligible=false`，避免“历史命中再次成为新事实源”导致递归索引；原 source result/fragment 仍通过稳定 historical refs 读取。
-- [ ] 在 M6 gates/result assembly 加回归保护：历史永远不能满足 target parameter、discharge 或 current observation；不能提高原 confidence/quality/applicability，不能覆盖当前 valid direct observation。
-- [ ] 保持 M7 scheduler/upstream result/run summarizer 不变：当前 run 内 direct-upstream 仍按 M7 规则使用，跨 run historical 只存在于 waterbody session optional context，summarizer/zero-model 不获得 tool。
+- [x] 以现有 M5 `TranscriptEvidencePort`/producer slot 实现唯一 production `search_transcript_evidence` producer；不得创建第二个 executor、另一个 tool loop 或 route/direct caller。
+- [x] 在 M5 scope preparation 中从 sealed `EvidenceSessionScope` 填写 operation/run/session/memory mode/current COMID/authorized COMIDs/time/season/topology/profile，只接受 Agent 的 strategy、scope 内 parameters/windows、1–5 limit。
+- [x] `stateless` roster 完全不含 historical tool；`memory_augmented` 且 producer 正常装配时才可见。Agent 可以 0 次、1 次或 2 次调用；server-side budget 最多 2 次且不因 repair/model retry 重置。
+- [x] 非法 strategy/options/parameters/windows/limit 继续复用 M5 preflight：严格 `0 search / 0 embedding / 0 hydrate / 0 source record`，只保留既有安全 rejection audit。
+- [x] 将 search completed/empty、unavailable/index-building/embedding、invalid/index/source/protocol 和 cancel 映射进既有 M5 typed collection/result；不得把 unavailable/invalid 伪装 empty、required evidence failure 或普通异常泄漏。
+- [x] 将每个 hit materialize 为 `HistoricalTranscriptRecord`/`historical_inference` contextual source，保留完整 source identity/schema/original confidence/quality/time/score components/matched_by；普通 `transcript_item_refs` 不跨 run。
+- [x] 通过既有 M5 source → fragment → tool result → bundle 写入闭环，并在 source-record item 持久化的同一事务确认 `rag_consumption_links`；link 失败不能留下无 ownership registry 的正文。
+- [x] 保持每个 historical fragment `rag_eligible=false`，避免“历史命中再次成为新事实源”导致递归索引；原 source result/fragment 仍通过稳定 historical refs 读取。
+- [x] 在 M6 gates/result assembly 加回归保护：历史永远不能满足 target parameter、discharge 或 current observation；不能提高原 confidence/quality/applicability，不能覆盖当前 valid direct observation。
+- [x] 保持 M7 scheduler/upstream result/run summarizer 不变：当前 run 内 direct-upstream 仍按 M7 规则使用，跨 run historical 只存在于 waterbody session optional context，summarizer/zero-model 不获得 tool。
 
 ### Tests
 
-- [ ] roster tests 覆盖 stateless、memory_augmented+ready、memory_augmented+building/unavailable；parser、summarizer、zero-model、HTTP handler 均不能直接调用 producer。
-- [ ] tool budget tests 覆盖 0/1/2/第 3 次调用、repair/retry、两个 waterbody sessions 的独立预算和 run cancel；descriptor 与 server enforcement 一致。
-- [ ] preflight table 覆盖 source identity/COMID/date/radius/hops/profile/raw query 注入、scope 外/空/重复 parameter/window、非法 limit/options，并断言 0 search/embedding/hydrate/source。
-- [ ] empty/unavailable/invalid/cancel round-trip 保留 typed 差异和安全错误码；当前已有 supported cells 不因 optional historical failure 变成 failed。
-- [ ] provenance tests 证明 historical source 保留原 run/session/item/COMID/confidence/schema/score，当前普通 refs 不跨 run，用户仍可按原 history path 找到 source。
-- [ ] priority/gate fixture 同时给出当前 direct observation、上游/current indirect 和冲突历史，证明当前事实优先且历史不解锁 gate、不重算 confidence。
-- [ ] persistence failure/transaction test 证明 source record 与 consumption link 同生共灭；materialized historical fragment 不会被下一轮 discovery 索引。
+- [x] roster tests 覆盖 stateless、memory_augmented+ready、memory_augmented+building/unavailable；parser、summarizer、zero-model、HTTP handler 均不能直接调用 producer。
+- [x] tool budget tests 覆盖 0/1/2/第 3 次调用、repair/retry、两个 waterbody sessions 的独立预算和 run cancel；descriptor 与 server enforcement 一致。
+- [x] preflight table 覆盖 source identity/COMID/date/radius/hops/profile/raw query 注入、scope 外/空/重复 parameter/window、非法 limit/options，并断言 0 search/embedding/hydrate/source。
+- [x] empty/unavailable/invalid/cancel round-trip 保留 typed 差异和安全错误码；当前已有 supported cells 不因 optional historical failure 变成 failed。
+- [x] provenance tests 证明 historical source 保留原 run/session/item/COMID/confidence/schema/score，当前普通 refs 不跨 run，用户仍可按原 history path 找到 source。
+- [x] priority/gate fixture 同时给出当前 direct observation、上游/current indirect 和冲突历史，证明当前事实优先且历史不解锁 gate、不重算 confidence。
+- [x] persistence failure/transaction test 证明 source record 与 consumption link 同生共灭；materialized historical fragment 不会被下一轮 discovery 索引。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools backend/tests/application/reasoning -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_producer.py backend/tests/application/transcript_memory/test_priority.py -q`
-- [ ] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_consumption_links.py backend/tests/application/transcripts -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m5_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m7_runtime.py backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_tools backend/tests/application/reasoning -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_producer.py backend/tests/application/transcript_memory/test_priority.py -q`
+- [x] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_consumption_links.py backend/tests/application/transcripts -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m5_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m7_runtime.py backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：`memory_augmented` waterbody Agent 可通过唯一 M5 tool 显式、有限地读取历史；typed provenance/审计/consumption ownership 完整，stateless 与 M6/M7 authority 未变化，optional failure 不污染当前结论。
 
@@ -398,7 +398,7 @@
 
 #### Milestone 7 完成记录
 
-- [ ] 完成后填写：roster/budget/0-0-0/provenance/priority/link 证据、改动路径、commit SHA、剩余风险。
+- [x] 2026-10-08 在 `codex/m8-m0-foundation` 完成：复用唯一 M5 executor/producer slot，落地 sealed-scope producer、每 session 最多 2 次的 server budget、typed optional failure、historical contextual provenance/current-evidence priority，以及 source-record 与 `rag_consumption_links` 同事务写入；主要路径为 `application/{evidence_tools,transcript_memory,analysis_runs}`、`infrastructure/{runtime,persistence}`，实现提交 `d55c2e73eccf3c29c76ee68c413ca57dd4e73d60`。验证为 focused `238 passed`、producer/priority `11 passed`、专用 PostgreSQL `5 passed`、runtime/architecture `198 passed`、完整 backend `2233 passed, 1 warning`，compileall/diff check 通过；真实 embedding provider、生产容量及 Linux/macOS 为 `not run`，production lifespan/worker wiring 严格留给 M8，M9 与 M1–M9 最终验收尚未开始。
 
 ## Milestone 8：production composition、生命周期与可观测性
 
