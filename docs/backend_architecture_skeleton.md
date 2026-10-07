@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-03
+更新日期：2026-10-07
 
 本文档是当前后端架构骨架的最终版，也是给后续设计/实现 agent 阅读的架构引入文档。它只回答最高层问题：WaterAgents 后端要解决什么问题、第一版需要哪些大功能、系统分成哪些层、层与层之间如何协作。
 
@@ -201,8 +201,9 @@ run 通知采用 D71 完整轻量状态快照，包含 run、实际会话简要�
 
 7. Memory / RAG
    - transcript 是历史事实源。
-   - RAG 从 transcript 中可检索的 item 建索引。
-   - 历史记忆可以作为 evidence，但不能覆盖当前真实检测站数据。
+   - RAG 只从 completed、persistence-confirmed 的合格 `inference_result` 与直接关联的 eligible `evidence_fragment` 建可重建索引。
+   - semantic search 比较当前与历史的 canonical query-understanding projection，命中后按原 run/session/result 精确引用回读事实。
+   - 历史记忆是 optional/contextual evidence，不能满足 target/discharge gate，也不能覆盖当前真实检测站数据。
 
 8. Settings / Keys / Admin
    - 管理 provider、model、API key、运行参数默认值。
@@ -258,7 +259,7 @@ M5 不跨 observation series 自动判定“明显冲突”或选择赢家。Age
 
 每次分析的过程要保存为 transcript。Transcript 中记录请求、上下文、tools 结果、agent/subagent 会话、证据、结果和错误状态。
 
-跨会话 memory/RAG 不另建一套神秘记忆系统，而是从 transcript 中可检索的 item 生成索引视图。
+跨会话 memory/RAG 不另建一套神秘记忆系统，而是从 transcript 中合格 result/fragment 生成索引视图。向量只负责定位相似 case，原 transcript result 始终是历史事实权威；index 可删除重建，不能反向成为新的科学事实源。
 
 ### 3.7 第一版优先跑通主流程
 
@@ -848,29 +849,35 @@ memory_mode:
   memory_augmented
 ```
 
-`stateless` 表示不使用过去 session 的 cross-session memory，但仍允许当前 session 内上游 agent 结果传给下游。
+`stateless` 表示不使用其他 run 的 cross-session memory，但仍允许当前 run 内 M7 直接上游 agent 结果传给下游。
 
-`memory_augmented` 表示允许从历史 transcript/RAG 中检索相关历史结果，作为 historical evidence 进入当前推理。
+`memory_augmented` 表示 waterbody Agent 可在既有 bounded tool loop 中显式调用 `search_transcript_evidence`，从历史 transcript/RAG 检索相关 case，作为 historical evidence 进入当前推理。它不自动预检索、不隐藏注入 prompt，也不保证每个 session 都调用或命中。parser、run summarizer、zero-model 路径与 direct HTTP 不触发历史检索。
 
 ### 10.4 Historical evidence
 
-历史结果可以被 RAG 检索并引用，但必须标记为 historical inference：
+历史结果可以被 RAG 检索并引用，但必须标记为 `historical_inference/contextual_only`：
 
 ```text
 source_type: historical_inference
-session_id
+original_run_id
+original_session_id
+analysis_context_item_id
+result_item_id
+target_comid
 original_confidence
 rag_score
 matched_by
 ```
 
-低置信度历史结果可以使用，但权重应降低，并在证据链里暴露其原始置信度。
+`rag_score` 只表示当前 query 与历史 case 的检索相关性，不是科学置信度、quality 或风险。低置信度/可疑历史可以在 hard filters 合格时使用，但必须保留原值、降低同等相关候选的排序资格，并在证据链中明确暴露。
 
-RAG 检索出来的历史 item 必须写入当前 transcript，否则未来无法审计这次判断引用了哪些历史记忆。
+命中后必须按上述五元身份重新验证并读取原 `inference_result`，只投影本次授权 ParameterKey/window、必要 overall risk/availability/confidence/time 与最多两个直接关联 eligible fragments。不得把整个历史 run、其他 waterbody session、无关参数或完整 evidence chain 装入 prompt。
+
+RAG 实际调用、filters、strategy、score components、命中/未命中、采用的 historical records/fragments 与安全失败必须写入当前 session transcript，否则未来无法审计这次判断引用了哪些历史记忆。跨 run source ref 使用专门 historical structure；普通 transcript item refs 仍限于同一 run。
 
 ### 10.5 RAG 检索策略
 
-Agent 可以主动选择 RAG 检索时的侧重点，但数据库层不应支持任意自由查询。第一版可以提供有限的固定检索策略，例如：
+Agent 可以主动选择 RAG 检索时的侧重点，但数据库层不支持任意自由查询。第一版固定为：
 
 ```text
 by COMID + parameter + time window
@@ -880,7 +887,19 @@ by semantic query
 by topology neighborhood + parameter
 ```
 
-这些策略后续可以对应数据库索引或联合索引。
+每次调用只选一个 strategy，只提交当前 scope 内 ParameterKeys、window IDs 和 1–5 limit。COMID、绝对时间、season、25 km nearby set、topology neighborhood 与 active embedding profile 全由后端从保存后的 `AnalysisContext`、当前 session 和 `HydrologyGraph` 推导/验证。非法请求在 M5 preflight 保持 `0 search / 0 hydrate / 0 source record`。
+
+全部策略先做 ownership、completed/persistence/schema、COMID/topology、ParameterKey、time/season hard filters，再排名；不得先全库向量 top-K 再让 Agent 判断 scope。semantic strategy 使用同版本 canonical query-to-query embedding；`run_id` 不能单独定位答案，因为一个 M7 run 可有多个 waterbody results。
+
+### 10.6 Index lifecycle 与 PostgreSQL
+
+M8 在同一 PostgreSQL database 中使用结构化索引、full-text/GIN 与 pgvector，不引入独立 vector database。一个全局 active embedding profile 对应一个 active index generation；profile identity覆盖 provider/model/dimensions/distance/semantic threshold/projection/template version，不同 generation 的 vectors 不比较或混写。首版 exact vector scan，不使用 HNSW/IVFFlat；以后启用近似索引必须有独立容量、recall 和排序验收。
+
+索引通过持久化 jobs 最终一致构建：原 run/session/transcript 先按 M3–M7 完成，worker再做 eligibility、canonical projection、supplier embedding与原子 ready upsert。job失败不改写原 run终态；search只读 active generation的完整 ready rows，不扫描 raw transcript兜底。profile变化先完整构建新 generation，再原子切换；原 transcript不随 generation删除。
+
+首版只实现远程 supplier `EmbeddingPort` adapter；tests使用 deterministic fake。发送内容只能是版本化、脱敏、有界的 canonical query projection，不能包含完整 transcript、raw query/prompt、provider envelope、secret或无界 payload。
+
+详细契约见 [M8 总体设计](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md) 与 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md)。TODO 当前全部未完成，不能作为 M8 已有运行能力的证据。
 
 ## 11. Ports
 
@@ -901,8 +920,10 @@ WeatherForecastPort
 FacilitySearchPort
 QueryParserModelPort
 WaterbodyModelPort
+EmbeddingPort
 TranscriptStorePort
 RAGIndexPort
+RAGJobStorePort
 KeyStorePort
 CachePort
 ClockPort
@@ -924,14 +945,15 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 - Google geocoding adapter：地名转坐标。
 - Query parser provider adapter：一次性结构化生成，禁止 tools。
 - Waterbody model provider adapter：支持可见文字增量、tool call/result 与结构化响应的流式端口；provider 差异不能泄漏进 Domain/Application。
+- Embedding supplier adapter：只接收 canonical case-query batch，严格验证 profile、数量、顺序、维度与有限数值。
 - Transcript database repository。
-- RAG index repository。
+- PostgreSQL RAG repository：generation/job/case/window/fragment/consumption-link 与 exact pgvector/full-text search。
 - Key store repository。
 - Cache repository。
 - HTTP client adapter。
 - Config/lifecycle adapter。
 
-第一版数据库格式还需要单独设计。本文只要求数据库能支撑 transcript、history detail、RAG index 和增长型数据清理。
+M3 四张事实表保持 transcript/history 权威；M8 在同库增加 generation、job、case/window/fragment projection 与 consumption-link 派生表，具体列/约束见 M8 实施设计。M9 增加增长型数据清理时必须按 cross-run consumption ownership 处理 retained references，不能只删 source 留下悬空 transcript，也不能删除 API keys。
 
 ## 13. 第一版端到端流程
 

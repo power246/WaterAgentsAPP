@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-10-03
+更新日期：2026-10-07
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -23,6 +23,13 @@
 - [M6 Implementation TODO](M6/m6_implementation_todo.md)
 - [M5 Policy Catalog](M5/m5_evidence_policy_catalog.md)
 - [M5 API / 读取契约](M5/m5_evidence_tools_api.md)
+- [M7 设计决策](M7/m7_topology_driven_multi_agent_design.md)
+- [M7 实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)
+- [M8 设计决策](M8/m8_memory_rag_design.md)
+- [M8 实施设计](M8/m8_memory_rag_implementation_design.md)
+- [M8 RAG Policy Catalog](M8/m8_rag_policy_catalog.md)
+- [M8 API / 读取契约](M8/m8_memory_rag_api.md)
+- [M8 Implementation TODO](M8/m8_implementation_todo.md)
 
 ## 1. 使用方式与权威性
 
@@ -409,6 +416,17 @@ Contract changes:
 - **M8-C03 — 固定检索策略**：至少支持 COMID + parameter + time window、nearby COMID + parameter、parameter + season、semantic query 和 topology neighborhood + parameter。
 - **M8-C04 — Historical provenance**：按 D58，historical inference 进入当前 transcript/evidence 时使用明确的历史来源结构，保留原 run/item、适用 session、原 confidence、content schema version、RAG score 和 matched_by。原内容可按 D57 的 run_id + item_id 读取；普通 transcript_item_refs 不跨 run，不复制同义原过程以规避校验，具体历史来源 DTO 在本阶段定型。
 - **M8-C05 — 当前观测优先**：历史 inference 不得覆盖当前有效观测；低置信度历史结果可以使用，但必须保留原置信度并降权。检索命中保持 `historical_inference/contextual_only`，不能满足本次 target/discharge gate，也不能因 RAG score 提升 applicability、quality 或原 confidence。
+- **M8-C06 — Source allowlist 与事实权威**：首版长期 memory facts 仅允许 validated `inference_result v1` 与其直接引用、仍通过 final eligibility 的 `evidence_fragment v1`。message、reasoning、prompt、raw model output、query-understood item本身、run/topology summary、tool call/result、raw source records、inspection、bundle、error与未知content type不索引。index/projection/embedding是可重建检索视图，原 transcript item始终是事实权威。
+- **M8-C07 — Query-to-query retrieval**：semantic strategy必须从历史 validated `AnalysisContext` 派生版本化 canonical case query，以当前同版本 query-understanding projection比较相似性；首版不使用answer/result-body vector作主/次召回。hit至少定位原 `run_id/session_id/target_comid/analysis_context_item_id/result_item_id`，不能只凭run ID在M7多水体run中选择答案。
+- **M8-C08 — Server-owned scope**：Agent每次只可选择一个fixed strategy和当前scope内ParameterKeys/window IDs/1–5 limit。COMID、绝对时间、season、25 km nearby set、topology neighborhood、profile与canonical query全部由后端从保存后的context/session/graph推导和验证；非法输入在M5 preflight保持 `0 search / 0 hydrate / 0 source record`。所有检索先hard-filter授权/生命周期/科学scope，再执行全文/向量ranking。
+- **M8-C09 — PostgreSQL 与 active generation**：同一PostgreSQL database承载结构化、full-text/GIN与pgvector；不增加独立vector DB。全系统只有一个active embedding profile/generation，identity覆盖provider/model/dimensions/distance/无默认值的semantic threshold/projection/template version。不同generation vectors不混写/比较；首版使用exact vector scan，近似索引必须另有容量、recall与排序验收。
+- **M8-C10 — Embedding port 与隐私**：application只依赖`EmbeddingPort`；首版实现远程supplier adapter、tests使用deterministic fake，不同时交付本地推理runtime。只发送脱敏、有界canonical case-query text；完整transcript/raw query/prompt/model response/secret不发送。数量、顺序、profile、维度与有限数值必须严格验证，不自动换supplier/model。
+- **M8-C11 — Durable eventual indexing**：run/session/transcript先完成并确认持久化，再由幂等持久化job建立projection；run终态不等待或因indexing失败改写。worker有界claim/batch/deadline/lease/attempt/backoff并可重启恢复；projection ready与job completed原子提交。search只读active generation完整ready rows，不扫描raw transcript、读取半成品或用另一profile兜底。
+- **M8-C12 — Agent-driven producer**：历史检索只通过M5 `search_transcript_evidence` producer slot由`memory_augmented` waterbody Agent显式调用；不得在run/session启动、parser、summarizer、zero-model、HTTP、startup prompt enrichment或其他旁路自动注入。每session最多2次，每次一种strategy；Agent不调用仍是合法执行。
+- **M8-C13 — Optional failure semantics**：合法查询无命中为completed/empty；index building/unavailable、embedding timeout/rate limit、profile/dimension/schema或source validation错误必须分别为unavailable/invalid，不能伪装empty或使用旧缓存。historical failure不使已有current supported cells失败、不解锁gate、不增加raw scan/fallback model/无限重试。
+- **M8-C14 — Bounded hydration**：hit必须回读并重新验证原result/fragment，只向Agent返回当前授权ParameterKey/window cells、必要overall risk/availability、原confidence/quality/time/schema/refs和每case最多2个直接关联fragments；不得装载完整历史run、其他waterbody sessions、无关参数或完整evidence chain。每call最多5 cases、同source run最多2，最终preview沿用16 KiB上限与稳定完整-record裁剪。
+- **M8-C15 — 既有API/SSE与闭环审计**：M8不新增direct search/job/generation/reindex/embedding production route或第三条SSE。实际strategy/filters/score components/hits/adopted records/fragments/empty与安全失败沿现有M5 typed transcript、session SSE、history/content routes闭环读取；canonical text、vector、job和supplier raw response不公开。
+- **M8-C16 — 删除、引用与重建**：generation/reindex/index-only cleanup只处理派生视图，不删除原transcript。当前historical record持久化时必须登记source/consumer consumption link；选择性删除被保留run消费的source时必须conflict，或在用户明确授权下级联删除整个dependent consumer run，不能改写immutable transcript、留下悬空ref或静默tombstone。API keys不在该ownership图中。
 
 ### 验收重点
 
@@ -416,17 +434,24 @@ Contract changes:
 - **M8-A02**：检索结果的身份、版本、分数、置信度和 provenance 可审计。
   - 按 D58 验证跨 run 历史证据保留原来源身份与置信度，原内容可通过 run/item 引用读取；不会混入当前普通 transcript_item_refs 或被重标为本次 session 的原过程。stateless 仍可使用当前 run 内上游 session 的结果。
 - **M8-A03**：当前观测与历史记忆冲突时，优先级规则由测试证明。
+- **M8-A04**：五种strategy逐项证明server-owned hard filters、typed request、exact score/stable tie-break、limit/多样性/byte fit；scope外COMID/参数/window/source identity与非法options为0 search/0 hydrate/0 source record。
+- **M8-A05**：使用至少两个历史runs和一个多waterbody run证明canonical query-to-query能够命中正确session/result；hydration只返回授权cells/fragments，answer body不参与首版semantic recall。
+- **M8-A06**：现有四表数据库可迁移到带pgvector的schema；first generation backfill/激活、job lease/restart/idempotent upsert、profile新generation构建/原子切换和并发search单generation读取均有PostgreSQL integration evidence。
+- **M8-A07**：normal empty、first-generation building、index/database unavailable、embedding unavailable/protocol invalid、source invalid与cancel逐项保持typed差异；这些历史失败不改变M6 gate或已支持结果。
+- **M8-A08**：production OpenAPI route集合不增加；stateless roster无历史tool，memory_augmented允许显式调用或不调用；tool/source/fragment/result/bundle经session SSE/history/full-content round-trip一致。
+- **M8-A09**：source与consumer cleanup、retired generation deletion、rebuild均无悬空跨run引用；被消费source的选择性删除会稳定conflict或按显式授权级联whole dependent run，API keys不受影响。
+- **M8-A10**：deterministic fake embedding E2E、focused policy/application、专用PostgreSQL、完整M1–M8 regression与contract audit给出可复现证据；真实supplier、生产容量、Ubuntu/macOS/Windows同提交结果只按实际运行情况登记，不以fake或文档冒充。
 
 ## 11. M9：Settings/Keys/Admin + Demo Closure
 
 ### 必须实现
 
-- **M9-C01 — Settings/keys/admin**：定型 settings、provider/model、key store 和 admin cleanup API，并将 demo 所需 fake adapter 替换为真实 adapter。
+- **M9-C01 — Settings/keys/admin**：定型 settings、provider/model、key store 和 admin cleanup API，并将 demo 所需 fake adapter 替换为真实 adapter。embedding设置表达期望profile；变更时先构建/验证新generation、原子激活，再允许清理旧profile credential，不能在切换前使旧active search失去所需配置。
 - **M9-C02 — 动态时区**：动态修改默认 IANA analysis timezone 只影响新 session，不改变已有 snapshot。
 - **M9-C03 — Secret DTO**：定型 secret 与 masked status DTO，支持 API key 保存、清除和 masked 展示。
 - **M9-C04 — 自定义单位**：确定性 unit tool 解析和校验量纲，Agent 判断参数适用性；默认只生成 session override。
 - **M9-C05 — 全局单位确认**：写入全局目标单位表必须由用户显式确认，并保存版本记录。
-- **M9-C06 — Admin cleanup**：可以清理 session history、transcript、RAG index、derived memory 和 evidence cache，但不得删除 API keys；与 M3 live-state cleanup 使用一致的 ownership/幂等规则。承接 M3 D14：明确删除 session 历史时对应幂等记录的处置，以及之后使用旧 key 的响应，并同步前端文档；不能将内存清理等同于删除历史或释放幂等 key。
+- **M9-C06 — Admin cleanup**：可以清理 session history、transcript、RAG index、derived memory 和 evidence cache，但不得删除 API keys；与 M3 live-state cleanup 使用一致的 ownership/幂等规则。承接 M3 D14：明确删除 session 历史时对应幂等记录的处置，以及之后使用旧 key 的响应，并同步前端文档；不能将内存清理等同于删除历史或释放幂等 key。承接M8-C16：index-only cleanup/reindex不删除source transcript；选择性history cleanup必须先检查cross-run consumption links，对被保留run引用的source稳定返回conflict，或在用户明确确认后级联删除整个dependent consumer run，不能改写retained transcript或留下悬空reference。
 - **M9-C07 — 最终契约校对**：完成最终 OpenAPI、SSE 文档、前端消费代码、端到端 smoke 和启动说明的一致性 sweep。
 - **M9-C08 — 前端重构**：前端以最终契约独立重构，不读取或迁移旧前端组件、字段或事件。承接 D18/D69，由同一 fetch SSE 客户端实现管理 run 通知与 session 过程两类流，读取 HTTP status/body，按 D77 处理 `200` SSE、`stream_end` 与 `410` 等分支，不保留 M3 路径的旧 `204` 兼容分支，按 D73 区分 run 重连最新快照同步与 session 游标补齐过程，session 消费身份、Last-Event-ID 整数编码、400/409 校验及去重按 D78 实现，不要求 run 补播旧状态通知。页面关闭订阅不取消分析，GET 用于加载/断线核对/历史，不持续轮询；业务终态与流结束分别处理，正常关闭按 D70、明确结束通知按 D76，具体控制通知 payload、握手协议及解析库随后定型。
   - 按 D86 用同一客户端消费 message_started/message_delta/message_finalized，按原身份建立、追加和定稿同一消息，不为三阶段维护独立 transcript 模型；具体字段和解析由实现者同步协议后落实。
@@ -454,7 +479,7 @@ Contract changes:
 ### 验收重点
 
 - **M9-A01**：settings/key/admin API 独立测试通过，secret 不出现在公开响应、日志、transcript 或事件中。
-- **M9-A02**：清理增长型数据后 API keys 仍存在，已固化 session 语义不变。删除历史后的旧幂等 key 请求按 M9-C06 定型的规则响应，前端文档、数据库记录处置与实际接口行为一致。
+- **M9-A02**：清理增长型数据后 API keys 仍存在，已固化 session 语义不变。删除历史后的旧幂等 key 请求按 M9-C06 定型的规则响应，前端文档、数据库记录处置与实际接口行为一致。另覆盖index-only cleanup后source history仍可读/rebuild、被消费source选择性删除的conflict或显式whole-run级联，以及无dangling historical source refs。
 - **M9-A03**：端到端 session 从创建跑到完成或 cancel，并可查询历史详情。
 - **M9-A04**：demo 输出三态结果之一、EvidenceChain、confidence 和 AttributionSummary。
 - **M9-A05**：最终前端、OpenAPI、SSE raw frame、错误码、smoke 和后端实现使用同一字段/事件名称。统一 fetch SSE 客户端按 D69 最终两层协议覆盖 HTTP 状态分支、跨网络分块解析、D73 的 run 最新快照同步与 session 游标补齐/去重、GET 与通知衔接及关闭条件；run 业务终态不直接关闭仍需通知保存变化的流，关闭订阅不取消分析，`410` 能转到真实历史入口。
@@ -568,6 +593,14 @@ M7 Milestone 0–9 已完成 Windows 本机实现与契约审计；这里只索�
 | 范围 | 实现、测试与文档证据 | 剩余验收 |
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、`M7-C01`–`M7-C12`、`M7-A01`–`M7-A07` | [M7 契约覆盖矩阵](M7/m7_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API/读取契约](M7/m7_topology_driven_multi_agent_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 chain/diamond/失败/取消/max-topology E2E、七类 typed content、production OpenAPI、专用 `wateragents_test` workflow/history/restart/startup-repair 与完整 M1–M7 regression 已在 Windows 本机通过。 | 获得明确计费/联网授权和安全 model 配置后执行真实 provider contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的实际三平台证据后，再评估中心最终承接表的 `implemented` 记录。 |
+
+### M8 待实施索引
+
+M8 产品/架构、实施、policy、API 与 Milestone 0–10 施工清单已经冻结，但代码、migration、Compose、worker、provider adapter、tests 和运行验收均未开始。以下仅登记后续承接入口，不把 docs-only 设计或既有 placeholder 当成 implementation evidence。
+
+| 范围 | 施工与计划证据 | 当前状态 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M8-C01`–`M8-C16`、`M8-A01`–`M8-A10` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写)、[设计决策](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md)和[前端接力边界](frontend_integration_contracts.md)。 | `pending`：全部 TODO 未勾选；完成各阶段 production implementation、focused/PG/full/smoke 与承接记录后才能更新。 |
 
 M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 

@@ -1,10 +1,12 @@
 # M5 Evidence Tools + EvidenceBundle 设计决策记录
 
-更新日期：2026-10-03
+更新日期：2026-10-07
 
 > 状态：设计方向与实施模式已完成对齐，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收证据和未运行边界见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
-> M7 接力说明：本文 2026-10-03 同步的 dependency manifest、stationless 零模型截断及本地/上游组合规则是最终产品目标，须由 M7 接入实现；不属于既有 M5 Milestone 0–13 的完成证据。
+> M7 接力说明：本文 2026-10-03 同步的 dependency manifest、stationless 零模型截断及本地/上游组合规则已由M7 production workflow承接；它们仍不属于既有M5 Milestone 0–13的完成证据。
+
+> M8 接力说明：M8 已冻结真实 transcript-RAG producer、query-to-query retrieval 与 historical DTO 设计，并建立全部待办的 [M8 Implementation TODO](../M8/m8_implementation_todo.md)；总体边界见 [M8 总体设计](../M8/m8_memory_rag_design.md) 和 [M8 API](../M8/m8_memory_rag_api.md)。这些目标尚不是 M5 实现完成证据。
 
 本文承接：
 
@@ -391,7 +393,7 @@ facility 事实默认是 `contextual_only`。设施存在、permit/compliance �
 
 上游 Agent result 先作为 contextual raw input 保存。只有当前 plan 存在相应 `upstream_to_downstream` 规则，且它引用直接上游 session 的原结果及完整 evidence closure 时，materializer 才生成 `allowed_indirect` relation support；它仍不是下游本地 observed。下游的加权、传播或综合值继续标记 inferred/predicted，不得因上游链包含观测而提升为下游 observed。
 
-`search_transcript_evidence` 返回的历史推理必须保留 `historical_inference` 事实和原 run/session provenance。M5 slot 默认将其标为 contextual，不能替代本次 collection、required discharge 或 M6 gate；M8 若扩大用途，必须通过同一 append-only rule plan 明确关系、时效和优先级，并经过确定性物化，且当前 session 的合格实际观测始终优先。
+`search_transcript_evidence` 返回的历史推理必须保留 `historical_inference` 事实和原 run/session provenance。M5 slot 将其固定标为 `contextual_only`，不能替代本次 collection、required discharge 或 M6 gate；M8 已确认不把历史证据提升为 `allowed_indirect/direct`，也不通过 rule plan 解锁 gate。当前 session 的合格实际观测始终优先。
 
 现有 `AttributionBasis(observed/correlated/inferred/hypothesized)` 表达结论的归因依据，不替代 evidence applicability。M6 validator 必须交叉校验 result source、attribution basis、applicability、relation identity 和 evidence refs：目标水体 observed 只能来自适用且能够一对一追溯的本地具体直接观测；相关、聚合、综合、推断或假设不得通过措辞或 confidence 值伪装成 observed/causal。
 
@@ -499,7 +501,7 @@ M1 已有的 `rag_eligible` 默认保持 `false`。M5 Evidence Tool 按固定 po
 
 M8 projection 只保存检索所需的有界语义文本/字段、稳定原 item refs、原 run/session/COMID/ParameterKey/window、quality/applicability、schema version、时间和 provenance；不复制完整 source-record array、provider envelope、secret 或无界 tool payload。命中后按引用和权限读取原事实，索引内容不成为新的 evidence 真相源。
 
-facility/weather 等 contextual evidence 在自身事实有效、安全时可以成为内容层 candidate，但仍保留 `contextual_only`；M8 只有在 session/run 完成且持久化确认后才允许实际索引，不得因被检索命中提升 applicability。历史推理继续标记 `historical_inference`；M8 retrieval score 不改写原 confidence、quality 或 attribution basis。
+facility/weather 等 contextual evidence 在自身事实有效、安全时可以成为内容层 candidate，但仍保留 `contextual_only`；M8 最终只把 validated `inference_result` 作为case root，并投影其直接引用、继续通过final eligibility的fragment，因此candidate flag本身不保证独立进入index。M8只有在session/run完成且持久化确认后才允许实际索引，不得因被检索命中提升applicability。历史推理继续标记`historical_inference`；M8 retrieval score不改写原confidence、quality或attribution basis。
 
 任何历史命中都不能满足当前 run 的 target/discharge gate、替代当前 observation collection，或覆盖当前 session 的合格实际观测。索引缺失、尚未构建或检索失败不改变 M5 原 evidence、transcript 和最终历史可读性。
 
@@ -532,7 +534,7 @@ provider retry 由 tool executor 执行有界 attempt/backoff/deadline policy；
 | M5 | 补齐当前 V1 水体空间事实；按需调用本地来源、返回 source records、构造 evidence、执行质量/单位/聚合并形成窗口级 bundle 输入；不作最终推理。 |
 | M6 | 为单水体调用 tools，执行确定性 sufficiency gate，并只对通过门禁的窗口调用水体模型。 |
 | M7 | 按 active DAG 在真正准备执行时创建水体 session，并复用同一 M5 tool 层；接入真实 upstream-result producer。 |
-| M8 | 接入真实 transcript-RAG producer；M5 只保留 tool 槽位和 unavailable 语义。 |
+| M8 | 按 [M8 总体设计](../M8/m8_memory_rag_design.md)、[Policy Catalog](../M8/m8_rag_policy_catalog.md) 与 [API](../M8/m8_memory_rag_api.md) 接入真实 transcript-RAG producer；M5 继续拥有tool preflight/executor/materialization与unavailable语义。 |
 
 ## 4. 实施文档索引
 
