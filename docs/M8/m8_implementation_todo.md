@@ -2,7 +2,7 @@
 
 更新日期：2026-10-07
 
-> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0 的基线、架构 guards 与预期红灯契约已于 2026-10-07 完成，Milestone 1–10 的 production 实现尚未开始。placeholder port、预期红灯或历史测试不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
+> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0 的基线/guards 与 Milestone 1 的当前 V1 类型、ports、catalog/tool schema 已于 2026-10-07 完成，Milestone 2–10 的 production 实现尚未开始。placeholder port、预期红灯或历史测试不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
 
 本清单执行以下已确认文档：
 
@@ -121,30 +121,30 @@
 
 ### 工作
 
-- [ ] 在当前 V1 中定义五种封闭 `HistoricalSearchStrategy`，以及只含 `strategy`、`parameter_keys`、`window_ids`、`limit` 的 typed request；删除自由 `query` 和 Agent 可控 source identity/COMID/date/radius/hops/profile 字段。
-- [ ] 定义 `HistoricalCaseRef`，至少包含 `run_id`、`session_id`、`target_comid`、`analysis_context_item_id`、`result_item_id`；禁止只用 `run_id` 定位历史答案。
-- [ ] 定义带 component 明细的 typed score、matched strategy/reasons、source schema/version、projection/generation identity、授权 cells、overall fields 和有界 fragment refs；不要用无界 `dict`/任意 JSON 代替冻结字段。
-- [ ] 原子更新 `HistoricalTranscriptRecord`、`HistoricalInferencePayload`、`EvidenceToolOptions`、M5 tool schema、DTO builders、serializers、fixtures 和 fake producers；保留 `historical_inference/contextual_only` 与 `rag_eligible=false`。
-- [ ] 将泛化 placeholder `RAGIndexPort` 收敛为 typed search contract，并新增最小 `EmbeddingPort`、`HistoricalSourceReaderPort`、`RAGJobStorePort`/generation repository port；ports 只表达能力，不泄漏 SQLAlchemy/pgvector/provider response。
-- [ ] 定义 `EmbeddingProfile`、projection/canonical schema version、distance=`cosine`、dimensions、semantic threshold 与 generation/job 状态；拒绝未知枚举、非法维度、非法阈值和不匹配版本。
-- [ ] 扩展当前 model catalog/capability schema，使其恰好能声明一个 desired embedding profile/model；embedding 不是第三个推理 Agent role，也不进入 M6 token-limit/fallback 语义。
-- [ ] 保持启动配置只有一个 desired profile，credentials 仍由既有 settings/secret 边界解析；不得在 catalog、profile、transcript 或 exception 中存 secret。
+- [x] 在当前 V1 中定义五种封闭 `HistoricalSearchStrategy`，以及只含 `strategy`、`parameter_keys`、`window_ids`、`limit` 的 typed request；删除自由 `query` 和 Agent 可控 source identity/COMID/date/radius/hops/profile 字段。
+- [x] 定义 `HistoricalCaseRef`，至少包含 `run_id`、`session_id`、`target_comid`、`analysis_context_item_id`、`result_item_id`；禁止只用 `run_id` 定位历史答案。
+- [x] 定义带 component 明细的 typed score、matched strategy/reasons、source schema/version、projection/generation identity、授权 cells、overall fields 和有界 fragment refs；不要用无界 `dict`/任意 JSON 代替冻结字段。
+- [x] 原子更新 `HistoricalTranscriptRecord`、`HistoricalInferencePayload`、`EvidenceToolOptions`、M5 tool schema、DTO builders、serializers、fixtures 和 fake producers；保留 `historical_inference/contextual_only` 与 `rag_eligible=false`。
+- [x] 将泛化 placeholder `RAGIndexPort` 收敛为 typed search contract，并新增最小 `EmbeddingPort`、`HistoricalSourceReaderPort`、`RAGJobStorePort`/generation repository port；ports 只表达能力，不泄漏 SQLAlchemy/pgvector/provider response。
+- [x] 定义 `EmbeddingProfile`、projection/canonical schema version、distance=`cosine`、dimensions、semantic threshold 与 generation/job 状态；拒绝未知枚举、非法维度、非法阈值和不匹配版本。
+- [x] 扩展当前 model catalog/capability schema，使其恰好能声明一个 desired embedding profile/model；embedding 不是第三个推理 Agent role，也不进入 M6 token-limit/fallback 语义。
+- [x] 保持启动配置只有一个 desired profile，credentials 仍由既有 settings/secret 边界解析；不得在 catalog、profile、transcript 或 exception 中存 secret。
 
 ### Tests
 
-- [ ] request 正反测试覆盖五种 strategy 的字段组合、空/重复/scope 外值、limit 上界和禁止字段；序列化/反序列化不会接纳自由 query/source identity。
-- [ ] multi-waterbody fixture 证明相同 `run_id` 下不同 session/result 由完整 case ref 区分；缺少任何关键 identity 都 fail closed。
-- [ ] profile/catalog 测试覆盖恰好一个 desired profile、provider/model/dimensions/distance/threshold/version 校验和 secret exclusion。
-- [ ] architecture tests 锁定 ports/domain 不导入 infrastructure/provider/ORM；M8 types 不新增 V2/read union/feature flag/第二套 tool。
-- [ ] M5/M6/M7 原有 fixtures 在 V1 原子更新后仍编译；不存在同时支持旧自由 query 与新 typed request 的兼容分支。
+- [x] request 正反测试覆盖五种 strategy 的字段组合、空/重复/scope 外值、limit 上界和禁止字段；序列化/反序列化不会接纳自由 query/source identity。
+- [x] multi-waterbody fixture 证明相同 `run_id` 下不同 session/result 由完整 case ref 区分；缺少任何关键 identity 都 fail closed。
+- [x] profile/catalog 测试覆盖恰好一个 desired profile、provider/model/dimensions/distance/threshold/version 校验和 secret exclusion。
+- [x] architecture tests 锁定 ports/domain 不导入 infrastructure/provider/ORM；M8 types 不新增 V2/read union/feature flag/第二套 tool。
+- [x] M5/M6/M7 原有 fixtures 在 V1 原子更新后仍编译；不存在同时支持旧自由 query 与新 typed request 的兼容分支。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain backend/tests/ports backend/tests/application/evidence_tools backend/tests/application/reasoning -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_model_catalog.py backend/tests/infrastructure/test_m5_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m7_runtime.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain backend/tests/ports backend/tests/application/evidence_tools backend/tests/application/reasoning -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain/test_model_catalog.py backend/tests/infrastructure/test_m5_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m7_runtime.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：当前唯一 V1 已能在不接数据库/网络的情况下完整表达 M8 request、case、profile、job 与结果边界；所有旧 placeholder consumer 已原子更新，仍未产生真实搜索或 embedding。
 
@@ -152,7 +152,7 @@
 
 #### Milestone 1 完成记录
 
-- [ ] 完成后填写：被替换的 placeholder、原子消费者清单、focused/architecture 结果、改动路径、commit SHA、剩余风险。
+- [x] 已以 typed intent/case/result/projection/profile/generation/job contracts 替换自由 query、字符串 `matched_by` 与 generic `RAGIndexPort`；同步更新 `domain/memory_rag`、`domain/evidence`、M5 authorization/executor/materializer/registry、ports、catalog/config、smoke 与 M4–M7 fixtures。最终验证为 focused `644 passed`、runtime `53 passed`、architecture `150 passed`、隔离 PostgreSQL 完整 suite `2065 passed, 1 warning`，`compileall`/`git diff --check` 通过；实现提交 `a56a1f3c778c1f20dbe9b38a85097b5ebfecfd86`。本阶段未新增 migration、SQL、provider HTTP、worker 或 production wiring；真实 embedding/provider 与新 RAG 持久化仍由后续 Milestone 验证。
 
 ## Milestone 2：pgvector schema、migration 与 repositories
 
