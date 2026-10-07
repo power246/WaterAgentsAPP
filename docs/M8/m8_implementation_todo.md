@@ -320,35 +320,35 @@
 
 ### 工作
 
-- [ ] 实现统一 search pipeline：capture 一个 active generation → 从 sealed scope 补全授权条件 → SQL hard filters → exact structured/FTS/vector signals → 固定公式 → stable order → dedupe/diversity/byte fit → source hydration/revalidation。
-- [ ] 实现 `exact_comid_parameter_window`：同 COMID、ParameterKey overlap、UTC 正长度窗口重叠、只返回相交 cells；不得为未来不重叠窗口偷偷放宽。
-- [ ] 实现 `nearby_comid_parameter`：只用当前保存 graph active nodes/geometry、固定 25 km 且不超过 graph `max_distance_km`、排除 current COMID；不得重调 NLDI/地理服务。
-- [ ] 实现 `parameter_season`：当前/active-node COMID、同 mode、local `DJF/MAM/JJA/SON` 与稳定 `season_year`、duration/resolution compatibility；首版保持 CONUS/北半球版本边界。
-- [ ] 实现 `semantic_case_query`：先按 current/active nodes、mode、ParameterKey、profile/template hard-filter，再在候选集上 exact cosine；只 embedding 当前 canonical query，不使用 result/summary/fragment body vector。
-- [ ] 实现 `topology_neighborhood_parameter`：只使用当前保存 graph 的 participating edges、ancestor/descendant、hop/path distance 与原 `max_hops/max_distance_km`；不得重跑 BFS 或扩大 scope。
-- [ ] 严格实现 Policy Catalog 的 normalization、五套 score 公式、semantic threshold 与 stable tie-break；NaN/Inf/非法分母/profile mismatch 使整次 search invalid，不静默丢坏 row。
-- [ ] 实现最多 50 internal candidates、5 cases/call、1 case/source session-result、2 cases/source run、2 fragments/case、stable cells/fragments order 与 16 KiB 完整-record byte fit；不能截断 JSON 或隐式分页。
-- [ ] 只在 `semantic_case_query` 调用 `EmbeddingPort`；四种结构化策略在 supplier unavailable 时仍能运行。当前 session 可按 `(profile_id,canonical_text_digest)` 缓存成功 query vector，cancel/failed 不缓存且不持久化。
-- [ ] hydrator 对每个 hit 回读原 result/fragment，重验 run/session/result ownership、target COMID、schema/digest、active projection、current scope/hard filters、cell/ref closure 与 fragment direct relation。
-- [ ] 任一 top hit authority/corruption 失败使整个 collection `invalid/historical_source_invalid`，不得返回可信/不可信混合 partial；合法无命中是 completed/empty。
+- [x] 实现统一 search pipeline：capture 一个 active generation → 从 sealed scope 补全授权条件 → SQL hard filters → exact structured/FTS/vector signals → 固定公式 → stable order → dedupe/diversity/byte fit → source hydration/revalidation。
+- [x] 实现 `exact_comid_parameter_window`：同 COMID、ParameterKey overlap、UTC 正长度窗口重叠、只返回相交 cells；不得为未来不重叠窗口偷偷放宽。
+- [x] 实现 `nearby_comid_parameter`：只用当前保存 graph active nodes/geometry、固定 25 km 且不超过 graph `max_distance_km`、排除 current COMID；不得重调 NLDI/地理服务。
+- [x] 实现 `parameter_season`：当前/active-node COMID、同 mode、local `DJF/MAM/JJA/SON` 与稳定 `season_year`、duration/resolution compatibility；首版保持 CONUS/北半球版本边界。
+- [x] 实现 `semantic_case_query`：先按 current/active nodes、mode、ParameterKey、profile/template hard-filter，再在候选集上 exact cosine；只 embedding 当前 canonical query，不使用 result/summary/fragment body vector。
+- [x] 实现 `topology_neighborhood_parameter`：只使用当前保存 graph 的 participating edges、ancestor/descendant、hop/path distance 与原 `max_hops/max_distance_km`；不得重跑 BFS 或扩大 scope。
+- [x] 严格实现 Policy Catalog 的 normalization、五套 score 公式、semantic threshold 与 stable tie-break；NaN/Inf/非法分母/profile mismatch 使整次 search invalid，不静默丢坏 row。
+- [x] 实现最多 50 internal candidates、5 cases/call、1 case/source session-result、2 cases/source run、2 fragments/case、stable cells/fragments order 与 16 KiB 完整-record byte fit；不能截断 JSON 或隐式分页。
+- [x] 只在 `semantic_case_query` 调用 `EmbeddingPort`；四种结构化策略在 supplier unavailable 时仍能运行。当前 session 可按 `(profile_id,canonical_text_digest)` 缓存成功 query vector，cancel/failed 不缓存且不持久化。
+- [x] hydrator 对每个 hit 回读原 result/fragment，重验 run/session/result ownership、target COMID、schema/digest、active projection、current scope/hard filters、cell/ref closure 与 fragment direct relation。
+- [x] 任一 top hit authority/corruption 失败使整个 collection `invalid/historical_source_invalid`，不得返回可信/不可信混合 partial；合法无命中是 completed/empty。
 
 ### Tests
 
-- [ ] 五种 strategy 各有 table-driven hard-filter 正反 fixture，并证明过滤发生在 FTS/vector ranking 前；scope 外 COMID/parameter/window/source/profile 永远不会成为候选。
-- [ ] ranking golden tests 精确断言每个 component、固定公式、semantic threshold 和完整 stable order；数据库插入顺序变化不改变返回顺序。
-- [ ] query-to-query fixture 至少包含两个历史 runs 和一个多 waterbody run，证明命中正确 session/result，answer/result body 改写不影响首版 semantic recall。
-- [ ] limits/property tests 覆盖 50/5/2/2/16 KiB、dedupe、多样性、完整-record skip、all-too-large invalid 和同 session 两次调用之外由上层拒绝的边界。
-- [ ] supplier unavailable 时四种 structured strategies 仍成功、semantic 为 unavailable；成功 query embedding 同 session 复用一次，失败/cancel 不复用。
-- [ ] hydration corruption 矩阵覆盖 source 删除、session/result/COMID/schema/digest/ref/fragment 不一致；全部返回 typed invalid、0 partial records。
-- [ ] profile switch 与并发 search 使用可控 gate 证明单次 operation 始终 pin 同一 generation，不混读两代 rows/vectors。
+- [x] 五种 strategy 各有 table-driven hard-filter 正反 fixture，并证明过滤发生在 FTS/vector ranking 前；scope 外 COMID/parameter/window/source/profile 永远不会成为候选。
+- [x] ranking golden tests 精确断言每个 component、固定公式、semantic threshold 和完整 stable order；数据库插入顺序变化不改变返回顺序。
+- [x] query-to-query fixture 至少包含两个历史 runs 和一个多 waterbody run，证明命中正确 session/result，answer/result body 改写不影响首版 semantic recall。
+- [x] limits/property tests 覆盖 50/5/2/2/16 KiB、dedupe、多样性、完整-record skip、all-too-large invalid 和同 session 两次调用之外由上层拒绝的边界。
+- [x] supplier unavailable 时四种 structured strategies 仍成功、semantic 为 unavailable；成功 query embedding 同 session 复用一次，失败/cancel 不复用。
+- [x] hydration corruption 矩阵覆盖 source 删除、session/result/COMID/schema/digest/ref/fragment 不一致；全部返回 typed invalid、0 partial records。
+- [x] profile switch 与并发 search 使用可控 gate 证明单次 operation 始终 pin 同一 generation，不混读两代 rows/vectors。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_search_policies.py backend/tests/application/transcript_memory/test_ranking.py backend/tests/application/transcript_memory/test_hydration.py -q`
-- [ ] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_search.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_search_policies.py backend/tests/application/transcript_memory/test_ranking.py backend/tests/application/transcript_memory/test_hydration.py -q`
+- [x] 使用专用测试数据库运行 `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence/test_rag_search.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：五种固定 strategy 在同一 search pipeline 中按 server-owned hard filters 和精确 policy 产生稳定、有界、可审计结果；semantic 正确执行 query-to-query，hydration 只返回经重新授权的原 source 投影。
 
@@ -356,7 +356,7 @@
 
 #### Milestone 6 完成记录
 
-- [ ] 完成后填写：五策略 fixture、ranking golden、query-to-query 多水体证据、limits/PG 结果、改动路径、commit SHA、剩余风险。
+- [x] 已在 `domain/memory_rag`、`application/transcript_memory`、PostgreSQL RAG repository 与原 sealed evidence scope 内完成五策略授权检索、固定 ranking、query-to-query session cache、bounded hydration/source revalidation；实现提交 `49e91023eb6e3a59650c9f5d2e5af5e540d5ad8b`。fixture 覆盖两条历史 run/多 waterbody、反向插入 stable order、50/5/2/2/16 KiB、supplier/cache、corruption matrix 与并发 profile switch；验证为 focused `27 passed`、专用 PostgreSQL search `7 passed`、相关回归 `261 passed`、architecture `150 passed`、完整 backend `2220 passed, 1 warning`，compileall/diff check 通过。未新增 migration、M5 producer、production worker wiring、public API 或 frontend；真实 embedding provider、生产容量及 Linux/macOS 仍为 `not run`，M7–M9 尚未完成，因此本阶段不是 M1–M9 最终验收结论。
 
 ## Milestone 7：M5/M6 historical producer 与当前证据优先级
 
