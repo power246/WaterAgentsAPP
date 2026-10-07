@@ -2,7 +2,7 @@
 
 更新日期：2026-10-07
 
-> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结，代码尚未开始。本文件全部复选框均为待办；任何现有文件名、placeholder port 或历史测试都不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
+> 当前状态：M8 产品/架构、实施、policy 与 API 设计已经冻结；Milestone 0 的基线、架构 guards 与预期红灯契约已于 2026-10-07 完成，Milestone 1–10 的 production 实现尚未开始。placeholder port、预期红灯或历史测试不能作为 M8 已完成的证据。M8 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本。
 
 本清单执行以下已确认文档：
 
@@ -80,35 +80,42 @@
 
 ### 工作
 
-- [ ] 记录 branch、HEAD、`origin/main`、merge-base、tracked/untracked/permission-limited 状态、Python/依赖版本和测试入口；保护当前 M8 文档与所有已有用户改动。
-- [ ] 追踪真实 production composition：lifespan → settings/model catalog → M4 runtime → PostgreSQL/store → coordinator/transcript reader → M5 runtime → M6 runtime → M7 execution stage，确认 M8 runtime/worker 与 historical producer 的唯一插入点。
-- [ ] 追踪 run 完成、typed item 持久化、result closure、startup repair、run/session/item history、两层 SSE、cleanup 与 cancellation 的真实顺序，形成 source 可见、job discovery、consumer write 的时序图。
-- [ ] 盘点当前 `RAGIndexPort`、`TranscriptEvidenceRequest`、`HistoricalTranscriptRecord`、`HistoricalInferencePayload`、`EvidenceToolOptions`、model catalog/capabilities、runtime builders、test builders 与 fake adapters 的全部生产/测试消费者，形成原子更新清单。
-- [ ] 审计 `backend/tests/application/test_milestone8_runtime.py` 的真实覆盖范围；明确它当前是通用 lifecycle/cancel/persistence 历史测试，不得因文件名被当作 M8 RAG 完成证据。只有在能保持责任清晰且同步所有引用时才单独重命名。
-- [ ] 记录当前 non-PostgreSQL full regression、专用 PostgreSQL、architecture、OpenAPI/SSE/history/smoke 基线；环境或 ACL 限制如实记录为 `not run`/permission-limited，不改测试绕过基础设施。
-- [ ] 增加失败的 architecture red gates：M8 不依赖归档/前端/M9；domain/ports 不导入 SQLAlchemy、pgvector 或 provider SDK；无外部 vector DB；production route/SSE 数不增加；只有 M5 waterbody producer 可以调用 search service。
-- [ ] 增加失败的 contract tests，先锁定当前 placeholder 与已冻结 V1 的差距：typed strategy、完整 case ref、query-to-query、contextual-only、0/0/0、active generation、五种 strategy 和 limits。
+- [x] 记录 branch、HEAD、`origin/main`、merge-base、tracked/untracked/permission-limited 状态、Python/依赖版本和测试入口；保护当前 M8 文档与所有已有用户改动。
+- [x] 追踪真实 production composition：lifespan → settings/model catalog → M4 runtime → PostgreSQL/store → coordinator/transcript reader → M5 runtime → M6 runtime → M7 execution stage，确认 M8 runtime/worker 与 historical producer 的唯一插入点。
+- [x] 追踪 run 完成、typed item 持久化、result closure、startup repair、run/session/item history、两层 SSE、cleanup 与 cancellation 的真实顺序，形成 source 可见、job discovery、consumer write 的时序图。
+- [x] 盘点当前 `RAGIndexPort`、`TranscriptEvidenceRequest`、`HistoricalTranscriptRecord`、`HistoricalInferencePayload`、`EvidenceToolOptions`、model catalog/capabilities、runtime builders、test builders 与 fake adapters 的全部生产/测试消费者，形成原子更新清单。
+- [x] 审计 `backend/tests/application/test_milestone8_runtime.py` 的真实覆盖范围；明确它当前是通用 lifecycle/cancel/persistence 历史测试，不得因文件名被当作 M8 RAG 完成证据。只有在能保持责任清晰且同步所有引用时才单独重命名。
+- [x] 记录当前 non-PostgreSQL full regression、专用 PostgreSQL、architecture、OpenAPI/SSE/history/smoke 基线；环境或 ACL 限制如实记录为 `not run`/permission-limited，不改测试绕过基础设施。
+- [x] 增加失败的 architecture red gates：M8 不依赖归档/前端/M9；domain/ports 不导入 SQLAlchemy、pgvector 或 provider SDK；无外部 vector DB；production route/SSE 数不增加；只有 M5 waterbody producer 可以调用 search service。
+- [x] 增加失败的 contract tests，先锁定当前 placeholder 与已冻结 V1 的差距：typed strategy、完整 case ref、query-to-query、contextual-only、0/0/0、active generation、五种 strategy 和 limits。
 
 ### Tests
 
-- [ ] 基线报告能区分现有通过、现有失败、PostgreSQL、外部 provider、三平台和 permission-limited 项，不把未运行项算作通过。
-- [ ] architecture tests 会拒绝 direct RAG route、第三 SSE、route/parser/summarizer 直接调用、archive import、provider SDK 进入 domain/ports、外部 vector DB 与 result-body embedding shortcut。
-- [ ] 新 contract tests 在业务实现前因预期能力缺失而失败，失败原因与设计差距一致，不是 import/fixture 拼写错误。
+- [x] 基线报告能区分现有通过、现有失败、PostgreSQL、外部 provider、三平台和 permission-limited 项，不把未运行项算作通过。
+- [x] architecture tests 会拒绝 direct RAG route、第三 SSE、route/parser/summarizer 直接调用、archive import、provider SDK 进入 domain/ports、外部 vector DB 与 result-body embedding shortcut。
+- [x] 新 contract tests 在业务实现前因预期能力缺失而失败，失败原因与设计差距一致，不是 import/fixture 拼写错误。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application/test_milestone8_runtime.py backend/tests/ports/test_evidence_ports.py backend/tests/infrastructure/test_m5_runtime.py backend/tests/infrastructure/test_m7_runtime.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（PostgreSQL/外部项按实际环境拆分并记录）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application/test_milestone8_runtime.py backend/tests/ports/test_evidence_ports.py backend/tests/infrastructure/test_m5_runtime.py backend/tests/infrastructure/test_m7_runtime.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（PostgreSQL/外部项按实际环境拆分并记录）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：唯一 production 插入点、全部原子消费者、source/job/search/consume 时序、数据库依赖缺口和可复现基线已经记录；red tests 精确描述 M8 缺口，本阶段不实现 RAG 业务行为。
 
 提交边界：只允许 architecture guards、失败 contract tests、必要的测试命名澄清和基线记录；不得提前增加 migration、provider adapter、worker、search 或 production composition。
 
-#### Milestone 0 完成记录
+#### Milestone 0 完成记录（2026-10-07）
 
-- [ ] 完成后填写：branch/base/HEAD、影响表、基线命令与结果、permission-limited 项、red tests、改动路径、commit SHA、剩余风险。
+- [x] 分支 `codex/m8-m0-foundation` 从最新 `origin/main` `1d9f5a9a49cfe106b40761e2b0f6cbcc90f3976b` 创建，初始 HEAD/merge-base 同为该 SHA，tracked 文件无改动；仓库历史 pytest 临时目录存在 ACL 拒绝访问，因此 untracked 结论限于 `docs`、`backend/app`、`backend/tests`、`backend/scripts` 和根配置等可读范围。Python 3.12.14，pytest 9.1.1，FastAPI 0.141.1，Pydantic 2.13.5，SQLAlchemy 2.0.54，psycopg 3.3.6，httpx 0.28.1。
+- production 唯一插入点：`main.lifespan` 现有顺序是 settings/catalog → M4 runtime → PostgreSQL schema/store → startup repair → coordinator/registry/reader → run-local upstream store → M5 → M6 → 单次 M7 execution-stage bind；M8 必须在 reader/upstream 已就绪后、`build_m5_runtime` 前创建 ports/search/worker，并只把真实 `TranscriptEvidencePort` 注入 M5。
+- source/job/search/consume 时序：`complete_waterbody_agent_session` 在同一 coordinator 临界区追加 `inference_result v1`、session completed lifecycle/mutation 和引用闭包 → `TranscriptWriter.write_batch` 事务提交并确认 persisted IDs → run summary/final result、workflow quiescence 与最终 persistence `up_to_date` → M8 post-commit wake + durable discovery；查询只允许 M6 Agent → M5 descriptor/scope preflight → M8 active generation/search/hydration → 原 `run/session/item` 单项回读 → M5 source/fragment/result/bundle 与未来 consumption link 原子写入。cancel 后不再发布新业务项；history 继续使用 `TranscriptReader` 的 live/PostgreSQL 选择和既有 run/session 两层 SSE；live cleanup 等待 terminal + quiesced + persistence confirmed。
+- 原子影响表：types/exports/source union/serialization 位于 `domain/evidence`；M5 consumers 位于 `evidence_tools` authorization/executor/collection/acquisition/registry、reasoning planning loop 与对应 tests/fakes；ports 为 `rag_index`/`transcript_evidence` 及 `ports/__init__`；catalog consumers 覆盖 domain/config、M4/M6/M7 runtime、main 和 builders；composition consumers覆盖 `main.py`、runtime M4–M7、`m5_test.py`/`m6_test.py`、API/OpenAPI、registry/reader/persistence/smoke fixtures。`test_milestone8_runtime.py` 的 13 个展开用例只验证 M3 lifecycle/cancel/late-output/startup-repair/persistence/cleanup 竞争，且被多处 M3 历史证据引用，因此本阶段不重命名，也不将其计作 RAG 证据。
+- architecture guard 新增 14 个通过用例，锁定 archive/frontend/M9 隔离、domain/application/ports 依赖、无外部 vector DB、无 result-body embedding shortcut、无 direct route/第三 SSE、route/parser/reasoning/summarizer/M7 不直接进入 memory search，M5 只通过注入的 `TranscriptEvidencePort` 调用。contract 红灯共 9 个，精确对应五种 strategy/typed intent、完整 case identity、typed match/result/payload、historical wrapper `rag_eligible=false`、generation-scoped port 和非法 `limit=6` 的 0 search/0 scope prepare/0 audit；无 collection/import/fixture 错误。
+- 改动前基线：focused `172 passed`；non-PostgreSQL full `1966 passed, 1 warning`；专用 PostgreSQL persistence `63 passed`；architecture `124 passed`；OpenAPI/SSE/history/smoke `61 passed`；含 `wateragents_test` 的完整 suite `1989 passed, 1 warning`。首次 sandbox focused 在 pytest 临时目录 cleanup 时 ACL permission-limited，授权上下文用独立 basetemp 重跑后通过。
+- 改动后验证：architecture `138 passed`；TODO 指定 focused gate `186 passed`；red contract 单独运行 `9 failed`，均为预期能力缺失；专用 PostgreSQL 完整 suite `2003 passed, 9 expected red failures, 1 warning`，除红灯外无回归；`compileall` 与 `git diff --check` 通过。Docker PostgreSQL 17 healthy，测试库与业务库隔离；当前 Compose 仍是 `postgres:17`，`vector` extension 为 `absent`，且未新增 migration，这是 Milestone 2 必须关闭的数据库依赖缺口。
+- 本阶段仅新增 `backend/tests/architecture/test_m8_boundaries.py`、`backend/tests/application/transcript_memory/__init__.py`、`test_m8_contracts.py` 并更新本记录；contracts `GLOBAL-C01/GLOBAL-C08` 只建立 guard，矩阵仍保持 `pending`。真实 embedding/provider、生产容量及 Ubuntu/macOS/Windows CI 均 `not run`；M1–M10 production 行为未实现。测试边界提交 `368534bb3261e183495180ae251359fca82ec3d8`，本完成记录由后续本地文档提交保存。
 
 ## Milestone 1：当前唯一 V1 类型、ports 与配置契约
 
