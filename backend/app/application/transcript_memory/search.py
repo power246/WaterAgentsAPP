@@ -459,7 +459,16 @@ def _validate_intent(
 ) -> None:
     if scope.memory_mode is not MemoryMode.MEMORY_AUGMENTED:
         raise RAGSearchInvalidError("historical_scope_memory_mode_invalid")
-    if not set(intent.parameter_keys) <= set(scope.requested_parameters):
+    allowed_parameters = {
+        *scope.requested_parameters,
+        *scope.supporting_parameters,
+        *(
+            parameter
+            for rule in scope.evidence_rule_plan.effective_rules
+            for parameter in (rule.output_parameter, *rule.input_parameters)
+        ),
+    }
+    if not set(intent.parameter_keys) <= allowed_parameters:
         raise RAGSearchInvalidError("historical_scope_parameter_invalid")
     available_windows = {window.window_id for window in scope.time_windows}
     if not set(intent.window_ids) <= available_windows:
@@ -478,7 +487,11 @@ def _prepare_query(
     canonical = CanonicalCaseQueryV1(
         mode=scope.mode,
         requested_parameter_keys=intent.parameter_keys,
-        supporting_parameter_keys=scope.supporting_parameters,
+        supporting_parameter_keys=tuple(
+            parameter
+            for parameter in scope.supporting_parameters
+            if parameter not in intent.parameter_keys
+        ),
         window_descriptors=tuple(
             window.canonical_descriptor() for window in query_windows
         ),

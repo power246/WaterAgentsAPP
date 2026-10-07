@@ -60,6 +60,7 @@ from app.application.transcript_memory.search import (
     RAGSearchSession,
     RAGSearchUnavailableError,
 )
+from app.application.transcript_memory.producer import TranscriptEvidenceProducer
 
 __all__ = [
     "ConfirmedSourceReference",
@@ -95,6 +96,7 @@ __all__ = [
     "TypedRAGSourceItem",
     "TypedRAGSourceReader",
     "TranscriptRAGCaseSourceReader",
+    "TranscriptEvidenceProducer",
     "ValidatedRAGCaseSource",
     "build_prepared_projection",
     "assess_generation_startup",

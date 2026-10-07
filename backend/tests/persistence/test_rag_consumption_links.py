@@ -1,0 +1,150 @@
+import asyncio
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+import pytest
+from sqlalchemy import func, select
+
+from app.application.analysis_runs.persistence import (
+    BatchVerification,
+    PersistenceGroup,
+    PersistenceWriteBatch,
+    PersistenceWriteConflictError,
+    RAGConsumptionLink,
+)
+from app.application.transcripts.models import (
+    StoredTranscriptItem,
+    TranscriptStorageBatch,
+)
+from app.infrastructure.persistence.database import create_database_engine
+from app.infrastructure.persistence.rag_repository import PostgresRAGRepository
+from app.infrastructure.persistence.schema import (
+    rag_consumption_links,
+    transcript_items,
+)
+from app.infrastructure.persistence.store import PostgresTranscriptStore
+from scripts.test_database import temporary_migrated_schema
+from tests.persistence.rag_test_support import (
+    embedding_profile,
+    pending_job,
+    ready_projection,
+    seed_completed_source,
+)
+
+
+async def _ready_case(repository, source):
+    profile = embedding_profile()
+    generation = await repository.create_building_generation(
+        profile,
+        source.completed_at,
+        str(source.result_item_id),
+    )
+    await repository.enqueue(pending_job(source, generation.generation_id))
+    claimed = await repository.claim(
+        generation.generation_id,
+        "consumption-link-worker",
+        datetime.now(UTC) + timedelta(minutes=10),
+        1,
+    )
+    case, fragments = ready_projection(
+        source,
+        generation.generation_id,
+        profile,
+    )
+    await repository.write_ready_projection(claimed[0], case, fragments)
+    return case
+
+
+def _consumer_batch(consumer, case, *, valid_source=True):
+    item_id = uuid4()
+    created_at = consumer.completed_at + timedelta(minutes=1)
+    item = StoredTranscriptItem(
+        item_id=item_id,
+        run_id=consumer.run_id,
+        session_id=consumer.session_id,
+        transcript_sequence=9 if valid_source else 10,
+        created_at=created_at,
+        content_type="evidence_source_records",
+        content_schema_version=1,
+        tags=(),
+        rag_eligible=False,
+        inline_body="{}",
+        content_bytes=2,
+    )
+    link = RAGConsumptionLink(
+        link_id=uuid4(),
+        source_generation_id=UUID(case.case_ref.generation_id),
+        source_case_id=(
+            UUID(case.case_ref.case_id) if valid_source else uuid4()
+        ),
+        source_result_item_id=UUID(case.case_ref.result_item_id),
+        consumer_run_id=consumer.run_id,
+        consumer_session_id=consumer.session_id,
+        consumer_item_id=item_id,
+        created_at=created_at,
+    )
+    return PersistenceWriteBatch(
+        run_id=consumer.run_id,
+        groups=(PersistenceGroup(item_ids=(item_id,)),),
+        transcript=TranscriptStorageBatch(items=(item,)),
+        rag_consumption_links=(link,),
+    )
+
+
+def test_source_record_and_consumption_link_commit_or_rollback_together() -> None:
+    async def exercise(settings) -> None:
+        engine = create_database_engine(settings)
+        repository = PostgresRAGRepository(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            source = await seed_completed_source(engine)
+            consumer = await seed_completed_source(
+                engine,
+                target_comid="87654321",
+            )
+            case = await _ready_case(repository, source)
+            committed = _consumer_batch(consumer, case, valid_source=True)
+
+            await store.write_batch(committed)
+
+            assert await store.verify_batch(committed) is BatchVerification.COMMITTED
+            async with engine.connect() as connection:
+                assert await connection.scalar(
+                    select(func.count())
+                    .select_from(rag_consumption_links)
+                    .where(
+                        rag_consumption_links.c.consumer_item_id
+                        == committed.item_ids[0]
+                    )
+                ) == 1
+
+            rejected = _consumer_batch(consumer, case, valid_source=False)
+            with pytest.raises(PersistenceWriteConflictError):
+                await store.write_batch(rejected)
+
+            async with engine.connect() as connection:
+                item_count = await connection.scalar(
+                    select(func.count())
+                    .select_from(transcript_items)
+                    .where(transcript_items.c.item_id == rejected.item_ids[0])
+                )
+                link_count = await connection.scalar(
+                    select(func.count())
+                    .select_from(rag_consumption_links)
+                    .where(
+                        rag_consumption_links.c.consumer_item_id
+                        == rejected.item_ids[0]
+                    )
+                )
+            assert (item_count, link_count) == (0, 0)
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))

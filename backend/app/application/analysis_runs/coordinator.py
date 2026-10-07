@@ -67,6 +67,8 @@ from app.application.analysis_runs.persistence import (
     PersistenceInfo,
     PersistenceState,
     PersistenceWriteBatch,
+    RAGConsumptionLink,
+    RAGConsumptionSource,
 )
 from app.application.analysis_runs.topology_result_models import (
     DependencyOutcome,
@@ -1786,6 +1788,7 @@ class RunCoordinator:
         body: object,
         *,
         private_values: tuple[str, ...] = (),
+        rag_consumption_sources: tuple[RAGConsumptionSource, ...] = (),
     ) -> TranscriptItemIdentity:
         runtime = await self._lookup(run_id)
         key = _UUID.validate_python(item_id)
@@ -1799,6 +1802,14 @@ class RunCoordinator:
             )
             if identity is None:
                 raise ValueError("transcript item identity is not reserved in this run")
+            if rag_consumption_sources and (
+                content_type != "evidence_source_records"
+                or identity.session_id is None
+                or len(rag_consumption_sources) != len(set(rag_consumption_sources))
+            ):
+                raise ValueError(
+                    "RAG consumption sources require one session source-record item"
+                )
             self._validate_m4_content_scope_locked(
                 runtime,
                 identity,
@@ -1835,6 +1846,20 @@ class RunCoordinator:
                 finalized,
                 self._clock.now(),
             )
+            if rag_consumption_sources:
+                runtime.rag_consumption_links[identity.item_id] = tuple(
+                    RAGConsumptionLink(
+                        link_id=self._new_record_id(),
+                        source_generation_id=source.source_generation_id,
+                        source_case_id=source.source_case_id,
+                        source_result_item_id=source.source_result_item_id,
+                        consumer_run_id=identity.run_id,
+                        consumer_session_id=identity.session_id,
+                        consumer_item_id=identity.item_id,
+                        created_at=identity.created_at,
+                    )
+                    for source in rag_consumption_sources
+                )
             content_ref = TranscriptContentRef(
                 run_id=runtime.snapshot.run_id,
                 item_id=identity.item_id,

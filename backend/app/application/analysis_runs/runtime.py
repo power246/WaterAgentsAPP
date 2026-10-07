@@ -17,6 +17,7 @@ from app.application.analysis_runs.topology_result_models import DependencyStatu
 from app.application.analysis_runs.persistence import (
     PersistenceGroup,
     PersistenceWriteBatch,
+    RAGConsumptionLink,
 )
 from app.application.transcripts.buffer import TranscriptBuffer
 from app.application.transcripts.models import TranscriptContentRef
@@ -70,6 +71,9 @@ class RunRuntime:
     workflow_task: asyncio.Task[None] | None = field(default=None, repr=False)
     last_error: PublicError | None = None
     persistence_groups: list[PersistenceGroup] = field(default_factory=list)
+    rag_consumption_links: dict[UUID, tuple[RAGConsumptionLink, ...]] = field(
+        default_factory=dict
+    )
     persistence_active_batch: PersistenceWriteBatch | None = None
     persisted_item_ids: set[UUID] = field(default_factory=set)
     persisted_mutation_ids: set[UUID] = field(default_factory=set)

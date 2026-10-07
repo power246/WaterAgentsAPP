@@ -10,6 +10,7 @@ from app.application.analysis_runs.models import (
     SessionStateMutation,
 )
 from app.application.transcripts.models import TranscriptStorageBatch
+from app.domain.common import UtcDatetime
 from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
 
@@ -41,12 +42,34 @@ class PersistenceGroup(DomainModel):
         return self
 
 
+class RAGConsumptionSource(DomainModel):
+    """Indexed source identity attached to one persisted consumer item."""
+
+    source_generation_id: UUID
+    source_case_id: UUID
+    source_result_item_id: UUID
+
+
+class RAGConsumptionLink(DomainModel):
+    """Atomic ownership edge persisted with its consumer transcript item."""
+
+    link_id: UUID
+    source_generation_id: UUID
+    source_case_id: UUID
+    source_result_item_id: UUID
+    consumer_run_id: UUID
+    consumer_session_id: UUID
+    consumer_item_id: UUID
+    created_at: UtcDatetime
+
+
 class PersistenceWriteBatch(DomainModel):
     run_id: UUID
     groups: tuple[PersistenceGroup, ...]
     transcript: TranscriptStorageBatch = TranscriptStorageBatch()
     run_mutations: tuple[RunStateMutation, ...] = ()
     session_mutations: tuple[SessionStateMutation, ...] = ()
+    rag_consumption_links: tuple[RAGConsumptionLink, ...] = ()
 
     @property
     def item_ids(self) -> tuple[UUID, ...]:
@@ -120,6 +143,31 @@ class PersistenceWriteBatch(DomainModel):
                     raise ValueError(
                         "state mutation transcript item must be a lifecycle event"
                     )
+        link_ids = tuple(link.link_id for link in self.rag_consumption_links)
+        if len(link_ids) != len(set(link_ids)):
+            raise ValueError("RAG consumption link identities must be unique")
+        link_owners = tuple(
+            (
+                link.source_generation_id,
+                link.source_case_id,
+                link.consumer_item_id,
+            )
+            for link in self.rag_consumption_links
+        )
+        if len(link_owners) != len(set(link_owners)):
+            raise ValueError("RAG consumption ownership identities must be unique")
+        for link in self.rag_consumption_links:
+            consumer = stored_items.get(link.consumer_item_id)
+            if (
+                consumer is None
+                or link.consumer_run_id != self.run_id
+                or consumer.run_id != link.consumer_run_id
+                or consumer.session_id != link.consumer_session_id
+                or consumer.content_type != "evidence_source_records"
+            ):
+                raise ValueError(
+                    "RAG consumption link must accompany its source-record item"
+                )
         for mutation in self.run_mutations:
             terminal = mutation.snapshot.status in {
                 RunStatus.COMPLETED,

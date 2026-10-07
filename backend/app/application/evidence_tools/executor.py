@@ -25,6 +25,7 @@ from app.application.evidence_tools.errors import (
     FacilityRadiusTooSmallForBudgetError as EvidenceFacilityRadiusTooSmallError,
     EvidenceProducerUnavailableError,
     EvidenceScopeViolationError,
+    EvidenceToolBudgetExceededError,
     EvidenceToolDeadlineExceededError,
     EvidenceToolError,
     EvidenceToolLimitExceededError,
@@ -48,6 +49,7 @@ from app.application.evidence_tools.models import (
     EvidenceToolLimits,
     EvidenceToolReader,
     EvidenceToolExecution,
+    EvidenceToolDescriptor,
     EvidenceToolWriter,
 )
 from app.application.evidence_tools.provider_output_validator import (
@@ -169,6 +171,7 @@ class EvidenceToolExecutor:
         )
         self._provider_output_validator = ProviderOutputValidator(reader)
         self._budgets: dict[tuple[str, str], EvidenceBudgetLedger] = {}
+        self._tool_calls: dict[tuple[str, str, str], int] = {}
         self._deadlines: dict[tuple[str, str], float] = {}
         self._inspection_pages: dict[tuple[str, str], EvidenceInspectionPage] = {}
 
@@ -234,7 +237,7 @@ class EvidenceToolExecutor:
                 request,
                 policy_manifest_digest=self._capabilities.manifest_digest,
             )
-            self._reserve_budget(scope, descriptor.policy_class, canonical_key)
+            self._reserve_budget(scope, descriptor, canonical_key)
             self._check_deadline(scope)
 
             async def work() -> _CompletedOperation:
@@ -363,7 +366,7 @@ class EvidenceToolExecutor:
                 request,
                 policy_manifest_digest=self._capabilities.manifest_digest,
             )
-            self._reserve_budget(scope, descriptor.policy_class, canonical_key)
+            self._reserve_budget(scope, descriptor, canonical_key)
         except (WorkflowStopped, asyncio.CancelledError):
             return await self._write_failure_result(
                 scope,
@@ -394,6 +397,9 @@ class EvidenceToolExecutor:
         await self._single_flight.cleanup_run(run_id)
         self._budgets = {
             key: value for key, value in self._budgets.items() if key[0] != run_id
+        }
+        self._tool_calls = {
+            key: value for key, value in self._tool_calls.items() if key[0] != run_id
         }
         self._deadlines = {
             key: value for key, value in self._deadlines.items() if key[0] != run_id
@@ -460,7 +466,10 @@ class EvidenceToolExecutor:
             if options.source_item_id is None:
                 raise EvidenceScopeViolationError()
         elif request.tool_name == "search_transcript_evidence":
-            if options.historical_search_strategy is None:
+            if (
+                options.historical_search_strategy is None
+                or len(request.parameter_keys) > 6
+            ):
                 raise EvidenceScopeViolationError()
 
     @staticmethod
@@ -471,9 +480,14 @@ class EvidenceToolExecutor:
     def _reserve_budget(
         self,
         scope: EvidenceSessionScope,
-        policy_class: EvidencePolicyClass,
+        descriptor: EvidenceToolDescriptor,
         canonical_key: str,
     ) -> None:
+        tool_key = (scope.run_id, scope.session_id, descriptor.name)
+        tool_calls = self._tool_calls.get(tool_key, 0)
+        if tool_calls >= descriptor.max_calls_per_session:
+            raise EvidenceToolBudgetExceededError()
+        self._tool_calls[tool_key] = tool_calls + 1
         ledger = self._budgets.setdefault(
             (scope.run_id, scope.session_id),
             EvidenceBudgetLedger(
@@ -483,7 +497,7 @@ class EvidenceToolExecutor:
         )
         kind = (
             "transform"
-            if policy_class is EvidencePolicyClass.DETERMINISTIC
+            if descriptor.policy_class is EvidencePolicyClass.DETERMINISTIC
             else "collection"
         )
         ledger.reserve(kind, canonical_key)
@@ -870,8 +884,11 @@ class EvidenceToolExecutor:
             collections=collections,
         )
         complete = all(batch.completion_proof.complete for batch in batches)
+        failure_code = _collection_failure_code(batches)
         status = (
-            CollectionStatus.UNAVAILABLE
+            CollectionStatus.INVALID
+            if not complete and _is_invalid_collection_failure(failure_code)
+            else CollectionStatus.UNAVAILABLE
             if not complete
             else CollectionStatus.AVAILABLE
             if records
@@ -887,7 +904,7 @@ class EvidenceToolExecutor:
             pages=pages,
             records=records,
             cacheable=complete,
-            safe_error_code=None if complete else "evidence_collection_incomplete",
+            safe_error_code=None if complete else failure_code,
         )
 
     async def _persist_partial_collections(
@@ -1088,11 +1105,7 @@ class EvidenceToolExecutor:
         failed = value.safe_error_code is not None
         safe_error = None
         if failed:
-            safe_error = SafeEvidenceError(
-                code=value.safe_error_code,
-                message="The evidence collection could not be proven complete.",
-                retryable=True,
-            )
+            safe_error = _collection_safe_error(value.safe_error_code)
         return EvidenceToolResult(
             tool_call_id=request.tool_call_id,
             operation_id=operation_id,
@@ -1201,3 +1214,75 @@ def _map_policy_error(error: EvidencePolicyError) -> SafeEvidenceError:
     else:
         mapped = EvidenceAggregationNotAllowedError()
     return map_evidence_error(mapped)
+
+
+_HISTORICAL_COLLECTION_FAILURES = frozenset(
+    {
+        "index_building",
+        "historical_index_unavailable",
+        "embedding_unavailable",
+        "index_invalid",
+        "embedding_protocol_invalid",
+        "historical_source_invalid",
+    }
+)
+_INVALID_HISTORICAL_COLLECTION_FAILURES = frozenset(
+    {"index_invalid", "embedding_protocol_invalid", "historical_source_invalid"}
+)
+
+
+def _collection_failure_code(
+    batches: tuple[ProviderCollectionBatch, ...],
+) -> str:
+    reasons = {
+        batch.incomplete_reason
+        for batch in batches
+        if not batch.completion_proof.complete
+    }
+    if len(reasons) == 1:
+        reason = next(iter(reasons))
+        if reason in _HISTORICAL_COLLECTION_FAILURES:
+            return reason
+    return "evidence_collection_incomplete"
+
+
+def _is_invalid_collection_failure(code: str) -> bool:
+    return code in _INVALID_HISTORICAL_COLLECTION_FAILURES
+
+
+def _collection_safe_error(code: str) -> SafeEvidenceError:
+    messages = {
+        "index_building": (
+            "The historical memory index is still building.",
+            True,
+        ),
+        "historical_index_unavailable": (
+            "The historical memory index is unavailable.",
+            True,
+        ),
+        "embedding_unavailable": (
+            "The historical semantic search service is unavailable.",
+            True,
+        ),
+        "index_invalid": (
+            "The historical memory index is invalid.",
+            False,
+        ),
+        "embedding_protocol_invalid": (
+            "The historical semantic search response is invalid.",
+            False,
+        ),
+        "historical_source_invalid": (
+            "The historical source record is invalid.",
+            False,
+        ),
+        "evidence_collection_incomplete": (
+            "The evidence collection could not be proven complete.",
+            True,
+        ),
+    }
+    message, retryable = messages.get(
+        code,
+        messages["evidence_collection_incomplete"],
+    )
+    return SafeEvidenceError(code=code, message=message, retryable=retryable)

@@ -16,6 +16,7 @@ from app.application.analysis_runs.models import (
     TranscriptItemIdentity,
 )
 if TYPE_CHECKING:
+    from app.application.analysis_runs.persistence import RAGConsumptionSource
     from app.application.analysis_runs.topology_result_models import (
         DependencyOutcome,
         TopologyRunResult,
@@ -190,6 +191,7 @@ class WorkflowOperations(Protocol):
         body: object,
         *,
         private_values: tuple[str, ...] = (),
+        rag_consumption_sources: tuple[RAGConsumptionSource, ...] = (),
     ) -> TranscriptItemIdentity: ...
 
     async def start_transcript_message(

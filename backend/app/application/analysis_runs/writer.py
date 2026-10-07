@@ -22,6 +22,7 @@ from app.application.analysis_runs.persistence import (
     PersistenceState,
     PersistenceWriteBatch,
     PersistenceWriteConflictError,
+    RAGConsumptionLink,
 )
 from app.application.transcripts.buffer import (
     PendingTranscriptReferencesError,
@@ -37,6 +38,7 @@ class WriterRuntime(Protocol):
     transcript_items: list[TranscriptItemIdentity]
     state_mutations: list[RunStateMutation | SessionStateMutation]
     persistence_groups: list[PersistenceGroup]
+    rag_consumption_links: dict[UUID, tuple[RAGConsumptionLink, ...]]
     persistence_active_batch: PersistenceWriteBatch | None
     persisted_item_ids: set[UUID]
     persisted_mutation_ids: set[UUID]
@@ -372,6 +374,11 @@ class TranscriptWriter:
             transcript=transcript,
             run_mutations=run_mutations,
             session_mutations=session_mutations,
+            rag_consumption_links=tuple(
+                link
+                for item_id in item_ids
+                for link in runtime.rag_consumption_links.get(item_id, ())
+            ),
         )
 
     async def _attempt_batch(
