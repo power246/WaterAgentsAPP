@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-03
+更新日期：2026-10-07
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -528,37 +528,53 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 10. M8: Memory/RAG from Transcript
 
+状态：产品/架构、实施、policy 与 API 设计已冻结；[Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md) 已建立且所有实施项均为待办。代码、migration、Compose、tests 尚未实施。本阶段设计输入见 [总体设计](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md) 和 [API/读取契约](M8/m8_memory_rag_api.md)。
+
 目标：
 
-- 让历史 transcript 成为可检索的 cross-session memory。
-- 支持 `stateless` 和 `memory_augmented` 两种模式。
+- 将已完成、已持久化的合格历史 result/fragment 投影为可重建的跨 run memory。
+- 让 `memory_augmented` waterbody Agent通过 M5 producer slot显式检索相似历史 case；`stateless` 保持跨 run隔离。
+- 向量用于定位相似 query-understanding，命中后按原 run/session/result identity回读权威答案。
 
 主要产物：
 
-- `RAGIndex`
-- `rag_projection`
-- `rag_tools`
-- historical evidence wrapper
+- PostgreSQL + pgvector generation/job/case/window/fragment/consumption-link schema；
+- `EmbeddingPort` 与首版远程 supplier adapter，deterministic test fake；
+- typed `RAGIndexPort`/job/source reader/search service；
+- canonical case-query projection 与五种 fixed strategies；
+- `HistoricalCaseRef`、typed score components、bounded historical result/fragment projection；
+- M5 `search_transcript_evidence` production producer；
+- durable worker、backfill、active generation switch、rebuild/cleanup ownership。
 
 主要能力：
 
-- 从 `rag_eligible=true` 的 transcript item 生成 RAG index。
-- 支持有限固定检索策略：
+- `rag_eligible=true` 只是 candidate；最终只允许 completed + persistence-confirmed 的 `inference_result v1` 与其直接关联 eligible `evidence_fragment v1`，排除 message/reasoning/prompt/summary/tool/raw/error/bundle/cancelled/incomplete 内容。
+- 一个全局 active embedding profile；profile变化建立新 generation并验证后原子切换，不混写/比较不同模型、维度或模板的 vectors。
+- 同一 PostgreSQL使用结构化 filters、full-text/GIN 与 pgvector exact scan；首版不引入独立 vector DB或近似索引。
+- 支持有限固定策略：
   - by COMID + parameter + time window
   - by nearby COMID + parameter
   - by parameter + season
   - by semantic query
   - by topology neighborhood + parameter
-- `memory_augmented` 模式允许 agent 主动检索历史 transcript。
-- 按 D58，`stateless` 模式不使用跨 run 历史记忆，但保留当前 run 内上游 session 的结果传递；`memory_augmented` 的历史证据使用明确来源关联。
+- Agent每次只选择一种 strategy与当前 scope内 ParameterKeys/window IDs；COMID、时间、25 km nearby、topology范围、limit/profile由后端补全/验证，非法输入保持 `0 search / 0 hydrate / 0 source record`。
+- semantic recall使用本次与历史的同版本 canonical query-to-query similarity；case ref至少包含原 run/session/COMID/context item/result item，不能只凭 run ID选答案。
+- hit hydration只返回本次授权 cells、必要 risk/availability/confidence/time与最多两个直接关联 fragments；不返回完整历史 run/transcript。
+- `memory_augmented` 只开放显式 optional tool，不自动预检索/隐藏注入；parser、summarizer、zero-model与 direct HTTP不搜索。
+- 历史 evidence始终 `historical_inference/contextual_only`，不能解锁 target/discharge gate、覆盖当前 observation或提高原 confidence/quality。
+- 持久化 indexing jobs最终一致；run完成不等待索引，search不扫描 raw transcript兜底。empty、index lag/unavailable、invalid必须区分。
+- 不新增 production route或第三条 SSE；真实 call/source/fragment/result沿现有 transcript/session SSE/history读取。
 
 阶段自测验收：
 
-- 一个历史 session 的 eligible item 能进入 RAG index。
-- 新 session 在 `memory_augmented` 模式下能检索到历史 item。
-- 检索结果作为 `historical_inference` evidence 写入当前 transcript。
-- 当前真实检测站数据与历史记忆冲突时，真实检测站数据优先。
-- 低置信度历史结果可以被使用，但保留原始置信度并降低权重。
+- migration可从现有四表库升级，vector extension/profile/schema错误 fail closed；first generation可backfill、激活、重启恢复，run终态不等待worker。
+- eligible result/fragment进入active generation；non-eligible与半成品不出现，source删除/cleanup无悬空跨run引用。
+- 五种策略的hard filters、score、stable tie-break、最多2 calls/session、5 cases/call、2 fragments/case与16 KiB preview均有fixture。
+- 多水体历史run中 query-to-query hit读取正确 session/result，不串答案；profile切换期间每次search只读一个generation。
+- `stateless` roster无历史tool；`memory_augmented` 可显式调用或不调用，正常empty与unavailable/invalid可审计。
+- hit作为 historical source/fragment写入当前 transcript并可通过既有history/SSE round-trip；production OpenAPI route集合不增加。
+- 当前真实检测站数据与历史冲突时当前事实优先；低 confidence/可疑历史保留原值并降序，永不解锁gate。
+- fake embedding E2E、PostgreSQL integration与完整M1–M8 regression通过；真实supplier、三平台与生产规模只按实际证据报告。
 
 ## 11. M9: Settings/Keys/Admin + Demo Closure
 
@@ -589,6 +605,9 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - RAG index
   - derived cross-session memory
   - evidence cache
+- 按 M8 consumption-link ownership 清理跨 run 历史引用：选择性删除被保留 run 消费的 source 时必须 conflict 或在用户明确授权下级联整个 dependent run，不能改写 retained transcript 或留下悬空 ref。
+- embedding profile 变更只创建并切换新 generation，不改写既有 run/session/transcript；reindex/index-only cleanup 与删除原历史是两个不同动作。
+- profile变更先保存期望配置并构建/验证新generation，原子激活后才允许清理旧profile credential；切换前旧active search仍须可用。
 - 清理接口不删除 API keys。
 - 端到端 session 能从创建跑到完成或 cancel。
 - 前端按最终 OpenAPI/SSE 契约独立重构，不迁移旧前端字段、事件或交互。

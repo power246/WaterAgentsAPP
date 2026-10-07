@@ -1,10 +1,12 @@
 # M5 Evidence Tools + EvidenceBundle 实施设计
 
-更新日期：2026-10-03
+更新日期：2026-10-07
 
 > 状态：设计已冻结，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。真实 USGS/NWS/EPA 请求和 Ubuntu/macOS/Windows 三平台 CI 仍为 `not run`；实施步骤、验证证据和剩余风险见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
-> M7 接力说明：本文 2026-10-03 新增的 dependency manifest、usable upstream 启动门禁和 stationless 0-model 路径是 M7 待实施的接入目标，不表示当前 M5 runtime 已经具备真实 DAG producer。
+> M7 接力说明：本文 2026-10-03 新增的 dependency manifest、usable upstream启动门禁和stationless 0-model路径已由M7 production workflow承接；它们仍不表示M5 Milestone 0–13自身完成了DAG producer。
+
+> M8 接力说明：当前 `HistoricalTranscriptRecord`/`HistoricalInferencePayload` 是 producer slot占位；M8目标类型与读取协议见 [M8 实施设计](../M8/m8_memory_rag_implementation_design.md)、[M8 API](../M8/m8_memory_rag_api.md) 和全部待办的 [M8 Implementation TODO](../M8/m8_implementation_todo.md)，不属于既有M5完成证据。
 
 本文把 [M5 设计决策](m5_evidence_tools_design.md) 落到模块、类型、provider、执行链、持久化与测试接缝。确定性单位、质量、聚合和 applicability 规则见 [M5 Policy Catalog](m5_evidence_policy_catalog.md)，公开读取与 typed content 示例见 [M5 API 文档](m5_evidence_tools_api.md)。
 
@@ -188,6 +190,8 @@ provenance
 | `historical_transcript` | original run/session/item refs、schema、RAG score、matched_by、原 quality/confidence |
 
 provider envelope 不进入 DTO。原始响应只在 adapter contract fixture 中保留；生产 transcript 保存标准化 records 和足以重放的 provenance。
+
+M8实现时将上述占位收敛为typed `HistoricalCaseRef`（原run/session/COMID/context item/result item）、typed score components与有界result/fragment projection；跨run ref使用专门validator，不能进入普通同run `transcript_item_refs`。
 
 ### 4.2 EvidencePayload
 
