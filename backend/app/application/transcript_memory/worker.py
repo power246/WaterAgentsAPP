@@ -281,6 +281,8 @@ class RAGIndexWorker:
             return
 
         for (job, bundle), vector in zip(chunk, validated.vectors, strict=True):
+            if self._stop.is_requested():
+                return
             try:
                 await self._store.write_ready_projection(
                     job,

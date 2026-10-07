@@ -2,16 +2,28 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
 from app.application.analysis_runs.models import RunStatus
-from app.domain import ModelCatalogSnapshot, RAGJobCounts
+from app.application.transcript_memory import (
+    GenerationStartupReadiness,
+    GenerationStartupState,
+    RAGReconciliationSignal,
+)
+from app.domain import (
+    ModelCatalogSnapshot,
+    RAGIndexGeneration,
+    RAGIndexGenerationStatus,
+    RAGJobCounts,
+)
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
 from app.infrastructure.observability.json_logging import JsonFormatter
 from app.infrastructure.observability.rag_metrics import RAGRuntimeMetrics
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
-from app.infrastructure.runtime import build_m8_runtime
+from app.infrastructure.runtime import M8Runtime, build_m8_runtime
 from tests.m4_support import (
     MODEL_CATALOG,
     FakeM8Runtime,
@@ -173,3 +185,94 @@ def test_terminal_commit_wakes_m8_and_shutdown_stops_it_before_coordinator() -> 
 
     assert events == ["m8_shutdown", "coordinator_shutdown"]
     assert runtime.stopped
+
+
+def test_shutdown_gate_prevents_activation_after_worker_returns() -> None:
+    profile = MODEL_CATALOG.snapshot().embedding_profile
+    generation = RAGIndexGeneration(
+        generation_id=str(UUID(int=1)),
+        profile=profile,
+        status=RAGIndexGenerationStatus.BUILDING,
+        source_cutoff_created_at=datetime.now(UTC),
+        source_cutoff_item_id=str(UUID(int=2)),
+        created_at=datetime.now(UTC),
+    )
+
+    class Backfill:
+        def __init__(self) -> None:
+            self.activations = 0
+
+        async def ensure_building_generation(self, desired_profile) -> None:
+            assert desired_profile == profile
+
+        async def reconcile(self, *, discovered_at):
+            del discovered_at
+            return SimpleNamespace(building=SimpleNamespace(exhausted=True))
+
+        async def activate_when_complete(self, target, *, activated_at) -> None:
+            del target, activated_at
+            self.activations += 1
+
+    class Repository:
+        async def list_generations(self):
+            return (generation,)
+
+        async def counts(self, generation_id):
+            assert generation_id == generation.generation_id
+            return RAGJobCounts()
+
+        async def oldest_incomplete_job_at(self, generation_id):
+            assert generation_id == generation.generation_id
+            return None
+
+    class Worker:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def run_available(self, target) -> int:
+            assert target == generation
+            self.started.set()
+            await self.release.wait()
+            return 0
+
+        def request_stop(self) -> None:
+            self.release.set()
+
+        async def drain(self, timeout_seconds) -> bool:
+            del timeout_seconds
+            return True
+
+    class Runner:
+        def request_stop(self) -> None:
+            pass
+
+    async def exercise() -> None:
+        backfill = Backfill()
+        worker = Worker()
+        runtime = M8Runtime(
+            producer=FakeM8Runtime().producer,
+            worker=worker,  # type: ignore[arg-type]
+            backfill=backfill,  # type: ignore[arg-type]
+            discovery=object(),  # type: ignore[arg-type]
+            repository=Repository(),  # type: ignore[arg-type]
+            signal=RAGReconciliationSignal(),
+            runner=Runner(),  # type: ignore[arg-type]
+            metrics=RAGRuntimeMetrics(),
+            startup_state=GenerationStartupState(
+                readiness=GenerationStartupReadiness.INDEX_BUILDING,
+                active_generation=None,
+                building_generation=generation,
+            ),
+            desired_profile=profile,
+            clock=FixedClock(),
+            shutdown_grace_seconds=1,
+        )
+        reconciling = asyncio.create_task(runtime._reconcile())
+        await worker.started.wait()
+        await runtime.shutdown()
+        await reconciling
+
+        assert backfill.activations == 0
+
+    asyncio.run(exercise())

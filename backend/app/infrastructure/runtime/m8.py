@@ -181,6 +181,9 @@ class M8Runtime:
             }:
                 await self.worker.run_available(generation)
 
+        if self._stopping:
+            return
+
         building = next(
             (
                 generation
@@ -199,6 +202,8 @@ class M8Runtime:
                 and counts.retry_wait == 0
                 and counts.failed == 0
             ):
+                if self._stopping:
+                    return
                 await self.backfill.activate_when_complete(
                     building,
                     activated_at=self.clock.now(),

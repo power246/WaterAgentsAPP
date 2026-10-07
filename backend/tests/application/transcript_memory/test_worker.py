@@ -111,6 +111,19 @@ class _BlockedEmbedding:
         )
 
 
+class _BlockedWriteStore(_Store):
+    def __init__(self, jobs: tuple[RAGIndexJob, ...]) -> None:
+        super().__init__(jobs)
+        self.write_started = asyncio.Event()
+        self.release_write = asyncio.Event()
+
+    async def write_ready_projection(self, job, case, fragments):
+        if not self.projections:
+            self.write_started.set()
+            await self.release_write.wait()
+        await super().write_ready_projection(job, case, fragments)
+
+
 class _RegisteredRunReader:
     def __init__(self, snapshot: RegisteredRunRead) -> None:
         self.snapshot = snapshot
@@ -183,6 +196,19 @@ def test_worker_builds_and_writes_one_atomic_ready_projection() -> None:
         assert case.profile_id == _generation().profile.profile_id
         assert len(case.embedding.values) == 3
         assert fragments
+
+    asyncio.run(exercise())
+
+
+def test_stop_before_claim_does_not_claim_or_write() -> None:
+    async def exercise() -> None:
+        store = _Store((_job(),))
+        worker = _worker(store, _Loader(), DeterministicEmbeddingPort())
+        worker.request_stop()
+
+        assert await worker.run_once(_generation()) == 0
+        assert not store.claimed
+        assert store.projections == []
 
     asyncio.run(exercise())
 
@@ -334,5 +360,22 @@ def test_shutdown_timeout_leaves_inflight_lease_recoverable() -> None:
         await running
         assert store.saved == []
         assert store.projections == []
+
+    asyncio.run(exercise())
+
+
+def test_stop_during_database_commit_finishes_only_the_inflight_write() -> None:
+    async def exercise() -> None:
+        store = _BlockedWriteStore((_job(suffix=1), _job(suffix=2)))
+        worker = _worker(store, _Loader(), DeterministicEmbeddingPort())
+        running = asyncio.create_task(worker.run_once(_generation()))
+        await store.write_started.wait()
+
+        worker.request_stop()
+        store.release_write.set()
+        await running
+
+        assert len(store.projections) == 1
+        assert store.projections[0][0].job_id.endswith("000000000001")
 
     asyncio.run(exercise())
