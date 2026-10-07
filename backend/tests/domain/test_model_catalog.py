@@ -7,6 +7,23 @@ from app.domain.model_catalog import (
     ModelRole,
     ModelSelection,
 )
+from app.domain import EmbeddingProfile
+
+
+def embedding_capability(model: str = "embedding-v1") -> ModelCapability:
+    profile = EmbeddingProfile(
+        provider="provider",
+        model=model,
+        output_dimensions=8,
+        max_input_tokens=512,
+        semantic_min_similarity=0.78,
+    )
+    return ModelCapability(
+        provider=profile.provider,
+        model=profile.model,
+        roles=(ModelRole.EMBEDDING,),
+        embedding_profile=profile,
+    )
 
 
 def test_catalog_requires_unique_safe_identities_and_explicit_roles() -> None:
@@ -15,17 +32,22 @@ def test_catalog_requires_unique_safe_identities_and_explicit_roles() -> None:
         model="model",
         roles=(ModelRole.QUERY_PARSER,),
     )
-    assert ModelCatalogSnapshot(capabilities=(capability,)).supports(
+    catalog = ModelCatalogSnapshot(
+        capabilities=(capability, embedding_capability())
+    )
+    assert catalog.supports(
         ModelSelection(provider="provider", model="model"),
         ModelRole.QUERY_PARSER,
     )
-    assert not ModelCatalogSnapshot(capabilities=(capability,)).supports(
+    assert not catalog.supports(
         ModelSelection(provider="provider", model="model"),
         ModelRole.WATERBODY,
     )
 
     with pytest.raises(ValidationError, match="duplicates"):
-        ModelCatalogSnapshot(capabilities=(capability, capability))
+        ModelCatalogSnapshot(
+            capabilities=(capability, capability, embedding_capability())
+        )
     with pytest.raises(ValidationError, match="must not be empty"):
         ModelCapability(provider="provider", model="model", roles=())
 

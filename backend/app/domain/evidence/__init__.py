@@ -49,6 +49,13 @@ from app.domain.evidence.facility_evidence_request import FacilityEvidenceReques
 from app.domain.evidence.historical_inference_payload import (
     HistoricalInferencePayload,
 )
+from app.domain.evidence.historical_case_source import HistoricalCaseSourceV1
+from app.domain.evidence.historical_supporting_fragment_projection import (
+    HistoricalSupportingFragmentProjection,
+)
+from app.domain.evidence.historical_supporting_fragment_reference import (
+    HistoricalSupportingFragmentReference,
+)
 from app.domain.evidence.historical_transcript_record import HistoricalTranscriptRecord
 from app.domain.evidence.item_reference import ItemReference
 from app.domain.evidence.provenance import Provenance
@@ -124,6 +131,9 @@ __all__ = [
     "FacilityEvidenceRequest",
     "FacilityRecord",
     "HistoricalInferencePayload",
+    "HistoricalCaseSourceV1",
+    "HistoricalSupportingFragmentProjection",
+    "HistoricalSupportingFragmentReference",
     "HistoricalTranscriptRecord",
     "ItemReference",
     "Provenance",

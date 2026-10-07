@@ -11,7 +11,7 @@ from app.application.analysis_runs.query_topology_workflow import (
     QueryTopologyWorkflow,
 )
 from app.application.query_understanding import QueryParserWorkflow
-from app.domain import ModelCapability, ModelRole
+from app.domain import EmbeddingProfile, ModelCapability, ModelRole
 from app.infrastructure.adapters import OpenAIResponsesParserAdapter
 from app.infrastructure.config import (
     AppSettings,
@@ -52,6 +52,13 @@ class FixedClock:
 
 
 def catalog(provider: str = "openai") -> tuple[ModelCapability, ...]:
+    embedding_profile = EmbeddingProfile(
+        provider="openai",
+        model="embedding-v1",
+        output_dimensions=8,
+        max_input_tokens=512,
+        semantic_min_similarity=0.78,
+    )
     return (
         ModelCapability(
             provider=provider,
@@ -64,6 +71,12 @@ def catalog(provider: str = "openai") -> tuple[ModelCapability, ...]:
             roles=(ModelRole.WATERBODY,),
             context_window_tokens=128_000,
             max_output_tokens=32_768,
+        ),
+        ModelCapability(
+            provider=embedding_profile.provider,
+            model=embedding_profile.model,
+            roles=(ModelRole.EMBEDDING,),
+            embedding_profile=embedding_profile,
         ),
     )
 

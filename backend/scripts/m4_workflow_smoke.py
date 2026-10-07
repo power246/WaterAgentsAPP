@@ -20,6 +20,7 @@ from app.application.station_availability import StationAvailabilityService
 from app.application.transcripts.registry import create_production_registry
 from app.domain import (
     AdministrativeLocation,
+    EmbeddingProfile,
     GeoPoint,
     GeocodingCandidate,
     HydrologyGraph,
@@ -57,6 +58,13 @@ DO = ParameterKey(code_system="usgs", code="00300")
 DISCHARGE = ParameterKey(code_system="usgs", code="00060")
 PARSER_MODEL = ModelSelection(provider="fixture", model="parser-v1")
 WATERBODY_MODEL = ModelSelection(provider="fixture", model="waterbody-v1")
+EMBEDDING_PROFILE = EmbeddingProfile(
+    provider="fixture",
+    model="embedding-v1",
+    output_dimensions=8,
+    max_input_tokens=512,
+    semantic_min_similarity=0.78,
+)
 MODEL_CATALOG = ModelCatalog(
     (
         ModelCapability(
@@ -68,6 +76,12 @@ MODEL_CATALOG = ModelCatalog(
             roles=(ModelRole.WATERBODY,),
             context_window_tokens=128_000,
             max_output_tokens=32_768,
+        ),
+        ModelCapability(
+            provider=EMBEDDING_PROFILE.provider,
+            model=EMBEDDING_PROFILE.model,
+            roles=(ModelRole.EMBEDDING,),
+            embedding_profile=EMBEDDING_PROFILE,
         ),
     )
 )

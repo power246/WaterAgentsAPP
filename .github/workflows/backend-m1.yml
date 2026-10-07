@@ -28,7 +28,7 @@ jobs:
       WATERAGENTS_DB_PASSWORD: wateragents-ci-password
       WATERAGENTS_DB_SSLMODE: disable
       WATERAGENTS_TEST_DB_NAME: wateragents_m9
-      WATERAGENTS_MODEL_CATALOG: '[{"provider":"ci","model":"parser","roles":["query_parser"]},{"provider":"ci","model":"waterbody","roles":["waterbody"],"context_window_tokens":128000,"max_output_tokens":32768}]'
+      WATERAGENTS_MODEL_CATALOG: '[{"provider":"ci","model":"parser","roles":["query_parser"]},{"provider":"ci","model":"waterbody","roles":["waterbody"],"context_window_tokens":128000,"max_output_tokens":32768},{"provider":"ci","model":"embedding","roles":["embedding"],"embedding_profile":{"provider":"ci","model":"embedding","output_dimensions":8,"max_input_tokens":512,"distance_metric":"cosine","semantic_min_similarity":0.78,"canonical_query_schema_version":1,"canonical_template_version":1,"projection_schema_version":1}}]'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

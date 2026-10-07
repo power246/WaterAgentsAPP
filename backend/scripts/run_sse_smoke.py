@@ -40,6 +40,22 @@ SMOKE_SETTINGS = AppSettings(
             "context_window_tokens": 128_000,
             "max_output_tokens": 32_768,
         },
+        {
+            "provider": "fixture",
+            "model": "embedding-v1",
+            "roles": ["embedding"],
+            "embedding_profile": {
+                "provider": "fixture",
+                "model": "embedding-v1",
+                "output_dimensions": 8,
+                "max_input_tokens": 512,
+                "distance_metric": "cosine",
+                "semantic_min_similarity": 0.78,
+                "canonical_query_schema_version": 1,
+                "canonical_template_version": 1,
+                "projection_schema_version": 1,
+            },
+        },
     ),
 )
 

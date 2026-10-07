@@ -72,8 +72,15 @@ def test_ci_model_catalog_matches_the_runtime_settings_schema() -> None:
         for capability in settings.model_catalog
         if ModelRole.WATERBODY in capability.roles
     )
+    embedding_capabilities = tuple(
+        capability
+        for capability in settings.model_catalog
+        if ModelRole.EMBEDDING in capability.roles
+    )
 
     assert waterbody_capabilities
+    assert len(embedding_capabilities) == 1
+    assert embedding_capabilities[0].embedding_profile is not None
 
 
 def test_tests_and_direct_async_smoke_share_windows_loop_initialization() -> None:

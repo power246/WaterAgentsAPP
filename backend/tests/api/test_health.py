@@ -223,19 +223,44 @@ def test_model_catalog_is_parsed_once_as_safe_role_metadata(
                     "roles": ["query_parser", "waterbody"],
                     "context_window_tokens": 64_000,
                     "max_output_tokens": 8_192,
-                }
+                },
+                {
+                    "provider": "configured-provider",
+                    "model": "embedding-model",
+                    "roles": ["embedding"],
+                    "embedding_profile": {
+                        "provider": "configured-provider",
+                        "model": "embedding-model",
+                        "output_dimensions": 8,
+                        "max_input_tokens": 512,
+                        "distance_metric": "cosine",
+                        "semantic_min_similarity": 0.78,
+                        "canonical_query_schema_version": 1,
+                        "canonical_template_version": 1,
+                        "projection_schema_version": 1,
+                    },
+                },
             ]
         ),
     )
 
-    capability = AppSettings(_env_file=None).model_catalog[0]
+    capabilities = AppSettings(_env_file=None).model_catalog
+    capability = capabilities[0]
     assert capability.model_dump(mode="json") == {
         "provider": "configured-provider",
         "model": "configured-model",
         "roles": ["query_parser", "waterbody"],
         "context_window_tokens": 64_000,
         "max_output_tokens": 8_192,
+        "embedding_profile": None,
     }
+    embedding = capabilities[1]
+    assert embedding.embedding_profile is not None
+    assert embedding.embedding_profile.output_dimensions == 8
+    assert embedding.embedding_profile.max_input_tokens == 512
+    assert embedding.embedding_profile.distance_metric.value == "cosine"
+    assert embedding.embedding_profile.semantic_min_similarity == 0.78
+    assert "secret" not in embedding.model_dump_json().casefold()
 
 
 def test_timezone_can_load_without_system_zoneinfo() -> None:

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
+from app.application.evidence_tools import create_evidence_tool_registry
 from app.infrastructure.config import AppSettings
+from app.infrastructure.config import load_parameter_capability_registry
 from app.main import create_app
 
 
@@ -13,10 +15,17 @@ APP_ROOT = BACKEND_ROOT / "app"
 M8_APPLICATION_PACKAGE = "app.application.transcript_memory"
 M8_DOMAIN_PATHS = (
     Path("domain/evidence/evidence_tool_options.py"),
+    Path("domain/evidence/historical_case_source.py"),
     Path("domain/evidence/historical_inference_payload.py"),
+    Path("domain/evidence/historical_supporting_fragment_projection.py"),
+    Path("domain/evidence/historical_supporting_fragment_reference.py"),
     Path("domain/evidence/historical_transcript_record.py"),
     Path("domain/evidence/transcript_evidence_request.py"),
+    Path("domain/model_capability.py"),
+    Path("domain/model_catalog_snapshot.py"),
+    Path("domain/model_role.py"),
 )
+M8_DOMAIN_ROOTS = (Path("domain/memory_rag"),)
 M8_PORT_PATHS = (
     Path("ports/embedding.py"),
     Path("ports/historical_sources.py"),
@@ -110,6 +119,10 @@ def _m8_layer_violations(app_root: Path) -> tuple[str, ...]:
         for relative in (*M8_DOMAIN_PATHS, *M8_PORT_PATHS)
         if (app_root / relative).is_file()
     ]
+    for relative in M8_DOMAIN_ROOTS:
+        domain_root = app_root / relative
+        if domain_root.is_dir():
+            sources.extend(domain_root.rglob("*.py"))
     memory_root = app_root / "application" / "transcript_memory"
     if memory_root.is_dir():
         sources.extend(memory_root.rglob("*.py"))
@@ -280,6 +293,39 @@ def test_m8_does_not_add_a_direct_route_or_third_sse() -> None:
             "/reindex",
         )
     )
+
+
+def test_m8_keeps_one_v1_read_union_tool_and_no_feature_toggle() -> None:
+    type_paths = [
+        *(APP_ROOT / "domain" / "memory_rag").glob("*.py"),
+        *(APP_ROOT / "domain" / "evidence").glob("historical_*.py"),
+    ]
+    class_names = {
+        node.name
+        for path in type_paths
+        for node in ast.walk(_source_tree(path))
+        if isinstance(node, ast.ClassDef)
+    }
+    assert not {name for name in class_names if name.endswith("V2")}
+
+    source_union = (
+        APP_ROOT / "domain" / "evidence" / "source_record.py"
+    ).read_text(encoding="utf-8")
+    assert source_union.count("| HistoricalTranscriptRecord") == 1
+    assert "HistoricalTranscriptRecordV2" not in source_union
+
+    registry = create_evidence_tool_registry(load_parameter_capability_registry())
+    historical_tools = {
+        descriptor.name
+        for descriptor in registry.descriptors
+        if "historical" in descriptor.name or "transcript" in descriptor.name
+    }
+    assert historical_tools == {"search_transcript_evidence"}
+    assert not {
+        name
+        for name in AppSettings.model_fields
+        if "enable" in name and ("rag" in name or "memory" in name)
+    }
 
 
 def test_m8_layer_gate_detects_provider_orm_archive_and_deferred_imports(

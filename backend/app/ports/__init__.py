@@ -22,8 +22,10 @@ from app.ports.errors import (
     WaterbodyModelUnavailableError,
 )
 from app.ports.event_publisher import EventPublisherPort
+from app.ports.embedding import EmbeddingCancellationPort, EmbeddingPort
 from app.ports.facility_evidence import FacilityEvidencePort
 from app.ports.geocoding import GeocodingPort
+from app.ports.historical_sources import HistoricalSourceReaderPort
 from app.ports.hydrology_data import (
     ComidLookupPort,
     TopologyDataPort,
@@ -33,6 +35,7 @@ from app.ports.llm import LLMPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.ports.parameter_catalog import ParameterCatalogPort
 from app.ports.rag_index import RAGIndexPort
+from app.ports.rag_jobs import RAGJobStorePort
 from app.ports.station_metadata import StationMetadataPort
 from app.ports.station_inventory import StationInventoryPort
 from app.ports.transcript_store import TranscriptReadStorePort, TranscriptStorePort
@@ -45,9 +48,12 @@ __all__ = [
     "CachePort",
     "ClockPort",
     "ComidLookupPort",
+    "EmbeddingCancellationPort",
+    "EmbeddingPort",
     "EventPublisherPort",
     "FacilityEvidencePort",
     "GeocodingPort",
+    "HistoricalSourceReaderPort",
     "InvalidPortResponseError",
     "KeyStorePort",
     "LLMPort",
@@ -62,6 +68,7 @@ __all__ = [
     "PortTimeoutError",
     "PortUnavailableError",
     "RAGIndexPort",
+    "RAGJobStorePort",
     "StationMetadataPort",
     "StationInventoryPort",
     "TopologyDataPort",

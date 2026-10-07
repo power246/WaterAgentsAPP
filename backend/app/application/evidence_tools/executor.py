@@ -80,6 +80,7 @@ from app.domain import (
     EvidenceToolRequest,
     EvidenceToolResult,
     FacilityEvidenceRequest,
+    HistoricalSearchIntentV1,
     ItemReference,
     ParameterCapabilityRegistry,
     ProviderCollectionBatch,
@@ -193,7 +194,7 @@ class EvidenceToolExecutor:
             authorize_evidence_tool_request(
                 scope,
                 request,
-                max_agent_record_limit=self._limits.inspection_max_page_size,
+                max_agent_record_limit=descriptor.max_records_per_call,
             )
             self._authorize_request_preflight(request, descriptor)
         except EvidenceScopeViolationError:
@@ -213,7 +214,7 @@ class EvidenceToolExecutor:
         authorize_evidence_tool_request(
             scope,
             request,
-            max_agent_record_limit=self._limits.inspection_max_page_size,
+            max_agent_record_limit=descriptor.max_records_per_call,
         )
         self._authorize_request_preflight(request, descriptor)
         if self._scope_preparer is not None:
@@ -457,6 +458,9 @@ class EvidenceToolExecutor:
                 raise EvidenceScopeViolationError()
         elif request.tool_name == "inspect_evidence_records":
             if options.source_item_id is None:
+                raise EvidenceScopeViolationError()
+        elif request.tool_name == "search_transcript_evidence":
+            if options.historical_search_strategy is None:
                 raise EvidenceScopeViolationError()
 
     @staticmethod
@@ -739,17 +743,18 @@ class EvidenceToolExecutor:
                 run_id=scope.run_id,
                 session_id=scope.session_id,
                 memory_mode=scope.memory_mode,
-                query=scope.query,
-                max_records=(
-                    request.options.record_limit
-                    or self._limits.inspection_default_page_size
+                intent=HistoricalSearchIntentV1(
+                    strategy=request.options.historical_search_strategy,
+                    parameter_keys=request.parameter_keys,
+                    window_ids=request.window_ids,
+                    limit=request.options.record_limit or 5,
                 ),
             )
             authorize_provider_request(
                 scope,
                 plan,
                 registry=self._capabilities,
-                max_transcript_records=self._limits.inspection_max_page_size,
+                max_transcript_records=5,
             )
             batch = await self._await_provider(
                 scope,
@@ -758,7 +763,9 @@ class EvidenceToolExecutor:
                     deadline=self._check_deadline(scope),
                 ),
             )
-            query_identity = sha256(plan.query.encode("utf-8")).hexdigest()
+            query_identity = sha256(
+                plan.intent.model_dump_json().encode("utf-8")
+            ).hexdigest()
             return await self._finish_collection(
                 scope,
                 operation_id,
@@ -767,7 +774,10 @@ class EvidenceToolExecutor:
                         provider="transcript",
                         channel="historical",
                         request_range=scope.query_envelope,
-                        requested_series=(f"query:sha256:{query_identity}",),
+                        requested_series=(
+                            f"intent:sha256:{query_identity}",
+                            f"strategy:{plan.intent.strategy.value}",
+                        ),
                         parameter_keys=request.parameter_keys,
                         affected_window_ids=request.window_ids,
                         batch=batch,

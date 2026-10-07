@@ -188,7 +188,9 @@ class EvidenceFragment(DomainModel):
             if self.applicability is not EvidenceApplicability.CONTEXTUAL_ONLY:
                 raise ValueError("historical inference must be contextual_only")
             if self.source_record_refs or self.derivation is not None:
-                raise ValueError("historical inference uses original item reference only")
+                raise ValueError("historical inference uses cross-run source references only")
+            if self.rag_eligible:
+                raise ValueError("historical inference must not be RAG eligible")
             if (
                 self.quality_class is not EvidenceQualityClass.INVALID
                 and self.result_eligibility
@@ -209,6 +211,4 @@ class EvidenceFragment(DomainModel):
                 reference.item_id
                 for reference in self.payload.input_evidence_refs
             )
-        elif isinstance(self.payload, HistoricalInferencePayload):
-            item_ids.append(self.payload.original_item_ref.item_id)
         return tuple(dict.fromkeys(item_ids))

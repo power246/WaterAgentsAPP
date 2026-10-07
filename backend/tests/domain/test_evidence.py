@@ -40,8 +40,16 @@ from app.domain import (
     EvidenceToolResult,
     FacilityRecord,
     GeoPoint,
+    AssessmentAvailability,
+    HistoricalCaseRef,
     HistoricalInferencePayload,
+    HistoricalMatchReason,
+    HistoricalResultCellProjection,
+    HistoricalResultProjection,
+    HistoricalSearchStrategy,
+    HistoricalSupportingFragmentProjection,
     HistoricalTranscriptRecord,
+    InferenceMode,
     ItemReference,
     ParameterKey,
     Provenance,
@@ -50,12 +58,16 @@ from app.domain import (
     ReferenceScope,
     RelationSupportPayload,
     ResultSource,
+    RiskLevel,
+    RAGScoreComponentsV1,
     SafeEvidenceError,
     SourceRecord,
     SourceRecordReference,
     TimeRange,
     TimeResolution,
     TimeResolutionSource,
+    TrendDirection,
+    OutcomeStatus,
     UpstreamResultPayload,
     UpstreamResultRecord,
     WaterObservationRecord,
@@ -109,6 +121,57 @@ def provenance(
         provider_record_id=provider_record_id,
         source_timezone="America/New_York",
         source_utc_offset="-05:00",
+    )
+
+
+def historical_case_ref() -> HistoricalCaseRef:
+    return HistoricalCaseRef(
+        generation_id="generation-old",
+        case_id="case-old",
+        run_id="run-old",
+        session_id="session-old",
+        target_comid="12345678",
+        analysis_context_item_id="item-analysis-context-old",
+        result_item_id="item-old",
+    )
+
+
+def historical_cell() -> HistoricalResultCellProjection:
+    return HistoricalResultCellProjection(
+        parameter=TARGET,
+        window_id="historical-w000",
+        time_range=WINDOW,
+        outcome_status=OutcomeStatus.DIRECTIONAL,
+        representative_value=None,
+        unit_id=None,
+        trend=TrendDirection.FALLING,
+        risk_level=RiskLevel.MEDIUM,
+        confidence=0.6,
+        source=ResultSource.PREDICTED,
+    )
+
+
+def historical_result_projection() -> HistoricalResultProjection:
+    return HistoricalResultProjection(
+        mode=InferenceMode.PREDICTION,
+        source_completed_at=NOW,
+        overall_risk=RiskLevel.MEDIUM,
+        availability=AssessmentAvailability.COMPLETE,
+        cells=(historical_cell(),),
+    )
+
+
+def historical_match() -> RAGScoreComponentsV1:
+    return RAGScoreComponentsV1(
+        strategy=HistoricalSearchStrategy.SEMANTIC_CASE_QUERY,
+        reasons=(
+            HistoricalMatchReason.VECTOR_SIMILARITY,
+            HistoricalMatchReason.PARAMETER_OVERLAP,
+            HistoricalMatchReason.LEXICAL_SIMILARITY,
+        ),
+        parameter_overlap_ratio=1.0,
+        vector_similarity=0.9,
+        lexical_similarity=0.5,
     )
 
 
@@ -227,23 +290,33 @@ def valid_source_records() -> tuple[object, ...]:
         confidence=0.7,
         evidence_closure_refs=(ItemReference(item_id="item-evidence"),),
     )
+    historical_source = source_base(
+        record_type="historical_transcript",
+        location=point_location(),
+        raw_unit=None,
+        use_range=True,
+        source_provenance=provenance(provider_record_id="historical-1"),
+    )
+    historical_source.update(
+        provider="wateragents_transcript",
+        channel="historical_memory",
+        source_uri=None,
+    )
     historical = HistoricalTranscriptRecord(
-        **source_base(
-            record_type="historical_transcript",
-            location=point_location(),
-            raw_unit=None,
-            use_range=True,
-            source_provenance=provenance(provider_record_id="historical-1"),
-        ),
-        original_run_id="run-old",
-        original_session_id="session-old",
-        original_item_ref=ItemReference(item_id="item-old"),
+        **historical_source,
+        case_ref=historical_case_ref(),
         content_type="inference_result",
         content_schema_version=1,
+        projection_schema_version=1,
+        profile_id="sha256:profile",
+        projection_id="projection-old",
+        projection_digest="sha256:projection",
         rag_score=0.9,
-        matched_by="semantic",
+        matched_by=historical_match(),
         original_quality=EvidenceQualityClass.VALID,
         original_confidence=0.6,
+        result_projection=historical_result_projection(),
+        supporting_fragments=(),
     )
     return water, discharge, weather, forecast, facility, upstream, historical
 
@@ -256,6 +329,30 @@ def test_every_source_record_branch_round_trips_strictly(record: object) -> None
     assert restored == record
     assert restored.record_id == restored.provenance.provider_record_id
     assert "8.20" not in serialized.decode("utf-8")
+
+
+def test_historical_record_rejects_cross_case_location_or_duplicate_fragments() -> None:
+    historical = valid_source_records()[-1]
+    assert isinstance(historical, HistoricalTranscriptRecord)
+    body = historical.model_dump(mode="python", exclude={"record_id"})
+    body["location"] = historical.location.model_copy(update={"comid": "other"})
+
+    with pytest.raises(ValidationError, match="target COMID"):
+        HistoricalTranscriptRecord.model_validate(body)
+
+    fragment = HistoricalSupportingFragmentProjection(
+        original_item_id="fragment-item-old",
+        evidence_id="fragment-old",
+        parameter=TARGET,
+        valid_time_range=WINDOW,
+        quality_class=EvidenceQualityClass.VALID,
+        applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
+    )
+    body = historical.model_dump(mode="python", exclude={"record_id"})
+    body["supporting_fragments"] = (fragment, fragment)
+
+    with pytest.raises(ValidationError, match="duplicates"):
+        HistoricalTranscriptRecord.model_validate(body)
 
 
 def test_source_record_discriminator_rejects_unknown_branch() -> None:
@@ -332,7 +429,7 @@ def test_reference_bearing_source_records_extract_item_ids() -> None:
     historical = valid_source_records()[6]
 
     assert upstream.referenced_item_ids() == ("item-result", "item-evidence")
-    assert historical.referenced_item_ids() == ("item-old",)
+    assert historical.referenced_item_ids() == ()
 
 
 def evidence_provenance() -> Provenance:
@@ -496,8 +593,10 @@ def sample_fragments() -> tuple[EvidenceFragment, ...]:
         data_type="historical_inference",
         applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
         payload=HistoricalInferencePayload(
-            original_item_ref=ItemReference(item_id="item-historical"),
-            projection="Historical inferred value",
+            case_ref=historical_case_ref(),
+            historical_window_id="historical-w000",
+            cell_projection=historical_cell(),
+            supporting_fragment_refs=(),
         ),
         result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
     )
@@ -521,7 +620,7 @@ def test_fragment_reference_extraction_follows_typed_payloads() -> None:
         "item-upstream-result",
         "item-upstream-evidence",
     )
-    assert historical.referenced_item_ids() == ("item-historical",)
+    assert historical.referenced_item_ids() == ()
 
 
 def test_relation_support_payload_is_typed_and_reference_closed() -> None:

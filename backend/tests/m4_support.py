@@ -12,13 +12,33 @@ from app.application.query_understanding import (
     SupportingParameterIntent,
     TargetSource,
 )
-from app.domain import GeoPoint, InferenceMode, ParameterKey, TimeRange, TimeResolution
+from app.domain import (
+    EmbeddingProfile,
+    GeoPoint,
+    InferenceMode,
+    ParameterKey,
+    TimeRange,
+    TimeResolution,
+)
 from app.domain.time.time_resolution_source import TimeResolutionSource
 from app.domain.model_catalog import ModelCapability, ModelRole, ModelSelection
 from app.infrastructure.config import ModelCatalog
 
 PARSER_MODEL = ModelSelection(provider="test-provider", model="parser-v1")
 WATERBODY_MODEL = ModelSelection(provider="test-provider", model="waterbody-v1")
+EMBEDDING_PROFILE = EmbeddingProfile(
+    provider="test-provider",
+    model="embedding-v1",
+    output_dimensions=8,
+    max_input_tokens=512,
+    semantic_min_similarity=0.78,
+)
+EMBEDDING_CAPABILITY = ModelCapability(
+    provider=EMBEDDING_PROFILE.provider,
+    model=EMBEDDING_PROFILE.model,
+    roles=(ModelRole.EMBEDDING,),
+    embedding_profile=EMBEDDING_PROFILE,
+)
 MODEL_CAPABILITIES = (
     ModelCapability(
         **PARSER_MODEL.model_dump(),
@@ -30,6 +50,7 @@ MODEL_CAPABILITIES = (
         context_window_tokens=10_000_000,
         max_output_tokens=1_000_000,
     ),
+    EMBEDDING_CAPABILITY,
 )
 MODEL_CATALOG = ModelCatalog(MODEL_CAPABILITIES)
 
