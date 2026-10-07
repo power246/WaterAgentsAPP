@@ -33,6 +33,14 @@ from app.domain.memory_rag.rag_index_generation_status import RAGIndexGeneration
 from app.domain.memory_rag.rag_index_job import RAGIndexJob
 from app.domain.memory_rag.rag_index_job_status import RAGIndexJobStatus
 from app.domain.memory_rag.rag_job_counts import RAGJobCounts
+from app.domain.memory_rag.rag_cleanup_dependency import RAGCleanupDependency
+from app.domain.memory_rag.rag_cleanup_plan import RAGCleanupPlan
+from app.domain.memory_rag.rag_cleanup_result import RAGCleanupResult
+from app.domain.memory_rag.rag_failed_job_retry_filter import RAGFailedJobRetryFilter
+from app.domain.memory_rag.rag_generation_health import RAGGenerationHealth
+from app.domain.memory_rag.rag_index_health import RAGIndexHealth
+from app.domain.memory_rag.rag_profile_handoff_phase import RAGProfileHandoffPhase
+from app.domain.memory_rag.rag_profile_handoff_state import RAGProfileHandoffState
 from app.domain.memory_rag.rag_quality_tier import RAGQualityTier
 from app.domain.memory_rag.rag_score_components import RAGScoreComponentsV1
 from app.domain.memory_rag.rag_source_cutoff import RAGSourceCutoff
@@ -65,6 +73,14 @@ __all__ = [
     "RAGIndexJob",
     "RAGIndexJobStatus",
     "RAGJobCounts",
+    "RAGCleanupDependency",
+    "RAGCleanupPlan",
+    "RAGCleanupResult",
+    "RAGFailedJobRetryFilter",
+    "RAGGenerationHealth",
+    "RAGIndexHealth",
+    "RAGProfileHandoffPhase",
+    "RAGProfileHandoffState",
     "RAGQualityTier",
     "RAGScoreComponentsV1",
     "RAGSourceCutoff",

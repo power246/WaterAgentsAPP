@@ -198,6 +198,12 @@ class GenerationService:
                     )
             await self._store.delete_generation(generation_id)
 
+    async def reader_count(self, generation_id: str) -> int:
+        """Return the process-local leases guarded by this service instance."""
+
+        async with self._lock:
+            return self._reader_counts.get(generation_id, 0)
+
 
 def _validate_profile_integrity(profile: EmbeddingProfile) -> None:
     try:

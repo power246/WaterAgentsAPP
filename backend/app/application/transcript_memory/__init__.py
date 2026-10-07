@@ -61,6 +61,10 @@ from app.application.transcript_memory.search import (
     RAGSearchUnavailableError,
 )
 from app.application.transcript_memory.producer import TranscriptEvidenceProducer
+from app.application.transcript_memory.maintenance import (
+    RAGMaintenanceConflictError,
+    RAGMaintenanceOperations,
+)
 
 __all__ = [
     "ConfirmedSourceReference",
@@ -82,6 +86,8 @@ __all__ = [
     "RAGDiscoveryResult",
     "RAGDiscoveryService",
     "RAGIndexWorker",
+    "RAGMaintenanceConflictError",
+    "RAGMaintenanceOperations",
     "RAGReconciliationSignal",
     "RAGReconciliationRunner",
     "RAGSearchError",

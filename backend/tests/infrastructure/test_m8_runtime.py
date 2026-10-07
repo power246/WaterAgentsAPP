@@ -256,6 +256,7 @@ def test_shutdown_gate_prevents_activation_after_worker_returns() -> None:
             backfill=backfill,  # type: ignore[arg-type]
             discovery=object(),  # type: ignore[arg-type]
             repository=Repository(),  # type: ignore[arg-type]
+            operations=object(),  # type: ignore[arg-type]
             signal=RAGReconciliationSignal(),
             runner=Runner(),  # type: ignore[arg-type]
             metrics=RAGRuntimeMetrics(),

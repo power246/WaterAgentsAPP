@@ -15,6 +15,7 @@ from app.application.transcript_memory import (
     RAGBackfillCoordinator,
     RAGDiscoveryService,
     RAGIndexWorker,
+    RAGMaintenanceOperations,
     RAGReconciliationRunner,
     RAGReconciliationSignal,
     RAGSearchService,
@@ -113,6 +114,7 @@ class M8Runtime:
     backfill: RAGBackfillCoordinator
     discovery: RAGDiscoveryService
     repository: PostgresRAGRepository
+    operations: RAGMaintenanceOperations
     signal: RAGReconciliationSignal
     runner: RAGReconciliationRunner
     metrics: RAGRuntimeMetrics
@@ -347,6 +349,15 @@ async def build_m8_runtime(
             monotonic=loop.time,
         )
         generations = GenerationService(repository)
+        operations = RAGMaintenanceOperations(
+            store=repository,
+            backfill=backfill,
+            generations=generations,
+            clock=clock,
+            retired_generation_retention_seconds=(
+                settings.rag_retired_generation_retention_seconds
+            ),
+        )
         search = RAGSearchService(
             generations=generations,
             index=_ObservedSearchIndex(repository, metrics),
@@ -381,6 +392,7 @@ async def build_m8_runtime(
             backfill=backfill,
             discovery=discovery,
             repository=repository,
+            operations=operations,
             signal=signal,
             runner=RAGReconciliationRunner(
                 signal,

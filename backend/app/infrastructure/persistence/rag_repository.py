@@ -1,6 +1,6 @@
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import json
 from uuid import UUID, uuid4
 
@@ -36,6 +36,9 @@ from app.domain import (
     PreparedRAGCaseProjectionV1,
     RAGCandidateRow,
     RAGCaseWindowV1,
+    RAGCleanupDependency,
+    RAGCleanupPlan,
+    RAGCleanupResult,
     RAGCaseProjectionV1,
     RAGFragmentProjectionV1,
     RAGIndexGeneration,
@@ -62,6 +65,7 @@ from app.infrastructure.persistence.schema import (
     rag_fragment_projections,
     rag_index_generations,
     rag_index_jobs,
+    transcript_contents,
     transcript_items,
 )
 from app.ports.errors import PortUnavailableError
@@ -1151,6 +1155,74 @@ class PostgresRAGRepository:
         values = {row["status"]: row["count"] for row in rows}
         return RAGJobCounts(**values)
 
+    async def retry_failed_jobs(
+        self,
+        generation_id: str,
+        safe_error_codes: tuple[str, ...],
+        limit: int,
+        retried_at: datetime,
+    ) -> tuple[RAGIndexJob, ...]:
+        if not safe_error_codes:
+            raise ValueError("safe_error_codes must not be empty")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("limit must be an integer between 1 and 100")
+        identifier = _uuid(generation_id, "generation_id")
+        async with self._transaction() as connection:
+            generation = await self._locked_generation(connection, identifier)
+            if (
+                generation is None
+                or generation["status"]
+                != RAGIndexGenerationStatus.BUILDING.value
+            ):
+                raise RAGPersistenceConflictError(
+                    "failed jobs can only be retried for a building generation"
+                )
+            rows = tuple(
+                (
+                    await connection.execute(
+                        select(rag_index_jobs)
+                        .where(
+                            rag_index_jobs.c.generation_id == identifier,
+                            rag_index_jobs.c.status
+                            == RAGIndexJobStatus.FAILED.value,
+                            rag_index_jobs.c.last_safe_error_code.in_(
+                                safe_error_codes
+                            ),
+                        )
+                        .order_by(
+                            rag_index_jobs.c.updated_at,
+                            rag_index_jobs.c.job_id,
+                        )
+                        .with_for_update(skip_locked=True)
+                        .limit(limit)
+                    )
+                ).mappings()
+            )
+            retried: list[RAGIndexJob] = []
+            for row in rows:
+                updated = (
+                    await connection.execute(
+                        update(rag_index_jobs)
+                        .where(rag_index_jobs.c.job_id == row["job_id"])
+                        .values(
+                            status=RAGIndexJobStatus.PENDING.value,
+                            attempts=0,
+                            next_attempt_at=None,
+                            lease_owner=None,
+                            lease_until=None,
+                            last_safe_error_code=None,
+                            updated_at=max(
+                                retried_at,
+                                row["updated_at"] + timedelta(microseconds=1),
+                            ),
+                            completed_at=None,
+                        )
+                        .returning(rag_index_jobs)
+                    )
+                ).mappings().one()
+                retried.append(_job_from_row(updated))
+        return tuple(retried)
+
     async def write_ready_projection(
         self,
         job: RAGIndexJob,
@@ -1326,6 +1398,213 @@ class PostgresRAGRepository:
         )
         return tuple(
             RAGConsumptionLinkRecord.model_validate(dict(row)) for row in rows
+        )
+
+    async def inspect_cleanup_dependencies(
+        self,
+        run_ids: tuple[str, ...],
+    ) -> RAGCleanupPlan:
+        requested = tuple(_uuid(value, "run_id") for value in run_ids)
+        if not requested:
+            raise ValueError("run_ids must not be empty")
+        if len(requested) != len(set(requested)):
+            raise ValueError("run_ids must not contain duplicates")
+        async with self._transaction() as connection:
+            return await self._build_cleanup_plan(connection, requested)
+
+    async def delete_history_runs(
+        self,
+        run_ids: tuple[str, ...],
+        *,
+        cascade_consumers: bool,
+    ) -> RAGCleanupResult:
+        requested = tuple(_uuid(value, "run_id") for value in run_ids)
+        if not requested:
+            raise ValueError("run_ids must not be empty")
+        if len(requested) != len(set(requested)):
+            raise ValueError("run_ids must not contain duplicates")
+        try:
+            async with self._transaction() as connection:
+                plan = await self._build_cleanup_plan(connection, requested)
+                if plan.cascade_required and not cascade_consumers:
+                    raise RAGPersistenceConflictError(
+                        "source history is referenced by retained consumer runs"
+                    )
+                target_ids = tuple(
+                    _uuid(value, "delete_run_id")
+                    for value in plan.delete_run_ids
+                )
+                rows = tuple(
+                    (
+                        await connection.execute(
+                            select(
+                                analysis_runs.c.run_id,
+                                analysis_runs.c.status,
+                            )
+                            .where(analysis_runs.c.run_id.in_(target_ids))
+                            .order_by(analysis_runs.c.run_id)
+                            .with_for_update()
+                        )
+                    ).mappings()
+                )
+                nonterminal = tuple(
+                    row
+                    for row in rows
+                    if row["status"]
+                    not in {
+                        "completed",
+                        "failed",
+                        "cancelled",
+                        "completed_with_persistence_error",
+                    }
+                )
+                if nonterminal:
+                    raise RAGPersistenceConflictError(
+                        "history cleanup requires terminal runs"
+                    )
+                existing_ids = {row["run_id"] for row in rows}
+                delete_order = tuple(
+                    value
+                    for value in plan.delete_order
+                    if _uuid(value, "delete_run_id") in existing_ids
+                )
+                if not delete_order:
+                    return RAGCleanupResult(
+                        requested_run_ids=tuple(str(value) for value in requested),
+                        deleted_run_ids=(),
+                        delete_order=(),
+                    )
+                delete_ids = tuple(
+                    _uuid(value, "delete_run_id") for value in delete_order
+                )
+                item_ids = select(transcript_items.c.item_id).where(
+                    transcript_items.c.run_id.in_(delete_ids)
+                )
+                await connection.execute(
+                    delete(rag_consumption_links).where(
+                        rag_consumption_links.c.consumer_run_id.in_(delete_ids)
+                    )
+                )
+                await connection.execute(
+                    delete(transcript_contents).where(
+                        transcript_contents.c.item_id.in_(item_ids)
+                    )
+                )
+                await connection.execute(
+                    delete(transcript_items).where(
+                        transcript_items.c.run_id.in_(delete_ids)
+                    )
+                )
+                await connection.execute(
+                    delete(analysis_sessions).where(
+                        analysis_sessions.c.run_id.in_(delete_ids)
+                    )
+                )
+                await connection.execute(
+                    delete(analysis_runs).where(
+                        analysis_runs.c.run_id.in_(delete_ids)
+                    )
+                )
+                return RAGCleanupResult(
+                    requested_run_ids=tuple(str(value) for value in requested),
+                    deleted_run_ids=delete_order,
+                    delete_order=delete_order,
+                )
+        except IntegrityError as error:
+            raise RAGPersistenceConflictError(
+                "history cleanup raced with a new consumption dependency"
+            ) from error
+
+    @staticmethod
+    async def _build_cleanup_plan(
+        connection: AsyncConnection,
+        requested: tuple[UUID, ...],
+    ) -> RAGCleanupPlan:
+        requested_set = set(requested)
+        seen = set(requested)
+        frontier = set(requested)
+        graph: dict[UUID, set[UUID]] = {}
+        dependencies: dict[UUID, RAGCleanupDependency] = {}
+        while frontier:
+            rows = tuple(
+                (
+                    await connection.execute(
+                        select(
+                            rag_consumption_links.c.link_id,
+                            rag_consumption_links.c.source_generation_id,
+                            rag_consumption_links.c.source_case_id,
+                            rag_case_projections.c.source_run_id,
+                            rag_consumption_links.c.source_result_item_id,
+                            rag_consumption_links.c.consumer_run_id,
+                            rag_consumption_links.c.consumer_item_id,
+                        )
+                        .select_from(
+                            rag_consumption_links.join(
+                                rag_case_projections,
+                                and_(
+                                    rag_case_projections.c.generation_id
+                                    == rag_consumption_links.c.source_generation_id,
+                                    rag_case_projections.c.case_id
+                                    == rag_consumption_links.c.source_case_id,
+                                ),
+                            )
+                        )
+                        .where(
+                            rag_case_projections.c.source_run_id.in_(
+                                tuple(frontier)
+                            )
+                        )
+                        .order_by(
+                            rag_consumption_links.c.created_at,
+                            rag_consumption_links.c.link_id,
+                        )
+                    )
+                ).mappings()
+            )
+            next_frontier: set[UUID] = set()
+            for row in rows:
+                dependencies[row["link_id"]] = RAGCleanupDependency(
+                    link_id=str(row["link_id"]),
+                    source_generation_id=str(row["source_generation_id"]),
+                    source_case_id=str(row["source_case_id"]),
+                    source_run_id=str(row["source_run_id"]),
+                    source_result_item_id=str(row["source_result_item_id"]),
+                    consumer_run_id=str(row["consumer_run_id"]),
+                    consumer_item_id=str(row["consumer_item_id"]),
+                )
+                consumer = row["consumer_run_id"]
+                graph.setdefault(row["source_run_id"], set()).add(consumer)
+                if consumer not in seen:
+                    next_frontier.add(consumer)
+            if not next_frontier:
+                break
+            seen.update(next_frontier)
+            frontier = next_frontier
+        ordered_ids: list[UUID] = []
+        visited: set[UUID] = set()
+        visiting: set[UUID] = set()
+
+        def add_consumers_before_source(run_id: UUID) -> None:
+            if run_id in visited or run_id in visiting:
+                return
+            visiting.add(run_id)
+            for consumer_run_id in sorted(graph.get(run_id, ())):
+                add_consumers_before_source(consumer_run_id)
+            visiting.remove(run_id)
+            visited.add(run_id)
+            ordered_ids.append(run_id)
+
+        for run_id in sorted(requested):
+            add_consumers_before_source(run_id)
+        for run_id in sorted(seen):
+            add_consumers_before_source(run_id)
+        delete_order = tuple(str(run_id) for run_id in ordered_ids)
+        return RAGCleanupPlan(
+            requested_run_ids=tuple(str(value) for value in requested),
+            delete_run_ids=tuple(str(run_id) for run_id in sorted(seen)),
+            delete_order=delete_order,
+            dependencies=tuple(dependencies.values()),
+            cascade_required=bool(seen.difference(requested_set)),
         )
 
     @staticmethod
