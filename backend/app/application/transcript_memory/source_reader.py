@@ -4,6 +4,7 @@ from typing import Generic, Protocol, TypeVar, cast
 from uuid import UUID
 
 from app.application.query_understanding.context_models import AnalysisContext
+from app.application.analysis_runs.models import AgentRole, AgentSessionStatus
 from app.application.transcript_memory.source_models import (
     ConfirmedSourceReference,
     RAGCaseSource,
@@ -86,7 +87,7 @@ class TypedRAGSourceReader:
             session_id=None,
             content_type="query_understood",
             body_type=AnalysisContext,
-            require_run_global=True,
+            require_session_owned=True,
         )
 
     async def read_topology(
@@ -141,7 +142,7 @@ class TypedRAGSourceReader:
         session_id: UUID | None,
         content_type: str,
         body_type: type[SourceBodyT],
-        require_run_global: bool = False,
+        require_session_owned: bool = False,
         require_rag_candidate: bool = False,
     ) -> TypedRAGSourceItem[SourceBodyT]:
         read = await self._reader.read_registered_item(
@@ -153,7 +154,7 @@ class TypedRAGSourceReader:
         item = read.item
         if item.run_id != run_id or item.item_id != item_id:
             raise RAGSourceReadError("historical_source_identity_mismatch")
-        if require_run_global and item.session_id is not None:
+        if require_session_owned and item.session_id is None:
             raise RAGSourceReadError("historical_source_scope_mismatch")
         if require_rag_candidate and not item.rag_eligible:
             raise RAGSourceReadError("historical_source_not_rag_candidate")
@@ -233,12 +234,7 @@ class TranscriptRAGCaseSourceReader:
             session_id=session_id,
             require_rag_candidate=True,
         )
-        context = self._one_typed_item(
-            snapshot,
-            content_type="query_understood",
-            body_type=AnalysisContext,
-            session_id=None,
-        )
+        context = self._one_analysis_context(snapshot)
         topology = self._one_typed_item(
             snapshot,
             content_type="topology_ready",
@@ -280,6 +276,40 @@ class TranscriptRAGCaseSourceReader:
             result=result,
             fragments=tuple(fragments),
             confirmed_references=tuple(confirmed),
+        )
+
+    def _one_analysis_context(
+        self,
+        snapshot: RegisteredRunRead,
+    ) -> TypedRAGSourceItem[AnalysisContext]:
+        matches = tuple(
+            item
+            for item in snapshot.items
+            if item.item.content_type == "query_understood"
+            and item.item.content_schema_version == 1
+        )
+        if len(matches) != 1:
+            raise RAGSourceReadError("historical_source_closure_ambiguous")
+        session_id = matches[0].item.session_id
+        session = next(
+            (
+                item
+                for item in snapshot.sessions
+                if item.session_id == session_id
+            ),
+            None,
+        )
+        if (
+            session_id is None
+            or session is None
+            or session.agent_role is not AgentRole.QUERY_PARSER
+            or session.status is not AgentSessionStatus.COMPLETED
+        ):
+            raise RAGSourceReadError("historical_source_scope_mismatch")
+        return self._typed_item(
+            matches[0],
+            body_type=AnalysisContext,
+            require_rag_candidate=False,
         )
 
     def _one_typed_item(

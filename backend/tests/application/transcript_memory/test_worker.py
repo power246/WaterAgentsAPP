@@ -21,7 +21,11 @@ from app.domain import (
     RAGIndexJobStatus,
 )
 from app.ports import InvalidPortResponseError, PortTimeoutError
-from tests.application.transcript_memory.m3_support import REGISTRY, case_source
+from tests.application.transcript_memory.m3_support import (
+    REGISTRY,
+    case_source,
+    parser_session,
+)
 from tests.infrastructure.embeddings.fake import DeterministicEmbeddingPort
 
 
@@ -233,7 +237,7 @@ def test_transcript_source_loader_decodes_authoritative_run_once() -> None:
                 created_item_id=UUID(int=102),
                 terminal_item_id=UUID(int=103),
             ),
-            sessions=(source.session,),
+            sessions=(parser_session(), source.session),
             items=tuple(
                 REGISTRY.parse(item.item, item.item.inline_body or "") for item in typed
             ),

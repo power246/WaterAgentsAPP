@@ -57,10 +57,13 @@ async def seed_completed_source(
     target_comid: str = "12345678",
 ) -> TranscriptSourceFixture:
     run_id = uuid4()
+    parser_session_id = uuid4()
     session_id = uuid4()
     request_item_id = uuid4()
     run_created_item_id = uuid4()
     analysis_context_item_id = uuid4()
+    parser_created_item_id = uuid4()
+    parser_terminal_item_id = uuid4()
     session_created_item_id = uuid4()
     fragment_item_id = uuid4()
     result_item_id = uuid4()
@@ -95,10 +98,25 @@ async def seed_completed_source(
                 terminal_item_id=session_terminal_item_id,
             )
         )
+        await connection.execute(
+            insert(analysis_sessions).values(
+                session_id=parser_session_id,
+                run_id=run_id,
+                agent_role="query_parser",
+                target_comid=None,
+                status="completed",
+                created_at=created_at,
+                updated_at=completed_at,
+                created_item_id=parser_created_item_id,
+                terminal_item_id=parser_terminal_item_id,
+            )
+        )
         item_specs = (
             (request_item_id, None, "analysis_request", False),
             (run_created_item_id, None, "lifecycle_event", False),
-            (analysis_context_item_id, None, "analysis_context", False),
+            (parser_created_item_id, parser_session_id, "lifecycle_event", False),
+            (analysis_context_item_id, parser_session_id, "query_understood", False),
+            (parser_terminal_item_id, parser_session_id, "lifecycle_event", False),
             (session_created_item_id, session_id, "lifecycle_event", False),
             (fragment_item_id, session_id, "evidence_fragment", True),
             (result_item_id, session_id, "inference_result", True),

@@ -103,13 +103,13 @@ def test_typed_reader_rejects_wrong_typed_body_and_scope() -> None:
         _read(source.result, body=source.analysis_context.body)
     )
     wrong_body_reader = TypedRAGSourceReader(wrong_body_backend, REGISTRY)
-    scoped_context = replace(
+    run_owned_context = replace(
         source.analysis_context,
         item=source.analysis_context.item.model_copy(
-            update={"session_id": source.session.session_id}
+            update={"session_id": None}
         ),
     )
-    scoped_backend = SingleItemReader(_read(scoped_context))
+    scoped_backend = SingleItemReader(_read(run_owned_context))
     scoped_reader = TypedRAGSourceReader(scoped_backend, REGISTRY)
 
     with pytest.raises(
@@ -126,8 +126,8 @@ def test_typed_reader_rejects_wrong_typed_body_and_scope() -> None:
     with pytest.raises(RAGSourceReadError, match="historical_source_scope_mismatch"):
         asyncio.run(
             scoped_reader.read_analysis_context(
-                scoped_context.item.run_id,
-                scoped_context.item.item_id,
+                run_owned_context.item.run_id,
+                run_owned_context.item.item_id,
             )
         )
 

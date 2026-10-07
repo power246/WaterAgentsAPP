@@ -80,7 +80,8 @@ def validate_source_closure(
     result = result_item.body
     if (
         context_item.item.run_id != result.run_id
-        or context_item.item.session_id is not None
+        or context_item.item.session_id is None
+        or context_item.item.session_id == result.session_id
         or context_item.item.content_type != "query_understood"
         or context_item.item.content_schema_version != 1
         or topology_item.item.run_id != result.run_id

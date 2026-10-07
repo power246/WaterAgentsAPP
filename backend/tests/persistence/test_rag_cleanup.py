@@ -358,7 +358,7 @@ def test_generation_cleanup_switch_retry_and_rebuild_leave_transcript_untouched(
 
             async with engine.connect() as connection:
                 assert await _count(connection, analysis_runs) == 1
-                assert await _count(connection, transcript_items) == 8
+                assert await _count(connection, transcript_items) == 10
         finally:
             await engine.dispose()
 

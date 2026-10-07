@@ -49,6 +49,7 @@ RUN_ID = UUID("81000000-0000-4000-8000-000000000001")
 CONTEXT_ITEM_ID = UUID("81000000-0000-4000-8000-000000000002")
 TOPOLOGY_ITEM_ID = UUID("81000000-0000-4000-8000-000000000003")
 SESSION_ID = UUID("81000000-0000-4000-8000-000000000010")
+PARSER_SESSION_ID = UUID("81000000-0000-4000-8000-000000000009")
 FRAGMENT_ITEM_ID = UUID("81000000-0000-4000-8000-000000000011")
 RESULT_ITEM_ID = UUID("81000000-0000-4000-8000-000000000012")
 SOURCE_RECORD_ITEM_ID = UUID("81000000-0000-4000-8000-000000000013")
@@ -56,6 +57,19 @@ GENERATION_ID = "81000000-0000-4000-8000-000000000020"
 PROFILE_ID = "sha256:test-profile"
 NOW = datetime(2026, 10, 8, 1, tzinfo=UTC)
 REGISTRY = create_production_registry()
+
+
+def parser_session() -> SessionSummary:
+    return SessionSummary(
+        session_id=PARSER_SESSION_ID,
+        agent_role=AgentRole.QUERY_PARSER,
+        target_comid=None,
+        status=AgentSessionStatus.COMPLETED,
+        created_at=NOW,
+        updated_at=NOW,
+        result_ref=None,
+        result_summary=None,
+    )
 
 
 def case_source(
@@ -89,7 +103,7 @@ def case_source(
         content_type="query_understood",
         body=resolved_context,
         item_id=CONTEXT_ITEM_ID,
-        session_id=None,
+        session_id=PARSER_SESSION_ID,
         sequence=3,
     )
     topology_item = typed_item(

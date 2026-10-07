@@ -338,10 +338,18 @@ class EvidenceAcquisitionService:
         usage = self._executor.budget_usage(current_scope)
         visible: list[EvidenceToolDescriptor] = []
         for descriptor in self._registry.roster(current_scope):
-            if descriptor.policy_class not in {
-                EvidencePolicyClass.OPTIONAL,
-                EvidencePolicyClass.DETERMINISTIC,
-            }:
+            agent_selectable_producer = (
+                descriptor.policy_class is EvidencePolicyClass.PRODUCER_SLOT
+                and descriptor.name == "search_transcript_evidence"
+            )
+            if (
+                descriptor.policy_class
+                not in {
+                    EvidencePolicyClass.OPTIONAL,
+                    EvidencePolicyClass.DETERMINISTIC,
+                }
+                and not agent_selectable_producer
+            ):
                 continue
             if (
                 descriptor.policy_class is EvidencePolicyClass.OPTIONAL
@@ -788,11 +796,17 @@ class EvidenceAcquisitionService:
         if (
             request.session_id != scope.session_id
             or descriptor is None
-            or descriptor.policy_class
-            not in {
-                EvidencePolicyClass.OPTIONAL,
-                EvidencePolicyClass.DETERMINISTIC,
-            }
+            or (
+                descriptor.policy_class
+                not in {
+                    EvidencePolicyClass.OPTIONAL,
+                    EvidencePolicyClass.DETERMINISTIC,
+                }
+                and not (
+                    descriptor.policy_class is EvidencePolicyClass.PRODUCER_SLOT
+                    and descriptor.name == "search_transcript_evidence"
+                )
+            )
             or request.tool_name not in legal
         ):
             raise EvidenceScopeViolationError()

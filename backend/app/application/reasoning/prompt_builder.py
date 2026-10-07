@@ -36,6 +36,7 @@ from app.domain import (
     DomainEnum,
     DomainFloat,
     DomainModel,
+    HistoricalSearchStrategy,
     ModelSelection,
     NonEmptyString,
     OutcomeStatus,
@@ -669,6 +670,11 @@ def _option_schema(
             "type": "integer",
             "minimum": 1,
             "maximum": tool.max_records_per_call,
+        }
+    if field == "historical_search_strategy":
+        return {
+            "type": "string",
+            "enum": tuple(strategy.value for strategy in HistoricalSearchStrategy),
         }
     if field == "fragment_refs":
         return {

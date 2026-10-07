@@ -382,7 +382,7 @@ class PostgresRAGRepository:
                 context_item,
                 and_(
                     context_item.c.run_id == rag_case_projections.c.source_run_id,
-                    context_item.c.session_id.is_(None),
+                    context_item.c.session_id.is_not(None),
                     context_item.c.item_id
                     == rag_case_projections.c.analysis_context_item_id,
                 ),
@@ -415,7 +415,7 @@ class PostgresRAGRepository:
             source_item.c.content_type == "inference_result",
             source_item.c.content_schema_version == 1,
             source_item.c.rag_eligible.is_(True),
-            context_item.c.content_type == "analysis_context",
+            context_item.c.content_type == "query_understood",
             context_item.c.content_schema_version == 1,
         ]
         strategy = query.intent.strategy
@@ -2014,7 +2014,7 @@ class PostgresRAGRepository:
                         source_item.c.content_type == "inference_result",
                         source_item.c.content_schema_version == 1,
                         source_item.c.rag_eligible.is_(True),
-                        context_item.c.content_type == "analysis_context",
+                        context_item.c.content_type == "query_understood",
                         context_item.c.content_schema_version == 1,
                         analysis_runs.c.status == "completed",
                         analysis_sessions.c.status == "completed",
