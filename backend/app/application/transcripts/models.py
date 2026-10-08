@@ -77,8 +77,12 @@ class AnalysisRequestV1(DomainModel):
         return value
 
     def to_configuration_snapshot(
-        self, analysis_timezone: str
+        self, analysis_timezone: str, *,
+        unit_policy_version: int | None = None,
+        unit_registry_digest: str | None = None,
     ) -> AnalysisConfigurationSnapshot:
+        if (unit_policy_version is None) != (unit_registry_digest is None):
+            raise ValueError("unit policy version and registry digest must be supplied together")
         source = (
             TimeResolutionPreferenceSource.FRONTEND
             if "time_resolution" in self.model_fields_set
@@ -91,6 +95,8 @@ class AnalysisRequestV1(DomainModel):
             parser_model=self.parser_model,
             waterbody_model=self.waterbody_model,
             memory_mode=self.memory_mode,
+            unit_policy_version=unit_policy_version if unit_policy_version is not None else "legacy",
+            unit_registry_digest=unit_registry_digest if unit_registry_digest is not None else "unknown",
         )
 
 

@@ -33,6 +33,7 @@ from app.application.analysis_runs.creation import (
     InvalidSubmissionEncodingError,
 )
 from app.application.analysis_runs.models import CorrelationContext, RunStatus
+from app.application.settings_admin.errors import SettingsAdminError
 from app.application.transcripts.reader import (
     InvalidHistoryCursorError,
     PersistenceRetryUnavailableError,
@@ -74,6 +75,11 @@ _SAFE_FIELDS = set(CreateAnalysisRunRequest.model_fields) | {
     "body", "path", "query", "header", "run_id", "session_id", "item_id",
     "last-event-id", "view", "limit", "cursor", "comid", "coordinates",
     "latitude", "longitude", "start_date", "end_date", "provider", "model",
+    "expected_revision", "defaults", "analysis_timezone", "desired_embedding_profile_id",
+    "base_version", "entries", "parameter", "target_unit_id", "key_name",
+    "value", "operation_id", "generation_id", "selection", "run_ids",
+    "cascade_consumers", "confirmation_token", "confirmation_phrase",
+    "safe_error_codes", "registry_digest",
 }
 
 
@@ -237,6 +243,10 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         )
     elif isinstance(exception, InvalidSubmissionEncodingError):
         status, code, message = 400, "invalid_request", "The request is invalid."
+    elif isinstance(exception, SettingsAdminError):
+        status, code, message = exception.status, exception.code, exception.public_message
+        stage, retryable = exception.stage, exception.retryable
+        headers["Cache-Control"] = "no-store"
     elif isinstance(exception, IdempotencyKeyConflictError):
         status, code = 409, "idempotency_key_conflict"
         message = "The idempotency key was already used with a different request body."
@@ -374,5 +384,6 @@ def register_error_handlers(application: FastAPI) -> None:
         IdempotencyKeyConflictError, IdempotencyWaitTimeoutError,
         CreationCommitUnconfirmedError, CreationPersistenceUnavailableError,
         CreationRolledBackError,
+        SettingsAdminError,
     ):
         application.add_exception_handler(exception_type, handle_error)

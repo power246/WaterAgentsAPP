@@ -32,6 +32,8 @@ CONFIGURATION = {
     "parser_model": PARSER_MODEL.model_dump(mode="json"),
     "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
     "memory_mode": "stateless",
+    "unit_policy_version": 2,
+    "unit_registry_digest": "a" * 64,
 }
 ERROR = {
     "error_id": ERROR_ID,
@@ -129,6 +131,22 @@ def test_snapshot_normalizes_uuid_and_utc_and_round_trips() -> None:
         "updated_at": UTC_TIME,
     }
     assert AnalysisRunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+
+
+def test_old_run_configuration_projects_explicit_legacy_identity() -> None:
+    legacy = {key: value for key, value in CONFIGURATION.items() if not key.startswith("unit_")}
+    snapshot = AnalysisRunSnapshot.model_validate(
+        {**SNAPSHOT, "configuration": legacy}
+    )
+    assert snapshot.configuration.unit_policy_version == "legacy"
+    assert snapshot.configuration.unit_registry_digest == "unknown"
+    assert snapshot.configuration.analysis_timezone == "America/Chicago"
+    assert AnalysisRunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
+
+    with pytest.raises(ValidationError):
+        AnalysisConfigurationSnapshot.model_validate(
+            {**legacy, "unit_policy_version": 2}
+        )
 
 
 def test_snapshot_and_nested_configuration_are_immutable() -> None:

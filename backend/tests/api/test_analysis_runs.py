@@ -184,6 +184,8 @@ def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> No
                     "parser_model": PARSER_MODEL.model_dump(mode="json"),
                     "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
                     "memory_mode": "stateless",
+                    "unit_policy_version": "legacy",
+                    "unit_registry_digest": "unknown",
                 },
             }
             assert response.json() == expected

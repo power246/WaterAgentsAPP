@@ -48,7 +48,6 @@ def test_admin_operation_status_and_preview_routes_exist(application) -> None:
     assert {"operation_id", "kind", "state", "progress", "safe_error"} <= set(properties)
 
 
-@pytest.mark.xfail(strict=True, reason="M9 Milestones 1 and 3: frozen run unit identity")
 def test_run_configuration_carries_unit_policy_identity() -> None:
     assert {"unit_policy_version", "unit_registry_digest"} <= set(
         AnalysisConfigurationSnapshot.model_fields

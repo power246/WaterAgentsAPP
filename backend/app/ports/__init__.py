@@ -32,6 +32,8 @@ from app.ports.hydrology_data import (
     TopologyDataPort,
 )
 from app.ports.key_store import KeyStorePort
+from app.ports.settings_store import SettingsStorePort
+from app.ports.admin_operation_store import AdminOperationStorePort
 from app.ports.llm import LLMPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.ports.parameter_catalog import ParameterCatalogPort
@@ -58,6 +60,8 @@ __all__ = [
     "HistoricalSourceReaderPort",
     "InvalidPortResponseError",
     "KeyStorePort",
+    "SettingsStorePort",
+    "AdminOperationStorePort",
     "LLMPort",
     "ModelCatalogPort",
     "ParameterCatalogPort",

@@ -61,6 +61,8 @@ def test_request_preserves_explicit_resolution_through_configuration_and_json(
         "parser_model": PARSER_MODEL.model_dump(mode="json"),
         "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
         "memory_mode": "stateless",
+        "unit_policy_version": "legacy",
+        "unit_registry_digest": "unknown",
     }
     assert ("time_resolution" in request.model_fields_set) is (resolution is not None)
     restored = CreateAnalysisRunRequest.model_validate_json(
@@ -88,6 +90,20 @@ def test_configuration_does_not_follow_later_settings_changes() -> None:
     )
     with pytest.raises(ValidationError):
         request.to_configuration_snapshot("Not/A-Timezone")
+
+
+def test_m9_unit_identity_is_frozen_with_timezone_at_create() -> None:
+    request = CreateAnalysisRunRequest.model_validate(create_request("Analyze water quality"))
+    current = {"timezone": "America/Chicago", "unit_version": 2, "registry_digest": "a" * 64}
+    snapshot = request.to_configuration_snapshot(
+        current["timezone"], unit_policy_version=current["unit_version"],
+        unit_registry_digest=current["registry_digest"],
+    )
+    current.update(timezone="Asia/Shanghai", unit_version=3, registry_digest="b" * 64)
+    restored = AnalysisConfigurationSnapshot.model_validate_json(snapshot.model_dump_json())
+    assert restored.analysis_timezone == "America/Chicago"
+    assert restored.unit_policy_version == 2
+    assert restored.unit_registry_digest == "a" * 64
 
 
 @pytest.mark.parametrize("query", ["", " \n\t ", None, 12, True, [], {}])
@@ -154,6 +170,8 @@ def test_success_response_reuses_public_snapshot_without_query(status: RunStatus
             "parser_model": PARSER_MODEL.model_dump(mode="json"),
             "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
             "memory_mode": "stateless",
+            "unit_policy_version": "legacy",
+            "unit_registry_digest": "unknown",
         },
     }
     assert "private query" not in response.model_dump_json()

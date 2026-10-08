@@ -363,17 +363,17 @@ def test_stable_ports_use_domain_types() -> None:
     ]
 
 
-def test_deferred_ports_are_generic_without_guessing_dtos() -> None:
+def test_deferred_ports_remain_generic_except_m9_typed_key_store() -> None:
     generic_ports = (
         LLMPort[int, str],
         TranscriptStorePort[str, int, float, bytes],
         TranscriptReadStorePort[str, int],
         EventPublisherPort[str],
         CachePort[str],
-        KeyStorePort[str],
     )
 
     assert all(get_origin(port) is not None for port in generic_ports)
+    assert get_origin(KeyStorePort) is None
 
 
 @pytest.mark.parametrize(

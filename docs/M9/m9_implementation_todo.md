@@ -143,37 +143,39 @@
 
 ### 工作
 
-- [ ] 在 `domain/settings_admin` 或更少但等价的模块中定义严格 typed `MutableDefaults`、`SettingsSnapshot`、safe catalog、`CredentialName/Status/Lease`、unit policy/version/override、Admin action/preview/operation 和 tombstone identity；拒绝未知字段/枚举/无界 JSON。
-- [ ] 公开 DTO 与 secret-bearing `StoredCredential/CredentialLease` 完全分离；secret-bearing type不得实现公开 serialization，masked projection必须由 application显式构造。
-- [ ] 新增最小 `SettingsStorePort`、`AdminOperationStorePort`，并收敛现有 `KeyStorePort` 的 typed envelope/availability语义；ports不泄漏 ORM、keyring、FastAPI或 provider response。
-- [ ] 定义稳定 settings revision、unit registry/version identity、admin action/fingerprint/confirmation digest、operation state与 safe result/error；所有状态转换有封闭枚举和不变量。
-- [ ] 扩展当前唯一 `AnalysisConfigurationSnapshot`，加入 `unit_policy_version` 与 `unit_registry_digest`；旧持久化记录缺字段时只允许 explicit legacy/unknown public projection，不回填当前值。
-- [ ] 定义 Settings/Keys/Admin application exceptions 与 stable error codes/status mapping，包括 revision、credential allowlist/store、preview、dependency、operation、generation、tombstone 410；继续复用现有 error envelope/validation shape。
-- [ ] 将 [M9 API route 总表](m9_settings_admin_api.md#2-route-总表) 转成 OpenAPI contract tests与严格 request/response schemas；route尚未实现时可保持预期 red，不得注册返回假成功的 stub。
-- [ ] 定义 OpenAPI → frontend type generation输入，包含 session SSE union缺口的解决方式；不得把 handwritten duplicate interfaces或 `any` 作为临时完成条件。
-- [ ] 原子更新 exports、builders、fixtures、history/read-model/schema tests中受 snapshot/domain变化影响的消费者，不保留旧/new snapshot兼容分支。
+- [x] 在 `domain/settings_admin` 或更少但等价的模块中定义严格 typed `MutableDefaults`、`SettingsSnapshot`、safe catalog、`CredentialName/Status/Lease`、unit policy/version/override、Admin action/preview/operation 和 tombstone identity；拒绝未知字段/枚举/无界 JSON。
+- [x] 公开 DTO 与 secret-bearing `StoredCredential/CredentialLease` 完全分离；secret-bearing type不得实现公开 serialization，masked projection必须由 application显式构造。
+- [x] 新增最小 `SettingsStorePort`、`AdminOperationStorePort`，并收敛现有 `KeyStorePort` 的 typed envelope/availability语义；ports不泄漏 ORM、keyring、FastAPI或 provider response。
+- [x] 定义稳定 settings revision、unit registry/version identity、admin action/fingerprint/confirmation digest、operation state与 safe result/error；所有状态转换有封闭枚举和不变量。
+- [x] 扩展当前唯一 `AnalysisConfigurationSnapshot`，加入 `unit_policy_version` 与 `unit_registry_digest`；旧持久化记录缺字段时只允许 explicit legacy/unknown public projection，不回填当前值。
+- [x] 定义 Settings/Keys/Admin application exceptions 与 stable error codes/status mapping，包括 revision、credential allowlist/store、preview、dependency、operation、generation、tombstone 410；继续复用现有 error envelope/validation shape。
+- [x] 将 [M9 API route 总表](m9_settings_admin_api.md#2-route-总表) 转成 OpenAPI contract tests与严格 request/response schemas；route尚未实现时可保持预期 red，不得注册返回假成功的 stub。
+- [x] 定义 OpenAPI → frontend type generation输入，包含 session SSE union缺口的解决方式；不得把 handwritten duplicate interfaces或 `any` 作为临时完成条件。
+- [x] 原子更新 exports、builders、fixtures、history/read-model/schema tests中受 snapshot/domain变化影响的消费者，不保留旧/new snapshot兼容分支。
 
 ### Tests
 
-- [ ] domain正反矩阵覆盖 settings enum/catalog/model role、credential allowlist、unit entry/digest、Admin state transition、confirmation expiry/action binding和未知字段。
-- [ ] secret safety tests证明公开 DTO、`repr`、exception、JSON schema和 fixture均不含 credential value或可逆 secret fragment。
-- [ ] snapshot round-trip覆盖新 M9 record与旧 record legacy/unknown，timezone/unit policy identity不被当前 settings替换。
-- [ ] ports/architecture tests锁定 domain/application依赖方向、route schema与infrastructure隔离、无 V2/read union/feature flag/第二套 admin operation。
-- [ ] OpenAPI target tests锁定 route/method/status/header/error code与 key/admin allowlists，未实现行为保持明确 red。
+- [x] domain正反矩阵覆盖 settings enum/catalog/model role、credential allowlist、unit entry/digest、Admin state transition、confirmation expiry/action binding和未知字段。
+- [x] secret safety tests证明公开 DTO、`repr`、exception、JSON schema和 fixture均不含 credential value或可逆 secret fragment。
+- [x] snapshot round-trip覆盖新 M9 record与旧 record legacy/unknown，timezone/unit policy identity不被当前 settings替换。
+- [x] ports/architecture tests锁定 domain/application依赖方向、route schema与infrastructure隔离、无 V2/read union/feature flag/第二套 admin operation。
+- [x] OpenAPI target tests锁定 route/method/status/header/error code与 key/admin allowlists，未实现行为保持明确 red。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain backend/tests/ports backend/tests/application/test_run_models.py backend/tests/api/test_analysis_schemas.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] 运行新增 M9 contract tests并记录 expected red与已转绿范围。
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/domain backend/tests/ports backend/tests/application/test_run_models.py backend/tests/api/test_analysis_schemas.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] 运行新增 M9 contract tests并记录 expected red与已转绿范围。
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：无数据库/网络/浏览器时即可严格表达 M9 settings、credential、unit、Admin、tombstone与扩展 configuration；所有当前 V1 consumer能编译，公开面无法携带 secret，但尚无 migration、真实 route或运行时行为。
 
 提交边界：domain/application types、ports、exceptions、schemas、exports、fixtures、contract/architecture tests；不得包含 migration、SQL、keyring、provider factory、Admin task或 frontend依赖。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：在 codex/m9-milestone-0（基于 origin/main 的 cf7eed7）完成单一 V1 的 M9 Settings/Keys/Admin/units/tombstone 类型、typed ports、safe error mapping 与 OpenAPI 目标 schema/SSE type source；历史缺失单位字段固定投影为 legacy/unknown，当前生产 route 未添加占位实现。新增领域、端口、架构、HTTP 与预期 red 合同测试，同步受影响的 snapshot/fixture/consumer。
+
+验证：最终 focused 529 passed、architecture 159 passed、M9 API contract 10 passed/26 strict xfailed；此前完整专用 PostgreSQL wateragents_test 回归 2286 passed/26 xfailed（其后仅收紧 M9 DTO 的 strict bool 与新增测试，已由最终 focused/architecture/API contract 覆盖），compileall 和 git diff --check 通过。无 migration/SQL/frontend 依赖；现有 migration head 20261007_01 未改；无真实 provider、OS credential backend、browser、Ubuntu/macOS 或容量验证。26 项 xfail 对应 M3–M8 待实现的真实 route/410/static 能力；本地提交 SHA 以该阶段提交 HEAD 为准。
 
 ## Milestone 2：PostgreSQL migration 与 repositories
 

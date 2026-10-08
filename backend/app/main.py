@@ -14,6 +14,7 @@ from app.api.http.errors import register_error_handlers
 from app.api.http.health import router as health_router
 from app.api.http.request_context import RequestContextMiddleware
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
+from app.api.schemas.settings_admin import M9_PUBLIC_SCHEMAS
 from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.creation import RunCreationCandidate, RunCreationResult
 from app.application.analysis_runs.persistence import (
@@ -21,6 +22,7 @@ from app.application.analysis_runs.persistence import (
     PersistenceWriteBatch,
 )
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
+from app.application.settings_admin.errors import M9_PUBLIC_ERRORS
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import AnalysisContext
 from app.application.evidence_tools import (
@@ -29,7 +31,9 @@ from app.application.evidence_tools import (
 )
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import TranscriptRegistry, create_production_registry
-from app.application.transcripts.stream_models import RunSnapshotEvent
+from app.application.transcripts.stream_models import (
+    RunSnapshotEvent, SessionProcessEvent, StreamEndEvent,
+)
 from app.domain import HydrologyGraph
 from app.domain.hydrology import ParameterCapabilityRegistry
 from app.infrastructure.config import (
@@ -319,12 +323,31 @@ def create_app(
             ].pop("default", None)
         schemas.update(definitions)
         schemas["CreateAnalysisRunRequest"] = create_schema
-        for public_model in (AnalysisContext, HydrologyGraph, RunSnapshotEvent):
+        for public_model in (
+            AnalysisContext, HydrologyGraph, RunSnapshotEvent,
+            SessionProcessEvent, StreamEndEvent, *M9_PUBLIC_SCHEMAS,
+        ):
             public_schema = public_model.model_json_schema(
                 ref_template="#/components/schemas/{model}",
             )
             schemas.update(public_schema.pop("$defs", {}))
             schemas[public_model.__name__] = public_schema
+        schema["x-m9-frontend-type-source"] = {
+            "openapi": "/openapi.json",
+            "sse_event_payloads": {
+                "run_snapshot": "#/components/schemas/RunSnapshotEvent",
+                "transcript_item": "#/components/schemas/TranscriptItemPayload",
+                "message_started": "#/components/schemas/MessageStartedPayload",
+                "message_delta": "#/components/schemas/MessageDeltaPayload",
+                "message_finalized": "#/components/schemas/MessageFinalizedPayload",
+                "stream_end": "#/components/schemas/StreamEndEvent",
+            },
+            "session_envelope": "#/components/schemas/SessionProcessEvent",
+        }
+        schema["x-m9-public-errors"] = [
+            {"code": error.code, "status": error.status, "retryable": error.retryable}
+            for error in M9_PUBLIC_ERRORS
+        ]
         schema["x-m4-public-errors"] = [
             {"code": code, "failed_stage": stage, "retryable": retryable}
             for code, stage, retryable in (
