@@ -19,9 +19,11 @@ from app.main import create_app
 try:
     from scripts.m4_request import smoke_request
     from scripts.m6_fixture_runtime import build_fixture_m6_runtime
+    from scripts.m8_fixture_runtime import build_fixture_m8_runtime
 except ModuleNotFoundError:  # Direct `python scripts/run_sse_smoke.py` execution.
     from m4_request import smoke_request
     from m6_fixture_runtime import build_fixture_m6_runtime
+    from m8_fixture_runtime import build_fixture_m8_runtime
 
 BASE = "/api/analysis/runs"
 SMOKE_SETTINGS = AppSettings(
@@ -187,6 +189,7 @@ async def completed_smoke() -> None:
         workflow=CompleteWorkflow(),
         transcript_store=InMemoryTranscriptStore(),
         m6_runtime_builder=build_fixture_m6_runtime,
+        m8_runtime_builder=build_fixture_m8_runtime,
     )
     async with running_server(app) as client:
         created = await client.post(
@@ -234,6 +237,7 @@ async def cancelled_smoke() -> None:
         keepalive_interval=0.01,
         transcript_store=InMemoryTranscriptStore(),
         m6_runtime_builder=build_fixture_m6_runtime,
+        m8_runtime_builder=build_fixture_m8_runtime,
     )
     async with running_server(app) as client:
         try:
