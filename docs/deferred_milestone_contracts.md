@@ -30,6 +30,12 @@
 - [M8 RAG Policy Catalog](M8/m8_rag_policy_catalog.md)
 - [M8 API / 读取契约](M8/m8_memory_rag_api.md)
 - [M8 Implementation TODO](M8/m8_implementation_todo.md)
+- [M9 总设计](M9/m9_settings_admin_demo_design.md)
+- [M9 Frontend Experience](M9/m9_frontend_experience_design.md)
+- [M9 Policy Catalog](M9/m9_settings_admin_policy_catalog.md)
+- [M9 API](M9/m9_settings_admin_api.md)
+- [M9 实施设计](M9/m9_implementation_design.md)
+- [M9 Implementation TODO](M9/m9_implementation_todo.md)
 
 ## 1. 使用方式与权威性
 
@@ -41,7 +47,7 @@
 
 ## 2. 跨 Milestone 硬约束
 
-- **GLOBAL-C01 — 新旧边界**：新系统只以当前架构、Milestone 和功能设计为依据。`backend_bk/`、`frontend_bk/` 及旧契约文档属于完全独立、最终丢弃的归档系统，不是需求、行为、数据源、兼容或测试依据；设计、实现、测试、评审和验收新系统时不得读取、导入、复制、适配、枚举或测试其中的代码、服务、接口、数据模型、依赖、配置、缓存或行为。未来新前端依据届时产品设计和新后端最终契约独立实现，不继承归档前端。
+- **GLOBAL-C01 — 新旧边界**：新系统只以当前架构、Milestone 和功能设计为依据。`backend_bk/`、`frontend_bk/` 及旧契约文档属于完全独立、最终丢弃的归档系统，不是需求、行为、数据源、兼容或测试依据；设计、实现、测试、评审和验收新系统时不得导入、复制、适配或依赖其中的代码、服务、接口、数据模型、依赖、配置、缓存或行为。用户于2026-10-08仅授权一次只读`frontend_bk/` UI调研，其唯一可继承结果已冻结在M9 D18/D19与Frontend Experience；后续Agent直接使用这些新文档，不再读取归档推导需求。新前端不继承归档前端契约。
 - **GLOBAL-C02 — 单一首版演进与验收边界**：M1–M9 是同一项目进程中的一套第一版系统，只按 Milestone 组织开发接力和内部自测；不存在可独立使用、正式联调或需要长期兼容的“M4 版”等产品中间态。M9 完成后才开始正式前后端联调和第一版整体验收。在此之前，阶段性 request、configuration、DTO、lifecycle、SSE、数据库 schema、fake adapter 和 fixture 直接更新为当前唯一形态；新增配置就在同一个配置模型/文件中增加字段并同步所有消费者，不得只因 Milestone 变化增加版本号、旧版只读 union、兼容分支、迁移层、临时 feature flag 或“当前阶段未启用”的产品行为。开发历史数据可按当前 HEAD 迁移或重建；既有 M2/M3 文档中的 legacy reader/历史版本描述只记录已经发生的实现，不构成最终产品兼容承诺，也不能作为后续新增 milestone 版本的先例，正式联调前可随当前模型收敛删除。第一版对外基线在 M9 后冻结，之后才根据真实发布兼容需要决定版本化与持久化迁移。
 - **GLOBAL-C03 — COMID 身份**：第一版业务身份只使用 COMID；只有出现非 COMID 水体的真实需求时才设计通用 `Waterbody`。
 - **GLOBAL-C04 — 时间身份**：时间事实统一存 UTC。用户时间语义按 session 固化的 IANA timezone 解释，全局设置修改不得改变已有 session。
@@ -49,7 +55,7 @@
 - **GLOBAL-C05 — 墙上时钟窗口**：窗口按当地墙上时钟推进。真实 DST transition 导致的 elapsed duration 变化合法；重复当地时间使用不同 UTC instant 作为唯一身份，不得互相覆盖。
 - **GLOBAL-C06 — Evidence 闭包**：结果、归因和进入推理的事实必须能回溯到 evidence references；不得只把事实散落在 prompt 或日志中。
 - **GLOBAL-C07 — Secret 边界**：API key、Authorization、Cookie 和其他敏感凭据不得进入 transcript、普通日志、公开错误或前端事件。业务分析 query 本身不自动视为 secret；按 M3 D26，日志允许保留其正文，只对其中凭据脱敏，不因字段名为 query 而整段隐藏。
-- **GLOBAL-C08 — 最终前端**：最终前端以当时确认的产品设计、OpenAPI 和 SSE 事件契约独立重构，不迁移旧前端字段、事件或交互契约。
+- **GLOBAL-C08 — 最终前端**：最终前端以当时确认的产品设计、OpenAPI 和 SSE 事件契约独立建设，不迁移旧前端字段、事件或交互契约。M9 可采用已冻结的三栏空间关系/按钮位置等视觉结论，但不读取、依赖或迁移旧源码。
 - **GLOBAL-C09 — 单一事实模型**：同一 request/session/event/error/result 事实不得在 API、日志、transcript 和 workflow 中维护语义不同的重复模型；边界映射只负责可见性和序列化。
 - **GLOBAL-C10 — 可验收延后**：延后事项必须同时写明归属、必须保留的约束和可观察验收方式，不能只写“以后完善”。
 - **GLOBAL-C11 — 跨系统可迁移性与简单迁移**：macOS、Windows、Linux 共用业务代码、配置格式、依赖锁和 schema 迁移链；迁移只需调整环境配置、在目标机器重建依赖并执行统一检查/启动入口，不要求改业务代码或按 OS 转换历史格式。路径、编码、进程与事件循环差异集中在基础设施边界，不依赖原开发机、特定 shell 或复制 venv/数据库原数据目录。M3 按 [实施设计 §10.4](M3/m3_transcript_history_implementation_design.md#104-跨操作系统可迁移性) 和 [迁移步骤](M3/m3_transcript_history_api.md#85-更换操作系统或机器的最短流程) 首次交付，Milestone 2/9 验证三个系统分别作为目标的锁定安装与同库切换、路径/编码兼容、原历史身份/时间/顺序/游标/回执/全文不变；缺少实际平台证据保持 partial。继续使用原 PostgreSQL 不搬历史，新空库通过同一 Alembic 初始化 schema；不额外要求内容搬迁、live state 转移或 Agent 续跑。后续 Milestone 新增依赖、脚本和存储时继续遵守。
@@ -446,26 +452,26 @@ Contract changes:
 
 ### 必须实现
 
-- **M9-C01 — Settings/keys/admin**：定型 settings、provider/model、key store 和 admin cleanup API，并将 demo 所需 fake adapter 替换为真实 adapter。embedding设置表达期望profile；变更时先构建/验证新generation、原子激活，再允许清理旧profile credential，不能在切换前使旧active search失去所需配置。
-- **M9-C02 — 动态时区**：动态修改默认 IANA analysis timezone 只影响新 session，不改变已有 snapshot。
-- **M9-C03 — Secret DTO**：定型 secret 与 masked status DTO，支持 API key 保存、清除和 masked 展示。
+- **M9-C01 — Settings/keys/admin**：定型 settings、provider/model、key store 和 admin cleanup API，并将 demo 所需真实 adapter 接入 production composition。普通 mutable defaults 使用单记录/revision；model/base URL/capability/hard budget 仍由 deployment catalog 管理。embedding设置表达期望profile；变更时先构建/验证新generation、原子激活，再允许清理旧profile credential，不能在切换前使旧active search失去所需配置。
+- **M9-C02 — 动态时区**：动态修改默认 IANA analysis timezone 只影响新 run/session，不改变已有 snapshot；history 列表/详情必须明确显示该次保存的 IANA identity，不能用浏览器或当前默认时区替代。
+- **M9-C03 — Secret DTO**：定型 secret 与 masked status DTO，第一版 UI 只管理 OpenAI/Google Geocoding credential；通过 OS user credential store 持久化，deployment secret 仅作 fallback，禁止明文 file fallback。保存 key 不联网，connection test 必须由用户显式触发。
 - **M9-C04 — 自定义单位**：确定性 unit tool 解析和校验量纲，Agent 判断参数适用性；默认只生成 session override。
 - **M9-C05 — 全局单位确认**：写入全局目标单位表必须由用户显式确认，并保存版本记录。
-- **M9-C06 — Admin cleanup**：可以清理 session history、transcript、RAG index、derived memory 和 evidence cache，但不得删除 API keys；与 M3 live-state cleanup 使用一致的 ownership/幂等规则。承接 M3 D14：明确删除 session 历史时对应幂等记录的处置，以及之后使用旧 key 的响应，并同步前端文档；不能将内存清理等同于删除历史或释放幂等 key。承接M8-C16：index-only cleanup/reindex不删除source transcript；选择性history cleanup必须先检查cross-run consumption links，对被保留run引用的source稳定返回conflict，或在用户明确确认后级联删除整个dependent consumer run，不能改写retained transcript或留下悬空reference。
+- **M9-C06 — Admin cleanup**：可以通过preview、confirmation与幂等async operation清理session history、transcript、RAG index和derived memory，但不得删除API keys/settings/unit policy versions；与M3 live-state cleanup使用一致的ownership/幂等规则。当前没有持久化evidence cache，M9不得提供no-op清理按钮/API；未来若新增必须在同一变更中定义owner、TTL/freshness、source/transcript引用、在途reader/worker、删除与重建语义。承接M3 D14：history删除后将create幂等记录收敛为最小tombstone，同key同body返回`410 idempotency_resource_deleted`、不同body返回409；不能将内存清理等同于删除历史或释放key。承接M8-C16：index-only cleanup/reindex不删除source transcript；选择性history cleanup必须先检查cross-run consumption links，对被保留run引用的source稳定返回conflict，或在用户明确确认后级联删除整个dependent consumer run，不能改写retained transcript或留下悬空reference。
 - **M9-C07 — 最终契约校对**：完成最终 OpenAPI、SSE 文档、前端消费代码、端到端 smoke 和启动说明的一致性 sweep。
-- **M9-C08 — 前端重构**：前端以最终契约独立重构，不读取或迁移旧前端组件、字段或事件。承接 D18/D69，由同一 fetch SSE 客户端实现管理 run 通知与 session 过程两类流，读取 HTTP status/body，按 D77 处理 `200` SSE、`stream_end` 与 `410` 等分支，不保留 M3 路径的旧 `204` 兼容分支，按 D73 区分 run 重连最新快照同步与 session 游标补齐过程，session 消费身份、Last-Event-ID 整数编码、400/409 校验及去重按 D78 实现，不要求 run 补播旧状态通知。页面关闭订阅不取消分析，GET 用于加载/断线核对/历史，不持续轮询；业务终态与流结束分别处理，正常关闭按 D70、明确结束通知按 D76，具体控制通知 payload、握手协议及解析库随后定型。
+- **M9-C08 — 前端重构**：新前端唯一生产目录为`frontend/`，与`frontend_bk/`所属旧系统没有代码、API、数据、构建或发布兼容关系；旧系统只作视觉参考。桌面端优先保留左侧控制/History、中间地图、右侧Overview/Agent/Evidence的熟悉空间关系，允许克制局部改良。前端以最终契约独立建设，承接 D18/D69，由同一 fetch SSE 客户端实现管理 run 通知与 session 过程两类流，读取 HTTP status/body，按 D77 处理 `200` SSE、`stream_end` 与 `410` 等分支，不保留 M3 路径的旧 `204` 兼容分支，按 D73 区分 run 重连最新快照同步与 session 游标补齐过程，session 消费身份、Last-Event-ID 整数编码、400/409 校验及去重按 D78 实现，不要求 run 补播旧状态通知。页面关闭订阅不取消分析，GET 用于加载/断线核对/历史，不持续轮询；业务终态与流结束分别处理，正常关闭按 D70、明确结束通知按 D76。
   - 按 D86 用同一客户端消费 message_started/message_delta/message_finalized，按原身份建立、追加和定稿同一消息，不为三阶段维护独立 transcript 模型；具体字段和解析由实现者同步协议后落实。
   - 按 D85 消费 message_finalized，按原 item_id 更新消息并结束其打字状态，按 SSE id 去重重发；正常完成与 incomplete 分别展示。该事件不表示 Agent/run 结束或已保存，大正文预览不替代完整正文；取消仅使用固定原文，消息定稿应先于 session stream_end。
   - 按 D79/D81 实现逐步输出：依据后端在消息开始时分配的 item_id 持续更新同一条消息，片段与整理后的正文不重复展示；按 SSE id 去重重发片段，相同 item_id 的不同片段正常追加。断线按原游标补齐，历史展示已保存的组装正文并保留原身份；item_id 不表示已保存。按 D82 保持开始生成时的消息位置和原创建时间，完成或补写后不移到末尾。按 D83 展示消息正文的 generating/completed/incomplete，正常结束和未完整生成分别表达；generating 只来自 live，历史读取已保存的后两态。消息 DTO 和具体原因继续定型，不因消息状态或打字效果改写业务终态或保存状态。
   - 按 D76 识别两类流的 stream_end，收到后停止该订阅的重连；未收到就意外断开按中断处理，不能仅凭 EOF 宣称业务成功或保存完整。用户主动关闭查看不自动重连；控制通知不加入业务 transcript 或生成新的完成状态。
   - 按 D75，首次查看未结束 Agent 直接无游标订阅 session SSE，消费已有全部可见记录后继续接收新增；无需先 GET transcript。重连按 D73 携带原消费游标，已结束 Agent/历史仍用统一 GET；共享客户端与内容模型，不新增第二套过程读取模型。
   - 按 D74 实现当前状态来源优先级：收到 run SSE 状态后，迟到的 GET 不覆盖；首次尚无 SSE 状态可使用 GET，断线核对与历史读取保留。不为此设计快照版本协议或时间戳比较。session 续传游标与内容 schema version 保持原义。
-- **M9-C09 — Demo 单 worker**：启动说明明确 demo 单进程、单 worker；不得通过未实现的共享状态暗示支持多 worker。
+- **M9-C09 — Demo 单 worker**：启动说明明确 demo 单进程、单 worker；不得通过未实现的共享状态暗示支持多 worker。第一版是backend同origin托管frontend/API的`127.0.0.1`本地单用户Web应用，不实现桌面壳、认证或远程多用户部署；本地边界仍要求同源/Fetch Metadata写保护。
 - **M9-C10 — 地图结果、汇总与上下文阅读**：承接 M3 D21、M6-C14/M6-C18 与 M7-C08/M7-C11/M7-C12，分析完成后地图展示所有实际参与推理的水体；点击水体展示分时段结果、逐窗口综合风险、日期范围总体风险、availability 和理由。从结果入口进入对应 waterbody Agent session 的真实消息、tool、evidence、decision 与 result 上下文，skill/tool/hook 等按语义默认折叠、用户点击展开，与内容大小和是否已下载无关。run 页面另展示 `run_summarizer` 生成的浅显全流程总结、特殊值和 partial/失败分支提示；汇总失败时显示后端安全失败信息，不用前端模板假造总结。特殊值的稳定 refs 可在 M9 评估渲染为可点击内部上下文 URL，首版不是硬验收项。前端不另造推理摘要流，不请求隐藏思维链，也不把后端四种查询职责直接变成四层页面导航。
   - 按 D66，run 执行中也允许选中已有 session 的水体观看实时上报，不要求先有最终结果；用户不能给 Agent 追加消息，但保留取消整个 run 的操作。SSE 连接时机按 D68，独立 session 的具体订阅协议继续定型，关闭查看连接不取消分析，历史读取不重新执行。
   - 按 [D68](M3/m3_transcript_history_design.md#d68按查看需要订阅水体-session已结束与历史使用统一读取)，前端打开水体实时过程时才订阅对应 session，切换水体或关闭过程视图时关闭旧订阅，不在进入 run 页面时连接所有 Agent。未被查看的 Agent 正常执行和保存，打开前的全部可见过程也必须能读全。已结束 Agent 和历史通过统一接口读取，auto 与严格 history 语义保留；完整记录与实时流的衔接协议继续定型。
   - 按 D69，当前 run 页面同时建立一条轻量 run 通知流，更新 run 状态、新 session、各 Agent 状态和保存变化。切换水体保持 run 连接，通常一页为一条 run 流加一条当前 session 流，离开页面才关闭两类连接；run 通知不承载完整 Agent 消息，历史不订阅实时流。
-  - 按 D71 消费完整轻量快照并展示五种水体状态：BFS 范围内不参与为半透明灰色，参与未开始为灰色，推理中为蓝色，完成为绿色，出错为红色。水体状态来自拓扑/调度与 session 原事实，前两种可没有 session，颜色仅由前端映射；取消后呈现按 [D72](M3/m3_transcript_history_design.md#d72取消后的水体展示延后到前端设计) 在 M9 前端设计阶段确定，本轮不冻结；session 的真实 cancelled 状态不改写。
+  - 按 D71 消费完整轻量快照并展示五种基线水体状态：BFS 范围内不参与为半透明灰色，参与未开始为实心灰色，推理中为蓝色并使用轻微呼吸外圈，完成为绿色，出错为红色。D72 在 M9 冻结为：真实 cancelled session 使用橙色；因 run 取消而未创建/未开始的参与节点使用灰色虚线圈/停止标记，不能伪造 cancelled session；已经完成/失败/取消的 session 原终态不被 run 后续状态覆盖。颜色同时配状态文字/legend。
   - 按 [D67](M3/m3_transcript_history_design.md#d67只公开-run-取消由后端传递到各-session)，前端停止操作只调用 run cancel，后端负责停止后续调度并通过内部能力取消各未终态 session；不增加单独停止某个 Agent 的 HTTP 入口或前端逐会话取消流程。
   - 按 D44/D50，历史分页对象为 run，完整分析记录必须先选中水体后展示其真实独立 session；未选水体时不展示混合的全 run 过程。按 D64，从 run 详情会话信息取得所选水体的 session_id，以 run_id + session_id 定位结果和完整过程；不另走按 COMID 定位同一 Agent 过程的第二套入口，具体 URL 按 D65。
   - 按 D59，拓扑中的未执行水体不保证存在 session，不能展示为预建的空会话；已创建会话失败或取消仍按所选来源及可见性规则读取已有过程。严格历史不以 live state 补齐，也不把暂未保存误判为从未执行。
@@ -475,6 +481,8 @@ Contract changes:
 - **M9-C11 — 重试保存入口**：承接 M3 D39/M3-C20，在自动补写耗尽且后端仍能补写时，于保存警告处提供“重试保存”按钮，用户主动操作才开启新一轮。执行中展示当前情况，不通过刷新页面、自动轮询或重复点击重置预算，不把此操作变成重新分析。内存丢失时明确不能恢复未保存内容，触发成功不显示成已经保存；沿用原终态并依据实际读取更新保存信息。
   - 按 D41 调用无请求体 POST /api/analysis/runs/{run_id}/persistence/retry；202 仅表示受理/已有补写，200 表示当前无需补写，409 表示当前不能手动恢复。此 POST 不自动重发，超时或响应丢失先查询 persistence，再由用户决定是否开启新一轮；已受理补写不随 HTTP 断开取消。
   - 按 D40 使用 persistence.state 区分 up_to_date/pending/retry_exhausted，只有 retry_exhausted 提供手动入口；persistence=null 表示本次读取无 live 保存运行信息，不能据此宣称整个分析已经保存完整或隐藏原记录中的警告。不另造前端重试计数或从业务 status/error.retryable 推断按钮条件。 按 D80，pending 可包括等待消息定稿，正常生成不展示保存失败；pending 或 202 不表明数据库正在执行 SQL，已有耗尽和错误不被新片段覆盖。
+
+设计状态（2026-10-08）：M9 产品、前端、policy、API、实施设计与 Milestone 0–9 施工清单已冻结，implementation 尚未开始，TODO 全部保持未勾选。权威输入见 [总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)与 [Implementation TODO](M9/m9_implementation_todo.md)。
 
 ### 验收重点
 
@@ -502,7 +510,7 @@ Contract changes:
   - 按 D67 验证前端仅请求 run cancel，不因当前只查看一个水体而缩小停止范围，也不将取消受理当作所有在途调用已停止；各 Agent 原终态保留。
   - 按 D68 验证查看才订阅、切换或关闭即释放旧连接，未订阅 Agent 的执行与保存不受影响；首次打开和切回均可取得此前完整可见过程，已结束 Agent 和历史使用统一读取，已结束但未保存的当前内容仍保留警告且不混入严格历史。首次衔接按 D75、续传按 D73 验收，消费身份与游标按 D78 验收，具体事件 DTO 继续定型。
   - 按 D69 验证未打开水体过程时，run 通知也能更新整体及各 Agent 状态；上游完成、下游 session 创建时更新对应状态，打开下游过程再建立其 session 连接。切换水体不关闭 run 流，页面不持续轮询 run 详情，通知不包含完整 Agent 正文。
-  - 按 D71 验证上述五种水体颜色及业务含义，范围内被排除和未开始水体可见但不显示伪造的 session；各次 run 的历史使用原已保存事实，不能用当前数据重跑 BFS。取消后的颜色/标签按 D72 留到 M9 前端设计后验收，不阻塞 M3，后端仍返回真实状态。
+  - 按 D71/D72 验证基线五态及 M9 取消呈现：范围内被排除和未开始水体可见但不显示伪造 session；running 为蓝色呼吸外圈，真实 cancelled session 为橙色，因 run 取消而未创建/未开始为灰色虚线/停止标记，已完成/失败/取消终态不被整次 run 状态覆盖。各次 run 的历史使用原已保存事实，不能用当前数据重跑 BFS；颜色同时有文字/legend。
   - 按 D50 验证分页列表选择 run、选中水体后读取对应独立 session 的完整过程；未选择水体时不展示混合的全分析过程。最终身份映射、路径及水体读取参数按后续冻结契约验收。
   - 按 D44/D45/D46，从分页 query 历史列表选择不同 session，前端按各自的已保存消息和最终前端设计展示地图与水体会话，不重新执行分析；同 query 或同 COMID 不串历史。一次读取水体完整有序记录列表、连续展示，公共上下文及大正文均可读，没有 Agent 记录分页参数或翻页交互，按需全文装载不改变语义折叠。地图画法不转化为后端独立快照或连线存储验收。
 - **M9-A08**：自动补写耗尽后展示后端允许的手动入口，点击只调用保存恢复接口，不调用创建分析接口；执行中与重复点击不会开启并发补写或重置预算。根据读取情况展示保存进度、再次耗尽或恢复成功，业务终态不变；内存丢失与触发成功但尚未落库均不被显示为保存成功。
@@ -602,6 +610,14 @@ M8 Milestone 0–10 已完成 Windows 本机 production implementation、migrati
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C10`、`M8-C01`–`M8-C16`、`M8-A01`–`M8-A10` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写)、[设计决策](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md)和[前端接力边界](frontend_integration_contracts.md)。 | `implemented`：production、focused/PG/full/smoke 与文档证据齐全。 |
 | `GLOBAL-C11` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写) | `partial`：dependency/migration/path/Windows 已验证；Ubuntu/macOS 与生产容量未运行。 |
+
+### M9 待实施索引
+
+M9 产品、Frontend Experience、Policy、API、实施设计与 Milestone 0–9 施工清单已经冻结；production code、migration、公开 route、`frontend/` 应用和 E2E 尚未开始。下表只登记实施入口，不构成完成证据。
+
+| 范围 | 施工与计划证据 | 当前状态 |
+|---|---|---|
+| `GLOBAL-C01`–`GLOBAL-C11`、`M9-C01`–`M9-C11`、`M9-A01`–`M9-A08` | [M9 Contract 承接矩阵](M9/m9_implementation_todo.md#contract-承接矩阵实施时填写)、[总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)和[前端接力边界](frontend_integration_contracts.md)。 | `pending`：TODO 全部未勾选，尚无 production implementation/test evidence。 |
 
 M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 
