@@ -27,7 +27,7 @@ from app.application.transcript_memory.search_policies import (
 from app.application.transcript_memory.source_closure import (
     RAGSourceClosureError,
     SourceClosureExpectation,
-    validate_source_closure,
+    validate_projection_expectation,
 )
 from app.application.transcript_memory.source_models import RAGCaseSource
 from app.application.transcript_memory.source_reader import (
@@ -327,25 +327,27 @@ class RAGSearchSession:
                 generation_id=query.generation_id,
                 profile_id=query.profile_id,
             )
-            if (
-                bundle.case.case_ref != candidate.case_ref
-                or bundle.case.projection_digest != candidate.projection_digest
-            ):
-                raise RAGSearchInvalidError("historical_source_projection_mismatch")
             windows = matching_projection_windows(query, bundle.case)
             window_ids = tuple(window.window_id for window in windows)
-            validated = validate_source_closure(
-                source,
-                projection=bundle.case,
-                expectation=SourceClosureExpectation(
-                    active_generation_id=query.generation_id,
-                    case_ref=candidate.case_ref,
-                    projection_digest=candidate.projection_digest,
-                    authorized_comids=query.candidate_comids,
-                    authorized_parameter_keys=query.intent.parameter_keys,
-                    authorized_source_window_ids=window_ids,
-                ),
-            )
+            try:
+                validate_projection_expectation(
+                    source,
+                    projection=bundle.case,
+                    expectation=SourceClosureExpectation(
+                        active_generation_id=query.generation_id,
+                        case_ref=candidate.case_ref,
+                        projection_digest=candidate.projection_digest,
+                        authorized_comids=query.candidate_comids,
+                        authorized_parameter_keys=query.intent.parameter_keys,
+                        authorized_source_window_ids=window_ids,
+                    ),
+                )
+            except RAGSourceClosureError as error:
+                if error.code == "source_active_projection_mismatch":
+                    raise RAGSearchInvalidError(
+                        "historical_source_projection_mismatch"
+                    ) from error
+                raise
             selected_cells = tuple(
                 sorted(
                     (

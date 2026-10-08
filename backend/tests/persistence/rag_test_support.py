@@ -34,6 +34,7 @@ from app.domain import (
     TimeResolution,
     TrendDirection,
 )
+from app.domain.memory_rag.historical_case_identity import derive_historical_case_id
 from app.infrastructure.persistence.schema import (
     analysis_runs,
     analysis_sessions,
@@ -196,7 +197,15 @@ def ready_projection(
 ) -> tuple[RAGCaseProjectionV1, tuple[RAGFragmentProjectionV1, ...]]:
     case_ref = HistoricalCaseRef(
         generation_id=generation_id,
-        case_id=str(case_id or uuid4()),
+        case_id=str(
+            case_id
+            or derive_historical_case_id(
+                generation_id,
+                source.run_id,
+                source.session_id,
+                source.result_item_id,
+            )
+        ),
         run_id=str(source.run_id),
         session_id=str(source.session_id),
         target_comid="12345678",

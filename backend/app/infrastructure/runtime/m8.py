@@ -404,10 +404,7 @@ async def build_m8_runtime(
             clock=clock,
             shutdown_grace_seconds=settings.rag_worker_shutdown_grace_seconds,
         )
-        try:
-            yield runtime
-        finally:
-            await runtime.shutdown()
+        yield runtime
 
 
 def _embedding_outcome(error: BaseException) -> str:

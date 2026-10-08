@@ -128,6 +128,10 @@ def test_terminal_commit_wakes_m8_and_shutdown_stops_it_before_coordinator() -> 
     events: list[str] = []
 
     class TrackedM8Runtime(FakeM8Runtime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.shutdown_calls = 0
+
         def notify_run_terminal(self, run_id) -> None:
             assert store.write_batches
             batch = store.write_batches[-1]
@@ -145,6 +149,7 @@ def test_terminal_commit_wakes_m8_and_shutdown_stops_it_before_coordinator() -> 
             super().notify_run_terminal(run_id)
 
         async def shutdown(self) -> None:
+            self.shutdown_calls += 1
             if not self.stopped:
                 events.append("m8_shutdown")
             await super().shutdown()
@@ -185,6 +190,7 @@ def test_terminal_commit_wakes_m8_and_shutdown_stops_it_before_coordinator() -> 
 
     assert events == ["m8_shutdown", "coordinator_shutdown"]
     assert runtime.stopped
+    assert runtime.shutdown_calls == 1
 
 
 def test_shutdown_gate_prevents_activation_after_worker_returns() -> None:

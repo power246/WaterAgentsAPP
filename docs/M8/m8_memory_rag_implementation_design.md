@@ -224,7 +224,7 @@ FK 指向 case projection、case window 与原 fragment item；保存 parameter/
 
 ### 5.6 `rag_consumption_links`
 
-当当前 session 的 historical source record 成功持久化时，登记被消费时的 source generation/case 快照、原 source run/session/result item 与 consumer run/session/item。创建 link 时在同一事务内锁定并验证完整 case identity；长期所有权 FK 直接指向权威 `transcript_items(run_id,session_id,item_id)`，不依赖可重建、可删除的 case projection。retired/failed generation 清理后 link 继续存在并保护原 source transcript；它不进入搜索排名，只用于删除冲突、引用审计和 M9 cleanup。
+当当前 session 的 historical source record 成功持久化时，登记被消费时的 source generation/case 快照、原 source run/session/result item 与 consumer run/session/item。创建 link 时在同一事务内锁定权威 source result transcript，验证其 content type/schema/final eligibility，并按 generation + source identity + projection version 重算 deterministic case identity；提交不依赖可重建、可删除的 case projection，因此 search reader lease 释放后即使 retired generation 被并发清理，source record 与 link 仍能原子提交。长期所有权 FK 直接指向 `transcript_items(run_id,session_id,item_id)`；retired/failed generation 清理后 link 继续存在并保护原 source transcript。它不进入搜索排名，只用于删除冲突、引用审计和 M9 cleanup。
 
 consumer 删除时 link cascade；source transcript 删除默认 restrict。选择性删除一个已被保留 run 消费的 source 时，M9 必须返回 conflict，或在用户明确授权下删除整个 dependent consumer run；不得改写 immutable transcript、只删 source 留下悬空引用或静默改成 tombstone。全量 history cleanup 按 consumer -> source -> index/link 顺序执行。
 
@@ -326,7 +326,7 @@ production startup顺序调整为：
 - `evidence_tool_result v1`：completed/failed、empty/unavailable/invalid 与 safe code；
 - `evidence_bundle v1`：允许进入 reasoning 的同 run item refs。
 
-`rag_consumption_links` 与 source-record item 在同一 persistence transaction 登记；link失败属于该历史记录 persistence failure，不能保留正文却缺 ownership registry。link 创建时验证其 generation/case/source identity，创建后以原 source transcript identity 作为长期 ownership；index jobs/generation/embedding response不写公共 transcript。
+`rag_consumption_links` 与 source-record item 在同一 persistence transaction 登记；link失败属于该历史记录 persistence failure，不能保留正文却缺 ownership registry。link 创建时以 immutable source result transcript 和 deterministic case identity 验证 generation/case/source 快照，不要求对应 projection 在 consumer transaction 提交时仍存在；创建后以原 source transcript identity 作为长期 ownership。index jobs/generation/embedding response不写公共 transcript。
 
 结构化日志/metrics至少覆盖：generation状态/年龄、job pending/lease/retry/failed/lag、embedding latency/error、search strategy/empty/failure/latency/candidate-return counts、hydration invalid、active profile digest。不得以 run/session/item、COMID、query text 或 vector作为无界 metric label；日志只用安全 hash/correlation ID。
 

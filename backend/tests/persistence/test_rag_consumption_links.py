@@ -150,3 +150,49 @@ def test_source_record_and_consumption_link_commit_or_rollback_together() -> Non
 
     with temporary_migrated_schema() as settings:
         asyncio.run(exercise(settings))
+
+
+def test_consumer_batch_commits_after_its_source_generation_is_deleted() -> None:
+    async def exercise(settings) -> None:
+        engine = create_database_engine(settings)
+        repository = PostgresRAGRepository(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            source = await seed_completed_source(engine)
+            case = await _ready_case(repository, source)
+            retired_generation_id = case.case_ref.generation_id
+            await repository.activate_generation(
+                retired_generation_id,
+                datetime.now(UTC),
+            )
+            consumer = await seed_completed_source(
+                engine,
+                target_comid="87654321",
+            )
+            batch = _consumer_batch(consumer, case)
+            replacement = await repository.create_building_generation(
+                embedding_profile(dimensions=4),
+                datetime(1970, 1, 1, tzinfo=UTC),
+                "00000000-0000-0000-0000-000000000000",
+            )
+            await repository.activate_generation(
+                replacement.generation_id,
+                datetime.now(UTC) + timedelta(seconds=1),
+            )
+            await repository.delete_generation(retired_generation_id)
+
+            await store.write_batch(batch)
+
+            assert await repository.read_generation(retired_generation_id) is None
+            assert await store.verify_batch(batch) is BatchVerification.COMMITTED
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))

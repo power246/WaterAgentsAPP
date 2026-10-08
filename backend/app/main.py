@@ -209,77 +209,80 @@ def create_app(
                         foundation_validated=foundation_validated,
                     )
                 )
-                coordinator.register_run_terminal_persisted_hook(
-                    m8_runtime.notify_run_terminal
-                )
-                m5_options = (
-                    {"upstream_results": upstream_results}
-                    if upstream_results is not None
-                    else {}
-                )
-                m5_runtime = await stack.enter_async_context(
-                    build_m5_runtime(
-                        resolved_settings,
-                        operations=coordinator,
-                        transcript_reader=transcript_reader,
-                        capability_registry=resolved_parameter_capabilities,
-                        clock=resolved_clock,
-                        transcript_port=m8_runtime.producer,
-                        **m5_options,
+                try:
+                    coordinator.register_run_terminal_persisted_hook(
+                        m8_runtime.notify_run_terminal
                     )
-                )
-                coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
-                active_m6_builder = m6_runtime_builder or build_m6_runtime
-                m6_runtime = await stack.enter_async_context(
-                    active_m6_builder(
-                        resolved_settings,
-                        operations=coordinator,
-                        m5_runtime=m5_runtime,
-                        capability_registry=resolved_parameter_capabilities,
-                        model_catalog=resolved_model_catalog.snapshot(),
-                        clock=resolved_clock,
-                        operation_id_factory=id_factory,
-                        result_id_factory=lambda: str(id_factory()),
-                        error_id_factory=id_factory,
+                    m5_options = (
+                        {"upstream_results": upstream_results}
+                        if upstream_results is not None
+                        else {}
                     )
-                )
-                if (
-                    query_topology_workflow is not None
-                    and upstream_results is not None
-                    and result_reader is not None
-                ):
-                    query_topology_workflow.bind_execution_stage(
-                        compose_m7_execution_stage(
+                    m5_runtime = await stack.enter_async_context(
+                        build_m5_runtime(
+                            resolved_settings,
+                            operations=coordinator,
+                            transcript_reader=transcript_reader,
+                            capability_registry=resolved_parameter_capabilities,
+                            clock=resolved_clock,
+                            transcript_port=m8_runtime.producer,
+                            **m5_options,
+                        )
+                    )
+                    coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
+                    active_m6_builder = m6_runtime_builder or build_m6_runtime
+                    m6_runtime = await stack.enter_async_context(
+                        active_m6_builder(
                             resolved_settings,
                             operations=coordinator,
                             m5_runtime=m5_runtime,
-                            m6_runtime=m6_runtime,
-                            upstream_results=upstream_results,
-                            result_reader=result_reader,
                             capability_registry=resolved_parameter_capabilities,
                             model_catalog=resolved_model_catalog.snapshot(),
                             clock=resolved_clock,
+                            operation_id_factory=id_factory,
                             result_id_factory=lambda: str(id_factory()),
                             error_id_factory=id_factory,
-                            operation_id_factory=id_factory,
                         )
                     )
-                await m8_runtime.start()
-                application.state.run_coordinator = coordinator
-                application.state.transcript_reader = transcript_reader
-                application.state.transcript_store = active_store
-                application.state.m8_runtime = m8_runtime
-                application.state.m5_runtime = m5_runtime
-                application.state.m6_runtime = m6_runtime
-                try:
+                    if (
+                        query_topology_workflow is not None
+                        and upstream_results is not None
+                        and result_reader is not None
+                    ):
+                        query_topology_workflow.bind_execution_stage(
+                            compose_m7_execution_stage(
+                                resolved_settings,
+                                operations=coordinator,
+                                m5_runtime=m5_runtime,
+                                m6_runtime=m6_runtime,
+                                upstream_results=upstream_results,
+                                result_reader=result_reader,
+                                capability_registry=resolved_parameter_capabilities,
+                                model_catalog=resolved_model_catalog.snapshot(),
+                                clock=resolved_clock,
+                                result_id_factory=lambda: str(id_factory()),
+                                error_id_factory=id_factory,
+                                operation_id_factory=id_factory,
+                            )
+                        )
+                    await m8_runtime.start()
+                    application.state.run_coordinator = coordinator
+                    application.state.transcript_reader = transcript_reader
+                    application.state.transcript_store = active_store
+                    application.state.m8_runtime = m8_runtime
+                    application.state.m5_runtime = m5_runtime
+                    application.state.m6_runtime = m6_runtime
                     yield
                 finally:
-                    await m8_runtime.shutdown()
-                    await coordinator.shutdown()
-                    coordinator = None
+                    try:
+                        await m8_runtime.shutdown()
+                    finally:
+                        try:
+                            await coordinator.shutdown()
+                        finally:
+                            coordinator = None
+                            m8_runtime = None
         finally:
-            if m8_runtime is not None:
-                await m8_runtime.shutdown()
             if coordinator is not None:
                 await coordinator.shutdown()
             if engine is not None:

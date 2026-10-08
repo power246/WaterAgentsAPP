@@ -41,10 +41,10 @@ from app.application.transcripts.read_models import (
 )
 
 from app.infrastructure.persistence.records import PersistenceBatch, PersistedRunRecord
+from app.infrastructure.persistence.rag_consumption import has_valid_consumption_source
 from app.infrastructure.persistence.schema import (
     analysis_runs,
     analysis_sessions,
-    rag_case_projections,
     rag_consumption_links,
     transcript_contents,
     transcript_items,
@@ -588,26 +588,16 @@ class PostgresTranscriptStore:
     ) -> None:
         if batch.rag_consumption_links:
             for link in batch.rag_consumption_links:
-                source = (
-                    await connection.execute(
-                        select(rag_case_projections.c.case_id)
-                        .where(
-                            rag_case_projections.c.generation_id
-                            == link.source_generation_id,
-                            rag_case_projections.c.case_id == link.source_case_id,
-                            rag_case_projections.c.source_run_id
-                            == link.source_run_id,
-                            rag_case_projections.c.source_session_id
-                            == link.source_session_id,
-                            rag_case_projections.c.source_result_item_id
-                            == link.source_result_item_id,
-                        )
-                        .with_for_update(key_share=True)
-                    )
-                ).one_or_none()
-                if source is None:
+                if not await has_valid_consumption_source(
+                    connection,
+                    source_generation_id=link.source_generation_id,
+                    source_case_id=link.source_case_id,
+                    source_run_id=link.source_run_id,
+                    source_session_id=link.source_session_id,
+                    source_result_item_id=link.source_result_item_id,
+                ):
                     raise PersistenceWriteConflictError(
-                        "RAG consumption link has no matching source case"
+                        "RAG consumption link has no valid source transcript"
                     )
             await connection.execute(
                 rag_consumption_links.insert(),

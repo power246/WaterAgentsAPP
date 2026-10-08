@@ -144,26 +144,39 @@ def validate_source_closure(
     if expectation is not None:
         if projection is None:
             raise RAGSourceClosureError("source_projection_required")
-        if (
-            expectation.active_generation_id != projection.case_ref.generation_id
-            or expectation.case_ref != projection.case_ref
-            or expectation.projection_digest != projection.projection_digest
-            or projection.case_ref.analysis_context_item_id
-            != str(context_item.item.item_id)
-            or projection.case_ref.result_item_id != str(result_item.item.item_id)
-        ):
-            raise RAGSourceClosureError("source_active_projection_mismatch")
-        if projection.case_ref.target_comid not in expectation.authorized_comids:
-            raise RAGSourceClosureError("source_scope_comid_mismatch")
-        if not set(projection.parameter_keys) & set(
-            expectation.authorized_parameter_keys
-        ):
-            raise RAGSourceClosureError("source_scope_parameter_mismatch")
-        if not set(projection.window_ids) & set(
-            expectation.authorized_source_window_ids
-        ):
-            raise RAGSourceClosureError("source_scope_window_mismatch")
+        validate_projection_expectation(
+            source,
+            projection=projection,
+            expectation=expectation,
+        )
     return ValidatedRAGCaseSource(
         source=source,
         eligible_fragments=eligible_fragments,
     )
+
+
+def validate_projection_expectation(
+    source: RAGCaseSource,
+    *,
+    projection: PreparedRAGCaseProjectionV1,
+    expectation: SourceClosureExpectation,
+) -> None:
+    if (
+        expectation.active_generation_id != projection.case_ref.generation_id
+        or expectation.case_ref != projection.case_ref
+        or expectation.projection_digest != projection.projection_digest
+        or projection.case_ref.analysis_context_item_id
+        != str(source.analysis_context.item.item_id)
+        or projection.case_ref.result_item_id != str(source.result.item.item_id)
+    ):
+        raise RAGSourceClosureError("source_active_projection_mismatch")
+    if projection.case_ref.target_comid not in expectation.authorized_comids:
+        raise RAGSourceClosureError("source_scope_comid_mismatch")
+    if not set(projection.parameter_keys) & set(
+        expectation.authorized_parameter_keys
+    ):
+        raise RAGSourceClosureError("source_scope_parameter_mismatch")
+    if not set(projection.window_ids) & set(
+        expectation.authorized_source_window_ids
+    ):
+        raise RAGSourceClosureError("source_scope_window_mismatch")

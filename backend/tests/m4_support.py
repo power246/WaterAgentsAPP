@@ -132,11 +132,7 @@ class FakeM8Runtime:
 @asynccontextmanager
 async def build_test_m8_runtime(*args, **kwargs):
     del args, kwargs
-    runtime = FakeM8Runtime()
-    try:
-        yield runtime
-    finally:
-        await runtime.shutdown()
+    yield FakeM8Runtime()
 
 
 def create_request(

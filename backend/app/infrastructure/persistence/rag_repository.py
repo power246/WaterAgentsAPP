@@ -53,9 +53,9 @@ from app.domain import (
 )
 from app.application.transcript_memory.search_policies import (
     rank_projection,
-    stable_candidate_order,
 )
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
+from app.infrastructure.persistence.rag_consumption import has_valid_consumption_source
 from app.infrastructure.persistence.schema import (
     analysis_runs,
     analysis_sessions,
@@ -762,7 +762,7 @@ class PostgresRAGRepository:
                 ),
             )
             candidates.append(candidate)
-        return tuple(sorted(candidates, key=stable_candidate_order))
+        return tuple(candidates)
 
     async def activate_generation(
         self,
@@ -1343,27 +1343,16 @@ class PostgresRAGRepository:
                     )
                 ).mappings().one_or_none()
                 if row is None:
-                    source = (
-                        await connection.execute(
-                            select(rag_case_projections.c.case_id)
-                            .where(
-                                rag_case_projections.c.generation_id
-                                == link.source_generation_id,
-                                rag_case_projections.c.case_id
-                                == link.source_case_id,
-                                rag_case_projections.c.source_run_id
-                                == link.source_run_id,
-                                rag_case_projections.c.source_session_id
-                                == link.source_session_id,
-                                rag_case_projections.c.source_result_item_id
-                                == link.source_result_item_id,
-                            )
-                            .with_for_update(key_share=True)
-                        )
-                    ).one_or_none()
-                    if source is None:
+                    if not await has_valid_consumption_source(
+                        connection,
+                        source_generation_id=link.source_generation_id,
+                        source_case_id=link.source_case_id,
+                        source_run_id=link.source_run_id,
+                        source_session_id=link.source_session_id,
+                        source_result_item_id=link.source_result_item_id,
+                    ):
                         raise RAGPersistenceConflictError(
-                            "consumption link has no matching source case"
+                            "consumption link has no valid source transcript"
                         )
                     await connection.execute(statement)
                     row = (

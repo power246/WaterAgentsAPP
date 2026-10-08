@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import sha256
-from uuid import UUID, uuid5
+from uuid import UUID
 
 from app.application.transcript_memory.source_closure import validate_source_closure
 from app.application.transcript_memory.source_models import RAGCaseSource
@@ -12,6 +12,7 @@ from app.domain.inference.mode import InferenceMode
 from app.domain.memory_rag.canonical_case_query import CanonicalCaseQueryV1
 from app.domain.memory_rag.canonical_intent_token import CanonicalIntentToken
 from app.domain.memory_rag.historical_case_ref import HistoricalCaseRef
+from app.domain.memory_rag.historical_case_identity import derive_historical_case_id
 from app.domain.memory_rag.historical_result_cell_projection import (
     HistoricalResultCellProjection,
 )
@@ -25,7 +26,6 @@ from app.domain.memory_rag.rag_fragment_projection import RAGFragmentProjectionV
 from app.domain.memory_rag.rag_quality_tier import RAGQualityTier
 from app.domain.time.timezone import get_iana_timezone
 
-_CASE_NAMESPACE = UUID("8f5ac7a0-78d8-4b08-b702-957bc8ce1f60")
 class RAGProjectionBuildError(ValueError):
     def __init__(self, code: str) -> None:
         self.code = code
@@ -72,17 +72,11 @@ def build_prepared_projection(
     case_ref = HistoricalCaseRef(
         generation_id=generation_id,
         case_id=str(
-            uuid5(
-                _CASE_NAMESPACE,
-                "|".join(
-                    (
-                        generation_id,
-                        str(source.result.item.run_id),
-                        str(source.result.item.session_id),
-                        str(source.result.item.item_id),
-                        "projection-v1",
-                    )
-                ),
+            derive_historical_case_id(
+                generation_id,
+                source.result.item.run_id,
+                source.result.item.session_id,
+                source.result.item.item_id,
             )
         ),
         run_id=str(source.result.item.run_id),
