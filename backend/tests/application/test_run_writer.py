@@ -5,6 +5,8 @@ from uuid import UUID
 
 import pytest
 
+from tests.application.coordinator_inspection import list_transcript_items
+
 from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.models import (
     AgentRole,
@@ -629,7 +631,7 @@ def test_finalize_rejects_unknown_and_cross_run_references_without_drafts() -> N
                         },
                     )
 
-            identities = await coordinator.list_transcript_items(second.run_id)
+            identities = await list_transcript_items(coordinator, second.run_id)
             assert not set(rejected_ids).intersection(
                 identity.item_id for identity in identities
             )

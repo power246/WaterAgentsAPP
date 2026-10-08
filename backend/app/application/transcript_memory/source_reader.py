@@ -27,17 +27,6 @@ from app.domain.memory_rag.historical_case_ref import HistoricalCaseRef
 SourceBodyT = TypeVar("SourceBodyT", bound=DomainModel)
 
 
-class RegisteredItemReader(Protocol):
-    async def read_registered_item(
-        self,
-        run_id: UUID,
-        item_id: UUID,
-        view: ReadView,
-        *,
-        session_id: UUID | None = None,
-    ) -> ReadTranscriptItem: ...
-
-
 class RegisteredRunReader(Protocol):
     async def read_registered_run(
         self,
@@ -65,110 +54,6 @@ class TypedRAGSourceItem(Generic[SourceBodyT]):
     @property
     def body_digest(self) -> str:
         return f"sha256:{sha256(canonical_model_bytes(self.body)).hexdigest()}"
-
-
-class TypedRAGSourceReader:
-    def __init__(
-        self,
-        reader: RegisteredItemReader,
-        registry: TranscriptRegistry,
-    ) -> None:
-        self._reader = reader
-        self._registry = registry
-
-    async def read_analysis_context(
-        self,
-        run_id: UUID,
-        item_id: UUID,
-    ) -> TypedRAGSourceItem[AnalysisContext]:
-        return await self._read(
-            run_id,
-            item_id,
-            session_id=None,
-            content_type="query_understood",
-            body_type=AnalysisContext,
-            require_session_owned=True,
-        )
-
-    async def read_topology(
-        self,
-        run_id: UUID,
-        item_id: UUID,
-    ) -> TypedRAGSourceItem[HydrologyGraph]:
-        return await self._read(
-            run_id,
-            item_id,
-            session_id=None,
-            content_type="topology_ready",
-            body_type=HydrologyGraph,
-            require_run_global=True,
-        )
-
-    async def read_result(
-        self,
-        run_id: UUID,
-        session_id: UUID,
-        item_id: UUID,
-    ) -> TypedRAGSourceItem[InferenceResult]:
-        return await self._read(
-            run_id,
-            item_id,
-            session_id=session_id,
-            content_type="inference_result",
-            body_type=InferenceResult,
-            require_rag_candidate=True,
-        )
-
-    async def read_fragment(
-        self,
-        run_id: UUID,
-        session_id: UUID,
-        item_id: UUID,
-    ) -> TypedRAGSourceItem[EvidenceFragment]:
-        return await self._read(
-            run_id,
-            item_id,
-            session_id=session_id,
-            content_type="evidence_fragment",
-            body_type=EvidenceFragment,
-            require_rag_candidate=True,
-        )
-
-    async def _read(
-        self,
-        run_id: UUID,
-        item_id: UUID,
-        *,
-        session_id: UUID | None,
-        content_type: str,
-        body_type: type[SourceBodyT],
-        require_session_owned: bool = False,
-        require_rag_candidate: bool = False,
-    ) -> TypedRAGSourceItem[SourceBodyT]:
-        read = await self._reader.read_registered_item(
-            run_id,
-            item_id,
-            ReadView.HISTORY,
-            session_id=session_id,
-        )
-        item = read.item
-        if item.run_id != run_id or item.item_id != item_id:
-            raise RAGSourceReadError("historical_source_identity_mismatch")
-        if require_session_owned and item.session_id is None:
-            raise RAGSourceReadError("historical_source_scope_mismatch")
-        if require_rag_candidate and not item.rag_eligible:
-            raise RAGSourceReadError("historical_source_not_rag_candidate")
-        if (
-            item.content_type != content_type
-            or item.content_schema_version != 1
-            or not isinstance(read.body, body_type)
-        ):
-            raise RAGSourceReadError("historical_source_schema_unsupported")
-        return TypedRAGSourceItem(
-            item=item,
-            body=cast(SourceBodyT, read.body),
-            references=self._registry.references_from_read(read),
-        )
 
 
 class TranscriptRAGCaseSourceReader:

@@ -294,17 +294,6 @@ class TranscriptRegistry:
             )
         return checked.model_copy(update={"metadata": metadata})
 
-    def parse_many(
-        self,
-        records: tuple[tuple[StoredTranscriptItem, str], ...],
-        *,
-        error_id_factory: Callable[[], UUID] = uuid4,
-    ) -> tuple[ReadTranscriptItem, ...]:
-        return tuple(
-            self.parse(item, body, error_id_factory=error_id_factory)
-            for item, body in records
-        )
-
     def message_projection(
         self,
         content_type: str,

@@ -3,14 +3,17 @@ from datetime import timedelta
 from hashlib import sha256
 from uuid import UUID
 
+from app.application.transcript_memory.case_policy import (
+    canonical_intent_tokens,
+    meteorological_season,
+    meteorological_season_year,
+)
 from app.application.transcript_memory.source_closure import validate_source_closure
 from app.application.transcript_memory.source_models import RAGCaseSource
 from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
 from app.domain.evidence.serialization import canonical_model_bytes
 from app.domain.hydrology.parameter_key import ParameterKey
-from app.domain.inference.mode import InferenceMode
 from app.domain.memory_rag.canonical_case_query import CanonicalCaseQueryV1
-from app.domain.memory_rag.canonical_intent_token import CanonicalIntentToken
 from app.domain.memory_rag.historical_case_ref import HistoricalCaseRef
 from app.domain.memory_rag.historical_case_identity import derive_historical_case_id
 from app.domain.memory_rag.historical_result_cell_projection import (
@@ -64,7 +67,7 @@ def build_prepared_projection(
             item.key for item in context.supporting_params
         ),
         window_descriptors=tuple(window.canonical_descriptor() for window in windows),
-        normalized_intent_tokens=_intent_tokens(
+        normalized_intent_tokens=canonical_intent_tokens(
             context.mode,
             tuple(item.key for item in context.supporting_params),
         ),
@@ -161,11 +164,13 @@ def _case_windows(result, context) -> tuple[tuple[RAGCaseWindowV1, ...], tuple[s
         months = tuple(sorted({value.month for value in touched}))
         seasons = tuple(
             sorted(
-                {_season(value.month) for value in touched},
+                {meteorological_season(value.month) for value in touched},
                 key=lambda item: tuple(MeteorologicalSeason).index(item),
             )
         )
-        season_years = {_season_year(value.year, value.month) for value in touched}
+        season_years = {
+            meteorological_season_year(value.year, value.month) for value in touched
+        }
         if len(season_years) != 1:
             raise RAGProjectionBuildError("source_result_season_year_mismatch")
         duration = (end - start).total_seconds()
@@ -248,34 +253,6 @@ def _window_id(parameter: ParameterKey, cell_id: str) -> str:
     if not cell_id.startswith(prefix) or cell_id == prefix:
         raise RAGProjectionBuildError("source_result_cell_identity_invalid")
     return cell_id.removeprefix(prefix)
-
-
-def _intent_tokens(
-    mode: InferenceMode,
-    supporting_parameters: tuple[ParameterKey, ...],
-) -> tuple[CanonicalIntentToken, ...]:
-    tokens = [CanonicalIntentToken.ANALYZE_CURRENT_STATE]
-    if mode in {InferenceMode.GAP_FILLING, InferenceMode.MIXED}:
-        tokens.append(CanonicalIntentToken.FILL_GAP)
-    if mode in {InferenceMode.PREDICTION, InferenceMode.MIXED}:
-        tokens.append(CanonicalIntentToken.PREDICT)
-    if ParameterKey(code_system="usgs", code="00060") in supporting_parameters:
-        tokens.append(CanonicalIntentToken.REQUIRES_DISCHARGE_SUPPORT)
-    return tuple(tokens)
-
-
-def _season(month: int) -> MeteorologicalSeason:
-    if month in {12, 1, 2}:
-        return MeteorologicalSeason.DJF
-    if month in {3, 4, 5}:
-        return MeteorologicalSeason.MAM
-    if month in {6, 7, 8}:
-        return MeteorologicalSeason.JJA
-    return MeteorologicalSeason.SON
-
-
-def _season_year(year: int, month: int) -> int:
-    return year + 1 if month == 12 else year
 
 
 def _require_uuid(value: str, field_name: str) -> None:

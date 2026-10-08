@@ -3,6 +3,8 @@ import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
+from tests.application.coordinator_inspection import list_session_transcript_items
+
 from app.application.analysis_runs.models import AgentRole, AgentSessionStatus
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
@@ -161,7 +163,7 @@ def test_recording_port_uses_existing_message_stream_and_typed_items() -> None:
                 created.run_id,
                 session.session_id,
             )
-            session_items = await coordinator.list_session_transcript_items(
+            session_items = await list_session_transcript_items(coordinator,
                 created.run_id,
                 session.session_id,
             )

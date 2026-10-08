@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+from tests.application.coordinator_inspection import set_waterbody_participation
+
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.api.sse.encoder import KEEPALIVE_FRAME, encode_event
 from app.api.sse.response import (
@@ -158,7 +160,7 @@ def test_encoder_uses_optional_integer_id_and_one_json_data_line() -> None:
 def test_run_subscription_assembles_latest_real_state_without_notification_log() -> None:
     async def exercise() -> None:
         async with run_runtime() as (_, coordinator, created, _, _, _):
-            await coordinator.set_waterbody_participation(
+            await set_waterbody_participation(coordinator,
                 created.run_id,
                 {"101": False, "202": True},
             )
@@ -204,7 +206,7 @@ def test_run_reconnect_starts_with_one_current_snapshot_and_ignores_header_at_ht
             first = await coordinator.subscribe_run(created.run_id)
             await anext(first)
             await first.aclose()
-            await coordinator.set_waterbody_participation(created.run_id, {"303": True})
+            await set_waterbody_participation(coordinator, created.run_id, {"303": True})
             reconnect = await coordinator.subscribe_run(created.run_id)
             latest = await anext(reconnect)
             await reconnect.aclose()

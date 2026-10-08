@@ -50,7 +50,6 @@ from app.application.transcript_memory.source_reader import (
     RAGSourceUnavailableError,
     TranscriptRAGCaseSourceReader,
     TypedRAGSourceItem,
-    TypedRAGSourceReader,
 )
 from app.application.transcript_memory.worker import RAGIndexWorker
 from app.application.transcript_memory.search import (
@@ -100,7 +99,6 @@ __all__ = [
     "RAGSourceUnavailableError",
     "SourceClosureExpectation",
     "TypedRAGSourceItem",
-    "TypedRAGSourceReader",
     "TranscriptRAGCaseSourceReader",
     "TranscriptEvidenceProducer",
     "ValidatedRAGCaseSource",

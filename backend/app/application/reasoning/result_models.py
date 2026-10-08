@@ -1,12 +1,9 @@
-import json
-from datetime import datetime, timezone
-from enum import Enum
-from hashlib import sha256
 from typing import Self
 from uuid import UUID
 
 from pydantic import StrictInt, field_validator, model_validator
 
+from app.application.canonical_json import canonical_json_digest, canonical_json_text
 from app.application.reasoning.errors import (
     AllCellsBlockedError,
     ResultSkeletonValidationError,
@@ -586,41 +583,12 @@ def _require(condition: bool, code: str) -> None:
 
 
 def _canonical_model_bytes(model: DomainModel) -> bytes:
-    return json.dumps(
-        model.model_dump(mode="json"),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
+    return canonical_json_text(model).encode("utf-8")
 
 
 def _digest_model(model: DomainModel, *, exclude: set[str]) -> str:
-    return _digest_values(model.model_dump(mode="json", exclude=exclude))
+    return canonical_json_digest(model.model_dump(mode="json", exclude=exclude))
 
 
 def _digest_values(values: object) -> str:
-    payload = json.dumps(
-        _json_value(values),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return f"sha256:{sha256(payload).hexdigest()}"
-
-
-def _json_value(value):
-    if isinstance(value, DomainModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {key: _json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_value(item) for item in value]
-    return value
+    return canonical_json_digest(values)

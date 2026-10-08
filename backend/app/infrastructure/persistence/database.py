@@ -1,7 +1,5 @@
 import asyncio
 import re
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 from alembic import command
@@ -311,12 +309,3 @@ def _is_ancestor(script: ScriptDirectory, ancestor: str, descendant: str) -> boo
                 return True
             pending.append(parent)
     return False
-
-
-@asynccontextmanager
-async def database_engine(settings: AppSettings) -> AsyncIterator[AsyncEngine]:
-    engine = create_database_engine(settings)
-    try:
-        yield engine
-    finally:
-        await engine.dispose()

@@ -2386,22 +2386,6 @@ class RunCoordinator:
             text=safe_text,
         ))
 
-    async def set_waterbody_participation(
-        self,
-        run_id: UUID | str,
-        participation: Mapping[str, bool],
-    ) -> None:
-        runtime = await self._lookup(run_id)
-        if any(type(value) is not bool for value in participation.values()):
-            raise TypeError("waterbody participation values must be booleans")
-        validated = {
-            _COMID.validate_python(comid): value
-            for comid, value in participation.items()
-        }
-        async with runtime.condition:
-            runtime.waterbody_participation = validated
-            runtime.condition.notify_all()
-
     async def mark_waterbody_ready(
         self,
         run_id: UUID | str,
@@ -2500,37 +2484,6 @@ class RunCoordinator:
                 raise CreationCommitUnconfirmedError(key) from None
             except (CreationRolledBackError, IdempotencyKeyConflictError):
                 return None
-
-    async def list_transcript_items(
-        self,
-        run_id: UUID | str,
-    ) -> tuple[TranscriptItemIdentity, ...]:
-        runtime = await self._lookup(run_id)
-        async with runtime.condition:
-            return tuple(runtime.transcript_items)
-
-    async def list_session_transcript_items(
-        self,
-        run_id: UUID | str,
-        session_id: UUID | str,
-    ) -> tuple[TranscriptItemIdentity, ...]:
-        runtime = await self._lookup(run_id)
-        key = _UUID.validate_python(session_id)
-        async with runtime.condition:
-            self._lookup_agent_session_locked(runtime, key)
-            return tuple(
-                item
-                for item in runtime.transcript_items
-                if item.session_id == key
-            )
-
-    async def list_state_mutations(
-        self,
-        run_id: UUID | str,
-    ) -> tuple[RunStateMutation | SessionStateMutation, ...]:
-        runtime = await self._lookup(run_id)
-        async with runtime.condition:
-            return tuple(runtime.state_mutations)
 
     async def mark_running(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         return await self._transition_run(run_id, RunStatus.RUNNING)
