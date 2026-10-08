@@ -80,36 +80,64 @@
 
 ### 工作
 
-- [ ] 记录 branch、HEAD、`origin/main`/upstream/merge-base、tracked/unstaged/untracked/permission-limited 状态、Python/Node/npm/浏览器版本、PostgreSQL migration head 和现有测试入口；保护当前 M9 文档与所有用户改动。
-- [ ] 确认 `frontend/` 当前真实状态、`.gitignore`、构建产物边界和 `frontend_bk/` 隔离；不得因为空目录存在就声称前端已初始化。
-- [ ] 追踪 production `create_app`/lifespan、settings/catalog、M4/M5/M6/M7/M8 runtime、analysis create、history/SSE、persistence retry 与 shutdown 的真实调用链，标出 M9 SettingsRuntime、per-run factory、Admin runner 和 static responder 的唯一插入点。
-- [ ] 追踪 `AppSettings` 三类 key在 M4/M5/M6/M8 的读取位置、HTTP client/header ownership、run/provider 生命周期和 M8 worker attempt，形成需要原子替换的 caller/builder/fake/smoke 列表。
-- [ ] 追踪当前 `AnalysisConfigurationSnapshot` 从 create body/default resolution 到 writer、PostgreSQL、history/API/SSE/M4–M8 consumer 的完整链，形成 timezone/unit policy向前演进清单。
-- [ ] 盘点 `KeyStorePort`、parameter/unit registry、`RAGMaintenanceOperations`、cleanup transaction、idempotency receipt、error mapper、OpenAPI 和 safe-log redaction 的真实能力与缺口。
-- [ ] 记录 backend non-PG、专用 PostgreSQL、architecture/OpenAPI/M8 smoke 基线；环境/ACL/缺少 Node 浏览器等限制如实标为 failed/skipped/not run/permission-limited。
-- [ ] 增加 architecture red gates：production 不 import archive；M9 domain/application 不 import FastAPI/SQLAlchemy/keyring/React；无第三 SSE/WebSocket/direct RAG search route/evidence-cache route/desktop shell/auth/multi-worker queue；API route不直连 repository/keyring。
-- [ ] 增加失败 contract tests，精确锁定当前缺失的 settings/key/admin routes、snapshot unit identity、tombstone 410、OS-store projection、operation status与 static hosting，不因 import/fixture 拼写错误失败。
+- [x] 记录 branch、HEAD、`origin/main`/upstream/merge-base、tracked/unstaged/untracked/permission-limited 状态、Python/Node/npm/浏览器版本、PostgreSQL migration head 和现有测试入口；保护当前 M9 文档与所有用户改动。
+- [x] 确认 `frontend/` 当前真实状态、`.gitignore`、构建产物边界和 `frontend_bk/` 隔离；不得因为空目录存在就声称前端已初始化。
+- [x] 追踪 production `create_app`/lifespan、settings/catalog、M4/M5/M6/M7/M8 runtime、analysis create、history/SSE、persistence retry 与 shutdown 的真实调用链，标出 M9 SettingsRuntime、per-run factory、Admin runner 和 static responder 的唯一插入点。
+- [x] 追踪 `AppSettings` 三类 key在 M4/M5/M6/M8 的读取位置、HTTP client/header ownership、run/provider 生命周期和 M8 worker attempt，形成需要原子替换的 caller/builder/fake/smoke 列表。
+- [x] 追踪当前 `AnalysisConfigurationSnapshot` 从 create body/default resolution 到 writer、PostgreSQL、history/API/SSE/M4–M8 consumer 的完整链，形成 timezone/unit policy向前演进清单。
+- [x] 盘点 `KeyStorePort`、parameter/unit registry、`RAGMaintenanceOperations`、cleanup transaction、idempotency receipt、error mapper、OpenAPI 和 safe-log redaction 的真实能力与缺口。
+- [x] 记录 backend non-PG、专用 PostgreSQL、architecture/OpenAPI/M8 smoke 基线；环境/ACL/缺少 Node 浏览器等限制如实标为 failed/skipped/not run/permission-limited。
+- [x] 增加 architecture red gates：production 不 import archive；M9 domain/application 不 import FastAPI/SQLAlchemy/keyring/React；无第三 SSE/WebSocket/direct RAG search route/evidence-cache route/desktop shell/auth/multi-worker queue；API route不直连 repository/keyring。
+- [x] 增加失败 contract tests，精确锁定当前缺失的 settings/key/admin routes、snapshot unit identity、tombstone 410、OS-store projection、operation status与 static hosting，不因 import/fixture 拼写错误失败。
 
 ### Tests
 
-- [ ] 基线报告区分现有通过、现有失败、PostgreSQL、frontend、browser、provider、三平台和 permission-limited；不把没有 `frontend/package.json` 记为 test pass。
-- [ ] architecture tests 会拒绝 archive import、旧 frontend build、第三 SSE/WebSocket、route直连 infrastructure、secret persistence、evidence-cache surface、remote/multi-user/desktop overbuild。
-- [ ] red contract tests 在业务实现前只因冻结能力缺失而失败，并注明后续负责 Milestone；现有 M1–M8 tests 不被改成适应未实现行为。
-- [ ] production impact表覆盖 code、tests、scripts、OpenAPI、docs 和 composition builders，没有遗漏长期捕获 secret 的 caller或第二套 cleanup owner。
+- [x] 基线报告区分现有通过、现有失败、PostgreSQL、frontend、browser、provider、三平台和 permission-limited；不把没有 `frontend/package.json` 记为 test pass。
+- [x] architecture tests 会拒绝 archive import、旧 frontend build、第三 SSE/WebSocket、route直连 infrastructure、secret persistence、evidence-cache surface、remote/multi-user/desktop overbuild。
+- [x] red contract tests 在业务实现前只因冻结能力缺失而失败，并注明后续负责 Milestone；现有 M1–M8 tests 不被改成适应未实现行为。
+- [x] production impact表覆盖 code、tests、scripts、OpenAPI、docs 和 composition builders，没有遗漏长期捕获 secret 的 caller或第二套 cleanup owner。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/api/test_openapi_contract.py backend/tests/infrastructure/test_m4_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m8_runtime.py -q`
-- [ ] 使用专用测试数据库运行当前 persistence/RAG baseline，并记录实际 `WATERAGENTS_TEST_DB_NAME`、migration head和 basetemp。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（PostgreSQL/外部 provider按环境拆分并分别记账）
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/api/test_openapi_contract.py backend/tests/infrastructure/test_m4_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m8_runtime.py -q`
+- [x] 使用专用测试数据库运行当前 persistence/RAG baseline，并记录实际 `WATERAGENTS_TEST_DB_NAME`、migration head和 basetemp。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`（PostgreSQL/外部 provider按环境拆分并分别记账）
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：production 插入点、所有 settings/secret/snapshot/admin/frontend consumers、数据库缺口与可复现基线已经记录；red tests 精确描述 M9 缺口，本阶段不实现新 route、migration、keyring、runtime factory 或 frontend。
 
 提交边界：只允许 architecture guards、失败 contract tests、基线/影响记录与必要的测试命名澄清；不得提前增加业务实现或依赖。
 
 完成记录：实施后按文末模板填写。
+
+### M0 基线与影响记录（2026-10-08）
+
+- Git：从最新 `origin/main=cf7eed70aa43fd6b4a2303a7e0b933804a113735` 新建 `codex/m9-milestone-0`，起点 HEAD/merge-base 同 SHA，upstream 为 `origin/main`；`git fetch` 与 `git ls-remote` 均已核对。切分支前目标源码/docs 路径 tracked、unstaged、untracked 均为 0；`target/`、`backend/target/` 等历史 pytest 目录有 ACL 限制，不能把全仓扫描等同于完全干净。未创建 worktree，也未触碰归档或旧测试缓存。
+- 环境：backend venv Python 3.12.14（系统 Python 3.13.2），Node 24.21.0、npm 11.19.0；本机 Chrome 154.0.8037.98、Edge 154.0.4258.62。`frontend/` 无 `package.json`、lockfile、源码或 build；`.gitignore` 已排除 `node_modules/`、`dist/` 等，后续 Playwright artifact 仍需单独审查。旧 `frontend_bk/` 不进入生产/构建。当前 Alembic 唯一 head 为 `20261007_01`；Docker pgvector PostgreSQL 17 容器 healthy，PG 测试使用独立 `wateragents_test` 的临时 schema。
+
+| 接缝与原子替换范围 | 当前生产事实 / M9 插入点 | 同步消费者 |
+|---|---|---|
+| composition 与生命周期 | `backend/app/main.py:create_app` lifespan 先校验 DB/repair，再建 M4 workflow、coordinator/reader、M8、M5、M6、M7，启动 M8 worker；shutdown 依次停 M8/coordinator/engine。SettingsRuntime 应接在 DB 校验后；per-run resolver/factory 接 create 前和 run 生命周期；Admin runner 复用 `m8_runtime.operations`；API router 后才接非 `/api` static responder。 | `backend/tests/application/test_run_workflow.py`、`test_milestone8_runtime.py`、`backend/tests/infrastructure/test_m4_runtime.py`、`test_m5_runtime.py`、`test_m6_runtime.py`、`test_m8_runtime.py`、`test_m7_runtime.py`、`backend/tests/smoke/test_m8_memory_rag_smoke.py`。 |
+| secret / HTTP ownership | `AppSettings` 的 OpenAI、Google、USGS 均为 `SecretStr`。`runtime/m4.py` 在 startup 取 OpenAI/Google/USGS；`runtime/m5.py` 取 deployment-only USGS；`runtime/m6.py` 在 startup 取 OpenAI；`runtime/m8.py` 在 startup 取 OpenAI，search 与 worker 共用 embedding adapter。各 adapter 自持 key并在调用边界写 Authorization、Google URL key或 USGS `X-Api-Key`，`ProviderHttpClient` 不应设置全局 secret header。M9 需替换 M4/M6/M8 的长期捕获、给 run 与 M8 claimed attempt 各自 lease；USGS 保持 deployment-only。 | `backend/tests/m6_reasoning_support.py`、各 runtime tests、`backend/tests/smoke/test_m8_memory_rag_smoke.py`，`backend/scripts/m4_workflow_smoke.py`、`m6_fixture_runtime.py`、`m6_provider_smoke.py`、`m5_provider_smoke.py`。真实 provider smoke 本阶段未运行。 |
+| configuration / history / SSE | `api/http/analysis_runs.py:create_run` 把原始 body交 `RunCoordinator.create_run`；`AnalysisRequestV1.to_configuration_snapshot` 用固定 `analysis_timezone`、默认/显式 resolution、model/memory生成当前 `AnalysisConfigurationSnapshot`。coordinator 写 `RunCreationCandidate`，Postgres store保存 typed run-created payload；`TranscriptReader`、history API、run/session SSE再投影。M9 在 create 时固化 timezone、unit version/digest并同步 reader、startup repair、M4/M6/M7/M8消费者；旧记录投影 legacy/unknown。 | `backend/app/application/analysis_runs/{models,coordinator,startup_repair}.py`、`application/transcripts/{models,reader,read_models}.py`、`infrastructure/persistence/{store,records,schema}.py`、`api/{schemas/http/sse}` 与对应 run/history/events/persistence tests。 |
+| 单位与管理 | `ParameterCapabilityRegistry`/manifest 是单位 authority，`convert_evidence_unit` 已用 registry target；无 global version。`KeyStorePort` 只有 generic get/set/delete，无 OS adapter/status。M8 `RAGMaintenanceOperations` 只在 `runtime/m8.py` 组合一次，`rag_repository.py:delete_history_runs` 已同事务处理 consumption 与 run facts，但尚未写 tombstone；live create receipt在 `analysis_runs`。 | M1–M6 需同改 ports、schema/migration、maintenance/repository、idempotency create、error mapper `_SAFE_FIELDS` 与 safe-log/private-values；不得 new 第二个 cleanup owner。 |
+| wire、前端、文档 | 当前 `main.py` 仅注册 health/analysis router并补充 OpenAPI schema；现有两条 SSE，history/cancel/retry 保持原路径。`frontend/` 尚未初始化，backend 未托管 static。 | `backend/tests/api/test_openapi_contract.py` 有精确旧路径集合，M1/M3 扩 route时须同步；`docs/M9` 的设计/API/Policy/Frontend、`docs/frontend_integration_contracts.md`、`backend/README.md`、`.github/workflows/backend-m1.yml` 与未来前端生成类型/脚本需随各阶段更新。 |
+
+新增 `backend/tests/architecture/test_m9_boundaries.py` 为 archive、依赖方向、route/持久化/前端构建与单 worker 护栏；`backend/tests/api/test_m9_red_contract.py` 用 strict xfail 锁住 Settings(M1/3)、OS key(M1/4)、Admin operation(M1/6)、unit snapshot(M1/3)、deleted receipt 410(M1/6)、static hosting(M8)。`--runxfail` 应恰好因这些缺失断言而失败；后续负责阶段使对应项转绿并移除 xfail。
+
+验证记录（Windows，本机，命令均从仓库根目录运行）：
+
+| Gate | 实际结果 |
+|---|---|
+| 原有 architecture + OpenAPI + M4/M6/M8 runtime 命令；`--basetemp=backend/target/m9-m0-architecture-elevated-20261008` | 202 passed。 |
+| `WATERAGENTS_TEST_DB_NAME=wateragents_test`，项目 venv 的 `python -m dotenv -f backend/.env run --no-override -- ... pytest backend/tests/persistence backend/tests/smoke/test_m8_memory_rag_smoke.py -q`；`--basetemp=backend/target/m9-m0-pg-elevated-20261008` | 98 passed；随机临时 schema 升级到 `20261007_01` 后清理，未使用业务库。 |
+| 非 PG：`pytest backend/tests --ignore=backend/tests/persistence --ignore=backend/tests/smoke/test_m8_memory_rag_smoke.py -q`；`--basetemp=backend/target/m9-m0-full-nonpg-final-elevated-20261008` | 2164 passed、6 xfailed、1 既有 StarletteDeprecationWarning。 |
+| 全量：同上设置专用测试库，经项目 venv `dotenv` 运行 `pytest backend/tests -q`；`--basetemp=backend/target/m9-m0-full-pg-final-elevated-20261008` | 2262 passed、6 xfailed、1 同类 warning；6 项 strict xfail 仅为 M9 后续阶段契约。 |
+| M9 focused：`pytest backend/tests/architecture/test_archive_isolation.py backend/tests/architecture/test_m9_boundaries.py backend/tests/api/test_m9_red_contract.py -q`；`--basetemp=backend/target/m9-m0-archive-repair-elevated-20261008` | 13 passed、6 xfailed；单跑 red contract `--runxfail` 为 6 failed，均为缺失能力断言。 |
+| `python -B -m compileall -q backend/app backend/scripts`；`git diff --check` | 均 exit 0。 |
+
+失败与修复：受限运行的 pytest 临时目录触发 WinError 5，改用上述可访问的 basetemp/测试权限；无 DB 环境的首次全量运行 2203 passed、37 failed、18 errors，失败集中在缺少专用测试库配置，随后按专用 PG 命令重跑。首次 PG 全量 2261 passed、6 xfailed、1 failed：新增合成测试写了完整 archive 目录名，被既有 isolation 守卫正确拒绝；拆分测试字面量后 focused 与全量均通过。系统 Python 没有 `dotenv` CLI，实际使用 backend venv。Frontend unit/build/E2E、真实 provider、OS credential backend、容量及 Ubuntu/macOS 均为 `not run`；本阶段没有 production route、migration、runtime factory、frontend 依赖或外部请求。提交范围仅为本文件与两份 M0 测试，提交 SHA 以本阶段提交的 HEAD 为准。
 
 ## Milestone 1：当前唯一 V1 类型、ports 与 wire contract
 
