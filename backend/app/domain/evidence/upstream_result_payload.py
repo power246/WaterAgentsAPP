@@ -2,8 +2,13 @@ from typing import Literal, Self
 
 from pydantic import model_validator
 
-from app.domain.common import DomainModel, NonEmptyString, ensure_unique_tuple
+from app.domain.common import (
+    DomainModel,
+    NonEmptyString,
+    ensure_unique_tuple,
+)
 from app.domain.evidence.item_reference import ItemReference
+from app.domain.evidence.upstream_result_cell_projection import UpstreamResultCellProjection
 
 
 class UpstreamResultPayload(DomainModel):
@@ -11,6 +16,7 @@ class UpstreamResultPayload(DomainModel):
     upstream_session_id: NonEmptyString
     result_ref: ItemReference
     closure_refs: tuple[ItemReference, ...]
+    cell_projection: UpstreamResultCellProjection | None = None
 
     @model_validator(mode="after")
     def validate_closure(self) -> Self:

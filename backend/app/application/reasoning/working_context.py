@@ -91,6 +91,7 @@ class BoundedEvidenceSummary(DomainModel):
     evidence_ref: NonEmptyString
     summary: NonBlankText
     source_record_item_refs: tuple[NonEmptyString, ...] = ()
+    dependency_evidence_refs: tuple[NonEmptyString, ...] = ()
     series_refs: tuple[NonEmptyString, ...] = ()
     truncated: StrictBool
 
@@ -99,12 +100,19 @@ class BoundedEvidenceSummary(DomainModel):
     def validate_summary(cls, value: str) -> str:
         return require_safe_prompt_text(value)
 
-    @field_validator("source_record_item_refs", "series_refs")
+    @field_validator("source_record_item_refs", "dependency_evidence_refs", "series_refs")
     @classmethod
     def canonicalize_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if len(value) != len(set(value)):
             raise ValueError("evidence summary refs must be unique")
         return tuple(sorted(value))
+
+    @model_serializer(mode="wrap")
+    def serialize_without_empty_dependencies(self, handler):
+        value = handler(self)
+        if not self.dependency_evidence_refs:
+            value.pop("dependency_evidence_refs", None)
+        return value
 
 
 class DependencyPromptWindow(DomainModel):

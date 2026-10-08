@@ -62,6 +62,7 @@ from app.application.reasoning.working_context import (
 from app.domain import (
     DomainModel,
     EvidenceFragment,
+    EvidenceFragmentReference,
     EvidenceToolOptions,
     EvidenceToolRequest,
     ItemReference,
@@ -71,6 +72,9 @@ from app.domain import (
     ParameterKey,
     SourceRecordReference,
     SourceRecord,
+    ConversionPayload,
+    RelationSupportPayload,
+    UpstreamResultPayload,
 )
 from app.ports.waterbody_model import WaterbodyModelPort
 
@@ -470,6 +474,19 @@ async def build_reasoning_working_context(
     )
 
 
+def build_reasoning_evidence_summaries(
+    handoff: EvidenceAcquisitionHandoff,
+) -> tuple[BoundedEvidenceSummary, ...]:
+    return _evidence_summaries(
+        handoff,
+        tuple(sorted(
+            handoff.fragment_allowlist,
+            key=lambda item: (item.evidence_id, item.item_id),
+        )),
+        require_upstream_projection=True,
+    )
+
+
 def _parse_decision(
     event: StructuredOutputCompleted | None,
 ) -> _EvidenceReadyDecision | _EvidenceRulesDecision | None:
@@ -615,6 +632,17 @@ def _bounded_fragment_summary(
             },
             exclude_none=True,
         )
+    if payload.payload_type == "upstream_result" and payload.cell_projection is not None:
+        payload_view["cell_projection"] = payload.cell_projection.model_dump(
+            mode="json", exclude_none=True
+        )
+    if isinstance(payload, RelationSupportPayload):
+        payload_view["input_evidence_refs"] = tuple(
+            reference.evidence_id for reference in payload.input_evidence_refs
+        )
+        payload_view["rationale"] = payload.rationale
+    if isinstance(payload, ConversionPayload):
+        payload_view["input_evidence_ref"] = payload.input_evidence_ref.evidence_id
     base = {
         "data_type": fragment.data_type,
         "collection_status": fragment.collection_status,
@@ -712,48 +740,13 @@ async def _working_context(
             )
         )
 
-    summaries = []
-    fragments_by_ref = dict(handoff.validated_inputs.fragments)
-    source_cache = {
-        item_id: {record.record_id: record for record in records}
-        for item_id, records in handoff.validated_inputs.source_records
-    }
-    for reference in sorted(
-        handoff.fragment_allowlist,
-        key=lambda item: (item.evidence_id, item.item_id),
-    )[:_MAX_CONTEXT_SUMMARIES]:
-        fragment = fragments_by_ref[reference]
-        source_item_ids = tuple(dict.fromkeys(
-            item.item_id for item in fragment.source_record_refs
-        ))
-        source_records = tuple(
-            source_cache[item.item_id][item.record_id]
-            for item in fragment.source_record_refs
-        )
-        inspection_pages = handoff.executor.inspection_pages(
-            handoff.run_id, source_item_ids
-        )
-        summary, truncated = _bounded_fragment_summary(
-            fragment, source_records, inspection_pages
-        )
-        summaries.append(
-            BoundedEvidenceSummary(
-                evidence_ref=reference.evidence_id,
-                summary=summary,
-                source_record_item_refs=tuple(
-                    dict.fromkeys(
-                        item.item_id for item in fragment.source_record_refs
-                    )
-                ),
-                series_refs=(
-                    (fragment.series_identity,)
-                    if fragment.series_identity is not None
-                    else ()
-                ),
-                truncated=truncated,
-            )
-        )
-
+    summaries = _evidence_summaries(
+        handoff,
+        tuple(sorted(
+            handoff.fragment_allowlist,
+            key=lambda item: (item.evidence_id, item.item_id),
+        ))[:_MAX_CONTEXT_SUMMARIES],
+    )
     scope = task.task.evidence_scope
     scope_digest = canonical_json_digest(
         {
@@ -788,7 +781,7 @@ async def _working_context(
             reference_allowlist=allowlist,
             recent_messages=(),
             facts=tuple(facts),
-            evidence_summaries=tuple(summaries),
+            evidence_summaries=summaries,
             dependency_context=(
                 build_dependency_prompt_block(
                     task.task.dependency_manifest,
@@ -807,6 +800,69 @@ async def _working_context(
         )
     except ValueError as error:
         raise PlanningLoopError("evidence_prompt_projection_too_large") from error
+
+
+def _evidence_summaries(
+    handoff: EvidenceAcquisitionHandoff,
+    references: tuple[EvidenceFragmentReference, ...],
+    *,
+    require_upstream_projection: bool = False,
+) -> tuple[BoundedEvidenceSummary, ...]:
+    summaries = []
+    fragments_by_ref = dict(handoff.validated_inputs.fragments)
+    source_cache = {
+        item_id: {record.record_id: record for record in records}
+        for item_id, records in handoff.validated_inputs.source_records
+    }
+    for reference in references:
+        fragment = fragments_by_ref[reference]
+        if (
+            require_upstream_projection
+            and isinstance(fragment.payload, UpstreamResultPayload)
+            and fragment.payload.cell_projection is None
+        ):
+            raise PlanningLoopError("evidence_prompt_projection_invalid")
+        source_item_ids = tuple(dict.fromkeys(
+            item.item_id for item in fragment.source_record_refs
+        ))
+        source_records = tuple(
+            source_cache[item.item_id][item.record_id]
+            for item in fragment.source_record_refs
+        )
+        inspection_pages = handoff.executor.inspection_pages(
+            handoff.run_id, source_item_ids
+        )
+        summary, truncated = _bounded_fragment_summary(
+            fragment, source_records, inspection_pages
+        )
+        summaries.append(
+            BoundedEvidenceSummary(
+                evidence_ref=reference.evidence_id,
+                summary=summary,
+                source_record_item_refs=tuple(
+                    dict.fromkeys(
+                        item.item_id for item in fragment.source_record_refs
+                    )
+                ),
+                dependency_evidence_refs=(
+                    tuple(
+                        item.evidence_id
+                        for item in fragment.payload.input_evidence_refs
+                    )
+                    if isinstance(fragment.payload, RelationSupportPayload)
+                    else (fragment.payload.input_evidence_ref.evidence_id,)
+                    if isinstance(fragment.payload, ConversionPayload)
+                    else ()
+                ),
+                series_refs=(
+                    (fragment.series_identity,)
+                    if fragment.series_identity is not None
+                    else ()
+                ),
+                truncated=truncated,
+            )
+        )
+    return tuple(summaries)
 
 
 def _prompt_budget(

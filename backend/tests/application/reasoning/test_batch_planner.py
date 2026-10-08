@@ -404,12 +404,14 @@ def _plan(
     *,
     planner: ReasoningBatchPlanner | None = None,
     context=None,
+    evidence_summaries=None,
     model_fit: ModelFitCapability | None = None,
     reverse_schema: bool = False,
 ):
     return (planner or _planner()).plan(
         skeleton,
         working_context=context or _working_context(skeleton),
+        evidence_summaries=evidence_summaries,
         model_fit=model_fit or _model_fit(),
         deadline=DEADLINE,
         batch_response_schema=_schema("reasoning_batch", reverse=reverse_schema),
@@ -449,6 +451,92 @@ def test_maximum_six_parameter_fifteen_day_fixture_is_complete_and_stable() -> N
     ) == tuple(scope.cell_id for scope in skeleton.supported_scopes)
     assert max(batch.serialized_input_bytes for batch in batches) > 0
     assert first.synthesis_plan.reserved_validated_result_bytes > 0
+
+
+def test_seven_day_batches_include_every_required_evidence_body() -> None:
+    original = _make_skeleton(
+        segment_specs=((_range_for_windows(28), InferenceMode.GAP_FILLING),),
+    )
+    scopes = tuple(
+        scope.model_copy(update={
+            "allowed_evidence_refs": tuple(
+                f"e:{index}:{part}" for part in range(3)
+            ),
+        })
+        for index, scope in enumerate(original.supported_scopes)
+    )
+    references = tuple(
+        reference
+        for scope in scopes
+        for reference in scope.allowed_evidence_refs
+    )
+    values = original.model_dump(mode="json", exclude={"skeleton_digest"})
+    values["supported_scopes"] = tuple(
+        scope.model_dump(mode="json") for scope in scopes
+    )
+    values["evidence_allowlist"] = tuple(sorted(references))
+    skeleton = ResultSkeleton(
+        **values, skeleton_digest=canonical_json_digest(values)
+    )
+    summaries = tuple(
+        BoundedEvidenceSummary(
+            evidence_ref=reference,
+            summary=f"measured-content-for-{reference}",
+            truncated=False,
+        )
+        for reference in references
+    )
+    plan = _plan(
+        skeleton,
+        context=_working_context(original),
+        evidence_summaries=summaries,
+    )
+    assert len(references) == 84
+    assert len(plan.batch_plan.batches) >= 2
+    for batch in plan.batch_plan.batches:
+        request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_reasoning_batch(
+            batch.prompt_input()
+        )
+        serialized = request.model_dump_json()
+        for cell in batch.cells:
+            for reference in cell.allowed_evidence_refs:
+                assert f"measured-content-for-{reference}" in serialized
+
+
+def test_batch_includes_upstream_content_behind_relation_evidence() -> None:
+    original = _make_skeleton()
+    first = original.supported_scopes[0]
+    relation = first.allowed_evidence_refs[0]
+    upstream = "e:upstream:0"
+    values = original.model_dump(mode="json", exclude={"skeleton_digest"})
+    values["evidence_allowlist"] = tuple(sorted((*original.evidence_allowlist, upstream)))
+    skeleton = ResultSkeleton(
+        **values, skeleton_digest=canonical_json_digest(values)
+    )
+    summaries = tuple(
+        BoundedEvidenceSummary(
+            evidence_ref=reference,
+            summary=f"relation-uses-{upstream}" if reference == relation else "local evidence",
+            dependency_evidence_refs=(upstream,) if reference == relation else (),
+            truncated=False,
+        )
+        for reference in original.evidence_allowlist
+    ) + (BoundedEvidenceSummary(
+        evidence_ref=upstream,
+        summary="upstream trend rising and risk medium",
+        truncated=False,
+    ),)
+    plan = _plan(
+        skeleton,
+        context=_working_context(original),
+        evidence_summaries=summaries,
+    )
+    first_batch = plan.batch_plan.batches[0]
+    assert upstream not in first_batch.cells[0].allowed_evidence_refs
+    request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_reasoning_batch(
+        first_batch.prompt_input()
+    )
+    assert "upstream trend rising and risk medium" in request.model_dump_json()
 
 
 def test_real_m5_sealed_handoff_plans_every_supported_cell_once() -> None:

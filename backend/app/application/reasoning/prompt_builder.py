@@ -175,7 +175,23 @@ class ReasoningBatchPromptInput(_PromptInput):
         context_refs = {
             summary.evidence_ref for summary in self.context.evidence_summaries
         }
-        if not context_refs <= allowed_refs:
+        summaries = {
+            summary.evidence_ref: summary for summary in self.context.evidence_summaries
+        }
+        permitted_refs = set(allowed_refs)
+        pending = list(allowed_refs)
+        while pending:
+            summary = summaries.get(pending.pop())
+            if summary is None:
+                continue
+            for dependency in summary.dependency_evidence_refs:
+                if dependency not in permitted_refs:
+                    permitted_refs.add(dependency)
+                    pending.append(dependency)
+        if not context_refs <= permitted_refs or any(
+            not set(summary.dependency_evidence_refs) <= context_refs
+            for summary in self.context.evidence_summaries
+        ):
             raise ValueError("working context contains evidence outside batch evidence scope")
         return self
 
@@ -355,7 +371,6 @@ class PromptBuilder:
         self,
         prompt: ReasoningBatchPromptInput,
     ) -> WaterbodyModelRequest:
-        allowed = {ref for cell in prompt.cells for ref in cell.allowed_evidence_refs}
         body = {
             "phase": WaterbodyModelPhase.REASONING_BATCH,
             "batch_id": prompt.batch_id,
@@ -366,11 +381,7 @@ class PromptBuilder:
             "capability_registry_digest": prompt.context.capability_registry_digest,
             "working_context_digest": prompt.context.working_context_digest,
             "cells": prompt.cells,
-            "evidence_summaries": tuple(
-                summary
-                for summary in prompt.context.evidence_summaries
-                if summary.evidence_ref in allowed
-            ),
+            "evidence_summaries": prompt.context.evidence_summaries,
             "response_schema": {
                 "name": prompt.response_schema.name,
                 "digest": _schema_digest(prompt.response_schema),

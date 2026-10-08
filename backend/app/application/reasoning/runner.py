@@ -36,6 +36,7 @@ from app.application.reasoning.planning_loop import (
     EvidencePlanningOutcome,
     EvidencePlanningStageCounts,
     PlanningConvergenceReason,
+    build_reasoning_evidence_summaries,
     build_reasoning_working_context,
 )
 from app.application.evidence_tools import EvidenceAcquisitionHandoff
@@ -200,11 +201,13 @@ class RunSingleWaterbodyAgent:
                 generated_at=self._clock.now(),
             )
             context = await build_reasoning_working_context(task, planning)
+            evidence_summaries = build_reasoning_evidence_summaries(planning.handoff)
             stage = "batch_planning"
             self._checkpoint(task, deadline, stage=stage)
             plan = self._batch_planner.plan(
                 skeleton,
                 working_context=context,
+                evidence_summaries=evidence_summaries,
                 model_fit=self._model_fit,
                 deadline=deadline,
                 batch_response_schema=reasoning_batch_response_schema(),
