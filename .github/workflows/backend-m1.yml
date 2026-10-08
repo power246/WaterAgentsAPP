@@ -55,6 +55,7 @@ jobs:
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          set "PGROOT=C:\Program Files\PostgreSQL\17"
           cd /d %RUNNER_TEMP%
           git clone --branch v0.8.7 --depth 1 https://github.com/pgvector/pgvector.git
           cd pgvector

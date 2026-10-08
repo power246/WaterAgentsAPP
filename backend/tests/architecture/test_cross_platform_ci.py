@@ -78,6 +78,15 @@ def test_ci_installs_and_verifies_pgvector_before_running_database_tests() -> No
     assert "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public" in workflow
     assert "SELECT extversion FROM pg_extension WHERE extname = 'vector'" in workflow
 
+    windows_step = workflow[
+        workflow.index("Install pgvector on Windows") : verify_index
+    ]
+    pgroot_index = windows_step.index(
+        'set "PGROOT=C:\\Program Files\\PostgreSQL\\17"'
+    )
+    first_nmake_index = windows_step.index("nmake /NOLOGO /F Makefile.win")
+    assert pgroot_index < first_nmake_index
+
 
 def test_shared_ci_commands_do_not_require_a_platform_specific_shell() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
