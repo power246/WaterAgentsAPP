@@ -299,6 +299,9 @@ def test_result_and_waterbody_completion_share_one_persistence_group_and_history
                 "run_id": created.run_id,
                 "session_id": session.session_id,
                 "target_comid": "1234567",
+                "analysis_detail": outcome.result.analysis_detail.model_copy(
+                    update={"transcript_item_refs": ()}
+                ),
             })
             completed = await coordinator.complete_waterbody_agent_session(
                 created.run_id,

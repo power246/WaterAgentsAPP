@@ -1,9 +1,6 @@
-from typing import Annotated
-
-from pydantic import Field
-
 from app.domain.common import DomainModel, NonEmptyString
 from app.domain.memory import MemoryMode
+from app.domain.memory_rag import HistoricalSearchIntentV1
 
 
 class TranscriptEvidenceRequest(DomainModel):
@@ -11,5 +8,4 @@ class TranscriptEvidenceRequest(DomainModel):
     run_id: NonEmptyString
     session_id: NonEmptyString
     memory_mode: MemoryMode
-    query: NonEmptyString
-    max_records: Annotated[int, Field(strict=True, ge=1, le=200)]
+    intent: HistoricalSearchIntentV1

@@ -220,13 +220,13 @@ FK 指向 generation、source run/session/result item；source result 删除时 
 
 ### 5.5 `rag_fragment_projections`
 
-FK 指向 case projection与原 fragment item；保存 parameter/window、quality/applicability/time/provenance identity 和有界 JSONB projection。唯一 `(generation_id,case_id,source_fragment_item_id)`；root case 或 source fragment 删除时 cascade。
+FK 指向 case projection、case window 与原 fragment item；保存 parameter/window、quality/applicability/time/provenance identity 和有界 JSONB projection。一个原 fragment 可以直接支撑多个 result cells，因此每个 `(source_fragment_item_id,parameter_key,window_id)` 各保存一行，主键为 `(generation_id,case_id,source_fragment_item_id,parameter_key,window_id)`。写入时必须验证 parameter/window 是该 case 的真实 result cell；root case 或 source fragment 删除时 cascade。hydration 只向 Agent 投影当前授权 cell 的交集时间段，并按原 fragment identity 去重和执行每 case 上限。
 
 ### 5.6 `rag_consumption_links`
 
-当当前 session 的 historical source record 成功持久化时，登记 source case/result item与 consumer run/session/item 的关系。它不进入搜索排名，只用于删除冲突、引用审计和 M9 cleanup。
+当当前 session 的 historical source record 成功持久化时，登记被消费时的 source generation/case 快照、原 source run/session/result item 与 consumer run/session/item。创建 link 时在同一事务内锁定权威 source result transcript，验证其 content type/schema/final eligibility，并按 generation + source identity + projection version 重算 deterministic case identity；提交不依赖可重建、可删除的 case projection，因此 search reader lease 释放后即使 retired generation 被并发清理，source record 与 link 仍能原子提交。长期所有权 FK 直接指向 `transcript_items(run_id,session_id,item_id)`；retired/failed generation 清理后 link 继续存在并保护原 source transcript。它不进入搜索排名，只用于删除冲突、引用审计和 M9 cleanup。
 
-consumer 删除时 link cascade；source 删除默认 restrict。选择性删除一个已被保留 run 消费的 source 时，M9 必须返回 conflict，或在用户明确授权下删除整个 dependent consumer run；不得改写 immutable transcript、只删 source 留下悬空引用或静默改成 tombstone。全量 history cleanup 按 consumer -> source -> index/link 顺序执行。
+consumer 删除时 link cascade；source transcript 删除默认 restrict。选择性删除一个已被保留 run 消费的 source 时，M9 必须返回 conflict，或在用户明确授权下删除整个 dependent consumer run；不得改写 immutable transcript、只删 source 留下悬空引用或静默改成 tombstone。全量 history cleanup 按 consumer -> source -> index/link 顺序执行。
 
 ## 6. Discovery、backfill 与 active generation
 
@@ -326,7 +326,7 @@ production startup顺序调整为：
 - `evidence_tool_result v1`：completed/failed、empty/unavailable/invalid 与 safe code；
 - `evidence_bundle v1`：允许进入 reasoning 的同 run item refs。
 
-`rag_consumption_links` 在 source-record item持久化 transaction确认后登记；link失败属于该历史记录 persistence failure，不能保留正文却缺 ownership registry。index jobs/generation/embedding response不写公共 transcript。
+`rag_consumption_links` 与 source-record item 在同一 persistence transaction 登记；link失败属于该历史记录 persistence failure，不能保留正文却缺 ownership registry。link 创建时以 immutable source result transcript 和 deterministic case identity 验证 generation/case/source 快照，不要求对应 projection 在 consumer transaction 提交时仍存在；创建后以原 source transcript identity 作为长期 ownership。index jobs/generation/embedding response不写公共 transcript。
 
 结构化日志/metrics至少覆盖：generation状态/年龄、job pending/lease/retry/failed/lag、embedding latency/error、search strategy/empty/failure/latency/candidate-return counts、hydration invalid、active profile digest。不得以 run/session/item、COMID、query text 或 vector作为无界 metric label；日志只用安全 hash/correlation ID。
 
@@ -343,7 +343,9 @@ delete_retired_generation(generation)
 inspect_cleanup_dependencies(run_ids)
 ```
 
-M9 admin/cleanup调用这些 service前必须增加授权、确认、幂等与异步状态。index-only cleanup可删除 retired/active派生 rows，但删除 active后 producer必须 unavailable，直到新 generation激活；它不删除 transcript。profile change必须把“保存期望配置、构建、验证、激活、最后再允许清理旧credential”作为一个可观察workflow。history cleanup先检查 `rag_consumption_links`，按 source-first ownership规则拒绝或显式级联，不改写 retained transcript。API keys完全不在清理图中。
+M9 admin/cleanup调用这些 service前必须增加授权、确认、幂等与异步状态。index-only cleanup只删除 retired/failed generation 的派生 rows；active 必须先由另一完整 generation 原子接管并转为 retired，且 reader drain 与 retention 均满足后才能删除。它不删除 transcript，也不删除仍承担历史 source ownership 的 `rag_consumption_links`。profile change必须把“保存期望配置、构建、验证、激活、最后再允许清理旧credential”作为一个可观察workflow。history cleanup先检查 `rag_consumption_links`，按 source-first ownership规则拒绝或显式级联，不改写 retained transcript。API keys完全不在清理图中。
+
+实现状态（2026-10-08）：上述 operation 已由 production `M8Runtime.operations` 组合为单一 `RAGMaintenanceOperations`，并与 search 共享同一个 reader-lease owner。generation replacement 通过既有完整性校验与原子 activation 完成；history cleanup 在单事务内重新计算传递 consumption graph，默认稳定 conflict，只有显式参数才按 consumer-first 整 run 级联。该内部 service 另提供 cleanup 执行与 profile handoff readiness 供后续受控调用，但未新增 HTTP route、第三 SSE、frontend/admin surface，也不持有或返回 credential/API key。
 
 ## 13. 测试矩阵
 

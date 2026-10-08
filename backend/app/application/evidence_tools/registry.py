@@ -112,12 +112,17 @@ def create_evidence_tool_registry(
         allowed_option_fields: tuple[str, ...] = (),
         methods: tuple[str, ...] = (),
         units: tuple[str, ...] = (),
+        max_calls_per_session: int | None = None,
         max_records_per_call: int | None = None,
     ) -> EvidenceToolDescriptor:
         maximum_calls = (
-            limits.collection_calls
-            if policy_class is not EvidencePolicyClass.DETERMINISTIC
-            else limits.transform_calls
+            max_calls_per_session
+            if max_calls_per_session is not None
+            else (
+                limits.collection_calls
+                if policy_class is not EvidencePolicyClass.DETERMINISTIC
+                else limits.transform_calls
+            )
         )
         return EvidenceToolDescriptor(
             name=name,
@@ -182,8 +187,12 @@ def create_evidence_tool_registry(
                     "search_transcript_evidence",
                     EvidenceProducerStatus.UNAVAILABLE,
                 ),
-                allowed_option_fields=("record_limit",),
-                max_records_per_call=limits.inspection_max_page_size,
+                allowed_option_fields=(
+                    "historical_search_strategy",
+                    "record_limit",
+                ),
+                max_calls_per_session=2,
+                max_records_per_call=5,
             ),
             descriptor(
                 "convert_evidence_unit",

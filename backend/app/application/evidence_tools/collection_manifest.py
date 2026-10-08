@@ -9,6 +9,10 @@ from app.domain import (
     WindowCompleteness,
 )
 
+_INVALID_COLLECTION_REASONS = frozenset(
+    {"index_invalid", "embedding_protocol_invalid", "historical_source_invalid"}
+)
+
 
 def build_collection_manifest(
     *,
@@ -44,15 +48,15 @@ def build_collection_manifest(
             WindowCompleteness(
                 window_id=window.window_id,
                 complete=False,
-                status=CollectionStatus.UNAVAILABLE,
-                reason="incomplete_source",
+                status=_incomplete_status(batch),
+                reason=_incomplete_reason(batch),
             )
             for window in windows
         )
         all_complete = False
 
     if not all_complete:
-        status = CollectionStatus.UNAVAILABLE
+        status = _incomplete_status(batch)
     elif batch.records:
         status = CollectionStatus.AVAILABLE
     else:
@@ -94,8 +98,8 @@ def _window_completeness(
         return WindowCompleteness(
             window_id=window.window_id,
             complete=False,
-            status=CollectionStatus.UNAVAILABLE,
-            reason="incomplete_source",
+            status=_incomplete_status(batch),
+            reason=_incomplete_reason(batch),
         )
     has_records = any(
         _record_overlaps(record, window.time_range) for record in batch.records
@@ -129,3 +133,20 @@ def _record_overlaps(record: SourceRecord, window: TimeRange) -> bool:
     if record.valid_time_range is not None:
         return window.overlaps(record.valid_time_range)
     return False
+
+
+def _incomplete_status(batch: ProviderCollectionBatch) -> CollectionStatus:
+    if batch.incomplete_reason in _INVALID_COLLECTION_REASONS:
+        return CollectionStatus.INVALID
+    return CollectionStatus.UNAVAILABLE
+
+
+def _incomplete_reason(batch: ProviderCollectionBatch) -> str:
+    if batch.incomplete_reason in {
+        "index_building",
+        "historical_index_unavailable",
+        "embedding_unavailable",
+        *_INVALID_COLLECTION_REASONS,
+    }:
+        return batch.incomplete_reason
+    return "incomplete_source"

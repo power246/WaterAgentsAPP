@@ -64,6 +64,7 @@ def assemble_inference_result(
     synthesis: ValidatedOverallSynthesis | None,
     parameter_definitions: tuple[WaterQualityParameter, ...],
     evidence_references: tuple[EvidenceReference, ...],
+    transcript_item_refs: tuple[str, ...],
     model_execution_summary: ModelExecutionSummary,
 ) -> InferenceResult:
     """Merge only sealed facts and validated Agent output into the V1 result."""
@@ -75,6 +76,7 @@ def assemble_inference_result(
             synthesis=synthesis,
             parameter_definitions=parameter_definitions,
             evidence_references=evidence_references,
+            transcript_item_refs=transcript_item_refs,
             model_execution_summary=model_execution_summary,
         )
     except InferenceAssemblyError:
@@ -90,6 +92,7 @@ def _assemble(
     synthesis: ValidatedOverallSynthesis | None,
     parameter_definitions: tuple[WaterQualityParameter, ...],
     evidence_references: tuple[EvidenceReference, ...],
+    transcript_item_refs: tuple[str, ...],
     model_execution_summary: ModelExecutionSummary,
 ) -> InferenceResult:
     supported_ids = tuple(scope.cell_id for scope in skeleton.supported_scopes)
@@ -225,7 +228,9 @@ def _assemble(
         evidence_refs=overall_evidence,
     )
     analysis_detail = (
-        _analysis_detail(synthesis) if synthesis is not None else _fixed_analysis()
+        _analysis_detail(synthesis, transcript_item_refs=transcript_item_refs)
+        if synthesis is not None
+        else _fixed_analysis(transcript_item_refs=transcript_item_refs)
     )
     attribution_summary = (
         _attribution_summary(synthesis)
@@ -386,7 +391,11 @@ def _window_assessment(
     )
 
 
-def _analysis_detail(synthesis: ValidatedOverallSynthesis) -> AnalysisDetail:
+def _analysis_detail(
+    synthesis: ValidatedOverallSynthesis,
+    *,
+    transcript_item_refs: tuple[str, ...],
+) -> AnalysisDetail:
     return AnalysisDetail(
         summary=synthesis.analysis_detail.summary,
         steps=tuple(
@@ -399,16 +408,18 @@ def _analysis_detail(synthesis: ValidatedOverallSynthesis) -> AnalysisDetail:
             )
             for step in synthesis.analysis_detail.steps
         ),
+        transcript_item_refs=transcript_item_refs,
     )
 
 
-def _fixed_analysis() -> AnalysisDetail:
+def _fixed_analysis(*, transcript_item_refs: tuple[str, ...]) -> AnalysisDetail:
     return AnalysisDetail(
         summary=(
             "The complete requested grid was assembled as indeterminate from "
             "sealed evidence facts."
         ),
         steps=(),
+        transcript_item_refs=transcript_item_refs,
     )
 
 

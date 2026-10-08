@@ -2,6 +2,7 @@ from collections import defaultdict
 from uuid import UUID
 
 from app.application.analysis_runs.models import SessionSummary
+from app.application.analysis_runs.persistence import RAGConsumptionSource
 from app.application.analysis_runs.workflow import WorkflowOperations
 from app.application.evidence_tools.collection_service import build_policy_observation
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
@@ -28,6 +29,7 @@ from app.domain import (
     EvidenceToolCall,
     EvidenceToolRequest,
     EvidenceToolResult,
+    HistoricalTranscriptRecord,
     ItemReference,
     ParameterCapabilityRegistry,
     ReferenceScope,
@@ -288,6 +290,17 @@ class EvidenceTranscriptStore:
         manifest: CollectionManifest,
         records: tuple[SourceRecord, ...],
     ) -> ItemReference:
+        consumption_sources = tuple(
+            RAGConsumptionSource(
+                source_generation_id=UUID(record.case_ref.generation_id),
+                source_case_id=UUID(record.case_ref.case_id),
+                source_run_id=UUID(record.case_ref.run_id),
+                source_session_id=UUID(record.case_ref.session_id),
+                source_result_item_id=UUID(record.case_ref.result_item_id),
+            )
+            for record in records
+            if isinstance(record, HistoricalTranscriptRecord)
+        )
         return await self._write(
             scope,
             content_type="evidence_source_records",
@@ -298,6 +311,7 @@ class EvidenceTranscriptStore:
                 records=records,
             ),
             operation_id=operation_id,
+            rag_consumption_sources=consumption_sources,
         )
 
     async def _write(
@@ -307,19 +321,30 @@ class EvidenceTranscriptStore:
         content_type: str,
         body: object,
         operation_id: str | None,
+        rag_consumption_sources: tuple[RAGConsumptionSource, ...] = (),
     ) -> ItemReference:
         identity = await self._operations.reserve_transcript_item(
             scope.run_id,
             session_id=scope.session_id,
             operation_id=operation_id,
         )
-        await self._operations.finalize_transcript_item(
-            scope.run_id,
-            identity.item_id,
-            content_type,
-            1,
-            body,
-        )
+        if rag_consumption_sources:
+            await self._operations.finalize_transcript_item(
+                scope.run_id,
+                identity.item_id,
+                content_type,
+                1,
+                body,
+                rag_consumption_sources=rag_consumption_sources,
+            )
+        else:
+            await self._operations.finalize_transcript_item(
+                scope.run_id,
+                identity.item_id,
+                content_type,
+                1,
+                body,
+            )
         return ItemReference(item_id=str(identity.item_id))
 
     async def _read_session_item(

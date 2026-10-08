@@ -1,12 +1,18 @@
 from app.infrastructure.persistence.schema import metadata
 
 
-def test_schema_has_only_the_four_core_business_tables() -> None:
+def test_schema_has_core_transcript_and_m8_rag_tables() -> None:
     assert set(metadata.tables) == {
         "analysis_runs",
         "analysis_sessions",
         "transcript_items",
         "transcript_contents",
+        "rag_index_generations",
+        "rag_index_jobs",
+        "rag_case_projections",
+        "rag_case_windows",
+        "rag_fragment_projections",
+        "rag_consumption_links",
     }
 
 
@@ -42,7 +48,7 @@ def test_schema_columns_do_not_duplicate_config_results_or_full_content() -> Non
     }
 
 
-def test_schema_has_only_the_current_query_indexes() -> None:
+def test_schema_has_the_declared_query_and_rag_indexes() -> None:
     index_names = {
         index.name
         for table in metadata.tables.values()
@@ -56,7 +62,34 @@ def test_schema_has_only_the_current_query_indexes() -> None:
         "uq_analysis_sessions_run_summarizer_per_run",
         "uq_analysis_sessions_waterbody_per_run_comid",
         "ix_transcript_items_session_transcript",
+        "ix_rag_generations_profile",
+        "uq_rag_generations_one_active",
+        "uq_rag_generations_one_building",
+        "ix_rag_jobs_claim",
+        "ix_rag_cases_source",
+        "ix_rag_cases_scope",
+        "ix_rag_cases_parameters_gin",
+        "ix_rag_cases_search_document_gin",
+        "ix_rag_windows_case",
+        "ix_rag_windows_time_range_gist",
+        "ix_rag_windows_parameters_gin",
+        "ix_rag_fragments_case",
+        "ix_rag_fragments_lookup",
+        "ix_rag_consumption_source",
+        "ix_rag_consumption_consumer",
     }
+
+
+def test_rag_vector_is_unconstrained_and_has_no_approximate_index() -> None:
+    embedding = metadata.tables["rag_case_projections"].c.embedding
+    assert getattr(embedding.type, "dim", None) is None
+
+    index_names = {
+        index.name or ""
+        for table in metadata.tables.values()
+        for index in table.indexes
+    }
+    assert not any("hnsw" in name or "ivfflat" in name for name in index_names)
 
 
 def test_circular_lifecycle_references_are_deferred() -> None:

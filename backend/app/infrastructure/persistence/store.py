@@ -41,9 +41,11 @@ from app.application.transcripts.read_models import (
 )
 
 from app.infrastructure.persistence.records import PersistenceBatch, PersistedRunRecord
+from app.infrastructure.persistence.rag_consumption import has_valid_consumption_source
 from app.infrastructure.persistence.schema import (
     analysis_runs,
     analysis_sessions,
+    rag_consumption_links,
     transcript_contents,
     transcript_items,
 )
@@ -236,6 +238,7 @@ class PostgresTranscriptStore:
             async with self._run_transaction(batch.run_id) as connection:
                 await self._apply_state_mutations(connection, batch)
                 await self._execute_transcript_batch(connection, batch)
+                await self._execute_rag_consumption_links(connection, batch)
         except IntegrityError as error:
             raise PersistenceWriteConflictError(
                 "persistence batch violates an immutable database constraint"
@@ -578,6 +581,32 @@ class PostgresTranscriptStore:
                 ],
             )
 
+    @staticmethod
+    async def _execute_rag_consumption_links(
+        connection: AsyncConnection,
+        batch: PersistenceWriteBatch,
+    ) -> None:
+        if batch.rag_consumption_links:
+            for link in batch.rag_consumption_links:
+                if not await has_valid_consumption_source(
+                    connection,
+                    source_generation_id=link.source_generation_id,
+                    source_case_id=link.source_case_id,
+                    source_run_id=link.source_run_id,
+                    source_session_id=link.source_session_id,
+                    source_result_item_id=link.source_result_item_id,
+                ):
+                    raise PersistenceWriteConflictError(
+                        "RAG consumption link has no valid source transcript"
+                    )
+            await connection.execute(
+                rag_consumption_links.insert(),
+                [
+                    link.model_dump(mode="python")
+                    for link in batch.rag_consumption_links
+                ],
+            )
+
     async def _verification_evidence(
         self,
         connection: AsyncConnection,
@@ -610,6 +639,18 @@ class PostgresTranscriptStore:
                     == contents[expected.item_id]
                 )
             evidence.append(exact)
+        for expected in batch.rag_consumption_links:
+            row = (
+                await connection.execute(
+                    select(rag_consumption_links).where(
+                        rag_consumption_links.c.link_id == expected.link_id
+                    )
+                )
+            ).mappings().one_or_none()
+            evidence.append(
+                row is not None
+                and type(expected).model_validate(dict(row)) == expected
+            )
         if batch.run_mutations:
             row = (
                 await connection.execute(

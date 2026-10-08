@@ -146,7 +146,7 @@ def authorize_provider_request(
     *,
     registry: ParameterCapabilityRegistry,
     max_facility_centers: int = 32,
-    max_transcript_records: int = 200,
+    max_transcript_records: int = 5,
 ) -> None:
     scope.cancel_token.checkpoint()
     if isinstance(request, WaterObservationRequest):
@@ -180,9 +180,11 @@ def authorize_provider_request(
             or request.run_id != scope.run_id
             or request.session_id != scope.session_id
             or request.memory_mode is not scope.memory_mode
-            or request.max_records > max_transcript_records
+            or request.intent.limit > max_transcript_records
         ):
             raise EvidenceScopeViolationError()
+        _authorize_parameters(scope, request.intent.parameter_keys)
+        _authorize_windows(scope, request.intent.window_ids)
     else:
         raise EvidenceScopeViolationError()
 

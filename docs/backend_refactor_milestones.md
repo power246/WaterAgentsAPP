@@ -2,7 +2,7 @@
 
 生成日期：2026-09-06
 
-更新日期：2026-10-07
+更新日期：2026-10-08
 
 本文档是给后续设计/实现 agent 阅读的 milestone 引入文档。它基于 `docs/backend_architecture_skeleton.md`，说明第一版 demo 应该按什么顺序推进，以及每个 milestone 完成后如何作为开发接力检查点独立自测验收。
 
@@ -528,7 +528,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 10. M8: Memory/RAG from Transcript
 
-状态：产品/架构、实施、policy 与 API 设计已冻结；[Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md) 已建立且所有实施项均为待办。代码、migration、Compose、tests 尚未实施。本阶段设计输入见 [总体设计](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md) 和 [API/读取契约](M8/m8_memory_rag_api.md)。
+状态：Milestone 0–10 已完成 Windows 本机 production implementation、deterministic fake E2E、专用 PostgreSQL migration/restart/cleanup 与完整后端回归；最终证据和逐项合同矩阵见 [Implementation TODO](M8/m8_implementation_todo.md)。真实 embedding supplier 与生产容量为 `not run`，Ubuntu/macOS 同提交验证为 `partial`，不以 Windows/fake 结果代替。本阶段设计输入见 [总体设计](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md) 和 [API/读取契约](M8/m8_memory_rag_api.md)。
 
 目标：
 

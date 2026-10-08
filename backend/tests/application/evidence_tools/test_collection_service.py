@@ -21,6 +21,7 @@ from app.domain import (
     EvidenceLocation,
     EvidenceQualityClass,
     EvidenceResultEligibility,
+    HistoricalInferencePayload,
     ParameterProvider,
     Provenance,
     ProviderCollectionBatch,
@@ -31,6 +32,7 @@ from app.domain import (
 )
 from app.infrastructure.config import load_parameter_capability_registry
 from tests.application.evidence_tools.fakes import MemoryEvidenceStore
+from tests.domain.test_evidence import valid_source_records
 
 
 def run_async(function):
@@ -143,6 +145,55 @@ def collection(scope, provider_batch, *, parameters=None):
 
 def fragments(store):
     return tuple(store.fragments.values())
+
+
+@run_async
+async def test_historical_records_materialize_one_typed_non_recursive_fragment_per_cell(
+    evidence_scope,
+):
+    historical = valid_source_records()[-1]
+    provider_batch = batch(
+        evidence_scope,
+        (historical,),
+        operation_id="historical-operation",
+    )
+    historical_collection = EvidenceCollectionInput(
+        provider="transcript",
+        channel="historical",
+        request_range=evidence_scope.query_envelope,
+        requested_series=("strategy:semantic_case_query",),
+        parameter_keys=(evidence_scope.requested_parameters[0],),
+        affected_window_ids=(evidence_scope.time_windows[0].window_id,),
+        batch=provider_batch,
+        completion_applies_to_all_windows=True,
+    )
+    store = MemoryEvidenceStore()
+    service = EvidenceCollectionService(
+        registry=load_parameter_capability_registry(),
+        writer=store,
+    )
+
+    await service.process(
+        evidence_scope,
+        operation_id="historical-operation",
+        collections=(historical_collection,),
+    )
+
+    historical_fragments = tuple(
+        item
+        for item in fragments(store)
+        if isinstance(item.payload, HistoricalInferencePayload)
+    )
+    assert len(historical_fragments) == len(
+        historical.result_projection.cells
+    )
+    fragment = historical_fragments[0]
+    assert fragment.applicability.value == "contextual_only"
+    assert fragment.result_eligibility is EvidenceResultEligibility.INFERRED_ONLY
+    assert not fragment.rag_eligible
+    assert fragment.payload.case_ref == historical.case_ref
+    assert fragment.payload.cell_projection == historical.result_projection.cells[0]
+    assert fragment.referenced_item_ids() == ()
 
 
 @run_async

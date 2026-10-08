@@ -5,10 +5,11 @@ from functools import wraps
 from uuid import UUID, uuid4
 
 from app.api.sse.response import create_session_event_response
-from app.application.analysis_runs.models import AgentRole
+from app.application.analysis_runs.models import AgentRole, TranscriptItemIdentity
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.evidence_tools import (
+    build_collection_manifest,
     EvidenceBundleBuilder,
     EvidenceCollectionService,
     EvidencePolicyClass,
@@ -26,6 +27,9 @@ from app.domain import (
     EvidenceToolRequest,
     EvidenceToolResult,
     ReferenceScope,
+    HistoricalCaseRef,
+    HistoricalTranscriptRecord,
+    MemoryMode,
 )
 from app.infrastructure.config import AppSettings, load_parameter_capability_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
@@ -35,6 +39,8 @@ from tests.application.evidence_tools.test_collection_service import (
     observation,
 )
 from tests.m4_support import MODEL_CATALOG, create_request_bytes, create_test_app
+from tests.application.evidence_tools.conftest import make_context, make_scope
+from tests.domain.test_evidence import valid_source_records
 
 
 def run_async(function):
@@ -64,6 +70,50 @@ class HoldingWorkflow:
         self.calls.put_nowait(context)
         await self.release.wait()
         context.cancellation.checkpoint()
+
+
+class RecordingOperations:
+    def __init__(self) -> None:
+        self.finalized = []
+
+    async def reserve_transcript_item(
+        self,
+        run_id,
+        *,
+        session_id=None,
+        request_id=None,
+        operation_id=None,
+    ):
+        del request_id
+        return TranscriptItemIdentity(
+            item_id=uuid4(),
+            run_id=UUID(run_id),
+            session_id=UUID(session_id) if session_id is not None else None,
+            transcript_sequence=1,
+            created_at=datetime(2026, 10, 8, tzinfo=UTC),
+            operation_id=UUID(operation_id) if operation_id is not None else None,
+        )
+
+    async def finalize_transcript_item(
+        self,
+        run_id,
+        item_id,
+        content_type,
+        content_schema_version,
+        body,
+        *,
+        rag_consumption_sources=(),
+    ):
+        self.finalized.append(
+            (
+                run_id,
+                item_id,
+                content_type,
+                content_schema_version,
+                body,
+                rag_consumption_sources,
+            )
+        )
 
 
 async def wait_until(predicate, timeout: float = 2) -> None:
@@ -101,6 +151,69 @@ def decoded_frames(messages):
             json.loads(lines[offset + 1].removeprefix("data: ")),
         ))
     return decoded
+
+
+@run_async
+async def test_historical_source_item_hands_consumption_ownership_to_atomic_writer():
+    run_id = str(uuid4())
+    session_id = str(uuid4())
+    scope = make_scope(
+        run_id=run_id,
+        session_id=session_id,
+        context=make_context(memory_mode=MemoryMode.MEMORY_AUGMENTED),
+    )
+    source_generation_id = uuid4()
+    source_case_id = uuid4()
+    source_result_item_id = uuid4()
+    original = valid_source_records()[-1]
+    assert isinstance(original, HistoricalTranscriptRecord)
+    historical = original.model_copy(
+        update={
+            "case_ref": HistoricalCaseRef(
+                generation_id=str(source_generation_id),
+                case_id=str(source_case_id),
+                run_id=str(uuid4()),
+                session_id=str(uuid4()),
+                target_comid=original.case_ref.target_comid,
+                analysis_context_item_id=str(uuid4()),
+                result_item_id=str(source_result_item_id),
+            )
+        }
+    )
+    provider_batch = batch(
+        scope,
+        (historical,),
+        operation_id=str(uuid4()),
+    )
+    manifest = build_collection_manifest(
+        manifest_id="manifest:historical",
+        provider="transcript",
+        channel="historical",
+        request_range=scope.query_envelope,
+        requested_series=("strategy:exact_comid_parameter_window",),
+        windows=(scope.time_windows[0],),
+        batch=provider_batch,
+        completion_applies_to_all_windows=True,
+    )
+    operations = RecordingOperations()
+    transcript = EvidenceTranscriptStore(
+        operations=operations,
+        reader=object(),
+        capability_registry=load_parameter_capability_registry(),
+    )
+
+    await transcript.write_collection(
+        scope,
+        operation_id=provider_batch.operation_id,
+        manifests=(manifest,),
+        records=(historical,),
+    )
+
+    sources = operations.finalized[0][-1]
+    assert len(sources) == 1
+    assert sources[0].source_generation_id == source_generation_id
+    assert sources[0].source_case_id == source_case_id
+    assert sources[0].source_result_item_id == source_result_item_id
 
 
 @run_async

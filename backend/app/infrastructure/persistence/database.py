@@ -48,6 +48,10 @@ class MultipleSchemaHeadsError(SchemaVersionError):
     pass
 
 
+class VectorExtensionError(SchemaVersionError):
+    pass
+
+
 def require_database_password(settings: AppSettings) -> str:
     secret = settings.db_password
     if secret is None or secret.get_secret_value() == "":
@@ -113,7 +117,16 @@ def upgrade_database(settings: AppSettings) -> str:
     expected = expected_schema_head(config)
     try:
         command.upgrade(config, "head")
-    except (SQLAlchemyError, OSError) as error:
+    except SQLAlchemyError as error:
+        detail = str(error).casefold()
+        if "vector" in detail and "extension" in detail:
+            raise VectorExtensionError(
+                "required PostgreSQL vector extension could not be installed; "
+                "use a pgvector-enabled image and a migration role permitted "
+                "to CREATE EXTENSION"
+            ) from error
+        raise DatabaseConnectionError("database upgrade failed") from error
+    except OSError as error:
         raise DatabaseConnectionError("database upgrade failed") from error
     return expected
 
@@ -145,6 +158,12 @@ async def check_database_schema(
                         )
                     ).scalars()
                 )
+                vector_version = await connection.scalar(
+                    text(
+                        "SELECT extversion FROM pg_extension "
+                        "WHERE extname = 'vector'"
+                    )
+                )
     except SchemaVersionError:
         raise
     except (SQLAlchemyError, OSError, TimeoutError) as error:
@@ -154,7 +173,26 @@ async def check_database_schema(
             await active_engine.dispose()
 
     _validate_database_revisions(revisions, expected, script)
+    _validate_vector_extension(vector_version)
     return expected
+
+
+def _validate_vector_extension(version: str | None) -> None:
+    if version is None:
+        raise VectorExtensionError(
+            "required PostgreSQL vector extension is missing; "
+            "run wateragents-db upgrade with the deployment migration role"
+        )
+    try:
+        numeric = tuple(int(part) for part in version.split("."))
+    except ValueError as error:
+        raise VectorExtensionError(
+            "PostgreSQL vector extension version is not recognized"
+        ) from error
+    if numeric < (0, 8, 0):
+        raise VectorExtensionError(
+            f"PostgreSQL vector extension {version} is unsupported; require >= 0.8.0"
+        )
 
 
 def _validate_database_revisions(

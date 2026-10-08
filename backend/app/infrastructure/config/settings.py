@@ -195,6 +195,53 @@ class AppSettings(BaseSettings):
         ge=0,
         allow_inf_nan=False,
     )
+    rag_discovery_batch_size: int = Field(default=64, ge=1, le=1000)
+    rag_reconciliation_max_batches: int = Field(default=4, ge=1, le=100)
+    rag_worker_claim_batch_size: int = Field(default=16, ge=1, le=128)
+    rag_embedding_batch_size: int = Field(default=16, ge=1, le=128)
+    rag_worker_max_concurrency: int = Field(default=1, ge=1, le=8)
+    rag_embedding_timeout_seconds: float = Field(
+        default=30,
+        gt=0,
+        le=120,
+        allow_inf_nan=False,
+    )
+    rag_job_lease_seconds: float = Field(
+        default=60,
+        gt=0,
+        le=600,
+        allow_inf_nan=False,
+    )
+    rag_job_backoff_base_seconds: float = Field(
+        default=1,
+        gt=0,
+        le=60,
+        allow_inf_nan=False,
+    )
+    rag_job_backoff_max_seconds: float = Field(
+        default=60,
+        gt=0,
+        le=900,
+        allow_inf_nan=False,
+    )
+    rag_reconciliation_interval_seconds: float = Field(
+        default=30,
+        gt=0,
+        le=3600,
+        allow_inf_nan=False,
+    )
+    rag_worker_shutdown_grace_seconds: float = Field(
+        default=5,
+        ge=0,
+        le=120,
+        allow_inf_nan=False,
+    )
+    rag_retired_generation_retention_seconds: float = Field(
+        default=604800,
+        ge=0,
+        le=31536000,
+        allow_inf_nan=False,
+    )
 
     @field_validator(
         "db_password",
@@ -235,6 +282,11 @@ class AppSettings(BaseSettings):
         "reasoning_max_tool_calls_per_turn",
         "reasoning_max_cells_per_batch",
         "reasoning_max_batches",
+        "rag_discovery_batch_size",
+        "rag_reconciliation_max_batches",
+        "rag_worker_claim_batch_size",
+        "rag_embedding_batch_size",
+        "rag_worker_max_concurrency",
         mode="before",
     )
     @classmethod
@@ -255,6 +307,13 @@ class AppSettings(BaseSettings):
         "reasoning_session_deadline_seconds",
         "run_summary_timeout_seconds",
         "topology_stage_timeout_seconds",
+        "rag_embedding_timeout_seconds",
+        "rag_job_lease_seconds",
+        "rag_job_backoff_base_seconds",
+        "rag_job_backoff_max_seconds",
+        "rag_reconciliation_interval_seconds",
+        "rag_worker_shutdown_grace_seconds",
+        "rag_retired_generation_retention_seconds",
         mode="before",
     )
     @classmethod
@@ -342,6 +401,19 @@ class AppSettings(BaseSettings):
             raise ValueError(
                 "reasoning_model_timeout_seconds must not exceed "
                 "reasoning_session_deadline_seconds"
+            )
+        if self.rag_embedding_batch_size > self.rag_worker_claim_batch_size:
+            raise ValueError(
+                "rag_embedding_batch_size must not exceed rag_worker_claim_batch_size"
+            )
+        if self.rag_job_lease_seconds <= self.rag_embedding_timeout_seconds:
+            raise ValueError(
+                "rag_job_lease_seconds must exceed rag_embedding_timeout_seconds"
+            )
+        if self.rag_job_backoff_max_seconds < self.rag_job_backoff_base_seconds:
+            raise ValueError(
+                "rag_job_backoff_max_seconds must not be below "
+                "rag_job_backoff_base_seconds"
             )
         return self
 

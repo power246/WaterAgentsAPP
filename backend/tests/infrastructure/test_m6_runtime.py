@@ -46,6 +46,7 @@ from app.infrastructure.runtime import (
 from app.infrastructure.runtime.m6_test import build_m6_test_runtime
 from scripts import m6_provider_smoke
 from tests.m4_support import (
+    EMBEDDING_CAPABILITY,
     MODEL_CATALOG,
     WATERBODY_MODEL,
     _build_test_m6_runtime,
@@ -97,7 +98,9 @@ class FixedEstimator:
 
 
 def catalog(*capabilities: ModelCapability) -> ModelCatalogSnapshot:
-    return ModelCatalogSnapshot(capabilities=capabilities)
+    return ModelCatalogSnapshot(
+        capabilities=(*capabilities, EMBEDDING_CAPABILITY)
+    )
 
 
 def capability(

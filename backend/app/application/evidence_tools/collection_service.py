@@ -273,6 +273,17 @@ class EvidenceCollectionService:
         unique_records = {record.record_id: record for record in collection.batch.records}
         for record in sorted(unique_records.values(), key=_record_sort_key):
             reference = refs_by_record[record.record_id]
+            if isinstance(record, HistoricalTranscriptRecord):
+                fragments.extend(
+                    self._historical_context_fragments(
+                        scope,
+                        collection,
+                        record,
+                        reference,
+                        discovery_identities=discoveries[record.record_id],
+                    )
+                )
+                continue
             for window in windows:
                 if not _record_applies_to_window(record, window):
                     continue
@@ -540,17 +551,8 @@ class EvidenceCollectionService:
     ) -> EvidenceFragment:
         if not parameter_keys:
             raise EvidenceScopeViolationError()
-        quality = (
-            record.original_quality
-            if isinstance(record, HistoricalTranscriptRecord)
-            and record.original_quality is not None
-            else EvidenceQualityClass.SUSPICIOUS
-        )
-        flags = (
-            (DataQualityFlag.HISTORICAL_INFERENCE,)
-            if isinstance(record, HistoricalTranscriptRecord)
-            else (DataQualityFlag.PROVIDER_FLAGGED,)
-        )
+        quality = EvidenceQualityClass.SUSPICIOUS
+        flags = (DataQualityFlag.PROVIDER_FLAGGED,)
         applicability = EvidenceApplicability.CONTEXTUAL_ONLY
         relation_id = None
         if isinstance(record, UpstreamResultRecord):
@@ -567,12 +569,6 @@ class EvidenceCollectionService:
                     record_refs=(reference,),
                 )
                 source_refs = (reference,)
-        elif isinstance(record, HistoricalTranscriptRecord):
-            payload = HistoricalInferencePayload(
-                original_item_ref=record.original_item_ref,
-                projection=f"Historical {record.content_type} match via {record.matched_by}",
-            )
-            source_refs = ()
         else:
             payload = ContextPayload(
                 summary_fields=_context_summary(record),
@@ -620,6 +616,83 @@ class EvidenceCollectionService:
             reference_complete=True,
             redacted=True,
         )
+
+    def _historical_context_fragments(
+        self,
+        scope,
+        collection,
+        record,
+        reference,
+        *,
+        discovery_identities,
+    ) -> tuple[EvidenceFragment, ...]:
+        allowed_parameters = set(collection.parameter_keys)
+        if any(
+            cell.parameter not in allowed_parameters
+            for cell in record.result_projection.cells
+        ):
+            raise EvidenceScopeViolationError()
+        quality = record.original_quality
+        fragments = []
+        for cell in record.result_projection.cells:
+            supporting = tuple(
+                item.reference
+                for item in record.supporting_fragments
+                if item.parameter == cell.parameter
+                and item.valid_time_range == cell.time_range
+            )
+            window_seconds = int(
+                (cell.time_range.end - cell.time_range.start).total_seconds()
+            )
+            fragment = EvidenceFragment(
+                evidence_id=_evidence_id(
+                    "historical",
+                    reference.item_id,
+                    reference.record_id,
+                    cell.window_id,
+                    cell.parameter.code_system,
+                    cell.parameter.code,
+                ),
+                source=record.provider,
+                collection_status=CollectionStatus.AVAILABLE,
+                target_comid=scope.agent_comid,
+                location=record.location,
+                time_range=cell.time_range,
+                parameter_refs=(cell.parameter,),
+                data_type="historical_inference",
+                applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
+                relation_id=None,
+                series_identity=None,
+                quality_class=quality,
+                quality_flags=(DataQualityFlag.HISTORICAL_INFERENCE,),
+                coverage=EvidenceCoverage(
+                    status=CoverageStatus.PARTIAL,
+                    observed_count=1,
+                    expected_count=None,
+                    ratio=None,
+                    covered_duration_seconds=0,
+                    window_duration_seconds=window_seconds,
+                    largest_gap_seconds=None,
+                ),
+                payload=HistoricalInferencePayload(
+                    case_ref=record.case_ref,
+                    historical_window_id=cell.window_id,
+                    cell_projection=cell,
+                    supporting_fragment_refs=supporting,
+                ),
+                source_record_refs=(),
+                derivation=None,
+                provenance=_fragment_provenance(
+                    record.provenance,
+                    operation_id=collection.batch.operation_id,
+                    registry_digest=self._registry.manifest_digest,
+                    discovery_identities=discovery_identities,
+                ),
+                result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
+                rag_eligible=False,
+            )
+            fragments.append(fragment)
+        return tuple(fragments)
 
     def _collection_facts(
         self,
@@ -833,6 +906,8 @@ def _evidence_id(kind: str, *parts: str) -> str:
 
 def _record_applies_to_window(record: SourceRecord, window: EvidenceWindow) -> bool:
     if isinstance(record, FacilityRecord):
+        return True
+    if isinstance(record, HistoricalTranscriptRecord):
         return True
     if isinstance(record, UpstreamResultRecord):
         return record.window_id == window.window_id

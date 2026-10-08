@@ -48,6 +48,7 @@ from app.domain import (
     CoverageUnit,
     DischargeObservationRecord,
     EvidenceLocation,
+    EmbeddingProfile,
     EvidenceToolOptions,
     EvidenceToolRequest,
     GeoPoint,
@@ -90,6 +91,13 @@ TARGET_PARAMETER = ParameterKey(code_system="usgs", code="00300")
 SUPPORT_PARAMETER = ParameterKey(code_system="usgs", code="00060")
 PARSER_MODEL = ModelSelection(provider="m5-test", model="parser-v1")
 WATERBODY_MODEL = ModelSelection(provider="m5-test", model="waterbody-v1")
+EMBEDDING_PROFILE = EmbeddingProfile(
+    provider="m5-test",
+    model="embedding-v1",
+    output_dimensions=8,
+    max_input_tokens=512,
+    semantic_min_similarity=0.78,
+)
 MODEL_CAPABILITIES = (
     ModelCapability(
         **PARSER_MODEL.model_dump(),
@@ -100,6 +108,12 @@ MODEL_CAPABILITIES = (
         roles=(ModelRole.WATERBODY,),
         context_window_tokens=128_000,
         max_output_tokens=32_768,
+    ),
+    ModelCapability(
+        provider=EMBEDDING_PROFILE.provider,
+        model=EMBEDDING_PROFILE.model,
+        roles=(ModelRole.EMBEDDING,),
+        embedding_profile=EMBEDDING_PROFILE,
     ),
 )
 FIXTURE_SCOPE_IDS = (

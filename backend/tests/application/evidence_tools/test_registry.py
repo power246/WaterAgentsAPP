@@ -33,7 +33,8 @@ def test_registry_has_exactly_eight_typed_bounded_descriptors() -> None:
     assert all(item.scope_requirements for item in registry.descriptors)
     assert all(item.max_calls_per_session > 0 for item in registry.descriptors)
     assert registry.get("collect_water_observations").max_records_per_call == 10_000
-    assert registry.get("search_transcript_evidence").max_records_per_call == 200
+    assert registry.get("search_transcript_evidence").max_records_per_call == 5
+    assert registry.get("search_transcript_evidence").max_calls_per_session == 2
     assert registry.get("convert_evidence_unit").max_records_per_call == 1
     assert registry.get("inspect_evidence_records").max_records_per_call == 200
     assert all(item.max_result_preview_records == 32 for item in registry.descriptors)

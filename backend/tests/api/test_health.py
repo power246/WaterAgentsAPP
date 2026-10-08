@@ -86,8 +86,33 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "transcript_preview_bytes": 2048,
         "live_state_grace_seconds": 60.0,
         "shutdown_save_grace_seconds": 5.0,
+        "rag_discovery_batch_size": 64,
+        "rag_reconciliation_max_batches": 4,
+        "rag_worker_claim_batch_size": 16,
+        "rag_embedding_batch_size": 16,
+        "rag_worker_max_concurrency": 1,
+        "rag_embedding_timeout_seconds": 30.0,
+        "rag_job_lease_seconds": 60.0,
+        "rag_job_backoff_base_seconds": 1.0,
+        "rag_job_backoff_max_seconds": 60.0,
+        "rag_reconciliation_interval_seconds": 30.0,
+        "rag_worker_shutdown_grace_seconds": 5.0,
+        "rag_retired_generation_retention_seconds": 604800.0,
     }
     assert create_app(settings).state.settings is settings
+
+
+@pytest.mark.parametrize(
+    "values",
+    (
+        {"rag_worker_claim_batch_size": 1, "rag_embedding_batch_size": 2},
+        {"rag_embedding_timeout_seconds": 30, "rag_job_lease_seconds": 30},
+        {"rag_job_backoff_base_seconds": 2, "rag_job_backoff_max_seconds": 1},
+    ),
+)
+def test_m8_worker_settings_reject_incoherent_budgets(values: dict[str, object]) -> None:
+    with pytest.raises(ValidationError):
+        AppSettings(_env_file=None, **values)
 
 
 def test_settings_use_wateragents_environment_prefix(
@@ -223,19 +248,44 @@ def test_model_catalog_is_parsed_once_as_safe_role_metadata(
                     "roles": ["query_parser", "waterbody"],
                     "context_window_tokens": 64_000,
                     "max_output_tokens": 8_192,
-                }
+                },
+                {
+                    "provider": "configured-provider",
+                    "model": "embedding-model",
+                    "roles": ["embedding"],
+                    "embedding_profile": {
+                        "provider": "configured-provider",
+                        "model": "embedding-model",
+                        "output_dimensions": 8,
+                        "max_input_tokens": 512,
+                        "distance_metric": "cosine",
+                        "semantic_min_similarity": 0.78,
+                        "canonical_query_schema_version": 1,
+                        "canonical_template_version": 1,
+                        "projection_schema_version": 1,
+                    },
+                },
             ]
         ),
     )
 
-    capability = AppSettings(_env_file=None).model_catalog[0]
+    capabilities = AppSettings(_env_file=None).model_catalog
+    capability = capabilities[0]
     assert capability.model_dump(mode="json") == {
         "provider": "configured-provider",
         "model": "configured-model",
         "roles": ["query_parser", "waterbody"],
         "context_window_tokens": 64_000,
         "max_output_tokens": 8_192,
+        "embedding_profile": None,
     }
+    embedding = capabilities[1]
+    assert embedding.embedding_profile is not None
+    assert embedding.embedding_profile.output_dimensions == 8
+    assert embedding.embedding_profile.max_input_tokens == 512
+    assert embedding.embedding_profile.distance_metric.value == "cosine"
+    assert embedding.embedding_profile.semantic_min_similarity == 0.78
+    assert "secret" not in embedding.model_dump_json().casefold()
 
 
 def test_timezone_can_load_without_system_zoneinfo() -> None:

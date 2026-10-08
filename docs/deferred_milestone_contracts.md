@@ -1,6 +1,6 @@
 # WaterAgents 跨 Milestone 延后契约与 MR 门禁（M2+）
 
-更新日期：2026-10-07
+更新日期：2026-10-08
 
 本文档集中记录已经确认、但需由后续 Milestone 实现、细化或持续保持的功能约定。内容来自 M1/M2 详细设计、后端架构骨架和总 milestones 文档，是跨 Milestone 延后事项的统一登记处。
 
@@ -594,13 +594,14 @@ M7 Milestone 0–9 已完成 Windows 本机实现与契约审计；这里只索�
 |---|---|---|
 | `GLOBAL-C01`–`GLOBAL-C11`、`M7-C01`–`M7-C12`、`M7-A01`–`M7-A07` | [M7 契约覆盖矩阵](M7/m7_implementation_todo.md#契约覆盖矩阵实施时填写)、[设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API/读取契约](M7/m7_topology_driven_multi_agent_api.md)和[前端接力边界](frontend_integration_contracts.md)。固定 chain/diamond/失败/取消/max-topology E2E、七类 typed content、production OpenAPI、专用 `wateragents_test` workflow/history/restart/startup-repair 与完整 M1–M7 regression 已在 Windows 本机通过。 | 获得明确计费/联网授权和安全 model 配置后执行真实 provider contract smoke；在 Ubuntu/macOS/Windows 对同一提交运行完整 tests/smoke，并补齐 GLOBAL-C11 的实际三平台证据后，再评估中心最终承接表的 `implemented` 记录。 |
 
-### M8 待实施索引
+### M8 实现与承接索引
 
-M8 产品/架构、实施、policy、API 与 Milestone 0–10 施工清单已经冻结，但代码、migration、Compose、worker、provider adapter、tests 和运行验收均未开始。以下仅登记后续承接入口，不把 docs-only 设计或既有 placeholder 当成 implementation evidence。
+M8 Milestone 0–10 已完成 Windows 本机 production implementation、migration/Compose/worker/adapter、deterministic fake E2E、专用 PostgreSQL 与完整后端回归。以下索引指向逐项 implementation/test/docs 证据；真实 embedding supplier 与生产容量为 `not run`，Ubuntu/macOS 同提交验证为 `partial`，不把 fake 或 Windows 本机结果外推为这些边界已通过。
 
 | 范围 | 施工与计划证据 | 当前状态 |
 |---|---|---|
-| `GLOBAL-C01`–`GLOBAL-C11`、`M8-C01`–`M8-C16`、`M8-A01`–`M8-A10` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写)、[设计决策](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md)和[前端接力边界](frontend_integration_contracts.md)。 | `pending`：全部 TODO 未勾选；完成各阶段 production implementation、focused/PG/full/smoke 与承接记录后才能更新。 |
+| `GLOBAL-C01`–`GLOBAL-C10`、`M8-C01`–`M8-C16`、`M8-A01`–`M8-A10` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写)、[设计决策](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md)和[前端接力边界](frontend_integration_contracts.md)。 | `implemented`：production、focused/PG/full/smoke 与文档证据齐全。 |
+| `GLOBAL-C11` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写) | `partial`：dependency/migration/path/Windows 已验证；Ubuntu/macOS 与生产容量未运行。 |
 
 M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 

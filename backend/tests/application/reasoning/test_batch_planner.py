@@ -68,6 +68,7 @@ from tests.application.reasoning.test_task_and_skeleton import (
     NOW,
     _validated_fixture,
 )
+from tests.m4_support import EMBEDDING_CAPABILITY
 
 
 RUN_ID = UUID("10000000-0000-4000-8000-000000000001")
@@ -83,6 +84,7 @@ CATALOG = ModelCatalogSnapshot(
             context_window_tokens=10_000_000,
             max_output_tokens=1_000_000,
         ),
+        EMBEDDING_CAPABILITY,
     )
 )
 
@@ -473,6 +475,7 @@ def test_real_m5_sealed_handoff_plans_every_supported_cell_once() -> None:
                 context_window_tokens=10_000_000,
                 max_output_tokens=1_000_000,
             ),
+            EMBEDDING_CAPABILITY,
         )
     )
     planner = ReasoningBatchPlanner(

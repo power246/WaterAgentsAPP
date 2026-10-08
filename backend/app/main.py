@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import AsyncContextManager, Coroutine
 from uuid import UUID, uuid4
 
@@ -35,6 +35,7 @@ from app.domain.hydrology import ParameterCapabilityRegistry
 from app.infrastructure.config import (
     AppSettings,
     ModelCatalog,
+    SettingsConfigurationError,
     load_app_settings,
     load_parameter_capability_registry,
 )
@@ -47,10 +48,12 @@ from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.infrastructure.runtime import (
     M6Runtime,
+    M8Runtime,
     RuntimeComponents,
     build_m4_runtime,
     build_m5_runtime,
     build_m6_runtime,
+    build_m8_runtime,
     compose_m7_execution_stage,
     safe_m6_metadata,
 )
@@ -91,6 +94,9 @@ def create_app(
     m6_runtime_builder: (
         Callable[..., AsyncContextManager[M6Runtime]] | None
     ) = None,
+    m8_runtime_builder: (
+        Callable[..., AsyncContextManager[M8Runtime]] | None
+    ) = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
     resolved_clock = clock if clock is not None else SystemClock()
@@ -101,30 +107,38 @@ def create_app(
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         configure_logging(resolved_settings.log_level)
-        runtime_context = (
-            _provided_runtime(workflow)
-            if workflow is not None
-            else build_m4_runtime(
-                resolved_settings,
-                clock=resolved_clock,
-                parameter_capabilities=resolved_parameter_capabilities,
-                error_id_factory=id_factory,
+        engine = None
+        coordinator = None
+        m8_runtime = None
+        try:
+            active_store = transcript_store
+            foundation_validated = False
+            if active_store is None:
+                engine = create_database_engine(resolved_settings)
+                await check_database_schema(resolved_settings, engine=engine)
+                foundation_validated = True
+                active_store = PostgresTranscriptStore(
+                    engine,
+                    operation_timeout_seconds=(
+                        resolved_settings.db_operation_timeout_seconds
+                    ),
+                )
+            elif m8_runtime_builder is None:
+                raise SettingsConfigurationError(
+                    "a custom transcript store requires an explicit M8 runtime builder"
+                )
+            runtime_context = (
+                _provided_runtime(workflow)
+                if workflow is not None
+                else build_m4_runtime(
+                    resolved_settings,
+                    clock=resolved_clock,
+                    parameter_capabilities=resolved_parameter_capabilities,
+                    error_id_factory=id_factory,
+                )
             )
-        )
-        async with runtime_context as runtime:
-            engine = None
-            coordinator = None
-            try:
-                active_store = transcript_store
-                if active_store is None:
-                    engine = create_database_engine(resolved_settings)
-                    await check_database_schema(resolved_settings, engine=engine)
-                    active_store = PostgresTranscriptStore(
-                        engine,
-                        operation_timeout_seconds=(
-                            resolved_settings.db_operation_timeout_seconds
-                        ),
-                    )
+            async with AsyncExitStack() as stack:
+                runtime = await stack.enter_async_context(runtime_context)
                 active_registry = transcript_registry or create_production_registry()
                 await repair_interrupted_runs(
                     active_store,
@@ -179,72 +193,100 @@ def create_app(
                     if result_reader is not None
                     else None
                 )
-                m5_options = (
-                    {"upstream_results": upstream_results}
-                    if upstream_results is not None
-                    else {}
-                )
-                async with build_m5_runtime(
-                    resolved_settings,
-                    operations=coordinator,
-                    transcript_reader=transcript_reader,
-                    capability_registry=resolved_parameter_capabilities,
-                    clock=resolved_clock,
-                    **m5_options,
-                ) as m5_runtime:
-                    coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
-                    active_m6_builder = m6_runtime_builder or build_m6_runtime
-                    async with active_m6_builder(
+                if engine is None and m8_runtime_builder is None:
+                    raise SettingsConfigurationError(
+                        "production M8 runtime requires the PostgreSQL engine"
+                    )
+                active_m8_builder = m8_runtime_builder or build_m8_runtime
+                m8_runtime = await stack.enter_async_context(
+                    active_m8_builder(
                         resolved_settings,
-                        operations=coordinator,
-                        m5_runtime=m5_runtime,
-                        capability_registry=resolved_parameter_capabilities,
+                        engine=engine,
+                        transcript_reader=transcript_reader,
+                        transcript_registry=active_registry,
                         model_catalog=resolved_model_catalog.snapshot(),
                         clock=resolved_clock,
-                        operation_id_factory=id_factory,
-                        result_id_factory=lambda: str(id_factory()),
-                        error_id_factory=id_factory,
-                    ) as m6_runtime:
-                        if (
-                            query_topology_workflow is not None
-                            and upstream_results is not None
-                            and result_reader is not None
-                        ):
-                            query_topology_workflow.bind_execution_stage(
-                                compose_m7_execution_stage(
-                                    resolved_settings,
-                                    operations=coordinator,
-                                    m5_runtime=m5_runtime,
-                                    m6_runtime=m6_runtime,
-                                    upstream_results=upstream_results,
-                                    result_reader=result_reader,
-                                    capability_registry=(
-                                        resolved_parameter_capabilities
-                                    ),
-                                    model_catalog=(
-                                        resolved_model_catalog.snapshot()
-                                    ),
-                                    clock=resolved_clock,
-                                    result_id_factory=lambda: str(id_factory()),
-                                    error_id_factory=id_factory,
-                                    operation_id_factory=id_factory,
-                                )
+                        foundation_validated=foundation_validated,
+                    )
+                )
+                try:
+                    coordinator.register_run_terminal_persisted_hook(
+                        m8_runtime.notify_run_terminal
+                    )
+                    m5_options = (
+                        {"upstream_results": upstream_results}
+                        if upstream_results is not None
+                        else {}
+                    )
+                    m5_runtime = await stack.enter_async_context(
+                        build_m5_runtime(
+                            resolved_settings,
+                            operations=coordinator,
+                            transcript_reader=transcript_reader,
+                            capability_registry=resolved_parameter_capabilities,
+                            clock=resolved_clock,
+                            transcript_port=m8_runtime.producer,
+                            **m5_options,
+                        )
+                    )
+                    coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
+                    active_m6_builder = m6_runtime_builder or build_m6_runtime
+                    m6_runtime = await stack.enter_async_context(
+                        active_m6_builder(
+                            resolved_settings,
+                            operations=coordinator,
+                            m5_runtime=m5_runtime,
+                            capability_registry=resolved_parameter_capabilities,
+                            model_catalog=resolved_model_catalog.snapshot(),
+                            clock=resolved_clock,
+                            operation_id_factory=id_factory,
+                            result_id_factory=lambda: str(id_factory()),
+                            error_id_factory=id_factory,
+                        )
+                    )
+                    if (
+                        query_topology_workflow is not None
+                        and upstream_results is not None
+                        and result_reader is not None
+                    ):
+                        query_topology_workflow.bind_execution_stage(
+                            compose_m7_execution_stage(
+                                resolved_settings,
+                                operations=coordinator,
+                                m5_runtime=m5_runtime,
+                                m6_runtime=m6_runtime,
+                                upstream_results=upstream_results,
+                                result_reader=result_reader,
+                                capability_registry=resolved_parameter_capabilities,
+                                model_catalog=resolved_model_catalog.snapshot(),
+                                clock=resolved_clock,
+                                result_id_factory=lambda: str(id_factory()),
+                                error_id_factory=id_factory,
+                                operation_id_factory=id_factory,
                             )
-                        application.state.run_coordinator = coordinator
-                        application.state.transcript_reader = transcript_reader
-                        application.state.transcript_store = active_store
-                        application.state.m5_runtime = m5_runtime
-                        application.state.m6_runtime = m6_runtime
+                        )
+                    await m8_runtime.start()
+                    application.state.run_coordinator = coordinator
+                    application.state.transcript_reader = transcript_reader
+                    application.state.transcript_store = active_store
+                    application.state.m8_runtime = m8_runtime
+                    application.state.m5_runtime = m5_runtime
+                    application.state.m6_runtime = m6_runtime
+                    yield
+                finally:
+                    try:
+                        await m8_runtime.shutdown()
+                    finally:
                         try:
-                            yield
-                        finally:
                             await coordinator.shutdown()
+                        finally:
                             coordinator = None
-            finally:
-                if coordinator is not None:
-                    await coordinator.shutdown()
-                if engine is not None:
-                    await engine.dispose()
+                            m8_runtime = None
+        finally:
+            if coordinator is not None:
+                await coordinator.shutdown()
+            if engine is not None:
+                await engine.dispose()
 
     application = FastAPI(
         title=resolved_settings.app_name, lifespan=lifespan, redirect_slashes=False

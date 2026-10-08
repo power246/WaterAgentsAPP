@@ -26,7 +26,11 @@ from app.infrastructure.config import (
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime import build_m5_runtime, compose_m5_runtime
-from tests.m4_support import create_request_bytes, create_test_app
+from tests.m4_support import (
+    build_test_m8_runtime,
+    create_request_bytes,
+    create_test_app,
+)
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -76,18 +80,20 @@ def test_composition_fails_closed_when_required_component_is_missing() -> None:
         )
 
 
-def test_production_builder_wires_real_adapters_and_keeps_future_producers_off() -> None:
+def test_production_builder_wires_real_adapters_and_injected_m8_producer() -> None:
     async def exercise() -> None:
-        async with build_m5_runtime(
-            AppSettings(
-                _env_file=None,
-                evidence_provider_attempts=1,
-                evidence_max_pages=3,
-            ),
+        settings = AppSettings(
+            _env_file=None,
+            evidence_provider_attempts=1,
+            evidence_max_pages=3,
+        )
+        async with build_test_m8_runtime() as m8_runtime, build_m5_runtime(
+            settings,
             operations=object(),  # type: ignore[arg-type]
             transcript_reader=object(),  # type: ignore[arg-type]
             capability_registry=load_parameter_capability_registry(),
             clock=FixedClock(),
+            transcript_port=m8_runtime.producer,
         ) as runtime:
             assert isinstance(runtime.executor, EvidenceToolExecutor)
             assert isinstance(runtime.transcript, EvidenceTranscriptStore)
@@ -105,8 +111,9 @@ def test_production_builder_wires_real_adapters_and_keeps_future_producers_off()
             )
             assert (
                 runtime.registry.get("search_transcript_evidence").producer_status
-                is EvidenceProducerStatus.UNAVAILABLE
+                is EvidenceProducerStatus.READY
             )
+            assert runtime.transcript_producer is m8_runtime.producer
 
     asyncio.run(exercise())
 

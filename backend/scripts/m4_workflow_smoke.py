@@ -20,6 +20,7 @@ from app.application.station_availability import StationAvailabilityService
 from app.application.transcripts.registry import create_production_registry
 from app.domain import (
     AdministrativeLocation,
+    EmbeddingProfile,
     GeoPoint,
     GeocodingCandidate,
     HydrologyGraph,
@@ -48,8 +49,10 @@ from app.main import create_app
 from app.ports import PortUnavailableError
 try:
     from scripts.m6_fixture_runtime import build_fixture_m6_runtime
+    from scripts.m8_fixture_runtime import build_fixture_m8_runtime
 except ModuleNotFoundError:  # Direct `python scripts/m4_workflow_smoke.py` execution.
     from m6_fixture_runtime import build_fixture_m6_runtime
+    from m8_fixture_runtime import build_fixture_m8_runtime
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=UTC)
 TARGET_POINT = GeoPoint(latitude=38.9, longitude=-77.0)
@@ -57,6 +60,13 @@ DO = ParameterKey(code_system="usgs", code="00300")
 DISCHARGE = ParameterKey(code_system="usgs", code="00060")
 PARSER_MODEL = ModelSelection(provider="fixture", model="parser-v1")
 WATERBODY_MODEL = ModelSelection(provider="fixture", model="waterbody-v1")
+EMBEDDING_PROFILE = EmbeddingProfile(
+    provider="fixture",
+    model="embedding-v1",
+    output_dimensions=8,
+    max_input_tokens=512,
+    semantic_min_similarity=0.78,
+)
 MODEL_CATALOG = ModelCatalog(
     (
         ModelCapability(
@@ -68,6 +78,12 @@ MODEL_CATALOG = ModelCatalog(
             roles=(ModelRole.WATERBODY,),
             context_window_tokens=128_000,
             max_output_tokens=32_768,
+        ),
+        ModelCapability(
+            provider=EMBEDDING_PROFILE.provider,
+            model=EMBEDDING_PROFILE.model,
+            roles=(ModelRole.EMBEDDING,),
+            embedding_profile=EMBEDDING_PROFILE,
         ),
     )
 )
@@ -414,6 +430,7 @@ def build_runtime(profile: FixtureProfile, *, query_fallback: bool):
         model_catalog=MODEL_CATALOG,
         parameter_capability_registry=registry,
         m6_runtime_builder=build_fixture_m6_runtime,
+        m8_runtime_builder=build_fixture_m8_runtime,
     )
     return application, store, parser, geocoder, nldi, metadata
 

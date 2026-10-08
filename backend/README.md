@@ -142,7 +142,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_HOST` | `127.0.0.1` |
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
-| `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with `provider`, `model`, and `roles`; every `waterbody` model also requires its exact `context_window_tokens` and `max_output_tokens` |
+| `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with `provider`, `model`, and `roles`; configured catalogs require exactly one exclusive `embedding` capability with a cosine `embedding_profile` including dimensions, input-token limit, threshold, and schema versions, while every `waterbody` model requires its exact token limits |
 | `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `100` |
 | `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `12` |
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |

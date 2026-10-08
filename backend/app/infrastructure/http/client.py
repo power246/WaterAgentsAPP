@@ -176,6 +176,56 @@ class ProviderHttpClient:
                 operation=operation,
             ) from error
 
+    async def post_json(
+        self,
+        url: str,
+        body: Mapping[str, object],
+        *,
+        provider: str,
+        operation: str,
+        headers: Mapping[str, str] | None = None,
+        deadline: float | None = None,
+        on_attempt: Callable[[], None] | None = None,
+    ) -> object:
+        """Issue exactly one bounded JSON request.
+
+        Retry ownership stays with the calling application workflow.  The request
+        body and response body are deliberately excluded from failure logging.
+        """
+
+        client = self._client
+        if client is None:
+            raise RuntimeError("provider HTTP client is not open")
+        await self._cancellation_checkpoint()
+        self._remaining_timeout(deadline, provider, operation)
+        if on_attempt is not None:
+            on_attempt()
+        try:
+            content = await self._request_once(
+                client,
+                url,
+                method="POST",
+                body=body,
+                provider=provider,
+                operation=operation,
+                params=None,
+                headers=headers,
+                deadline=deadline,
+            )
+        except PortError as error:
+            self._log_failure(error, 1)
+            raise
+        try:
+            return json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            port_error = InvalidPortResponseError(
+                "Provider returned invalid JSON.",
+                provider=provider,
+                operation=operation,
+            )
+            self._log_failure(port_error, 1)
+            raise port_error from error
+
     @asynccontextmanager
     async def post_sse(
         self,
@@ -325,6 +375,8 @@ class ProviderHttpClient:
                 return await self._request_once(
                     client,
                     url,
+                    method="GET",
+                    body=None,
                     provider=provider,
                     operation=operation,
                     params=params,
@@ -347,6 +399,8 @@ class ProviderHttpClient:
         client: httpx.AsyncClient,
         url: str,
         *,
+        method: str,
+        body: Mapping[str, object] | None,
         provider: str,
         operation: str,
         params: Mapping[str, QueryValue] | None,
@@ -357,10 +411,11 @@ class ProviderHttpClient:
         try:
             async with asyncio.timeout(timeout):
                 async with client.stream(
-                    "GET",
+                    method,
                     url,
                     params=params or None,
                     headers=headers,
+                    json=body,
                     timeout=timeout,
                 ) as response:
                     self._raise_for_status(

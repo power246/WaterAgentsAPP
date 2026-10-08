@@ -8,6 +8,7 @@ from app.domain.evidence.source_record_reference import SourceRecordReference
 from app.domain.hydrology.evidence_aggregation_method import (
     EvidenceAggregationMethod,
 )
+from app.domain.memory_rag import HistoricalSearchStrategy
 
 
 class EvidenceToolOptions(DomainModel):
@@ -20,6 +21,7 @@ class EvidenceToolOptions(DomainModel):
     source_item_id: NonEmptyString | None = None
     source_record_refs: tuple[SourceRecordReference, ...] = ()
     fragment_refs: tuple[EvidenceFragmentReference, ...] = ()
+    historical_search_strategy: HistoricalSearchStrategy | None = None
 
     @field_validator("source_record_refs", "fragment_refs")
     @classmethod

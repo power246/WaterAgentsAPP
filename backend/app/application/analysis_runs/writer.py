@@ -11,6 +11,7 @@ from app.application.analysis_runs.creation import (
 from app.application.analysis_runs.models import (
     AnalysisRunSnapshot,
     PublicError,
+    RunStatus,
     RunStateMutation,
     SessionStateMutation,
     TranscriptItemIdentity,
@@ -22,6 +23,7 @@ from app.application.analysis_runs.persistence import (
     PersistenceState,
     PersistenceWriteBatch,
     PersistenceWriteConflictError,
+    RAGConsumptionLink,
 )
 from app.application.transcripts.buffer import (
     PendingTranscriptReferencesError,
@@ -37,6 +39,7 @@ class WriterRuntime(Protocol):
     transcript_items: list[TranscriptItemIdentity]
     state_mutations: list[RunStateMutation | SessionStateMutation]
     persistence_groups: list[PersistenceGroup]
+    rag_consumption_links: dict[UUID, tuple[RAGConsumptionLink, ...]]
     persistence_active_batch: PersistenceWriteBatch | None
     persisted_item_ids: set[UUID]
     persisted_mutation_ids: set[UUID]
@@ -83,6 +86,7 @@ class TranscriptWriter:
         attempt_timeout: float,
         completion_delivery_grace: float,
         sleep: Callable[[float], Awaitable[None]],
+        terminal_persisted: Callable[[UUID], None] | None = None,
     ) -> None:
         if type(batch_items) is not int or batch_items <= 0:
             raise ValueError("persistence_batch_items must be a positive integer")
@@ -116,6 +120,7 @@ class TranscriptWriter:
         self._attempt_timeout = attempt_timeout
         self._completion_delivery_grace = completion_delivery_grace
         self._sleep = sleep
+        self._terminal_persisted = terminal_persisted
 
     def enqueue_locked(
         self,
@@ -372,6 +377,11 @@ class TranscriptWriter:
             transcript=transcript,
             run_mutations=run_mutations,
             session_mutations=session_mutations,
+            rag_consumption_links=tuple(
+                link
+                for item_id in item_ids
+                for link in runtime.rag_consumption_links.get(item_id, ())
+            ),
         )
 
     async def _attempt_batch(
@@ -431,6 +441,24 @@ class TranscriptWriter:
         async with runtime.condition:
             self._confirm_batch_locked(runtime, batch)
             runtime.condition.notify_all()
+        if self._terminal_persisted is not None and any(
+            mutation.snapshot.status
+            in {
+                RunStatus.COMPLETED,
+                RunStatus.COMPLETED_WITH_PERSISTENCE_ERROR,
+                RunStatus.FAILED,
+                RunStatus.CANCELLED,
+            }
+            for mutation in batch.run_mutations
+        ):
+            try:
+                self._terminal_persisted(batch.run_id)
+            except Exception as error:
+                self._log_activity(
+                    "run_terminal_wake_failed",
+                    runtime,
+                    exception=error,
+                )
         return True
 
     def _record_failure_locked(

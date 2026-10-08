@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Callable
 from datetime import datetime, timezone
+from uuid import NAMESPACE_URL, uuid5
 
 from app.application.evidence_tools import (
     EvidenceCollectionArtifacts,
@@ -67,7 +68,13 @@ class MemoryEvidenceStore:
         return reference
 
     async def write_collection(self, scope, *, operation_id, manifests, records):
-        item_id = f"source:{scope.run_id}:{scope.session_id}:{operation_id}"
+        item_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"source:{scope.run_id}:{scope.session_id}:{operation_id}:"
+                f"{len(self.records) + 1}",
+            )
+        )
         self.records[(scope.run_id, scope.session_id, item_id)] = records
         self._remember_scope(scope, item_id)
         manifest_refs = []
@@ -85,7 +92,13 @@ class MemoryEvidenceStore:
         )
 
     async def write_fragment(self, scope, *, operation_id, fragment):
-        item_id = f"fragment:{scope.run_id}:{scope.session_id}:{operation_id}"
+        item_id = str(
+            uuid5(
+                NAMESPACE_URL,
+                f"fragment:{scope.run_id}:{scope.session_id}:{operation_id}:"
+                f"{len(self.fragments) + 1}",
+            )
+        )
         self.fragments[(item_id, fragment.evidence_id)] = fragment
         self._remember_scope(scope, item_id)
         return EvidenceFragmentReference(

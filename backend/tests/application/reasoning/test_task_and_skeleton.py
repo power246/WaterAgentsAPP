@@ -59,6 +59,7 @@ from tests.application.evidence_tools.test_acquisition_workflow import (
     _runtime,
     _water_port,
 )
+from tests.m4_support import EMBEDDING_CAPABILITY
 
 
 RUN_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -123,6 +124,7 @@ def _catalog(model=MODEL, *, role=ModelRole.WATERBODY):
                     else {}
                 ),
             ),
+            EMBEDDING_CAPABILITY,
         )
     )
 

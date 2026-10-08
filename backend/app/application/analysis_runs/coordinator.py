@@ -67,6 +67,8 @@ from app.application.analysis_runs.persistence import (
     PersistenceInfo,
     PersistenceState,
     PersistenceWriteBatch,
+    RAGConsumptionLink,
+    RAGConsumptionSource,
 )
 from app.application.analysis_runs.topology_result_models import (
     DependencyOutcome,
@@ -327,6 +329,7 @@ class RunCoordinator:
         self._shutdown_lock = asyncio.Lock()
         self._closing = False
         self._run_cleanup_hook: RunCleanupHook | None = None
+        self._run_terminal_persisted_hook: Callable[[UUID], None] | None = None
         self._cleaned_run_resources: set[UUID] = set()
         self._keepalive_interval = keepalive_interval
         self._idempotency_wait_timeout = idempotency_wait_timeout
@@ -356,6 +359,7 @@ class RunCoordinator:
             attempt_timeout=persistence_attempt_timeout,
             completion_delivery_grace=completion_delivery_grace,
             sleep=persistence_sleep,
+            terminal_persisted=self._notify_run_terminal_persisted,
         )
 
     def register_run_cleanup_hook(self, hook: RunCleanupHook) -> None:
@@ -366,6 +370,22 @@ class RunCoordinator:
         if self._run_cleanup_hook is not None:
             raise RuntimeError("run cleanup hook is already registered")
         self._run_cleanup_hook = hook
+
+    def register_run_terminal_persisted_hook(
+        self,
+        hook: Callable[[UUID], None],
+    ) -> None:
+        if self._closing:
+            raise RuntimeError("cannot register terminal hook during shutdown")
+        if self._runs:
+            raise RuntimeError("terminal hook must be registered before runs")
+        if self._run_terminal_persisted_hook is not None:
+            raise RuntimeError("terminal hook is already registered")
+        self._run_terminal_persisted_hook = hook
+
+    def _notify_run_terminal_persisted(self, run_id: UUID) -> None:
+        if self._run_terminal_persisted_hook is not None:
+            self._run_terminal_persisted_hook(run_id)
 
     async def _cleanup_run_resources(self, run_id: UUID) -> None:
         if (
@@ -1786,6 +1806,7 @@ class RunCoordinator:
         body: object,
         *,
         private_values: tuple[str, ...] = (),
+        rag_consumption_sources: tuple[RAGConsumptionSource, ...] = (),
     ) -> TranscriptItemIdentity:
         runtime = await self._lookup(run_id)
         key = _UUID.validate_python(item_id)
@@ -1799,6 +1820,14 @@ class RunCoordinator:
             )
             if identity is None:
                 raise ValueError("transcript item identity is not reserved in this run")
+            if rag_consumption_sources and (
+                content_type != "evidence_source_records"
+                or identity.session_id is None
+                or len(rag_consumption_sources) != len(set(rag_consumption_sources))
+            ):
+                raise ValueError(
+                    "RAG consumption sources require one session source-record item"
+                )
             self._validate_m4_content_scope_locked(
                 runtime,
                 identity,
@@ -1835,6 +1864,22 @@ class RunCoordinator:
                 finalized,
                 self._clock.now(),
             )
+            if rag_consumption_sources:
+                runtime.rag_consumption_links[identity.item_id] = tuple(
+                    RAGConsumptionLink(
+                        link_id=self._new_record_id(),
+                        source_generation_id=source.source_generation_id,
+                        source_case_id=source.source_case_id,
+                        source_run_id=source.source_run_id,
+                        source_session_id=source.source_session_id,
+                        source_result_item_id=source.source_result_item_id,
+                        consumer_run_id=identity.run_id,
+                        consumer_session_id=identity.session_id,
+                        consumer_item_id=identity.item_id,
+                        created_at=identity.created_at,
+                    )
+                    for source in rag_consumption_sources
+                )
             content_ref = TranscriptContentRef(
                 run_id=runtime.snapshot.run_id,
                 item_id=identity.item_id,

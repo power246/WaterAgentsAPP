@@ -202,3 +202,18 @@ class PersistenceBatch(DomainModel):
             raise ValueError("lifecycle reference must have the expected run/session scope")
         if item.content_type != content_type:
             raise ValueError(f"referenced item must have content_type {content_type}")
+
+
+class RAGConsumptionLinkRecord(DomainModel):
+    """Typed ownership edge between an indexed source and a consumer item."""
+
+    link_id: UUID
+    source_generation_id: UUID
+    source_case_id: UUID
+    source_run_id: UUID
+    source_session_id: UUID
+    source_result_item_id: UUID
+    consumer_run_id: UUID
+    consumer_session_id: UUID
+    consumer_item_id: UUID
+    created_at: UtcDatetime

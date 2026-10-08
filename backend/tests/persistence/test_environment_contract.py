@@ -6,7 +6,7 @@ BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 
 def test_compose_uses_pg17_loopback_healthcheck_and_named_volume() -> None:
     compose = (BACKEND_ROOT / "compose.yaml").read_text(encoding="utf-8")
-    assert "image: postgres:17" in compose
+    assert "image: pgvector/pgvector:0.8.6-pg17-trixie" in compose
     assert '127.0.0.1:${WATERAGENTS_DB_PORT:-5432}:5432' in compose
     assert "pg_isready" in compose
     assert "wateragents-postgres-data:/var/lib/postgresql/data" in compose

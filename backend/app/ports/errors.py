@@ -51,6 +51,10 @@ class UnsupportedPortVersionError(InvalidPortResponseError):
     """Raised when a provider API version is not supported by the adapter."""
 
 
+class EmbeddingCancelledError(PortError):
+    """Raised when an embedding call is cancelled by its explicit token."""
+
+
 class WaterbodyModelPortError(PortError):
     """Base class for safe, provider-neutral waterbody model failures."""
 

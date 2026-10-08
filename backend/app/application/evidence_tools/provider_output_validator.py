@@ -8,7 +8,7 @@ from app.application.evidence_tools.models import (
     EvidenceToolReader,
 )
 from app.application.evidence_tools.scope import EvidenceSessionScope
-from app.domain import UpstreamResultRecord
+from app.domain import HistoricalTranscriptRecord, UpstreamResultRecord
 
 
 class ProviderOutputValidator:
@@ -39,7 +39,22 @@ class ProviderOutputValidator:
                 records,
                 expected_operation_id=expected_operation_id,
             )
-        elif any(isinstance(record, UpstreamResultRecord) for record in records):
+        elif collection.provider == "transcript" and collection.channel == "historical":
+            if any(
+                not isinstance(record, HistoricalTranscriptRecord)
+                or record.provider != "wateragents_transcript"
+                or record.channel != "historical_memory"
+                or record.provenance.operation_id != expected_operation_id
+                or not {
+                    cell.parameter for cell in record.result_projection.cells
+                } <= set(collection.parameter_keys)
+                for record in records
+            ):
+                raise EvidenceProviderOutputInvalidError()
+        elif any(
+            isinstance(record, (UpstreamResultRecord, HistoricalTranscriptRecord))
+            for record in records
+        ):
             raise EvidenceProviderOutputInvalidError()
 
     async def _validate_upstream_records(

@@ -26,11 +26,14 @@ from app.domain import (
     EvidenceToolExecutionStatus,
     EvidenceToolOptions,
     EvidenceToolRequest,
+    HistoricalSearchStrategy,
     MemoryMode,
+    ParameterKey,
     ParameterProvider,
     Provenance,
     ProviderQuality,
     SourceRecordReference,
+    TranscriptEvidenceRequest,
     WaterObservationRecord,
 )
 from app.infrastructure.config import load_parameter_capability_registry
@@ -120,7 +123,12 @@ def test_descriptor_preflight_rejects_without_side_effects(
                 context=context_factory(memory_mode=MemoryMode.STATELESS)
             )
             tool_name = "search_transcript_evidence"
-            options = EvidenceToolOptions(record_limit=10)
+            options = EvidenceToolOptions(
+                record_limit=5,
+                historical_search_strategy=(
+                    HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW
+                ),
+            )
             producer_statuses = {
                 "search_transcript_evidence": EvidenceProducerStatus.READY
             }
@@ -327,7 +335,12 @@ def test_all_five_collection_and_producer_slots_use_one_executor_interface(
                 scope,
                 "search_transcript_evidence",
                 "call-transcript",
-                options=EvidenceToolOptions(record_limit=10),
+                options=EvidenceToolOptions(
+                    record_limit=5,
+                    historical_search_strategy=(
+                        HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW
+                    ),
+                ),
             ),
         )
 
@@ -341,6 +354,73 @@ def test_all_five_collection_and_producer_slots_use_one_executor_interface(
         assert len(store.calls) == len(calls)
         assert len(store.results) == len(calls)
         assert all(port.calls for port in ports.values())
+        transcript_request = ports["transcript"].calls[0][0]
+        assert isinstance(transcript_request, TranscriptEvidenceRequest)
+        assert transcript_request.intent.strategy is (
+            HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW
+        )
+        assert transcript_request.intent.limit == 5
+        assert set(transcript_request.intent.model_dump(mode="json")) == {
+            "strategy",
+            "parameter_keys",
+            "window_ids",
+            "limit",
+        }
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("parameter_keys", "window_ids"),
+)
+def test_historical_scope_values_fail_before_prepare_search_or_audit(
+    scope_factory,
+    context_factory,
+    field_name,
+) -> None:
+    async def exercise() -> None:
+        scope = scope_factory(
+            context=context_factory(memory_mode=MemoryMode.MEMORY_AUGMENTED)
+        )
+        store = MemoryEvidenceStore()
+        producer = FakeCollectionPort(
+            lambda provider_request: complete_batch(provider_request)
+        )
+        prepared_scopes = []
+        runtime = executor(
+            store,
+            producer_statuses={
+                "search_transcript_evidence": EvidenceProducerStatus.READY
+            },
+            transcript_port=producer,
+            scope_preparer=prepared_scopes.append,
+        )
+        valid = request(
+            scope,
+            "search_transcript_evidence",
+            "call-transcript-out-of-scope",
+            options=EvidenceToolOptions(
+                historical_search_strategy=(
+                    HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW
+                )
+            ),
+        )
+        if field_name == "parameter_keys":
+            invalid_value = ParameterKey(code_system="usgs", code="99999")
+            invalid = valid.model_copy(update={"parameter_keys": (invalid_value,)})
+        else:
+            invalid = valid.model_copy(
+                update={"window_ids": ("window-not-authorized",)}
+            )
+
+        with pytest.raises(EvidenceScopeViolationError):
+            await runtime.execute(scope, invalid)
+
+        assert producer.calls == []
+        assert prepared_scopes == []
+        assert store.calls == []
+        assert store.results == []
 
     asyncio.run(exercise())
 

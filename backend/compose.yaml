@@ -2,7 +2,7 @@ name: wateragents
 
 services:
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:0.8.6-pg17-trixie
     environment:
       POSTGRES_DB: ${WATERAGENTS_DB_NAME:-wateragents}
       POSTGRES_USER: ${WATERAGENTS_DB_USER:-wateragents}

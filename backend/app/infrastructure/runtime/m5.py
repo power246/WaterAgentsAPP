@@ -19,6 +19,7 @@ from app.application.evidence_tools import (
     create_evidence_tool_registry,
 )
 from app.application.transcripts.reader import TranscriptReader
+from app.application.transcript_memory import TranscriptEvidenceProducer
 from app.domain import ParameterCapabilityRegistry, WaterbodyGeometry
 from app.infrastructure.adapters import (
     EpaEchoFacilityAdapter,
@@ -29,7 +30,6 @@ from app.infrastructure.config import AppSettings, SettingsConfigurationError
 from app.infrastructure.http import ProviderHttpClient
 from app.ports import (
     FacilityEvidencePort,
-    TranscriptEvidencePort,
     UpstreamResultPort,
     WaterObservationPort,
     WeatherEvidencePort,
@@ -77,6 +77,7 @@ class M5Runtime:
     acquisition: EvidenceAcquisitionService
     geometry_catalog: TrustedGeometryCatalog | None = None
     upstream_results: RunLocalUpstreamResultRegistry | None = None
+    transcript_producer: TranscriptEvidenceProducer | None = None
 
     async def cleanup_run(self, run_id: UUID | str) -> None:
         identity = str(run_id)
@@ -85,6 +86,8 @@ class M5Runtime:
             self.geometry_catalog.cleanup_run(identity)
         if self.upstream_results is not None:
             await self.upstream_results.cleanup_run(run_id)
+        if self.transcript_producer is not None:
+            self.transcript_producer.cleanup_run(identity)
 
 
 def evidence_tool_limits(settings: AppSettings) -> EvidenceToolLimits:
@@ -115,7 +118,7 @@ def compose_m5_runtime(
     facility_port: FacilityEvidencePort,
     clock: ClockPort,
     upstream_port: UpstreamResultPort | None = None,
-    transcript_port: TranscriptEvidencePort | None = None,
+    transcript_port: TranscriptEvidenceProducer | None = None,
     operation_id_factory: Callable[[], str] | None = None,
     scope_preparer: Callable[[EvidenceSessionScope], None] | None = None,
     geometry_catalog: TrustedGeometryCatalog | None = None,
@@ -153,6 +156,19 @@ def compose_m5_runtime(
         capability_registry=capability_registry,
     )
     single_flight = RunLocalSingleFlight()
+    scope_preparers = tuple(
+        preparer
+        for preparer in (
+            scope_preparer,
+            transcript_port.prepare_scope if transcript_port is not None else None,
+        )
+        if preparer is not None
+    )
+
+    def prepare_scope(scope: EvidenceSessionScope) -> None:
+        for preparer in scope_preparers:
+            preparer(scope)
+
     executor = EvidenceToolExecutor(
         registry=registry,
         capability_registry=capability_registry,
@@ -167,7 +183,7 @@ def compose_m5_runtime(
         clock=clock,
         operation_id_factory=operation_id_factory,
         single_flight=single_flight,
-        scope_preparer=scope_preparer,
+        scope_preparer=prepare_scope if scope_preparers else None,
     )
     acquisition = EvidenceAcquisitionService(
         registry=registry,
@@ -184,6 +200,7 @@ def compose_m5_runtime(
         acquisition=acquisition,
         geometry_catalog=geometry_catalog,
         upstream_results=upstream_results,
+        transcript_producer=transcript_port,
     )
 
 
@@ -195,6 +212,7 @@ async def build_m5_runtime(
     transcript_reader: TranscriptReader,
     capability_registry: ParameterCapabilityRegistry,
     clock: ClockPort,
+    transcript_port: TranscriptEvidenceProducer,
     upstream_results: RunLocalUpstreamResultRegistry | None = None,
 ) -> AsyncIterator[M5Runtime]:
     geometry_catalog = TrustedGeometryCatalog()
@@ -247,6 +265,7 @@ async def build_m5_runtime(
             facility_port=facility,
             clock=clock,
             upstream_port=upstream_results,
+            transcript_port=transcript_port,
             scope_preparer=geometry_catalog.register_scope,
             geometry_catalog=geometry_catalog,
             upstream_results=upstream_results,

@@ -332,7 +332,7 @@ def _runner(loop, port, *, planner=None, clock=None, transcript_store=None):
 def test_runner_executes_planning_batches_synthesis_and_deterministic_assembly():
     async def exercise():
         port = AdaptiveWaterbodyModelPort()
-        _scope, _store, loop, task = await _fixture(port, water_mode="full")
+        _scope, store, loop, task = await _fixture(port, water_mode="full")
         outcome = await _runner(loop, port).run(
             task,
             deadline=FixedClock().now() + timedelta(minutes=5),
@@ -345,6 +345,14 @@ def test_runner_executes_planning_batches_synthesis_and_deterministic_assembly()
         assert outcome.error is None
         assert outcome.result is not None
         assert outcome.result.result_id == "result:m8:fixture"
+        assert outcome.result.analysis_detail.transcript_item_refs == tuple(
+            sorted(
+                {
+                    *(item_id for item_id, _evidence_id in store.fragments),
+                    *(item_id for _run_id, _session_id, item_id in store.records),
+                }
+            )
+        )
         assert all(
             point.outcome_status is OutcomeStatus.DIRECTIONAL
             for series in outcome.result.series

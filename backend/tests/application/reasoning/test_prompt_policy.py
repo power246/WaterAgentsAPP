@@ -352,6 +352,43 @@ def test_planning_schema_is_exactly_projected_from_authorized_registry_roster() 
         } & set(properties)
 
 
+def test_historical_search_tool_projects_the_closed_strategy_schema() -> None:
+    registry = create_evidence_tool_registry(load_parameter_capability_registry())
+    historical = next(
+        descriptor
+        for descriptor in registry.descriptors
+        if descriptor.name == "search_transcript_evidence"
+    )
+    request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_evidence_planning(
+        EvidencePlanningPromptInput(
+            **common(WaterbodyModelPhase.EVIDENCE_PLANNING, "planning_decision"),
+            station_kind=WaterbodyStationKind.STATION_BACKED,
+            gates=(supported_gate(),),
+            budget=PromptBudgetRemaining(
+                collection_calls=0,
+                transform_calls=0,
+                planning_turns=1,
+                calls_this_turn=1,
+            ),
+            authorized_tools=project_authorized_tool_roster((historical,)),
+        )
+    )
+
+    schema = json.loads(request.tool_descriptors[0].input_schema.schema_text)
+    assert schema["properties"]["options"]["properties"][
+        "historical_search_strategy"
+    ] == {
+        "type": "string",
+        "enum": [
+            "exact_comid_parameter_window",
+            "nearby_comid_parameter",
+            "parameter_season",
+            "semantic_case_query",
+            "topology_neighborhood_parameter",
+        ],
+    }
+
+
 def test_batch_synthesis_and_repair_inputs_are_phase_bounded() -> None:
     _, batch, synthesis, repair = build_all_requests()
     batch_text = batch.messages[-1].text
