@@ -712,6 +712,41 @@ def test_corrupt_items_keep_safe_fulltext_unless_body_is_unreadable(
     run(exercise)
 
 
+@pytest.mark.parametrize("body", ('{"invalid":true}', '{"invalid": true}'))
+def test_invalid_registered_body_is_isolated_regardless_of_json_spacing(body: str) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        async with app_client(store=store) as (_, client):
+            created = await client.post(BASE, json=create_request("spacing check"))
+            run_id = UUID(created.json()["run_id"])
+            request_id = store._runs[run_id].request_item_id
+            item = store._items[request_id]
+            store._items[request_id] = item.model_copy(update={
+                "content_type": "waterbody_model_response",
+                "content_schema_version": 1,
+                "inline_body": body,
+                "content_bytes": len(body.encode("utf-8")),
+            })
+            store._contents.pop(request_id, None)
+            response = await client.get(f"{BASE}/{run_id}?view=history")
+            assert response.status_code == 200
+            payload = response.json()
+            damaged = next(
+                item for item in payload["items"]
+                if item["item_id"] == str(request_id)
+            )
+            assert damaged["parse_status"] == "corrupt"
+            assert damaged["content"] == {"kind": "unparsed"}
+            assert any(
+                issue["item_id"] == str(request_id)
+                and issue["error"]["code"] == "transcript_content_corrupt"
+                for issue in payload["issues"]
+            )
+            assert any(item["item_id"] != str(request_id) for item in payload["items"])
+
+    run(exercise)
+
+
 def test_unsupported_fulltext_requires_strict_history_view() -> None:
     async def exercise() -> None:
         store = InMemoryTranscriptStore()

@@ -3,8 +3,9 @@ import hashlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import and_, or_, select, text, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -21,6 +22,7 @@ from app.application.settings_admin.errors import IdempotencyResourceDeletedErro
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
+    PublicError,
     RunStatus,
     SessionCompletedEvent,
     SessionStateMutation,
@@ -36,6 +38,8 @@ from app.application.transcripts.models import (
     StoredTranscriptItem,
 )
 from app.application.transcripts.read_models import (
+    ReadIssue,
+    ReadSessionSummary,
     StoredRunHeader,
     StoredRunHistoryPage,
     StoredRunRead,
@@ -72,7 +76,15 @@ def _session_summary_from_rows(
     row,
     items: dict[UUID, StoredTranscriptItem],
     contents: dict[UUID, StoredTranscriptContent],
-) -> SessionSummary:
+) -> tuple[ReadSessionSummary, ReadIssue | None]:
+    values = dict(
+        session_id=row["session_id"],
+        agent_role=AgentRole(row["agent_role"]),
+        target_comid=row["target_comid"],
+        status=AgentSessionStatus(row["status"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
     result_ref = None
     result_summary = None
     if (
@@ -80,38 +92,46 @@ def _session_summary_from_rows(
         and row["status"] == AgentSessionStatus.COMPLETED.value
     ):
         terminal_id = row["terminal_item_id"]
-        terminal = items.get(terminal_id)
-        if terminal is None:
-            raise ValueError("completed result session has no terminal item")
-        body = (
-            terminal.inline_body
-            if terminal.inline_body is not None
-            else contents.get(terminal_id).body
-            if terminal_id in contents
-            else None
-        )
-        if body is None:
-            raise ValueError("completed result terminal content is unavailable")
-        event = SessionCompletedEvent.model_validate_json(body)
-        if (
-            event.run_id != row["run_id"]
-            or event.session_id != row["session_id"]
-            or event.payload.result_ref is None
-            or event.payload.result_summary is None
-        ):
-            raise ValueError("completed result terminal payload is invalid")
-        result_ref = event.payload.result_ref
-        result_summary = event.payload.result_summary
-    return SessionSummary(
-        session_id=row["session_id"],
-        agent_role=AgentRole(row["agent_role"]),
-        target_comid=row["target_comid"],
-        status=AgentSessionStatus(row["status"]),
-        created_at=row["created_at"],
-        updated_at=row["updated_at"],
-        result_ref=result_ref,
-        result_summary=result_summary,
-    )
+        try:
+            terminal = items.get(terminal_id)
+            if terminal is None:
+                raise ValueError("completed result session has no terminal item")
+            body = (
+                terminal.inline_body
+                if terminal.inline_body is not None
+                else contents[terminal_id].body
+                if terminal_id in contents
+                else None
+            )
+            if body is None:
+                raise ValueError("completed result terminal content is unavailable")
+            event = SessionCompletedEvent.model_validate_json(body)
+            if (
+                event.run_id != row["run_id"]
+                or event.session_id != row["session_id"]
+                or event.payload.result_ref is None
+                or event.payload.result_summary is None
+            ):
+                raise ValueError("completed result terminal payload is invalid")
+            result_ref = event.payload.result_ref
+            result_summary = event.payload.result_summary
+            valid = SessionSummary(
+                **values, result_ref=result_ref, result_summary=result_summary
+            )
+        except (ValidationError, ValueError, TypeError, AttributeError):
+            return ReadSessionSummary(**values, terminal_corrupt=True), ReadIssue(
+                item_id=terminal_id or row["session_id"],
+                error=PublicError(
+                    error_id=uuid4(),
+                    code="transcript_content_corrupt",
+                    message="The session terminal record is invalid.",
+                    failed_stage="transcript_read",
+                    retryable=False,
+                ),
+            )
+    else:
+        valid = SessionSummary(**values)
+    return ReadSessionSummary.model_validate(valid.model_dump(mode="python")), None
 
 
 class PostgresTranscriptStore:
@@ -378,32 +398,35 @@ class PostgresTranscriptStore:
             row["item_id"]: StoredTranscriptContent.model_validate(dict(row))
             for row in content_rows
         }
-        sessions = {
+        resolved_sessions = {
             row["session_id"]: _session_summary_from_rows(row, items, contents)
             for row in session_rows
         }
         return StoredRunHistoryPage(runs=tuple(
             StoredRunRead(
-                run=self._stored_run_header(row),
+                run=self._stored_run_header(run_row),
                 sessions=tuple(
-                    session
-                    for session_id, session in sessions.items()
-                    if any(
-                        item.run_id == row["run_id"]
-                        and item.session_id == session_id
-                        for item in items.values()
-                    )
+                    resolved_sessions[session_row["session_id"]][0]
+                    for session_row in session_rows
+                    if session_row["run_id"] == run_row["run_id"]
+                ),
+                session_issues=tuple(
+                    issue
+                    for session_row in session_rows
+                    if session_row["run_id"] == run_row["run_id"]
+                    for _, issue in (resolved_sessions[session_row["session_id"]],)
+                    if issue is not None
                 ),
                 items=tuple(
-                    item for item in items.values() if item.run_id == row["run_id"]
+                    item for item in items.values() if item.run_id == run_row["run_id"]
                 ),
                 contents=tuple(
                     content
                     for item_id, content in contents.items()
-                    if item_id in items and items[item_id].run_id == row["run_id"]
+                    if item_id in items and items[item_id].run_id == run_row["run_id"]
                 ),
             )
-            for row in run_rows
+            for run_row in run_rows
         ))
 
     async def read_run(self, run_id: UUID) -> StoredRunRead | None:
@@ -461,11 +484,15 @@ class PostgresTranscriptStore:
             row["item_id"]: StoredTranscriptContent.model_validate(dict(row))
             for row in content_rows
         }
+        resolved_sessions = tuple(
+            _session_summary_from_rows(row, item_models, content_models)
+            for row in session_rows
+        )
         return StoredRunRead(
             run=self._stored_run_header(run_row),
-            sessions=tuple(
-                _session_summary_from_rows(row, item_models, content_models)
-                for row in session_rows
+            sessions=tuple(session for session, _ in resolved_sessions),
+            session_issues=tuple(
+                issue for _, issue in resolved_sessions if issue is not None
             ),
             items=tuple(item_models.values()),
             contents=tuple(content_models.values()),

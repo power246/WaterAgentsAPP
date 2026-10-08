@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from typing import Protocol
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from app.application.analysis_runs.models import (
     AgentRole,
     RunCompletedEvent,
@@ -38,6 +40,7 @@ from app.application.transcripts.read_models import (
     InlineTranscriptContent,
     LiveRunRead,
     ReadIssue,
+    ReadSession,
     ReadSource,
     ReadView,
     RegisteredRunRead,
@@ -205,7 +208,10 @@ class TranscriptReader:
         ))
         summary, summary_issues = self._run_summary(selected.stored, parsed)
         returned = (*run_items, *referenced)
-        issues = self._issues(returned, (*summary_issues, *reference_issues))
+        issues = self._issues(
+            returned,
+            (*summary_issues, *reference_issues, *selected.stored.session_issues),
+        )
         return RunDetailResponse(
             run=summary,
             sessions=selected.stored.sessions,
@@ -238,6 +244,7 @@ class TranscriptReader:
             ),
             source=selected.source,
             persistence=selected.persistence,
+            issues=self._session_issues(selected.stored, session_id),
         )
 
     async def get_session_transcript(
@@ -272,7 +279,10 @@ class TranscriptReader:
             ),
             source=selected.source,
             persistence=selected.persistence,
-            issues=self._issues(returned, reference_issues),
+            issues=self._issues(
+                returned,
+                (*reference_issues, *self._session_issues(selected.stored, session_id)),
+            ),
         )
 
     async def get_content(
@@ -298,11 +308,14 @@ class TranscriptReader:
         if checked is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
         safe_item, text, _ = checked
-        public_text = self._registry.public_content_body(
-            safe_item.content_type,
-            safe_item.content_schema_version,
-            text,
-        )
+        try:
+            public_text = self._registry.public_content_body(
+                safe_item.content_type,
+                safe_item.content_schema_version,
+                text,
+            )
+        except (ValidationError, TypeError, ValueError) as error:
+            raise TranscriptContentUnreadableError(run_id, item_id) from error
         return TranscriptContentResponse(
             run_id=run_id,
             item_id=item_id,
@@ -534,7 +547,10 @@ class TranscriptReader:
     def _history_item(self, stored: StoredRunRead) -> RunHistoryItem:
         parsed = self._parse_items(stored)
         summary, issues = self._run_summary(stored, parsed)
-        return RunHistoryItem(**summary.model_dump(mode="python"), issues=issues)
+        return RunHistoryItem(
+            **summary.model_dump(mode="python"),
+            issues=self._issues((), (*issues, *stored.session_issues)),
+        )
 
     def _run_summary(
         self,
@@ -842,13 +858,17 @@ class TranscriptReader:
         safe_content_bytes = len(safe_body.encode("utf-8"))
         if safe_body == original_body and safe_content_bytes == item.content_bytes:
             return item
-        location = locate_content(
-            safe_body,
-            preview_body=self._registry.public_safe_body(
+        try:
+            preview_body = self._registry.public_safe_body(
                 item.content_type,
                 item.content_schema_version,
                 safe_body,
-            ),
+            )
+        except (ValidationError, TypeError, ValueError):
+            preview_body = ""
+        location = locate_content(
+            safe_body,
+            preview_body=preview_body,
             inline_content_bytes=self._inline_content_bytes,
             preview_bytes=self._preview_bytes,
         )
@@ -930,7 +950,7 @@ class TranscriptReader:
     def _item_view(
         self,
         read: ReadTranscriptItem,
-        sessions: tuple[SessionSummary, ...],
+        sessions: tuple[ReadSession, ...],
     ) -> TranscriptItemView:
         session = (
             next(
@@ -998,7 +1018,19 @@ class TranscriptReader:
         return tuple(unique.values())
 
     @staticmethod
-    def _session(stored: StoredRunRead, session_id: UUID) -> SessionSummary:
+    def _session_issues(
+        stored: StoredRunRead, session_id: UUID
+    ) -> tuple[ReadIssue, ...]:
+        item_ids = {
+            item.item_id for item in stored.items if item.session_id == session_id
+        }
+        return tuple(
+            issue for issue in stored.session_issues
+            if issue.item_id in item_ids or issue.item_id == session_id
+        )
+
+    @staticmethod
+    def _session(stored: StoredRunRead, session_id: UUID) -> ReadSession:
         session = next(
             (item for item in stored.sessions if item.session_id == session_id),
             None,
