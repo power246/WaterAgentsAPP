@@ -34,7 +34,6 @@ def test_keys_expose_masked_status_and_explicit_test_only(application) -> None:
     assert "value" not in status
 
 
-@pytest.mark.xfail(strict=True, reason="M9 Milestones 1 and 6: Admin operations")
 def test_admin_operation_status_and_preview_routes_exist(application) -> None:
     paths = application.openapi()["paths"]
     assert "get" in paths.get("/api/admin/operations/{operation_id}", {})
@@ -52,7 +51,6 @@ def test_run_configuration_carries_unit_policy_identity() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="M9 Milestones 1 and 6: deleted create key")
 def test_create_contract_declares_deleted_idempotency_receipt(application) -> None:
     response_codes = application.openapi()["paths"]["/api/analysis/runs"]["post"]["responses"]
     assert "410" in response_codes

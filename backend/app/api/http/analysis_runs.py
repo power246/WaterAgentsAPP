@@ -69,7 +69,7 @@ router = APIRouter(
 @router.post(
     "", status_code=201, response_model=AnalysisRunResponse,
     responses={
-        **error_responses(400, 409),
+        **error_responses(400, 409, 410),
         201: {"headers": REQUEST_ID_HEADERS},
     },
     openapi_extra={

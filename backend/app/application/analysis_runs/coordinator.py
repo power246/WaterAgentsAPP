@@ -23,6 +23,8 @@ from app.application.analysis_runs.creation import (
     RunCreationDisposition,
     RunCreationResult,
 )
+from app.application.settings_admin.errors import IdempotencyResourceDeletedError
+from app.domain.settings_admin import IdempotencyTombstone
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -289,6 +291,7 @@ class RunCoordinator:
         live_state_grace_period: float = 60.0,
         persistence_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         transcript_registry: TranscriptRegistry | None = None,
+        tombstone_lookup: Callable[[UUID], Awaitable[IdempotencyTombstone | None]] | None = None,
     ) -> None:
         if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
             raise ValueError("shutdown_grace_period must be finite and non-negative")
@@ -313,6 +316,7 @@ class RunCoordinator:
             raise ValueError("live_state_grace_period must be finite and non-negative")
         self._clock = clock
         self._transcript_store = transcript_store
+        self._tombstone_lookup = tombstone_lookup
         self._model_catalog = model_catalog
         self._analysis_timezone = analysis_timezone
         self._settings_resolver = settings_resolver
@@ -447,6 +451,16 @@ class RunCoordinator:
                         fingerprint,
                     )
                     return existing.creation.receipt_snapshot()
+                if self._tombstone_lookup is not None:
+                    try:
+                        tombstone = await self._tombstone_lookup(idempotency_key)
+                    except Exception as error:
+                        raise CreationPersistenceUnavailableError() from error
+                    if tombstone is not None:
+                        self._require_same_fingerprint(
+                            tombstone.request_fingerprint, fingerprint,
+                        )
+                        raise IdempotencyResourceDeletedError()
 
             resolved_configuration = configuration_override
             if self._settings_resolver is not None and resolved_configuration is None:
@@ -727,6 +741,8 @@ class RunCoordinator:
             try:
                 result = await self._transcript_store.create_run(candidate)
             except IdempotencyKeyConflictError:
+                raise
+            except IdempotencyResourceDeletedError:
                 raise
             except Exception:
                 owner.commit_unconfirmed.set()

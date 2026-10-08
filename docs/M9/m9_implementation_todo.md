@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–4 已实现并保留本地提交，Milestone 5–9、`frontend/` 应用、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
+> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–6 已实现并保留本地提交，Milestone 7–9、`frontend/` 应用、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
 
 本清单执行以下权威文档：
 
@@ -343,41 +343,43 @@
 
 ### 工作
 
-- [ ] 实现 `AdminService`：preview读取current facts、normalized action/dependencies/counts/preserved resources，token digest/action digest/fingerprint/phrase/expiry只放有界进程内registry；token不承载secret或完整selection明文。
-- [ ] 实现execute顺序：registry lock validation → 重新读取facts/fingerprint → DB transaction insert/return operation → commit后schedule → CAS pending/running → typed handler → terminal safe result/error。
-- [ ] 实现 `AdminOperationRunner` 单process/worker生命周期；startup重新schedule pending，遗留running按底层durability reconcile或收敛interrupted/failed，不能永久running或引入distributed owner。
-- [ ] 实现Admin storage/RAG health与operation list/detail routes；列表cursor/limit稳定，GET无side effect，Admin不新增SSE或operation cancel route。
-- [ ] 实现history cleanup preview/execute：明确run ids或all-history snapshot、M8 dependency graph、consumer-first whole-run cascade、preserved keys/settings/unit versions和bounded counts。
-- [ ] 执行history delete时复用同一个 `RAGMaintenanceOperations`/store transaction，并原子写idempotency tombstone；不能先删后补、TRUNCATE绕过ownership或留下dangling ref。
-- [ ] 将create idempotency lookup扩展为live row+tombstone互斥：same raw bytes 410、different bytes 409、新key 201；frontend可用safe error，不返回旧query/result。
-- [ ] 公开RAG profile handoff、failed-job retry、inactive generation delete preview/execute；严格复用M8 state machine、reader lease/retention/build/validate/activate，不复制repository logic。
-- [ ] profile desired/active/building/reader-drain/cleanup-ready完整投影；新generation激活前旧adapter/credential仍可用，index-only操作不删除history。
-- [ ] storage/status明确 `evidence_cache.state=not_present`；不存在任何evidence-cache mutation route、button contract或伪统计。
-- [ ] operation safe summary/result/error不保存secret、canonical text/vector/provider body/完整cleanup preview；日志/metrics使用bounded labels。
+- [x] 实现 `AdminService`：preview读取current facts、normalized action/dependencies/counts/preserved resources，token digest/action digest/fingerprint/phrase/expiry只放有界进程内registry；token不承载secret或完整selection明文。
+- [x] 实现execute顺序：registry lock validation → 重新读取facts/fingerprint → DB transaction insert/return operation → commit后schedule → CAS pending/running → typed handler → terminal safe result/error。
+- [x] 实现 `AdminOperationRunner` 单process/worker生命周期；startup重新schedule pending，遗留running按底层durability reconcile或收敛interrupted/failed，不能永久running或引入distributed owner。
+- [x] 实现Admin storage/RAG health与operation list/detail routes；列表cursor/limit稳定，GET无side effect，Admin不新增SSE或operation cancel route。
+- [x] 实现history cleanup preview/execute：明确run ids或all-history snapshot、M8 dependency graph、consumer-first whole-run cascade、preserved keys/settings/unit versions和bounded counts。
+- [x] 执行history delete时复用同一个 `RAGMaintenanceOperations`/store transaction，并原子写idempotency tombstone；不能先删后补、TRUNCATE绕过ownership或留下dangling ref。
+- [x] 将create idempotency lookup扩展为live row+tombstone互斥：same raw bytes 410、different bytes 409、新key 201；frontend可用safe error，不返回旧query/result。
+- [x] 公开RAG profile handoff、failed-job retry、inactive generation delete preview/execute；严格复用M8 state machine、reader lease/retention/build/validate/activate，不复制repository logic。
+- [x] profile desired/active/building/reader-drain/cleanup-ready完整投影；新generation激活前旧adapter/credential仍可用，index-only操作不删除history。
+- [x] storage/status明确 `evidence_cache.state=not_present`；不存在任何evidence-cache mutation route、button contract或伪统计。
+- [x] operation safe summary/result/error不保存secret、canonical text/vector/provider body/完整cleanup preview；日志/metrics使用bounded labels。
 
 ### Tests
 
-- [ ] preview/execute矩阵覆盖expiry、wrong phrase/action/key、fact stale、same/different idempotency bytes、token double use、concurrent action和0 side effect rejection。
-- [ ] operation runner使用可控gate覆盖commit-before-schedule crash、pending restart、running reconcile、handler failure、terminal immutability、HTTP disconnect/UI离开与同resource conflict。
-- [ ] history cleanup fixture覆盖no consumer、one/transitive consumer、stable conflict、explicit whole-run cascade、concurrent new consumption、rollback/retry、tombstone 410/409与无dangling refs。
-- [ ] RAG Admin fixture覆盖desired already active、building/failed/retired/active、retry safe codes/limit、reader lease、retention、handoff activation和index-only deletion；history/API keys不变。
-- [ ] API/OpenAPI测试覆盖所有新增Admin method/status/header/error/cursor/202 operation shapes，并证明没有第三SSE、direct search、arbitrary SQL/filter或evidence-cache mutation。
-- [ ] restart/production composition证明route、runner与M8 worker共享同一maintenance/repository graph，且只有一个Admin runner。
+- [x] preview/execute矩阵覆盖expiry、wrong phrase/action/key、fact stale、same/different idempotency bytes、token double use、concurrent action和0 side effect rejection。
+- [x] operation runner使用可控gate覆盖commit-before-schedule crash、pending restart、running reconcile、handler failure、terminal immutability、HTTP disconnect/UI离开与同resource conflict。
+- [x] history cleanup fixture覆盖no consumer、one/transitive consumer、stable conflict、explicit whole-run cascade、concurrent new consumption、rollback/retry、tombstone 410/409与无dangling refs。
+- [x] RAG Admin fixture覆盖desired already active、building/failed/retired/active、retry safe codes/limit、reader lease、retention、handoff activation和index-only deletion；history/API keys不变。
+- [x] API/OpenAPI测试覆盖所有新增Admin method/status/header/error/cursor/202 operation shapes，并证明没有第三SSE、direct search、arbitrary SQL/filter或evidence-cache mutation。
+- [x] restart/production composition证明route、runner与M8 worker共享同一maintenance/repository graph，且只有一个Admin runner。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_maintenance.py backend/tests/persistence/test_rag_cleanup.py backend/tests/persistence/test_rag_consumption_links.py -q`
-- [ ] 使用专用PostgreSQL运行新增Admin operation/history tombstone/restart tests。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_history.py backend/tests/api/test_openapi_contract.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/infrastructure/test_m8_runtime.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/transcript_memory/test_maintenance.py backend/tests/persistence/test_rag_cleanup.py backend/tests/persistence/test_rag_consumption_links.py -q`
+- [x] 使用专用PostgreSQL运行新增Admin operation/history tombstone/restart tests。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_history.py backend/tests/api/test_openapi_contract.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/infrastructure/test_m8_runtime.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：所有破坏性动作都经server preview/confirmation与persisted operation；history/tombstone、M8 consumption ownership和generation handoff无悬空/越权，public surface不存在假cache或第三stream。
 
 提交边界：Admin service/runner/routes、history transaction/tombstone/create lookup、M8 maintenance exposure、focused PG/API tests；不得包含frontend、真实provider调用或无关RAG重构。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：Admin preview/confirm 使用有界单用途 token 和当前事实指纹；`20261008_03` migration 持久化有界恢复命令，operation 先提交再调度，pending 重启恢复、遗留 running 收敛为 interrupted。History 清理复用 M8 同事务 consumer-first 删除并写 tombstone；旧创建 key 相同原始请求返回 410、不同请求返回 409。RAG profile handoff、失败 job retry 和 inactive generation 删除复用 M8 state machine；storage 明示 `evidence_cache=not_present`，all-history 单次最多 500 个 run/依赖链接，超限返回 422。
+
+验证：专用 `wateragents_test` PostgreSQL 全量后端回归 2367 passed、1 xfailed；M8 maintenance/cleanup/consumption、analysis/history/OpenAPI、architecture/runtime 及 Admin restart/cascade/disconnect 专项用例通过，compileall 与 `git diff --check` 通过。未运行真实 provider 或跨平台实机验收；M7–M9 和最终整体验收仍待完成。本地提交 SHA 以该阶段提交 HEAD 为准。
 
 ## Milestone 7：Frontend foundation、实时分析与 History
 

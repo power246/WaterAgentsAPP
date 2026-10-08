@@ -236,6 +236,7 @@ from app.domain.time import (
 
 from app.domain.settings_admin import (
     AdminActionKind,
+    AdminCommand,
     AdminConfirmation,
     AdminOperation,
     AdminOperationState,
@@ -270,6 +271,7 @@ from app.domain.settings_admin import (
 
 __all__ = [
     "AdminActionKind",
+    "AdminCommand",
     "AdminConfirmation",
     "AdminOperation",
     "AdminOperationState",

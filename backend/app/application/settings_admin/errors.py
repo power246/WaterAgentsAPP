@@ -134,10 +134,22 @@ class AdminOperationNotFoundError(SettingsAdminError):
     public_message = "The operation was not found."
 
 
+class AdminOperationCursorError(SettingsAdminError):
+    code = "admin_operation_cursor_invalid"
+    status = 422
+    public_message = "The operation cursor is invalid."
+
+
 class HistoryCleanupDependencyConflictError(SettingsAdminError):
     code = "history_cleanup_dependency_conflict"
     status = 409
     public_message = "Retained history depends on the selected runs."
+
+
+class HistoryCleanupSelectionTooLargeError(SettingsAdminError):
+    code = "history_cleanup_selection_too_large"
+    status = 422
+    public_message = "The history selection exceeds the Admin limit."
 
 
 class IdempotencyResourceDeletedError(SettingsAdminError):
@@ -181,7 +193,9 @@ M9_PUBLIC_ERRORS = (
     AdminPreviewExpiredError,
     AdminPreviewStaleError, AdminConfirmationInvalidError,
     AdminOperationConflictError, AdminOperationNotFoundError,
+    AdminOperationCursorError,
     HistoryCleanupDependencyConflictError, IdempotencyResourceDeletedError,
+    HistoryCleanupSelectionTooLargeError,
     RAGGenerationNotFoundError, RAGGenerationConflictError,
     RAGReaderDrainRequiredError, RAGRetentionNotElapsedError,
 )

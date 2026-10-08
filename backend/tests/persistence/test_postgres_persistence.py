@@ -225,8 +225,8 @@ async def _wait_persistence(
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
     postgres_settings: AppSettings,
 ) -> None:
-    assert asyncio.run(check_database_schema(postgres_settings)) == "20261008_02"
-    assert upgrade_database(postgres_settings) == "20261008_02"
+    assert asyncio.run(check_database_schema(postgres_settings)) == "20261008_03"
+    assert upgrade_database(postgres_settings) == "20261008_03"
 
     async def inspect_schema() -> tuple[set[str], set[str], list[object]]:
         engine = create_database_engine(postgres_settings)

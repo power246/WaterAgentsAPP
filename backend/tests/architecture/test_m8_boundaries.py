@@ -284,7 +284,7 @@ def test_m8_does_not_add_a_direct_route_or_third_sse() -> None:
     }
     assert not any(
         forbidden in path.casefold()
-        for path in paths
+        for path in paths if path.startswith("/api/analysis/")
         for forbidden in (
             "/rag",
             "/memory",

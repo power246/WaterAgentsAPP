@@ -11,7 +11,10 @@ from sqlalchemy import and_, insert, or_, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.application.settings_admin.errors import AdminOperationConflictError
+from app.application.settings_admin.errors import (
+    AdminOperationConflictError, UnitPolicyIdempotencyConflictError,
+)
+from app.domain.settings_admin import AdminCommand
 from app.domain.settings_admin import AdminOperation, AdminOperationState
 from app.infrastructure.persistence.schema import admin_operations
 from app.ports.errors import PortUnavailableError
@@ -64,6 +67,7 @@ class PostgresAdminOperationRepository:
     async def create(
         self, operation: AdminOperation, *, idempotency_key: UUID,
         request_fingerprint: bytes, confirmation_token_digest: bytes,
+        command: AdminCommand | None = None,
     ) -> AdminOperation:
         if operation.state is not AdminOperationState.PENDING:
             raise ValueError("new Admin operation must be pending")
@@ -71,6 +75,11 @@ class PostgresAdminOperationRepository:
             len(value) != 32 for value in (request_fingerprint, confirmation_token_digest)
         ):
             raise ValueError("Admin operation identities must be UUID v4 and SHA-256")
+        if command is not None and (
+            command.kind is not operation.kind
+            or command.resource_identity != operation.resource_identity
+        ):
+            raise ValueError("Admin command and operation identity disagree")
         try:
             async with asyncio.timeout(self._timeout):
                 async with self._engine.begin() as connection:
@@ -84,6 +93,8 @@ class PostgresAdminOperationRepository:
                         safe_request_summary={
                             "action": operation.kind.value,
                             "resource_identity": operation.resource_identity,
+                            **({"command": command.model_dump(mode="json")}
+                               if command is not None else {}),
                         },
                         processed_items=operation.progress.processed_items,
                         total_items=operation.progress.total_items,
@@ -106,12 +117,59 @@ class PostgresAdminOperationRepository:
                         )).mappings().one_or_none()
             except (SQLAlchemyError, OSError, TimeoutError) as read_error:
                 raise PortUnavailableError("admin operation store unavailable") from read_error
-            if row is not None and (
-                row["request_fingerprint"] == request_fingerprint
-                and row["confirmation_token_digest"] == confirmation_token_digest
-            ):
+            if row is not None and row["request_fingerprint"] == request_fingerprint:
                 return _project(row)
+            if row is not None:
+                raise UnitPolicyIdempotencyConflictError() from error
             raise AdminOperationConflictError() from error
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("admin operation store unavailable") from error
+    async def read_receipt(
+        self, idempotency_key: UUID,
+    ) -> tuple[AdminOperation, bytes] | None:
+        try:
+            async with asyncio.timeout(self._timeout):
+                async with self._engine.connect() as connection:
+                    row = (await connection.execute(select(admin_operations).where(
+                        admin_operations.c.idempotency_key == idempotency_key
+                    ))).mappings().one_or_none()
+            return None if row is None else (_project(row), row["request_fingerprint"])
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("admin operation store unavailable") from error
+
+    async def list_pending(self) -> tuple[tuple[AdminOperation, AdminCommand | None], ...]:
+        try:
+            async with asyncio.timeout(self._timeout):
+                async with self._engine.connect() as connection:
+                    rows = tuple((await connection.execute(
+                        select(admin_operations).where(
+                            admin_operations.c.state == "pending"
+                        ).order_by(admin_operations.c.created_at,
+                                   admin_operations.c.operation_id)
+                    )).mappings())
+            return tuple((
+                _project(row),
+                AdminCommand.model_validate(row["safe_request_summary"]["command"])
+                if "command" in row["safe_request_summary"] else None,
+            ) for row in rows)
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("admin operation store unavailable") from error
+
+    async def reconcile_running(self, *, now: datetime) -> int:
+        if now.tzinfo is None:
+            raise ValueError("now must be timezone aware")
+        try:
+            async with asyncio.timeout(self._timeout):
+                async with self._engine.begin() as connection:
+                    result = await connection.execute(update(admin_operations).where(
+                        admin_operations.c.state == "running"
+                    ).values(
+                        state="interrupted", finished_at=now,
+                        safe_error={"code": "operation_interrupted",
+                                    "message": "The operation was interrupted.",
+                                    "retryable": True},
+                    ))
+                    return result.rowcount
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise PortUnavailableError("admin operation store unavailable") from error
 
@@ -182,23 +240,5 @@ class PostgresAdminOperationRepository:
                         started_at=operation.started_at, finished_at=operation.finished_at,
                     ))
                     return operation
-        except (SQLAlchemyError, OSError, TimeoutError) as error:
-            raise PortUnavailableError("admin operation store unavailable") from error
-
-    async def reconcile_interrupted(self, *, now: datetime) -> int:
-        if now.tzinfo is None:
-            raise ValueError("now must be timezone aware")
-        try:
-            async with asyncio.timeout(self._timeout):
-                async with self._engine.begin() as connection:
-                    result = await connection.execute(update(admin_operations).where(
-                        admin_operations.c.state.in_(("pending", "running"))
-                    ).values(
-                        state="interrupted", finished_at=now,
-                        safe_error={"code": "operation_interrupted",
-                                    "message": "The operation was interrupted.",
-                                    "retryable": True},
-                    ))
-                    return result.rowcount
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise PortUnavailableError("admin operation store unavailable") from error

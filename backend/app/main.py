@@ -13,6 +13,7 @@ from app.api.http.analysis_runs import router as analysis_runs_router
 from app.api.http.errors import register_error_handlers
 from app.api.http.health import router as health_router
 from app.api.http.settings import router as settings_router
+from app.api.http.admin import router as admin_router
 from app.api.http.keys import router as keys_router
 from app.api.http.request_context import RequestContextMiddleware
 from app.api.http.local_mutation import LocalMutationGuardMiddleware, _loopback
@@ -31,6 +32,8 @@ from app.application.settings_admin.settings_service import (
     SettingsService, deployment_defaults,
 )
 from app.application.settings_admin.unit_policy_service import UnitPolicyService
+from app.application.settings_admin.admin_service import AdminService
+from app.application.settings_admin.admin_operation_runner import AdminOperationRunner
 from app.application.settings_admin.credential_service import (
     CredentialService, CredentialTester,
 )
@@ -60,6 +63,8 @@ from app.infrastructure.persistence.database import (
     create_database_engine,
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
+from app.infrastructure.persistence.tombstone_repository import PostgresTombstoneRepository
+from app.infrastructure.persistence.admin_operation_repository import PostgresAdminOperationRepository
 from app.infrastructure.persistence.settings_repository import PostgresSettingsRepository
 from app.infrastructure.persistence.memory_settings import InMemorySettingsRepository
 from app.infrastructure.credentials import OSKeyStore
@@ -141,6 +146,7 @@ def create_app(
         engine = None
         coordinator = None
         m8_runtime = None
+        admin_runner = None
         try:
             active_store = transcript_store
             foundation_validated = False
@@ -261,6 +267,12 @@ def create_app(
                     ),
                     workflow_task_factory=workflow_task_factory,
                     transcript_registry=active_registry,
+                    tombstone_lookup=(
+                        PostgresTombstoneRepository(
+                            engine,
+                            operation_timeout_seconds=resolved_settings.db_operation_timeout_seconds,
+                        ).get if engine is not None else None
+                    ),
                 )
                 transcript_reader = TranscriptReader(
                     coordinator,
@@ -360,6 +372,37 @@ def create_app(
                             )
                         )
                     await m8_runtime.start()
+                    admin_service = None
+                    if engine is not None and isinstance(m8_runtime, M8Runtime):
+                        profile_by_id = {
+                            item.embedding_profile.profile_id: item.embedding_profile
+                            for item in resolved_model_catalog.snapshot().capabilities
+                            if item.embedding_profile is not None
+                        }
+                        operation_store = PostgresAdminOperationRepository(
+                            engine,
+                            operation_timeout_seconds=resolved_settings.db_operation_timeout_seconds,
+                        )
+                        async def credential_store_available() -> bool:
+                            statuses = await credential_service.statuses()
+                            return all(item.store_available for item in statuses)
+
+                        admin_service = AdminService(
+                            settings=settings_service,
+                            maintenance=m8_runtime.operations,
+                            store=operation_store, clock=resolved_clock,
+                            profile_for_id=profile_by_id.__getitem__,
+                            apply_profile=m8_runtime.apply_profile_handoff,
+                            notify_maintenance=m8_runtime.notify_admin_maintenance,
+                            credential_store_available=credential_store_available,
+                            id_factory=id_factory,
+                        )
+                        admin_runner = AdminOperationRunner(
+                            store=operation_store, clock=resolved_clock,
+                            handle=admin_service.handle,
+                        )
+                        admin_service.bind_runner(admin_runner.schedule)
+                        await admin_runner.start()
                     application.state.run_coordinator = coordinator
                     application.state.settings_service = settings_service
                     application.state.unit_policy_service = unit_policy_service
@@ -367,6 +410,8 @@ def create_app(
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store
                     application.state.m8_runtime = m8_runtime
+                    application.state.admin_service = admin_service
+                    application.state.admin_runner = admin_runner
                     application.state.m5_runtime = m5_runtime
                     application.state.m6_runtime = m6_runtime
                     application.state.provider_http = provider_http
@@ -374,6 +419,9 @@ def create_app(
                     yield
                 finally:
                     try:
+                        if admin_runner is not None:
+                            await admin_service.drain_accepts()
+                            await admin_runner.shutdown()
                         await m8_runtime.shutdown()
                     finally:
                         try:
@@ -406,6 +454,7 @@ def create_app(
     application.include_router(analysis_runs_router)
     application.include_router(settings_router)
     application.include_router(keys_router)
+    application.include_router(admin_router)
 
     generated_openapi = application.openapi
 

@@ -54,6 +54,7 @@ from app.domain import (
 from app.application.transcript_memory.search_policies import (
     rank_projection,
 )
+from app.application.transcript_memory.maintenance import HistoryStorageFacts
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
 from app.infrastructure.persistence.rag_consumption import has_valid_consumption_source
 from app.infrastructure.persistence.schema import (
@@ -1428,11 +1429,73 @@ class PostgresRAGRepository:
         async with self._transaction() as connection:
             return await self._build_cleanup_plan(connection, requested)
 
+    async def list_history_run_ids(self, *, limit: int) -> tuple[str, ...]:
+        if not 1 <= limit <= 10001:
+            raise ValueError("history selection limit is invalid")
+        rows = await self._read_all(
+            select(analysis_runs.c.run_id).order_by(analysis_runs.c.run_id).limit(limit)
+        )
+        return tuple(str(row["run_id"]) for row in rows)
+
+    async def inspect_history_storage(
+        self, run_ids: tuple[str, ...],
+    ) -> HistoryStorageFacts:
+        identifiers = tuple(_uuid(value, "run_id") for value in run_ids)
+        if not identifiers or len(identifiers) != len(set(identifiers)):
+            raise ValueError("history selection must be nonempty and unique")
+        async with self._transaction() as connection:
+            rows = tuple((await connection.execute(select(
+                analysis_runs.c.run_id, analysis_runs.c.status,
+                analysis_runs.c.idempotency_key,
+            ).where(analysis_runs.c.run_id.in_(identifiers)))).mappings())
+            sessions = (await connection.execute(select(func.count()).select_from(
+                analysis_sessions
+            ).where(analysis_sessions.c.run_id.in_(identifiers)))).scalar_one()
+            items = (await connection.execute(select(func.count()).select_from(
+                transcript_items
+            ).where(transcript_items.c.run_id.in_(identifiers)))).scalar_one()
+        return HistoryStorageFacts(
+            run_ids=tuple(sorted(str(row["run_id"]) for row in rows)),
+            sessions=sessions,
+            transcript_items=items,
+            idempotency_keys=sum(row["idempotency_key"] is not None for row in rows),
+            all_terminal=all(row["status"] in {
+                "completed", "failed", "cancelled",
+                "completed_with_persistence_error",
+            } for row in rows),
+        )
+
+    async def failed_job_codes(self, generation_id: str) -> tuple[str, ...]:
+        identifier = _uuid(generation_id, "generation_id")
+        rows = await self._read_all(select(
+            rag_index_jobs.c.last_safe_error_code
+        ).where(
+            rag_index_jobs.c.generation_id == identifier,
+            rag_index_jobs.c.status == RAGIndexJobStatus.FAILED.value,
+            rag_index_jobs.c.last_safe_error_code.is_not(None),
+        ).distinct().order_by(rag_index_jobs.c.last_safe_error_code))
+        return tuple(row["last_safe_error_code"] for row in rows)
+
+    async def count_failed_jobs(
+        self, generation_id: str, safe_error_codes: tuple[str, ...],
+    ) -> int:
+        identifier = _uuid(generation_id, "generation_id")
+        rows = await self._read_all(select(func.count().label("count")).select_from(
+            rag_index_jobs
+        ).where(
+            rag_index_jobs.c.generation_id == identifier,
+            rag_index_jobs.c.status == RAGIndexJobStatus.FAILED.value,
+            rag_index_jobs.c.last_safe_error_code.in_(safe_error_codes),
+        ))
+        return rows[0]["count"]
+
     async def delete_history_runs(
         self,
         run_ids: tuple[str, ...],
         *,
         cascade_consumers: bool,
+        expected_delete_run_ids: tuple[str, ...] | None = None,
+        expected_dependency_ids: tuple[str, ...] | None = None,
     ) -> RAGCleanupResult:
         requested = tuple(_uuid(value, "run_id") for value in run_ids)
         if not requested:
@@ -1442,6 +1505,14 @@ class PostgresRAGRepository:
         try:
             async with self._transaction() as connection:
                 plan = await self._build_cleanup_plan(connection, requested)
+                if expected_delete_run_ids is not None and (
+                    set(plan.delete_run_ids) != set(expected_delete_run_ids)
+                    or set(item.link_id for item in plan.dependencies)
+                    != set(expected_dependency_ids or ())
+                ):
+                    raise RAGPersistenceConflictError(
+                        "history cleanup facts changed after confirmation"
+                    )
                 if plan.cascade_required and not cascade_consumers:
                     raise RAGPersistenceConflictError(
                         "source history is referenced by retained consumer runs"
@@ -1481,6 +1552,10 @@ class PostgresRAGRepository:
                         "history cleanup requires terminal runs"
                     )
                 existing_ids = {row["run_id"] for row in rows}
+                if expected_delete_run_ids is not None and existing_ids != set(target_ids):
+                    raise RAGPersistenceConflictError(
+                        "history cleanup selection changed after confirmation"
+                    )
                 delete_order = tuple(
                     value
                     for value in plan.delete_order

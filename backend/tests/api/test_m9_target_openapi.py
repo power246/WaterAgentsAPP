@@ -38,14 +38,7 @@ def openapi():
     return create_app(AppSettings(_env_file=None)).openapi()
 
 
-@pytest.mark.parametrize("path,method,status", [
-    item if item[0].startswith("/api/settings") or item[0].startswith("/api/keys") else pytest.param(
-        *item, marks=pytest.mark.xfail(
-            strict=True, reason="Later M9 milestones register remaining routes",
-        ),
-    )
-    for item in TARGET_ROUTES
-])
+@pytest.mark.parametrize("path,method,status", TARGET_ROUTES)
 def test_target_route_method_status_and_request_id_header(openapi, path, method, status):
     operation = openapi["paths"][path][method]
     responses = operation["responses"]
@@ -103,7 +96,6 @@ def test_m9_error_catalog_has_stable_codes_status_and_no_duplicate(openapi):
     assert by_code["idempotency_resource_deleted"]["status"] == 410
 
 
-@pytest.mark.xfail(strict=True, reason="M9 M6 adds tombstone 410 to existing create route")
 def test_create_tombstone_410_has_safe_error_envelope(openapi):
     response = openapi["paths"]["/api/analysis/runs"]["post"]["responses"]["410"]
     assert "X-Request-ID" in response["headers"]

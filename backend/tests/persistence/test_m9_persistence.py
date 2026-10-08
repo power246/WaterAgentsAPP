@@ -13,10 +13,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.application.settings_admin.errors import (
     AdminOperationConflictError, SettingsRevisionConflictError,
+    UnitPolicyIdempotencyConflictError,
 )
 from app.domain.settings_admin import (
-    AdminOperation, AdminOperationState, AdminProgress, AdminSafeError,
-    SettingsSnapshot, UnitPolicyVersion,
+    AdminCommand, AdminOperation, AdminOperationState, AdminProgress, AdminSafeError,
+    HistoryCleanupResult, SettingsSnapshot, UnitPolicyVersion,
 )
 from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.persistence.admin_operation_repository import (
@@ -121,7 +122,7 @@ def test_m9_migration_round_trip_preserves_m8_transcripts_and_registry() -> None
         command.downgrade(alembic_config(settings), "20261007_01")
         generation_id = asyncio.run(verify_survival(settings, source))
         assert run_database_cli(["upgrade", "--test-database"]) == 0
-        assert asyncio.run(check_database_schema(settings)) == "20261008_02"
+        assert asyncio.run(check_database_schema(settings)) == "20261008_03"
         assert run_database_cli(["check", "--test-database"]) == 0
         async def check_preserved():
             engine = create_database_engine(settings)
@@ -276,7 +277,7 @@ def test_admin_operation_exact_once_state_and_json_guards() -> None:
                 request_fingerprint=fingerprint,
                 confirmation_token_digest=token,
             ) == winner
-            with pytest.raises(AdminOperationConflictError):
+            with pytest.raises(UnitPolicyIdempotencyConflictError):
                 await repository.create(
                     _pending(), idempotency_key=key,
                     request_fingerprint=b"z" * 32,
@@ -339,11 +340,20 @@ def test_admin_operation_exact_once_state_and_json_guards() -> None:
                 another, idempotency_key=uuid4(), request_fingerprint=b"e" * 32,
                 confirmation_token_digest=b"g" * 32,
             )
+            selected = uuid4()
+            command = AdminCommand(
+                kind="history_cleanup", resource_identity="other-run",
+                facts_digest="a" * 64,
+                requested_run_ids=(selected,), expected_delete_run_ids=(selected,),
+            )
             async with engine.begin() as connection:
                 for summary in (
                     {"action": "history_cleanup"},
                     {"action": "history_cleanup", "resource_identity": "other-run",
                      "secret": "forbidden"},
+                    {"action": "history_cleanup", "resource_identity": "other-run",
+                     "command": {**command.model_dump(mode="json"),
+                                 "secret": "forbidden"}},
                 ):
                     with pytest.raises(IntegrityError):
                         async with connection.begin_nested():
@@ -381,11 +391,18 @@ def test_admin_operation_exact_once_state_and_json_guards() -> None:
                             finished_at=another.created_at + timedelta(seconds=1),
                             safe_result={
                                 "kind": "history_cleanup",
-                                "deleted_run_ids": [str(uuid4()) for _ in range(150)],
+                                "deleted_run_ids": [str(uuid4()) for _ in range(1000)],
                                 "retained_idempotency_tombstones": 0,
                             },
                         ))
-            assert await repository.reconcile_interrupted(
+            await repository.compare_and_swap_state(
+                another.model_copy(update={
+                    "state": AdminOperationState.RUNNING,
+                    "started_at": another.created_at,
+                }),
+                expected=AdminOperationState.PENDING,
+            )
+            assert await repository.reconcile_running(
                 now=datetime.now(UTC) + timedelta(seconds=5)
             ) == 1
             restarted = PostgresAdminOperationRepository(
@@ -402,6 +419,51 @@ def test_admin_operation_exact_once_state_and_json_guards() -> None:
                         await connection.execute(update(admin_operations).where(
                             admin_operations.c.operation_id == winner.operation_id
                         ).values(resource_identity="changed"))
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
+def test_admin_history_result_accepts_bounded_full_selection() -> None:
+    async def exercise(settings):
+        engine = create_database_engine(settings)
+        repository = PostgresAdminOperationRepository(
+            engine, operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            pending = _pending()
+            pending = pending.model_copy(update={"progress": AdminProgress(total_items=500)})
+            await repository.create(
+                pending, idempotency_key=uuid4(),
+                request_fingerprint=b"a" * 32,
+                confirmation_token_digest=b"b" * 32,
+            )
+            running = pending.model_copy(update={
+                "state": AdminOperationState.RUNNING,
+                "started_at": pending.created_at + timedelta(seconds=1),
+            })
+            await repository.compare_and_swap_state(
+                running, expected=AdminOperationState.PENDING,
+            )
+            completed = running.model_copy(update={
+                "state": AdminOperationState.SUCCEEDED,
+                "finished_at": pending.created_at + timedelta(seconds=2),
+                "progress": AdminProgress(
+                    total_items=500, processed_items=500, succeeded_items=500,
+                ),
+                "safe_result": HistoryCleanupResult(
+                    deleted_run_ids=tuple(uuid4() for _ in range(500)),
+                    retained_idempotency_tombstones=0,
+                ),
+            })
+            await repository.compare_and_swap_state(
+                completed, expected=AdminOperationState.RUNNING,
+            )
+            saved = await repository.get(pending.operation_id)
+            assert saved.state is AdminOperationState.SUCCEEDED
+            assert len(saved.safe_result.deleted_run_ids) == 500
         finally:
             await engine.dispose()
 

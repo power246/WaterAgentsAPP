@@ -205,6 +205,30 @@ class M8Runtime:
         if not self._stopping:
             self.signal.notify_run_terminal()
 
+    def notify_admin_maintenance(self) -> None:
+        if not self._stopping:
+            self.signal.notify_run_terminal()
+
+    async def apply_profile_handoff(self, profile: EmbeddingProfile) -> str:
+        """Use the existing M8 worker and activation gates for a desired profile."""
+        if self._stopping:
+            raise RuntimeError("RAG runtime is shutting down")
+        await self.operations.build_generation(profile)
+        self.desired_profile = profile
+        self.notify_admin_maintenance()
+        async with asyncio.timeout(600):
+            while True:
+                active = await self.repository.read_active_generation()
+                if active is not None and active.profile == profile:
+                    return active.generation_id
+                generations = await self.repository.list_generations()
+                if any(
+                    item.profile == profile and item.status is RAGIndexGenerationStatus.FAILED
+                    for item in generations
+                ):
+                    raise RuntimeError("RAG generation build failed")
+                await asyncio.sleep(0.5)
+
     async def shutdown(self) -> None:
         if self._stopping:
             task = self._task
@@ -388,6 +412,18 @@ async def build_m8_runtime(
             initial_generations = await repository.list_generations()
             initial_dimensions = await repository.active_projection_dimensions()
             if initial_generations:
+                # A saved Settings desire needs an explicit Admin apply. Resume a
+                # durable building generation, otherwise retain the visible active
+                # profile across process restarts.
+                persisted_target = next(
+                    (item for item in initial_generations
+                     if item.status is RAGIndexGenerationStatus.BUILDING), None,
+                ) or next(
+                    (item for item in initial_generations
+                     if item.status is RAGIndexGenerationStatus.ACTIVE), None,
+                )
+                if persisted_target is not None:
+                    desired_profile = persisted_target.profile
                 assess_generation_startup(
                     foundation_validated=foundation_validated,
                     desired_profile=desired_profile,

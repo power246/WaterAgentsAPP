@@ -6,6 +6,7 @@ from app.domain.settings_admin.credentials_admin import (
     HistoryCleanupResult, IdempotencyTombstone, ProfileHandoffResult,
     RetryFailedJobsResult, StoredCredential,
 )
+from app.domain.settings_admin.admin_command import AdminCommand
 from app.domain.settings_admin.settings import (
     Digest, EmbeddingProfileOption, ModelOption, MutableDefaults, ProfileId,
     Revision, SessionUnitOverride, UnitPreference, SettingsCatalogProjection, SettingsSnapshot,
@@ -14,6 +15,7 @@ from app.domain.settings_admin.settings import (
 )
 
 __all__ = [
+    "AdminCommand",
     "AdminActionKind", "AdminConfirmation", "AdminOperation", "AdminOperationState",
     "AdminPreview", "AdminProgress", "AdminSafeError", "AdminSafeResult",
     "ConfirmationBinding", "CredentialLease", "CredentialName", "CredentialSource",

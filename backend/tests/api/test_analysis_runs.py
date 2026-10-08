@@ -921,6 +921,18 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         "/api/keys": {"get"},
         "/api/keys/{key_name}": {"put", "delete"},
         "/api/keys/{key_name}/test": {"post"},
+        "/api/admin/storage": {"get"},
+        "/api/admin/rag": {"get"},
+        "/api/admin/operations": {"get"},
+        "/api/admin/operations/{operation_id}": {"get"},
+        "/api/admin/history-cleanups/preview": {"post"},
+        "/api/admin/history-cleanups": {"post"},
+        "/api/admin/rag/profile-handoffs/preview": {"post"},
+        "/api/admin/rag/profile-handoffs": {"post"},
+        "/api/admin/rag/generations/{generation_id}/failed-jobs/retry-preview": {"post"},
+        "/api/admin/rag/generations/{generation_id}/failed-jobs/retries": {"post"},
+        "/api/admin/rag/generations/{generation_id}/deletion-preview": {"post"},
+        "/api/admin/rag/generations/{generation_id}/deletions": {"post"},
     }
     create = paths[BASE]["post"]
     assert "400" in create["responses"]
