@@ -28,6 +28,10 @@ venv/
 
 # JavaScript
 node_modules/
+.npm-cache/
+.playwright-browsers/
+test-results/
+playwright-report/
 .vite/
 npm-debug.log*
 yarn-debug.log*

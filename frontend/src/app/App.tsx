@@ -1,0 +1,255 @@
+import { useCallback, useEffect, useReducer, useState } from 'react'
+import { BrowserRouter, Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { api, ApiError, type Settings, type TranscriptItem } from '../api/http'
+import { subscribe } from '../api/sse'
+import { DetailPanel, type DetailTab } from '../features/analysis/DetailPanel'
+import { NewAnalysisForm } from '../features/analysis/NewAnalysisForm'
+import { TopologyMap } from '../features/analysis/TopologyMap'
+import { TimeSeries } from '../features/analysis/TimeSeries'
+import { graphFromDetail, inferenceFromText, summaryFromText, type InferenceResult, type RunSummaryResult } from '../features/analysis/models'
+import { emptyRun, emptyTranscript, runReducer, transcriptReducer } from '../features/analysis/state'
+import { DeleteRun } from '../features/history/DeleteRun'
+import { HistoryList } from '../features/history/HistoryList'
+
+type Mode = 'home' | 'history' | 'run'
+
+function SettingsDrawer({ settings, onClose }: { settings: Settings | null; onClose: () => void }) {
+  return <div className="dialog-backdrop" role="presentation" onClick={onClose}>
+    <aside className="settings-drawer" aria-label="Settings" onClick={(event) => event.stopPropagation()}>
+      <div className="panel-title"><h2>Settings</h2><button type="button" onClick={onClose}>Close</button></div>
+      {settings ? <>
+        <p>Analysis timezone: {settings.defaults.analysis_timezone}</p>
+        <p>Parser: {settings.defaults.parser_model.provider} / {settings.defaults.parser_model.model}</p>
+        <p>Waterbody: {settings.defaults.waterbody_model.provider} / {settings.defaults.waterbody_model.model}</p>
+        <p>Memory: {settings.defaults.memory_mode}</p>
+      </> : <p>Settings unavailable.</p>}
+      <Link to="/admin" onClick={onClose}>Advanced / Admin</Link>
+    </aside>
+  </div>
+}
+
+function Workspace({ mode }: { mode: Mode }) {
+  const params = useParams()
+  const navigate = useNavigate()
+  const [search, setSearch] = useSearchParams()
+  const historyRunId = mode === 'history' ? search.get('run') : null
+  const runId = mode === 'run' ? params.runId ?? null : historyRunId
+  const sessionId = mode === 'run' ? params.sessionId ?? null : search.get('session')
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [settingsError, setSettingsError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [run, dispatchRun] = useReducer(runReducer, emptyRun)
+  const [transcript, dispatchTranscript] = useReducer(transcriptReducer, emptyTranscript)
+  const [referencedItems, setReferencedItems] = useState<TranscriptItem[]>([])
+  const [result, setResult] = useState<InferenceResult | null>(null)
+  const [summary, setSummary] = useState<RunSummaryResult | null>(null)
+  const [tab, setTab] = useState<DetailTab>('overview')
+  const [mobileTab, setMobileTab] = useState<'controls' | 'map' | 'detail'>('controls')
+  const [runError, setRunError] = useState('')
+  const [historyReleased, setHistoryReleased] = useState(false)
+  const [selectedComid, setSelectedComid] = useState<string | null>(null)
+  const [mapPoint, setMapPoint] = useState<{ latitude: number; longitude: number } | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [historyVersion, setHistoryVersion] = useState(0)
+  const historical = mode === 'history' || historyReleased
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void api.settings(controller.signal).then(setSettings).catch((cause: unknown) => {
+      if (!controller.signal.aborted) setSettingsError(cause instanceof ApiError ? cause.code : 'Settings unavailable')
+    })
+    return () => controller.abort()
+  }, [])
+
+  const loadRun = useCallback(async (id: string, view: 'auto' | 'history', signal?: AbortSignal, historyUrl?: string) => {
+    try {
+      const detail = historyUrl ? await api.historyAt(historyUrl, signal) : await api.run(id, view, signal)
+      dispatchRun({ type: 'get', detail })
+      setRunError('')
+    } catch (cause) {
+      if (!signal?.aborted) setRunError(cause instanceof ApiError ? cause.code : 'Run unavailable')
+    }
+  }, [])
+
+  useEffect(() => {
+    dispatchRun({ type: 'open', runId: runId ?? '' })
+    setHistoryReleased(false)
+    setRunError('')
+    setSelectedComid(null)
+    if (!runId) return
+    const controller = new AbortController()
+    if (mode === 'history') {
+      void loadRun(runId, 'history', controller.signal)
+    } else {
+      void subscribe('run', runId, null, (event) => {
+        if (event.name === 'run_snapshot') dispatchRun({ type: 'sse', snapshot: event.data })
+      }, controller.signal).catch((cause: unknown) => {
+        if (controller.signal.aborted) return
+        if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
+          setHistoryReleased(true)
+          void loadRun(runId, 'history', controller.signal, cause.historyUrl)
+        } else setRunError(cause instanceof ApiError ? cause.code : 'Run stream unavailable')
+      })
+    }
+    return () => controller.abort()
+  }, [runId, mode, loadRun])
+
+  const hasRunRefs = Boolean(run.snapshot?.context_ref || run.snapshot?.topology_ref)
+  useEffect(() => {
+    if (!runId || historical || !hasRunRefs) return
+    const controller = new AbortController()
+    void loadRun(runId, 'auto', controller.signal)
+    return () => controller.abort()
+  }, [runId, historical, hasRunRefs, run.snapshot?.context_ref?.item_id,
+    run.snapshot?.topology_ref?.item_id, run.snapshot?.result_ref?.item_id, loadRun])
+
+  useEffect(() => {
+    dispatchTranscript({ type: 'open', sessionId: sessionId ?? '' })
+    setReferencedItems([])
+    setResult(null)
+  }, [runId, sessionId])
+
+  const sessionStatus = run.snapshot?.sessions.find((item) => item.session_id === sessionId)?.status
+    ?? run.detail?.sessions?.find((item) => item.session_id === sessionId)?.status
+  useEffect(() => {
+    if (!runId || !sessionId) return
+    const terminal = ['completed', 'failed', 'cancelled'].includes(sessionStatus ?? '')
+    const controller = new AbortController()
+    if (historical || terminal) {
+      void api.transcript(runId, sessionId, historical ? 'history' : 'auto', controller.signal)
+        .then((data) => {
+          dispatchTranscript({ type: 'history', sessionId, items: data.items ?? [] })
+          setReferencedItems(data.referenced_items ?? [])
+        }).catch((cause: unknown) => {
+          if (!controller.signal.aborted) setRunError(cause instanceof ApiError ? cause.code : 'Transcript unavailable')
+        })
+    } else if (sessionStatus && tab === 'agent') {
+      void subscribe('session', runId, sessionId, (event) => {
+        if (event.name !== 'stream_end' && event.name !== 'run_snapshot') {
+          dispatchTranscript({ type: 'event', name: event.name, data: event.data })
+        }
+      }, controller.signal).catch((cause: unknown) => {
+        if (controller.signal.aborted) return
+        if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
+          void api.transcript(runId, sessionId, 'history', controller.signal).then((data) => {
+            dispatchTranscript({ type: 'history', sessionId, items: data.items ?? [] })
+            setReferencedItems(data.referenced_items ?? [])
+          }).catch(() => setRunError('History unavailable'))
+        } else setRunError(cause instanceof ApiError ? cause.code : 'Session stream unavailable')
+      })
+    }
+    return () => controller.abort()
+  }, [runId, sessionId, historical, tab, sessionStatus])
+
+  const selectedSession = run.snapshot?.sessions.find((item) => item.session_id === sessionId)
+    ?? run.detail?.sessions?.find((item) => item.session_id === sessionId)
+  useEffect(() => {
+    if (!runId || !sessionId || !selectedSession?.result_ref?.item_id) return
+    let active = true
+    void api.content(runId, selectedSession.result_ref.item_id, historical ? 'history' : 'auto')
+      .then((content) => { if (active) setResult(inferenceFromText(content.text, runId, sessionId)) })
+      .catch(() => { if (active) setResult(null) })
+    return () => { active = false }
+  }, [runId, sessionId, selectedSession?.result_ref?.item_id, historical])
+
+  const summaryItemId = run.detail?.run.result_summary?.summary_result_ref?.item_id
+    ?? run.snapshot?.summary.result_ref?.item_id
+  useEffect(() => {
+    setSummary(null)
+    if (!runId || !summaryItemId) return
+    let active = true
+    void api.content(runId, summaryItemId, historical ? 'history' : 'auto')
+      .then((content) => { if (active) setSummary(summaryFromText(content.text, runId)) })
+      .catch(() => undefined)
+    return () => { active = false }
+  }, [runId, summaryItemId, historical])
+
+  function selectSession(comid: string, id: string | null) {
+    setSelectedComid(comid)
+    if (!id || !runId) { setTab('overview'); return }
+    setTab('agent')
+    setMobileTab('detail')
+    if (mode === 'history') setSearch({ run: runId, session: id })
+    else navigate(`/runs/${encodeURIComponent(runId)}/waterbodies/${encodeURIComponent(id)}`)
+  }
+
+  function selectHistory(id: string) {
+    setSearch({ run: id })
+    setTab('overview')
+    setMobileTab('map')
+  }
+
+  const graph = graphFromDetail(run.detail)
+  const status = run.snapshot?.status ?? run.detail?.run.status ?? 'pending'
+  const historyDelete = historical && runId && run.detail?.source === 'postgresql'
+  const refresh = () => { if (runId) void loadRun(runId, historical ? 'history' : 'auto') }
+
+  return <div className="app-shell">
+    <header className="app-header">
+      <Link to="/" className="brand">Water Agents</Link>
+      <nav><Link to="/">New</Link><Link to="/history">History</Link></nav>
+      <button type="button" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
+    </header>
+    <div className="mobile-switch" role="tablist" aria-label="Workspace panels">
+      {(['controls', 'map', 'detail'] as const).map((name) => <button key={name} role="tab"
+        aria-selected={mobileTab === name} onClick={() => setMobileTab(name)}>{name}</button>)}
+    </div>
+    <main className="workspace">
+      <aside className={`controls-panel mobile-${mobileTab}`}>
+        {mode === 'history' ? <HistoryList selectedRunId={runId} onSelect={selectHistory} refreshVersion={historyVersion} />
+          : settings ? <NewAnalysisForm key={settings.revision} settings={settings}
+            mapPoint={mapPoint} onCreated={(id) => navigate(`/runs/${id}`)} />
+            : <p>{settingsError || 'Loading settings…'}</p>}
+        {mode === 'run' && runId && <div className="run-controls">
+          <p><strong>Run</strong> {runId}</p>
+          <p>{status}</p>
+          {!['completed', 'failed', 'cancelled', 'completed_with_persistence_error'].includes(status) && <button type="button" onClick={() => {
+            void api.cancel(runId).catch((cause: unknown) => setRunError(cause instanceof ApiError ? cause.code : 'Cancel unavailable'))
+          }}>Stop run</button>}
+        </div>}
+        {historyDelete && <button type="button" className="danger" onClick={() => setDeleteOpen(true)}>Delete this saved run</button>}
+        {runError && <p className="error" role="alert">{runError}</p>}
+      </aside>
+      <div className={`center-panel mobile-${mobileTab}`}>
+        <TopologyMap graph={graph} snapshot={run.snapshot} sessions={run.detail?.sessions} runStatus={status}
+          selectedSessionId={sessionId} onSelect={selectSession}
+          onPick={mode === 'home' ? (latitude, longitude) => setMapPoint({ latitude, longitude }) : undefined} />
+        {selectedComid && !sessionId && <p className="map-note">COMID {selectedComid}: session not started. Topology and scheduling status are shown on the map.</p>}
+        {sessionId && <details className="time-series-drawer"><summary>Saved time series</summary><TimeSeries result={result} /></details>}
+      </div>
+      <div className={`right-panel mobile-${mobileTab}`}>
+        <DetailPanel runId={runId} snapshot={run.snapshot} detail={run.detail}
+          sessionId={sessionId} processItems={transcript.items} referencedItems={referencedItems}
+          result={result} summary={summary} tab={tab} onTab={setTab} onRefresh={refresh} />
+      </div>
+    </main>
+    {settingsOpen && <SettingsDrawer settings={settings} onClose={() => setSettingsOpen(false)} />}
+    {deleteOpen && runId && <DeleteRun runId={runId} onClose={() => setDeleteOpen(false)} onDeleted={() => {
+      setDeleteOpen(false)
+      setHistoryVersion((value) => value + 1)
+      if (mode === 'history') setSearch({})
+      else navigate('/history')
+    }} />}
+  </div>
+}
+
+function AdminPlaceholder() {
+  return <main className="simple-page"><Link to="/">Water Agents</Link><h1>Advanced / Admin</h1>
+    <p>Administration is available from the backend. Return to analysis or history.</p>
+    <Link to="/history">History</Link></main>
+}
+
+function NotFound() {
+  return <main className="simple-page"><h1>Page not found</h1><Link to="/">Go to analysis</Link></main>
+}
+
+export function App() {
+  return <BrowserRouter><Routes>
+    <Route path="/" element={<Workspace mode="home" />} />
+    <Route path="/history" element={<Workspace mode="history" />} />
+    <Route path="/runs/:runId" element={<Workspace mode="run" />} />
+    <Route path="/runs/:runId/waterbodies/:sessionId" element={<Workspace mode="run" />} />
+    <Route path="/admin" element={<AdminPlaceholder />} />
+    <Route path="*" element={<NotFound />} />
+  </Routes></BrowserRouter>
+}

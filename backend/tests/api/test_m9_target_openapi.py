@@ -59,6 +59,9 @@ def test_runtime_openapi_is_frontend_type_source_including_session_sse_union(ope
         "message_delta", "message_finalized", "stream_end",
     }
     assert "anyOf" in schemas["SessionProcessEvent"]["properties"]["payload"]
+    assert "nodes" in schemas["HydrologyGraph"]["properties"]
+    assert "series" in schemas["InferenceResult"]["properties"]
+    assert "plain_language_summary" in schemas["RunSummaryResult"]["properties"]
 
 
 def test_request_response_schema_separation_and_key_allowlist(openapi):

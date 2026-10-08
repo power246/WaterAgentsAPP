@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–6 已实现并保留本地提交，Milestone 7–9、`frontend/` 应用、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
+> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–7 已实现并保留本地提交，Milestone 8–9、production hosting、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
 
 本清单执行以下权威文档：
 
@@ -385,47 +385,49 @@
 
 ### 工作
 
-- [ ] 在唯一 `frontend/` 初始化 React + TypeScript + Vite与 committed `package-lock.json`；固定Node/npm支持范围和 `lint/typecheck/test/build/test:e2e/generate:api/check:api` scripts，不读取或复制`frontend_bk/`。
-- [ ] 仅添加首版所需依赖：React Router、Leaflet/react-leaflet、受控chart library、测试工具和单一SSE parser；不引入WebSocket、Redux/event bus、第二design system或插件框架。
-- [ ] 从backend OpenAPI生成/校验提交的API types；CI drift check失败时先修backend schema，不用`any`、重复handwritten DTO或unchecked cast绕过。
-- [ ] 实现统一typed HTTP client：relative `/api`、status/content-type/request-id/error envelope、GET bounded network retry、mutation不自动retry、secret-safe error/log policy。
-- [ ] 实现单一fetch-SSE parser/client，覆盖UTF-8跨chunk、CRLF/LF、multi-line data、keepalive、id/event/JSON、stream_end、400/409/410；不假设chunk=frame。
-- [ ] 建立feature reducers：run replacement snapshot、selected session transcript assembly、persistence、UI selection/form draft分别所有；迟到GET不覆盖已收到SSE状态。
-- [ ] 实现URL与shell：`/`、`/history`、`/runs/{run_id}`、`/runs/{run_id}/waterbodies/{session_id}`、`/admin`占位、not-found；桌面三栏与窄屏tabs/drawers，保留高频入口位置。
-- [ ] 实现New Analysis表单，字段严格等于current create request；default/catalog来自Settings，UUID v4 key与exact body bytes在同一提交重试中保持，用户新Start才生成新key。
-- [ ] 实现run stream与按需一个selected session stream：切水体释放旧session连接但保持run连接；首次live不先GET，ended/history用GET，410转真实history URL。
-- [ ] 实现地图/topology与七种视觉、legend/label、蓝色外圈呼吸、无session pending/cancelled-before-start和选中identity；截图测试冻结动画，不新增reduced-motion设置。
-- [ ] 实现Overview/Agent/Evidence三tab、message started/delta/finalized原位更新、折叠typed records/full content、current vs historical evidence和persistence retry；不展示hidden reasoning/raw prompt/provider response。
-- [ ] 实现History cursor分页、run选择/当次地图/session读取、原IANA timezone/legacy unknown；不发明total/filter、合并相同query/COMID或用current data重跑。
-- [ ] History页面只提供当前单个run的删除入口，并复用server cleanup preview/confirmation；批量/all-history只在Admin，RAG index/generation维护不得混进History删除动作。
-- [ ] time-series只渲染backend series/window/unit/quality/availability；不补点、自行换单位、生成risk或用confidence公式造band。
+- [x] 在唯一 `frontend/` 初始化 React + TypeScript + Vite与 committed `package-lock.json`；固定Node/npm支持范围和 `lint/typecheck/test/build/test:e2e/generate:api/check:api` scripts，不读取或复制`frontend_bk/`。
+- [x] 仅添加首版所需依赖：React Router、Leaflet/react-leaflet、受控chart library、测试工具和单一SSE parser；不引入WebSocket、Redux/event bus、第二design system或插件框架。
+- [x] 从backend OpenAPI生成/校验提交的API types；CI drift check失败时先修backend schema，不用`any`、重复handwritten DTO或unchecked cast绕过。
+- [x] 实现统一typed HTTP client：relative `/api`、status/content-type/request-id/error envelope、GET bounded network retry、mutation不自动retry、secret-safe error/log policy。
+- [x] 实现单一fetch-SSE parser/client，覆盖UTF-8跨chunk、CRLF/LF、multi-line data、keepalive、id/event/JSON、stream_end、400/409/410；不假设chunk=frame。
+- [x] 建立feature reducers：run replacement snapshot、selected session transcript assembly、persistence、UI selection/form draft分别所有；迟到GET不覆盖已收到SSE状态。
+- [x] 实现URL与shell：`/`、`/history`、`/runs/{run_id}`、`/runs/{run_id}/waterbodies/{session_id}`、`/admin`占位、not-found；桌面三栏与窄屏tabs/drawers，保留高频入口位置。
+- [x] 实现New Analysis表单，字段严格等于current create request；default/catalog来自Settings，UUID v4 key与exact body bytes在同一提交重试中保持，用户新Start才生成新key。
+- [x] 实现run stream与按需一个selected session stream：切水体释放旧session连接但保持run连接；首次live不先GET，ended/history用GET，410转真实history URL。
+- [x] 实现地图/topology与七种视觉、legend/label、蓝色外圈呼吸、无session pending/cancelled-before-start和选中identity；截图测试冻结动画，不新增reduced-motion设置。
+- [x] 实现Overview/Agent/Evidence三tab、message started/delta/finalized原位更新、折叠typed records/full content、current vs historical evidence和persistence retry；不展示hidden reasoning/raw prompt/provider response。
+- [x] 实现History cursor分页、run选择/当次地图/session读取、原IANA timezone/legacy unknown；不发明total/filter、合并相同query/COMID或用current data重跑。
+- [x] History页面只提供当前单个run的删除入口，并复用server cleanup preview/confirmation；批量/all-history只在Admin，RAG index/generation维护不得混进History删除动作。
+- [x] time-series只渲染backend series/window/unit/quality/availability；不补点、自行换单位、生成risk或用confidence公式造band。
 
 ### Tests
 
-- [ ] package scripts在clean install下可重复；dependency/license/build输出不含archive path、secret或未追踪generated source。
-- [ ] HTTP client测试覆盖create exact bytes/key重试、mutation no-retry、content-type/error/request-id、410 tombstone与secret-safe logging。
-- [ ] SSE parser golden/property fixture覆盖chunk切分、UTF-8、CRLF、multi-line、keepalive、duplicate id、different delta same item、malformed frame、EOF/stream_end和400/409/410。
-- [ ] reducer/integration测试覆盖GET/SSE race、run replacement、session cursor dedupe、message原位finalize、switch abort、run terminal/persistence独立和close-view不cancel。
-- [ ] component/map测试覆盖七种视觉与文字legend、running动画冻结、无session节点、three tabs、historical contextual-only、原timezone和persistence retry。
-- [ ] History测试覆盖opaque cursor、stable order、invalid cursor error、run/session identity、strict saved facts、legacy timezone、single-run删除，以及页面不存在批量/index/credential cleanup入口。
-- [ ] architecture/source scan证明`frontend/`没有`frontend_bk` import/copy、WebSocket、third SSE、secret storage、arbitrary provider/base URL或single-agent cancel。
+- [x] package scripts在clean install下可重复；dependency/license/build输出不含archive path、secret或未追踪generated source。
+- [x] HTTP client测试覆盖create exact bytes/key重试、mutation no-retry、content-type/error/request-id、410 tombstone与secret-safe logging。
+- [x] SSE parser golden/property fixture覆盖chunk切分、UTF-8、CRLF、multi-line、keepalive、duplicate id、different delta same item、malformed frame、EOF/stream_end和400/409/410。
+- [x] reducer/integration测试覆盖GET/SSE race、run replacement、session cursor dedupe、message原位finalize、switch abort、run terminal/persistence独立和close-view不cancel。
+- [x] component/map测试覆盖七种视觉与文字legend、running动画冻结、无session节点、three tabs、historical contextual-only、原timezone和persistence retry。
+- [x] History测试覆盖opaque cursor、stable order、invalid cursor error、run/session identity、strict saved facts、legacy timezone、single-run删除，以及页面不存在批量/index/credential cleanup入口。
+- [x] architecture/source scan证明`frontend/`没有`frontend_bk` import/copy、WebSocket、third SSE、secret storage、arbitrary provider/base URL或single-agent cancel。
 
 ### Verify
 
-- [ ] `npm --prefix frontend ci`
-- [ ] `npm --prefix frontend run lint`
-- [ ] `npm --prefix frontend run typecheck`
-- [ ] `npm --prefix frontend run test -- --run`
-- [ ] `npm --prefix frontend run check:api`
-- [ ] `npm --prefix frontend run build`
-- [ ] backend OpenAPI/architecture/current analysis/history/SSE focused regressions通过。
-- [ ] `git diff --check`
+- [x] `npm --prefix frontend ci`
+- [x] `npm --prefix frontend run lint`
+- [x] `npm --prefix frontend run typecheck`
+- [x] `npm --prefix frontend run test -- --run`
+- [x] `npm --prefix frontend run check:api`
+- [x] `npm --prefix frontend run build`
+- [x] backend OpenAPI/architecture/current analysis/history/SSE focused regressions通过。
+- [x] `git diff --check`
 
 阶段出口：用户可以通过新frontend创建/取消/查看live run与一个selected Agent、阅读地图/三tab/history/persistence；typed client与两层SSE行为可复现，Settings/Admin完整功能留给下一阶段。
 
 提交边界：frontend toolchain/lock、generated types、HTTP/SSE、reducers、shell、analysis/map/detail/history及测试；backend只允许为真实schema export修正契约，不夹带Settings/Admin UI或static hosting。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：唯一 `frontend/` 使用 React/TypeScript/Vite、当前后端 OpenAPI 生成类型、统一相对路径 HTTP/fetch-SSE client 和 feature reducers；提供创建/取消分析、run 与单个 selected session 实时流、七态地图、Overview/Agent/Evidence、后端 time-series、History cursor 与单 run 删除 preview/confirmation。后端仅补充 `HydrologyGraph`、`InferenceResult`、`RunSummaryResult` 的 public schema 导出；前端生产源码扫描禁止 archive、WebSocket、第三 SSE、secret storage 和单 Agent cancel。Settings/Admin 完整 UI 与后端静态托管归 Milestone 8。
+
+验证：`npm ci` clean install、lint、typecheck、21 项单元/组件测试、OpenAPI drift check、build 与 bundle scan 通过；Chrome deterministic fake browser 3 项通过，覆盖创建→run SSE→selected Agent SSE→取消→History、窄屏面板及冻结动画的七态地图截图。后端 OpenAPI/analysis/history/SSE/architecture 聚焦回归 359 passed；`git diff --check` 通过。未运行真实 provider 或跨平台浏览器验收；M8–M9 和 M1–M9 整体验收仍待完成。本地提交 SHA 以该阶段提交 HEAD 为准。
 
 ## Milestone 8：Frontend Settings/Admin 与 production hosting
 

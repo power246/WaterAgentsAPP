@@ -39,6 +39,7 @@ from app.application.settings_admin.credential_service import (
 )
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import AnalysisContext
+from app.application.run_summary.models import RunSummaryResult
 from app.application.evidence_tools import (
     RunLocalUpstreamResultRegistry,
     TranscriptUpstreamInferenceResultReader,
@@ -48,7 +49,7 @@ from app.application.transcripts.registry import TranscriptRegistry, create_prod
 from app.application.transcripts.stream_models import (
     RunSnapshotEvent, SessionProcessEvent, StreamEndEvent,
 )
-from app.domain import HydrologyGraph
+from app.domain import HydrologyGraph, InferenceResult
 from app.domain.hydrology import ParameterCapabilityRegistry
 from app.infrastructure.config import (
     AppSettings,
@@ -474,7 +475,8 @@ def create_app(
         schemas.update(definitions)
         schemas["CreateAnalysisRunRequest"] = create_schema
         for public_model in (
-            AnalysisContext, HydrologyGraph, RunSnapshotEvent,
+            AnalysisContext, HydrologyGraph, InferenceResult, RunSummaryResult,
+            RunSnapshotEvent,
             SessionProcessEvent, StreamEndEvent, *M9_PUBLIC_SCHEMAS,
         ):
             public_schema = public_model.model_json_schema(
