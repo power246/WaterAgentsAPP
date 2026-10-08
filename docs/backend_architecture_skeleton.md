@@ -12,6 +12,8 @@ M3 及之后必须承接的已确认功能，统一登记在 [deferred_milestone
 
 M1–M9 是同一套第一版系统的内部实施切片，不是九个可独立使用或需要互相兼容的产品版本。各阶段的自测只用于开发接力；M9 完成后才开始正式前后端联调和第一版整体验收。在此之前，请求、配置、DTO、SSE、数据库 schema 和测试 fixture 都直接向最终形态演进：新增字段就更新当前唯一模型及其所有消费者，不因进入新的 Milestone 建立 `M4 configuration`、`M4 lifecycle`、旧版只读 union、阶段 feature flag 或中间态迁移层。既有 `content_schema_version` 等协议字段继续使用当前值，不能只因为 Milestone 编号变化而升级；第一版正式验收基线冻结后，才按真实发布兼容需求决定版本和迁移策略。
 
+实施现状（2026-10-08）：M9 Milestone 0–8 已落地，最终联调与未运行的 provider/平台/容量边界由 [M9 Implementation TODO](M9/m9_implementation_todo.md) 记录。下文的目录树仍是架构骨架示意，实际 production 位置以当前 `backend/app/`、`frontend/src/` 和运行时 OpenAPI 为准。
+
 跨操作系统可迁移性与简单迁移是全局约束（GLOBAL-C11）：macOS、Windows、Linux 共用业务代码、依赖锁、配置格式和 schema，换系统通过目标环境配置与重新安装依赖完成；平台差异只在基础设施入口处理。M3 提供统一检查/启动命令及跨系统迁移验收，历史身份与全文引用不依赖宿主机路径。具体步骤见 [迁移指南](M3/m3_transcript_history_api.md#85-更换操作系统或机器的最短流程)。
 
 M3 工程文档入口：[实施详细设计](M3/m3_transcript_history_implementation_design.md)、[API 与搭建排障指南](M3/m3_transcript_history_api.md)、[Milestone 0–19 实施清单](M3/m3_implementation_todo.md)。M3 已在 `backend/` 实现四表 PostgreSQL 持久化、run/session 状态、history、十个 run 根路由与两层 SSE；Milestone 0–16 保留历史验证证据，原 D01–D86 保留为决策依据。Milestone 17–18 已完成 Windows 正式入口及统一脱敏/性能功能包，Milestone 19 已完成隔离 PostgreSQL、真实 socket、正式服务 smoke 与契约复审；HEAD `def435a` 追加审查的 4 个 P1、1 个 P2 均已本机复审通过，`request changes` 已清除。实际 Windows/Linux runner、三平台完整 CI 与同一 PostgreSQL 跨系统迁移另缺完整证据，因此 GLOBAL-C11 和中心最终承接仍保持 `partial`。
@@ -449,9 +451,9 @@ Application 层负责编排 waterbody Agent loop、模型调用前的确定性 e
 
 M5 已完成 Milestone 0–13 本机实现与集成审计：当前唯一 V1 的 source record、typed evidence、policy、official provider adapters、reference-only bundle、transcript 读写及 production/test composition 已落到 `backend/`。M7 已通过 production workflow 实现 upstream-result producer；M8 transcript-RAG producer 仍按后续责任保持 unavailable。真实 provider 请求与三平台 CI 未执行，详见 [M5 Implementation TODO](M5/m5_implementation_todo.md)。
 
-M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 已在唯一 production workflow 中按每个 waterbody session 复用该 runner，M8 transcript RAG 和 M9 frontend/settings/admin 仍由后续阶段实现。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
+M6 已完成 Milestone 0–13 本机实现与集成审计：单 waterbody `RunSingleWaterbodyAgent`、provider-neutral stream、typed policy、sealed gate/batches/validator/assembler、六类 transcript content、waterbody result summary/history、OpenAI adapter 和 production/test composition 已落到当前 `backend/`。它继续复用 M3 writer/reader 与两层 SSE，不新增 production reasoning route；M7 在唯一 production workflow 中按每个 waterbody session 复用该 runner，M8 transcript RAG 与 M9 frontend/settings/admin 也已接入当前系统。真实 OpenAI waterbody provider 请求与三平台 CI 尚未运行，详见 [M6 Implementation TODO](M6/m6_implementation_todo.md)。
 
-M7 已完成 Milestone 0–9 Windows 本机实现与集成审计：DAG ready queue、直接上游依赖 manifest、run-local outcome store、零模型收敛、M6 waterbody 调用、同模型 run summarizer、topology final result、取消/quiescence、typed transcript/history 与专用 PostgreSQL restart 路径已落到当前 `backend/`。它继续复用 M3 的 run/session、writer/reader 和两层 SSE，不新增 route、第三条流或 run-wide 模型配额；真实 provider 请求为 `not run`，三平台 CI 为 `partial`，M8 RAG 与 M9 前端尚未实现，详见 [M7 Implementation TODO](M7/m7_implementation_todo.md)。
+M7 已完成 Milestone 0–9 Windows 本机实现与集成审计：DAG ready queue、直接上游依赖 manifest、run-local outcome store、零模型收敛、M6 waterbody 调用、同模型 run summarizer、topology final result、取消/quiescence、typed transcript/history 与专用 PostgreSQL restart 路径已落到当前 `backend/`。它继续复用 M3 的 run/session、writer/reader 和两层 SSE，不新增 route、第三条流或 run-wide 模型配额；M8 RAG 与 M9 前端已接入，真实 provider 请求为 `not run`，三平台 CI 为 `partial`，详见 [M7 Implementation TODO](M7/m7_implementation_todo.md)。
 
 ## 7. Domain Layer
 

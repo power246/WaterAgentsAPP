@@ -1,6 +1,6 @@
 # M9 Settings/Keys/Admin + Frontend 实施设计
 
-本文描述 M9 的模块、依赖、持久化、runtime 重组、前端构建和验证边界。它不是完成证据，也不声明任何代码已实现。总决策见 [M9 总设计](m9_settings_admin_demo_design.md)，policy 与 wire contract 分别见 [Policy Catalog](m9_settings_admin_policy_catalog.md) 和 [API](m9_settings_admin_api.md)；分阶段施工见 [Implementation TODO](m9_implementation_todo.md)。
+本文描述 M9 的模块、依赖、持久化、runtime 重组、前端构建和验证边界。第 1 节保留设计冻结时的接入基线；实际完成项和未运行边界见 [Implementation TODO](m9_implementation_todo.md)。总决策见 [M9 总设计](m9_settings_admin_demo_design.md)，policy 与 wire contract 分别见 [Policy Catalog](m9_settings_admin_policy_catalog.md) 和 [API](m9_settings_admin_api.md)。
 
 ---
 

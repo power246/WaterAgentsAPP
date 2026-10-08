@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–7 已实现并保留本地提交，Milestone 8–9、production hosting、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
+> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–9 的本机实现及阶段验证已完成并分别保留本地提交。真实 provider、真实 OS credential backend、容量与 Ubuntu/macOS 验证仍按实际证据保持 partial / not run。
 
 本清单执行以下权威文档：
 
@@ -63,18 +63,18 @@
 
 ## M9 完成标准
 
-- [ ] 当前唯一 V1 能严格表达 mutable defaults、safe catalog、credential status/lease、unit policy/override、Admin preview/operation 和 idempotency tombstone；producer/consumer/fixtures/OpenAPI/前端类型原子一致。
-- [ ] 现有 M8 database 可通过一个新 Alembic head 升级；fresh install、upgrade、schema check、settings CAS、unit append-only、operation idempotency、tombstone transaction 和 restart 使用专用 PostgreSQL 验证。
-- [ ] Settings GET/PUT、unit preview/confirm、key list/save/delete/test、Admin read/preview/execute/poll routes 与冻结 API 一致；unknown field/content type/origin/error/status/OpenAPI 都有测试。
-- [ ] settings/key 更新只影响未来 run/attempt；在途 run 保留 configuration/credential leases，历史明确显示原 timezone/unit policy，secret 不进入任何公开或持久化边界。
-- [ ] M4/M6/M8 runtime 不再从 startup 固定 secret构造长期 provider adapter；per-run bundle、background attempt lease、cancel/shutdown 和 deployment fallback 可执行验证。
-- [ ] query unit intent、global unit policy 与 session override 经 registry、dimension、sealed parameter scope、reasoning applicability 和 validator闭环；conversion不绕过现有 evidence policy。
-- [ ] Admin preview/confirmation/operation、restart reconciliation、history dependency conflict/whole-run cascade、tombstone、generation handoff/retry/delete 都复用现有 owner并无 dangling refs。
-- [ ] `frontend/` 是唯一生产前端，React/TypeScript/Vite、OpenAPI types、typed HTTP/fetch-SSE、三栏布局、analysis/map/detail/history/settings/admin 完整；不读取或构建 `frontend_bk/`。
-- [ ] run/session/message/persistence 状态、七种地图视觉、原时区、three detail tabs、历史分页、masked keys、settings conflict、Admin polling与操作恢复都有 unit/integration/browser evidence。
-- [ ] backend 同 origin托管 production build；API 404 不被 SPA fallback 吞掉，SSE不缓冲，hashed assets/index cache、path traversal、dist missing 与 Vite proxy 均有测试。
-- [ ] deterministic fake browser E2E、专用 PostgreSQL/restart、M1–M9 full backend regression、frontend unit/build/E2E、architecture/OpenAPI/docs/secret audits 有实际证据；真实 provider、容量与三平台按事实记账。
-- [ ] GLOBAL-C01–C11、M9-C01–C11、M9-A01–A08 的 contract matrix 填入实际 implementation/test/docs evidence；`partial`/`not run` 不标记为已通过。
+- [x] 当前唯一 V1 能严格表达 mutable defaults、safe catalog、credential status/lease、unit policy/override、Admin preview/operation 和 idempotency tombstone；producer/consumer/fixtures/OpenAPI/前端类型原子一致。
+- [x] 现有 M8 database 可通过一个新 Alembic head 升级；fresh install、upgrade、schema check、settings CAS、unit append-only、operation idempotency、tombstone transaction 和 restart 使用专用 PostgreSQL 验证。
+- [x] Settings GET/PUT、unit preview/confirm、key list/save/delete/test、Admin read/preview/execute/poll routes 与冻结 API 一致；unknown field/content type/origin/error/status/OpenAPI 都有测试。
+- [x] settings/key 更新只影响未来 run/attempt；在途 run 保留 configuration/credential leases，历史明确显示原 timezone/unit policy，secret 不进入任何公开或持久化边界。
+- [x] M4/M6/M8 runtime 不再从 startup 固定 secret构造长期 provider adapter；per-run bundle、background attempt lease、cancel/shutdown 和 deployment fallback 可执行验证。
+- [x] query unit intent、global unit policy 与 session override 经 registry、dimension、sealed parameter scope、reasoning applicability 和 validator闭环；conversion不绕过现有 evidence policy。
+- [x] Admin preview/confirmation/operation、restart reconciliation、history dependency conflict/whole-run cascade、tombstone、generation handoff/retry/delete 都复用现有 owner并无 dangling refs。
+- [x] `frontend/` 是唯一生产前端，React/TypeScript/Vite、OpenAPI types、typed HTTP/fetch-SSE、三栏布局、analysis/map/detail/history/settings/admin 完整；不读取或构建 `frontend_bk/`。
+- [x] run/session/message/persistence 状态、七种地图视觉、原时区、three detail tabs、历史分页、masked keys、settings conflict、Admin polling与操作恢复都有 unit/integration/browser evidence。
+- [x] backend 同 origin托管 production build；API 404 不被 SPA fallback 吞掉，SSE不缓冲，hashed assets/index cache、path traversal、dist missing 与 Vite proxy 均有测试。
+- [x] deterministic fake browser E2E、专用 PostgreSQL/restart、M1–M9 full backend regression、frontend unit/build/E2E、architecture/OpenAPI/docs/secret audits 有实际证据；真实 provider、容量与三平台按事实记账。
+- [x] GLOBAL-C01–C11、M9-C01–C11、M9-A01–A08 的 contract matrix 填入实际 implementation/test/docs evidence；`partial`/`not run` 不标记为已通过。
 
 ## Milestone 0：基线、接缝与红线
 
@@ -480,88 +480,97 @@
 
 ### 工作
 
-- [ ] 新增M9 deterministic fake E2E runner/test，只通过production app factory、production routes、backend-served frontend与真实PostgreSQL边界；fake只替换外部provider/OS keyring/时钟，不开放test-only production switch/header/query。
-- [ ] E2E覆盖settings/key save无网络 → create future run → run SSE/topology → selected session SSE → result/evidence/summary → history/original timezone → persistence retry语义。
-- [ ] 同一suite覆盖cancel：only run cancel、running session真实收敛、未开始节点灰色虚线、真实cancelled橙色、已完成/failed/cancelled不被run状态重染。
-- [ ] E2E覆盖settings/key替换：在途run保留旧snapshot/lease，之后run使用新值；test connection与real analysis分别由明确动作触发，fixture证明无隐式provider call。
-- [ ] E2E覆盖unit global version与session override、history round-trip、legacy/unknown和M6 validator；科学gate/confidence/evidence closure不被前端或单位偏好改写。
-- [ ] E2E覆盖history cleanup dependency conflict/whole-run cascade/tombstone 410/409、RAG profile handoff/reader drain/retry/delete、operation restart/polling与keys/settings/unit preservation。
-- [ ] PostgreSQL restart测试从现有M8 head upgrade，跨至少一次process restart验证settings/unit/admin/tombstone/history/RAG/readers/static frontend；不得使用业务数据库。
-- [ ] 从create入口沿settings resolver、credential lease、M4/M5/M6/M7/M8、writer/history/SSE/Admin/static frontend做contract sweep，搜索startup captured secret、旧snapshot、第二maintenance owner、archive/WebSocket/third SSE/fake cache与duplicate DTO。
-- [ ] 运行M1–M9 focused、完整non-PG、专用PostgreSQL、architecture/OpenAPI、frontend unit/build/browser E2E、smoke、compileall、docs/link/fence/contract/secret audits；逐项记录真实数字。
-- [ ] 只有用户明确授权、credential preflight成功且接受可能计费时，才运行最小OpenAI/Google真实smoke；USGS key不进入UI smoke。未授权/未配置一律记录`not run`。
+- [x] 新增M9 deterministic fake E2E runner/test，只通过production app factory、production routes、backend-served frontend与真实PostgreSQL边界；fake只替换外部provider/OS keyring/时钟，不开放test-only production switch/header/query。
+- [x] E2E覆盖settings/key save无网络 → create future run → run SSE/topology → selected session SSE → result/evidence/summary → history/original timezone → persistence retry语义。
+- [x] 同一suite覆盖cancel：only run cancel、running session真实收敛、未开始节点灰色虚线、真实cancelled橙色、已完成/failed/cancelled不被run状态重染。
+- [x] E2E覆盖settings/key替换：在途run保留旧snapshot/lease，之后run使用新值；test connection与real analysis分别由明确动作触发，fixture证明无隐式provider call。
+- [x] E2E覆盖unit global version与session override、history round-trip、legacy/unknown和M6 validator；科学gate/confidence/evidence closure不被前端或单位偏好改写。
+- [x] E2E覆盖history cleanup dependency conflict/whole-run cascade/tombstone 410/409、RAG profile handoff/reader drain/retry/delete、operation restart/polling与keys/settings/unit preservation。
+- [x] PostgreSQL restart测试从现有M8 head upgrade，跨至少一次process restart验证settings/unit/admin/tombstone/history/RAG/readers/static frontend；不得使用业务数据库。
+- [x] 从create入口沿settings resolver、credential lease、M4/M5/M6/M7/M8、writer/history/SSE/Admin/static frontend做contract sweep，搜索startup captured secret、旧snapshot、第二maintenance owner、archive/WebSocket/third SSE/fake cache与duplicate DTO。
+- [x] 运行M1–M9 focused、完整non-PG、专用PostgreSQL、architecture/OpenAPI、frontend unit/build/browser E2E、smoke、compileall、docs/link/fence/contract/secret audits；逐项记录真实数字。
+- [x] 只有用户明确授权、credential preflight成功且接受可能计费时，才运行最小OpenAI/Google真实smoke；USGS key不进入UI smoke。未授权/未配置一律记录`not run`。
 - [ ] 在Ubuntu/macOS/Windows对同一commit运行支持的backend/frontend/build/browser gates；缺平台证据保持`partial`，不把Windows本机结果外推。
-- [ ] 填写本文件全部实际完成项、阶段记录与contract matrix，同步M9五份设计、root architecture/milestones/deferred/frontend docs、README/startup说明和OpenAPI；代码未实现项保持unchecked/pending。
-- [ ] 审查staged/unstaged/untracked/permission-limited范围、migration head、dependency locks、generated types与artifacts；不提交secret、OS credential dump、database volume、`frontend/dist`（除非仓库明确要求）、Playwright report、pytest cache或无关文件。
+- [x] 填写本文件全部实际完成项、阶段记录与contract matrix，同步M9五份设计、root architecture/milestones/deferred/frontend docs、README/startup说明和OpenAPI；代码未实现项保持unchecked/pending。
+- [x] 审查staged/unstaged/untracked/permission-limited范围、migration head、dependency locks、generated types与artifacts；不提交secret、OS credential dump、database volume、`frontend/dist`（除非仓库明确要求）、Playwright report、pytest cache或无关文件。
 
 ### Tests
 
-- [ ] fake browser E2E对真实业务facts、identity、status、SSE sequence、map state、typed transcript、history timezone、settings revision、operation result和cleanup ownership做断言，不只断言页面出现/HTTP 200。
-- [ ] fault E2E覆盖DB/key store/provider/network/SSE interruption、invalid/stale token、process restart和dist missing；每种失败明确哪些side effect不存在、用户看到什么safe状态和能否retry。
-- [ ] PG E2E证明migration、CAS、unit append-only、operation/tombstone原子性、history/RAG cleanup与restart，不扫描或修改业务库。
-- [ ] frontend/browser证据覆盖desktop/narrow、keyboard focus、七种地图状态、two-stream connection count、secret absence、API 404/static cache与no archive asset。
-- [ ] contract matrix每项含实际production位置、具体test和docs status；provider/platform/capacity为partial/not run时不标implemented。
-- [ ] docs audit证明链接/fence/checkbox/contract ID/stage exit/命令无破损，本文件没有因文档存在而误勾选implementation项。
+- [x] fake browser E2E对真实业务facts、identity、status、SSE sequence、map state、typed transcript、history timezone、settings revision、operation result和cleanup ownership做断言，不只断言页面出现/HTTP 200。
+- [x] fault E2E覆盖DB/key store/provider/network/SSE interruption、invalid/stale token、process restart和dist missing；每种失败明确哪些side effect不存在、用户看到什么safe状态和能否retry。
+- [x] PG E2E证明migration、CAS、unit append-only、operation/tombstone原子性、history/RAG cleanup与restart，不扫描或修改业务库。
+- [x] frontend/browser证据覆盖desktop/narrow、keyboard focus、七种地图状态、two-stream connection count、secret absence、API 404/static cache与no archive asset。
+- [x] contract matrix每项含实际production位置、具体test和docs status；provider/platform/capacity为partial/not run时不标implemented。
+- [x] docs audit证明链接/fence/checkbox/contract ID/stage exit/命令无破损，本文件没有因文档存在而误勾选implementation项。
 
 ### Verify
 
-- [ ] 运行新增M9 backend/fake/PG smoke与production-entrypoint runner，记录实际命令、数据库、basetemp和结果。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application backend/tests/domain backend/tests/ports backend/tests/infrastructure backend/tests/api backend/tests/smoke -q`
-- [ ] 使用专用`wateragents_test`运行`backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `npm --prefix frontend ci`
-- [ ] `npm --prefix frontend run lint`
-- [ ] `npm --prefix frontend run typecheck`
-- [ ] `npm --prefix frontend run test -- --run`
-- [ ] `npm --prefix frontend run check:api`
-- [ ] `npm --prefix frontend run build`
-- [ ] `npm --prefix frontend run test:e2e`
-- [ ] 执行docs link/fence/contract-ID/unchecked-count、OpenAPI drift、secret、archive import/path和build artifact audits并保存实际输出。
-- [ ] `git diff --check`
-- [ ] `git status --short --branch`，并核对local HEAD、upstream与remote SHA。
+- [x] 运行新增M9 backend/fake/PG smoke与production-entrypoint runner，记录实际命令、数据库、basetemp和结果。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/application backend/tests/domain backend/tests/ports backend/tests/infrastructure backend/tests/api backend/tests/smoke -q`
+- [x] 使用专用`wateragents_test`运行`backend/.venv/Scripts/python.exe -B -m pytest backend/tests -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `npm --prefix frontend ci`
+- [x] `npm --prefix frontend run lint`
+- [x] `npm --prefix frontend run typecheck`
+- [x] `npm --prefix frontend run test -- --run`
+- [x] `npm --prefix frontend run check:api`
+- [x] `npm --prefix frontend run build`
+- [x] `npm --prefix frontend run test:e2e`
+- [x] 执行docs link/fence/contract-ID/unchecked-count、OpenAPI drift、secret、archive import/path和build artifact audits并保存实际输出。
+- [x] `git diff --check`
+- [x] `git status --short --branch`，并核对local HEAD、upstream与remote SHA。
 
 阶段出口：M9 backend、frontend、PostgreSQL、OS-store abstraction、provider lease、units、Admin、history/SSE/static hosting在production入口有可复现的fake/PG/browser证据；所有适用契约有真实承接，未运行的外部边界如实记录，M1–M9第一版可以进入最终交付评审。
 
 提交边界：E2E/smoke、审计修复、completion evidence、contract/root docs与启动说明；不夹带未设计功能、真实secret/provider artifact或无关重构。最终提交前列出相对`origin/main`的完整文件范围与commit SHA，未经用户要求不push。
 
-完成记录：实施后按文末模板填写。
+### M9 完成记录（2026-10-08）
+
+- 分支 `codex/m9-milestone-0`；M9 前 HEAD `67972093a2608c42054d3447d4cff1c831c0304e`，merge-base / 本地及远端 `origin/main` 均为 `cf7eed70aa43fd6b4a2303a7e0b933804a113735`。M9 无新 migration；当前唯一 head `20261008_03`。`frontend/package-lock.json` 与生成 API types 无变更，`check:api` 通过。
+- 新增 `backend/tests/smoke/test_m9_production_pg.py`，只替换外部 provider、OS key store 与时钟，通过 production `create_app`、HTTP/SSE、backend-served build 和隔离的 `wateragents_test` schema 完成 run、cancel、在途 lease、后续配置、证据/结果、历史、重启、Admin cleanup/operation 与 tombstone 断言；`frontend/e2e/production.spec.ts` 对真实保存事实、两层 SSE、地图、原时区、operation/cleanup 及重启后 410 历史转接做 Chrome 断言。单位/M6 validator、RAG handoff/reader/cleanup 与故障矩阵由同一完整回归中的 PG API、application、frontend browser/unit 用例分层覆盖，并非每个故障都在同一 Playwright 用例内重演。
+- 发现并修复 M5 合成 evidence fact 的非 UUID operation identity，保证 production writer 可保存缺失事实；日志回归只比较故障注入之后的记录；M8 PostgreSQL 专属 smoke 在无测试库时明确 skip。M9 fake clock 曾比数据库实时时钟超前一天，使 RAG job 触发 `updated_at >= created_at` 约束；改为每个测试 app 创建时固定当前 UTC，重跑无 reconciliation 告警。没有改动业务 migration、锁文件或生成类型。
+- 专用 PostgreSQL：`WATERAGENTS_TEST_DB_NAME=wateragents_test` 与 `python -m dotenv -f backend/.env run --no-override --`，`pytest backend/tests -q --basetemp=backend/target/m9-m9-full-pg-elevated-final-20261008` 为 **2372 passed、2 第三方 deprecation warnings**；时钟修正后 M9 production PG/Chrome `pytest backend/tests/smoke/test_m9_production_pg.py -q -s --basetemp=backend/target/m9-m9-production-browser-clock-final-20261008` 为 **2 passed、无 RAG reconciliation 告警**。现有 M8 head upgrade、fresh schema、CAS、append-only、Admin 原子性、restart 在 PG tests 中验证，未访问业务数据库。
+- 无测试库的指定 architecture/application/domain/ports/infrastructure/api/smoke 集合为 **2190 passed、12 skipped、2 第三方 warnings**（`--basetemp=backend/target/m9-m9-nonpg-subset-elevated-final-20261008`）；直接无测试库执行整个 `backend/tests` 会把 PostgreSQL 专属 persistence tests 收进来并因缺少 `WATERAGENTS_TEST_DB_NAME` 失败，不属于 non-PG 门禁。此前完整 PG 首轮 2371 passed；新增取消场景后以上 2372 为最终后端结果。
+- `npm --prefix frontend ci`、lint、typecheck、`test -- --run` **33 passed**、`check:api`、build 均通过；`WATERAGENTS_BROWSER_CHANNEL=chrome npm --prefix frontend run test:e2e` **4 passed、1 production-only skipped**，该 production-only 用例另在 PG/Chrome runner 中通过。build 仍提示约 825 kB 的单 JS chunk 警告。M4/M5/M6/M7/M8 离线 smoke、health、history restart 与 154/154 capability audit 通过；`compileall`、`git diff --check` 通过。
+- 11 份相关文档链接与代码围栏均 0 问题，contract matrix 30 条、27 implemented / 3 partial；15 个本阶段源码/文档文件凭据特征扫描 0 命中，frontend bundle 边界检查通过。旧目录的部分 pytest 临时文件存在 ACL 限制，未扫描或提交这些目录；仅按列出的路径暂存本阶段文件。
+- 真实 OpenAI/Google provider、三个 OS credential backend 实机、容量与 Ubuntu/macOS CI **not run**；Windows 本机 fake/PG/Chrome 不能替代它们。原因是需要明确授权/可用凭据或对应平台；matrix 的 GLOBAL-C11、M9-C01、M9-C03 保持 partial。本地提交见该阶段 HEAD；未 push。
 
 ## Contract 承接矩阵（实施时填写）
 
 状态只能使用 `pending / partial / implemented`。只有 production implementation、对应测试、文档和阶段完成证据齐全时才能改为 `implemented`；真实 provider、三平台或容量未运行时，对应外部边界保持 `partial`/`not run`，不能被fake、本机或文档完成替代。
 
-| Contract | 初始状态 | 主要阶段 | 最低证据要求 | 实施位置 / 测试 / 文档（实施后填写） |
+| Contract | 当前状态 | 主要阶段 | 最低证据要求 | 实施位置 / 测试 / 文档 |
 |---|---|---:|---|---|
-| GLOBAL-C01 | pending | 0/7/9 | archive isolation architecture/source/build audit | — |
-| GLOBAL-C02 | pending | 1/9 | current-only V1，无compat/flag/dual path | — |
-| GLOBAL-C03 | pending | 3/7 | COMID与真实session identity不泛化 | — |
-| GLOBAL-C04 | pending | 3/7 | UTC事实、原IANA snapshot/history | — |
-| GLOBAL-C05 | pending | 3/5 | DST/window与单位snapshot不被current setting改写 | — |
-| GLOBAL-C06 | pending | 5/7/9 | result/evidence/source refs闭合 | — |
-| GLOBAL-C07 | pending | 4/8/9 | secret不进公开/日志/持久化/browser | — |
-| GLOBAL-C08 | pending | 0/7/8 | 独立`frontend/`与最终OpenAPI/SSE | — |
-| GLOBAL-C09 | pending | 3/7/9 | backend facts驱动UI，不另造状态/结论 | — |
-| GLOBAL-C10 | pending | 2/6/9 | ownership、约束、可观察integration evidence | — |
-| GLOBAL-C11 | pending | 2/4/8/9 | 跨平台依赖/migration/build/OS store实测状态 | — |
-| M9-C01 | pending | 1–6 | settings/provider/key/admin production composition | — |
-| M9-C02 | pending | 3/7 | dynamic timezone只影响future，history原identity | — |
-| M9-C03 | pending | 4 | secret DTO、OS store、masked status、explicit test | — |
-| M9-C04 | pending | 5 | deterministic unit parse + Agent applicability | — |
-| M9-C05 | pending | 2/5 | global confirmation + append-only version | — |
-| M9-C06 | pending | 2/6 | preview/operation/cleanup/tombstone/ownership | — |
-| M9-C07 | pending | 7–9 | OpenAPI/SSE/frontend/smoke/startup一致性 | — |
-| M9-C08 | pending | 7/8 | new frontend、两层fetch SSE、三栏与状态所有权 | — |
-| M9-C09 | pending | 0/6/8/9 | single process/worker、loopback same-origin | — |
-| M9-C10 | pending | 7/9 | map/result/summary/Agent/Evidence真实facts | — |
-| M9-C11 | pending | 7/9 | persistence retry入口与状态独立 | — |
-| M9-A01 | pending | 3–6/9 | settings/key/admin tests与secret audit | — |
-| M9-A02 | pending | 6/9 | cleanup后keys/snapshot不变、tombstone与RAG ownership | — |
-| M9-A03 | pending | 7/9 | create到complete/cancel/history E2E | — |
-| M9-A04 | pending | 7/9 | 三态结果、EvidenceChain、confidence、attribution | — |
-| M9-A05 | pending | 7–9 | frontend/OpenAPI/SSE/error/smoke同名同义 | — |
-| M9-A06 | pending | 3/7/9 | history list字段来自persisted facts | — |
-| M9-A07 | pending | 7/9 | 每参与水体结果/上下文/full content一致 | — |
-| M9-A08 | pending | 3/7/9 | retry保存不重跑、预算不重置、warning真实 | — |
+| GLOBAL-C01 | implemented | 0/7/9 | archive isolation architecture/source/build audit | `backend/app/`, `frontend/src/`；`backend/tests/architecture/test_archive_isolation.py`、`frontend/scripts/check-boundaries.mjs`；本文件红线与[实施设计](m9_implementation_design.md)。 |
+| GLOBAL-C02 | implemented | 1/9 | current-only V1，无compat/flag/dual path | `backend/app/application/analysis_runs/models.py`、`backend/app/api/http/`；`backend/tests/architecture/test_current_v1_contracts.py`；[API](m9_settings_admin_api.md)。 |
+| GLOBAL-C03 | implemented | 3/7 | COMID与真实session identity不泛化 | `backend/app/application/analysis_runs/topology_driven_workflow.py`、`frontend/src/features/analysis/TopologyMap.tsx`；`backend/tests/smoke/test_m9_production_pg.py`、`frontend/e2e/workspace.spec.ts`；[Frontend](m9_frontend_experience_design.md)。 |
+| GLOBAL-C04 | implemented | 3/7 | UTC事实、原IANA snapshot/history | `backend/app/application/settings_admin/runtime_settings.py`、`backend/app/application/transcripts/reader.py`；`backend/tests/smoke/test_m9_production_pg.py`；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| GLOBAL-C05 | implemented | 3/5 | DST/window与单位snapshot不被current setting改写 | `backend/app/application/settings_admin/unit_policy_service.py`、`backend/app/application/reasoning/`；`backend/tests/api/test_m9_settings_postgres.py`、`backend/tests/application/test_m9_unit_preferences.py`；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| GLOBAL-C06 | implemented | 5/7/9 | result/evidence/source refs闭合 | `backend/app/application/evidence_tools/`、`backend/app/application/reasoning/`；`backend/tests/smoke/test_m9_production_pg.py`、M5/M6 smoke；[总设计](m9_settings_admin_demo_design.md)。 |
+| GLOBAL-C07 | implemented | 4/8/9 | secret不进公开/日志/持久化/browser | `backend/app/application/settings_admin/credential_service.py`、`frontend/src/features/settings/SettingsDrawer.tsx`；`backend/tests/api/test_m9_keys.py`、`frontend/tests/settings.test.tsx`、bundle audit；[API](m9_settings_admin_api.md)。 |
+| GLOBAL-C08 | implemented | 0/7/8 | 独立`frontend/`与最终OpenAPI/SSE | `frontend/src/api/`、`backend/app/main.py`；`frontend/tests/sse.test.ts`、`frontend/e2e/production.spec.ts`、`check:api`；[Frontend](m9_frontend_experience_design.md)。 |
+| GLOBAL-C09 | implemented | 3/7/9 | backend facts驱动UI，不另造状态/结论 | `frontend/src/features/analysis/models.ts`、`DetailPanel.tsx`；`frontend/tests/state.test.ts`、production browser smoke；[Frontend](m9_frontend_experience_design.md)。 |
+| GLOBAL-C10 | implemented | 2/6/9 | ownership、约束、可观察integration evidence | `backend/app/application/settings_admin/admin_service.py`、`backend/app/infrastructure/persistence/`；`backend/tests/api/test_m9_admin_postgres.py`、`backend/tests/smoke/test_m9_production_pg.py`；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| GLOBAL-C11 | partial | 2/4/8/9 | 跨平台依赖/migration/build/OS store实测状态 | `backend/app/infrastructure/credentials/os_key_store.py`、migration `20261008_03`、`frontend/package-lock.json`；Windows PG/browser 通过；Ubuntu/macOS、真实 OS store 与跨系统迁移未运行；[实施设计](m9_implementation_design.md)。 |
+| M9-C01 | partial | 1–6 | settings/provider/key/admin production composition | `backend/app/main.py`、`backend/app/infrastructure/runtime/provider_bundle.py`；`backend/tests/smoke/test_m9_production_pg.py`、`backend/tests/infrastructure/test_m9_provider_bundle.py`；[总设计](m9_settings_admin_demo_design.md)；真实 provider 未运行。 |
+| M9-C02 | implemented | 3/7 | dynamic timezone只影响future，history原identity | `backend/app/application/settings_admin/runtime_settings.py`、`backend/app/application/transcripts/reader.py`；生产 PG 双 run/restart smoke；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| M9-C03 | partial | 4 | secret DTO、OS store、masked status、explicit test | `backend/app/infrastructure/credentials/os_key_store.py`、`backend/app/api/http/keys.py`；`backend/tests/api/test_m9_keys.py`、生产 fake-store smoke；[API](m9_settings_admin_api.md)；真实 OS store 后端未实测。 |
+| M9-C04 | implemented | 5 | deterministic unit parse + Agent applicability | `backend/app/domain/settings_admin/`、`backend/app/application/reasoning/`；`backend/tests/application/test_m9_unit_preferences.py`、`backend/tests/api/test_m9_unit_policy.py`；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| M9-C05 | implemented | 2/5 | global confirmation + append-only version | `backend/app/application/settings_admin/unit_policy_service.py`、`backend/app/infrastructure/persistence/settings_repository.py`；`backend/tests/api/test_m9_settings_postgres.py`、`backend/tests/persistence/test_m9_persistence.py`；[API](m9_settings_admin_api.md)。 |
+| M9-C06 | implemented | 2/6 | preview/operation/cleanup/tombstone/ownership | `backend/app/application/settings_admin/admin_service.py`、`admin_operation_runner.py`；`backend/tests/api/test_m9_admin_postgres.py`、production PG smoke；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| M9-C07 | implemented | 7–9 | OpenAPI/SSE/frontend/smoke/startup一致性 | `backend/app/main.py`、`frontend/src/api/generated.ts`；`backend/tests/api/test_m9_target_openapi.py`、`frontend/e2e/production.spec.ts`、`check:api`；[API](m9_settings_admin_api.md)、`backend/README.md`。 |
+| M9-C08 | implemented | 7/8 | new frontend、两层fetch SSE、三栏与状态所有权 | `frontend/src/app/App.tsx`、`frontend/src/api/sse.ts`；`frontend/tests/sse.test.ts`、`frontend/e2e/workspace.spec.ts`；[Frontend](m9_frontend_experience_design.md)。 |
+| M9-C09 | implemented | 0/6/8/9 | single process/worker、loopback same-origin | `backend/app/__main__.py`、`backend/app/api/http/local_mutation.py`；`backend/tests/smoke/test_m9_production_pg.py`、`backend/tests/api/test_m9_frontend_static.py`；`backend/README.md`。 |
+| M9-C10 | implemented | 7/9 | map/result/summary/Agent/Evidence真实facts | `frontend/src/features/analysis/TopologyMap.tsx`、`DetailPanel.tsx`；production browser smoke、`frontend/tests/detail-panel.test.tsx`；[Frontend](m9_frontend_experience_design.md)。 |
+| M9-C11 | implemented | 7/9 | persistence retry入口与状态独立 | `backend/app/api/http/analysis_runs.py`、`frontend/src/features/analysis/DetailPanel.tsx`；production PG smoke、`backend/tests/api/test_analysis_history.py`、`frontend/tests/detail-panel.test.tsx`；[Frontend](m9_frontend_experience_design.md)。 |
+| M9-A01 | implemented | 3–6/9 | settings/key/admin tests与secret audit | `backend/app/api/http/{settings,keys,admin}.py`；`backend/tests/api/test_m9_settings.py`、`test_m9_keys.py`、`test_m9_admin_postgres.py`；[API](m9_settings_admin_api.md)。 |
+| M9-A02 | implemented | 6/9 | cleanup后keys/snapshot不变、tombstone与RAG ownership | `backend/app/application/settings_admin/admin_service.py`；`backend/tests/api/test_m9_admin_postgres.py`、production PG restart/cleanup smoke；[Policy](m9_settings_admin_policy_catalog.md)。 |
+| M9-A03 | implemented | 7/9 | create到complete/cancel/history E2E | `backend/app/main.py`、`frontend/src/app/App.tsx`；两项 production PG/Chrome smoke、`frontend/e2e/workspace.spec.ts`；[总设计](m9_settings_admin_demo_design.md)。 |
+| M9-A04 | implemented | 7/9 | 三态结果、EvidenceChain、confidence、attribution | `backend/app/application/reasoning/`、`frontend/src/features/analysis/DetailPanel.tsx`；M6 smoke、production PG/Chrome smoke、`frontend/tests/detail-panel.test.tsx`；[Frontend](m9_frontend_experience_design.md)。 |
+| M9-A05 | implemented | 7–9 | frontend/OpenAPI/SSE/error/smoke同名同义 | `frontend/src/api/{http,sse,generated}.ts`、`backend/app/api/`；`check:api`、`frontend/tests/{http,sse}.test.ts`、production browser smoke；[API](m9_settings_admin_api.md)。 |
+| M9-A06 | implemented | 3/7/9 | history list字段来自persisted facts | `backend/app/application/transcripts/reader.py`、`frontend/src/features/history/HistoryList.tsx`；`backend/tests/api/test_analysis_history.py`、production PG restart smoke；[Frontend](m9_frontend_experience_design.md)。 |
+| M9-A07 | implemented | 7/9 | 每参与水体结果/上下文/full content一致 | `backend/app/application/transcripts/reader.py`、`frontend/src/features/analysis/DetailPanel.tsx`；`backend/tests/smoke/test_m9_production_pg.py`、`frontend/tests/detail-panel.test.tsx`；[Frontend](m9_frontend_experience_design.md)。 |
+| M9-A08 | implemented | 3/7/9 | retry保存不重跑、预算不重置、warning真实 | `backend/app/application/analysis_runs/writer.py`、`frontend/src/features/analysis/DetailPanel.tsx`；`backend/tests/api/test_analysis_history.py`、production PG retry no-op、frontend unit；[Frontend](m9_frontend_experience_design.md)。 |
 
 ## 每个 Milestone 的完成记录模板
 

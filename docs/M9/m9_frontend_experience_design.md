@@ -1,6 +1,6 @@
 # M9 Frontend Experience 设计
 
-本文冻结 M9 `frontend/` 的页面、交互、状态所有权和前后端消费规则。它是待实现设计，不代表 frontend、settings、keys 或 admin API 已经落地。可序列化字段与 HTTP 语义以 [M9 Settings/Admin API](m9_settings_admin_api.md) 为准；跨域产品边界见 [M9 总设计](m9_settings_admin_demo_design.md)。
+本文冻结 M9 `frontend/` 的页面、交互、状态所有权和前后端消费规则。实现和验收状态以 [M9 Implementation TODO](m9_implementation_todo.md) 的实际证据为准。可序列化字段与 HTTP 语义以 [M9 Settings/Admin API](m9_settings_admin_api.md) 为准；跨域产品边界见 [M9 总设计](m9_settings_admin_demo_design.md)。
 
 ---
 

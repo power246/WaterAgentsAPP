@@ -478,7 +478,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 ## 9. M7: Topology-Driven Multi-Agent Workflow
 
-状态：Milestone 0–9 已完成 Windows 本机实现、固定 fake E2E、专用 PostgreSQL 持久化/重启和离线契约审计；production composition 已串联 DAG 调度、直接上游依赖、M6 waterbody runner、同模型 run summarizer 与 topology final result。真实 provider 请求保持 `not run`，Ubuntu/macOS/Windows 同提交 CI 保持 `partial`，M8 transcript RAG 与 M9 frontend/settings/admin 尚未实现。正式输入与完成证据见 [设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API 契约](M7/m7_topology_driven_multi_agent_api.md) 与 [Implementation TODO](M7/m7_implementation_todo.md)。
+状态：Milestone 0–9 已完成 Windows 本机实现、固定 fake E2E、专用 PostgreSQL 持久化/重启和离线契约审计；production composition 已串联 DAG 调度、直接上游依赖、M6 waterbody runner、同模型 run summarizer 与 topology final result。M8 transcript RAG 与 M9 frontend/settings/admin 已接入当前系统；真实 provider 请求保持 `not run`，Ubuntu/macOS/Windows 同提交 CI 保持 `partial`。正式输入与完成证据见 [设计决策](M7/m7_topology_driven_multi_agent_design.md)、[实施设计](M7/m7_topology_driven_multi_agent_implementation_design.md)、[Workflow Policy Catalog](M7/m7_workflow_policy_catalog.md)、[API 契约](M7/m7_topology_driven_multi_agent_api.md) 与 [Implementation TODO](M7/m7_implementation_todo.md)。
 
 目标：
 
@@ -633,7 +633,7 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 - demo 输出包含 quantified、directional 或 indeterminate 结果，以及证据链、置信度和归因总结。
 - 最终前端、OpenAPI、SSE raw frame、错误码、smoke 和后端实现使用同一字段与事件名称。
 
-设计状态（2026-10-08）：M9 产品、前端、policy、API、实施设计与 Milestone 0–9 施工清单已冻结，代码尚未实现，TODO 全部保持未勾选。权威输入见 [总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)与 [Implementation TODO](M9/m9_implementation_todo.md)。
+实施状态（2026-10-08）：M9 Milestone 0–8 已按当前唯一 V1 实现，Milestone 9 的验收结果、未运行边界和逐项契约证据以 [Implementation TODO](M9/m9_implementation_todo.md) 为准。设计依据仍为 [总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)与 [实施设计](M9/m9_implementation_design.md)。
 
 ## 12. 跨 Milestone 延后契约登记
 

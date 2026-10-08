@@ -482,7 +482,7 @@ Contract changes:
   - 按 D41 调用无请求体 POST /api/analysis/runs/{run_id}/persistence/retry；202 仅表示受理/已有补写，200 表示当前无需补写，409 表示当前不能手动恢复。此 POST 不自动重发，超时或响应丢失先查询 persistence，再由用户决定是否开启新一轮；已受理补写不随 HTTP 断开取消。
   - 按 D40 使用 persistence.state 区分 up_to_date/pending/retry_exhausted，只有 retry_exhausted 提供手动入口；persistence=null 表示本次读取无 live 保存运行信息，不能据此宣称整个分析已经保存完整或隐藏原记录中的警告。不另造前端重试计数或从业务 status/error.retryable 推断按钮条件。 按 D80，pending 可包括等待消息定稿，正常生成不展示保存失败；pending 或 202 不表明数据库正在执行 SQL，已有耗尽和错误不被新片段覆盖。
 
-设计状态（2026-10-08）：M9 产品、前端、policy、API、实施设计与 Milestone 0–9 施工清单已冻结，implementation 尚未开始，TODO 全部保持未勾选。权威输入见 [总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)与 [Implementation TODO](M9/m9_implementation_todo.md)。
+实施状态（2026-10-08）：M9 Milestone 0–8 已落地；Milestone 9 的本机、PostgreSQL、浏览器及未运行外部边界由 [Implementation TODO](M9/m9_implementation_todo.md) 逐项登记。权威设计仍见 [总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)与 [实施设计](M9/m9_implementation_design.md)。
 
 ### 验收重点
 
@@ -611,13 +611,13 @@ M8 Milestone 0–10 已完成 Windows 本机 production implementation、migrati
 | `GLOBAL-C01`–`GLOBAL-C10`、`M8-C01`–`M8-C16`、`M8-A01`–`M8-A10` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写)、[设计决策](M8/m8_memory_rag_design.md)、[实施设计](M8/m8_memory_rag_implementation_design.md)、[RAG Policy Catalog](M8/m8_rag_policy_catalog.md)、[API/读取契约](M8/m8_memory_rag_api.md)和[前端接力边界](frontend_integration_contracts.md)。 | `implemented`：production、focused/PG/full/smoke 与文档证据齐全。 |
 | `GLOBAL-C11` | [M8 Contract 承接矩阵](M8/m8_implementation_todo.md#contract-承接矩阵全部完成后填写) | `partial`：dependency/migration/path/Windows 已验证；Ubuntu/macOS 与生产容量未运行。 |
 
-### M9 待实施索引
+### M9 实施与验收索引
 
-M9 产品、Frontend Experience、Policy、API、实施设计与 Milestone 0–9 施工清单已经冻结；production code、migration、公开 route、`frontend/` 应用和 E2E 尚未开始。下表只登记实施入口，不构成完成证据。
+M9 production code、migration、公开 route 与 `frontend/` 应用已按 Milestone 0–8 实现。Milestone 9 的验证结果和剩余外部边界以完成清单为准；下表只提供索引，不单独构成完成证据。
 
 | 范围 | 施工与计划证据 | 当前状态 |
 |---|---|---|
-| `GLOBAL-C01`–`GLOBAL-C11`、`M9-C01`–`M9-C11`、`M9-A01`–`M9-A08` | [M9 Contract 承接矩阵](M9/m9_implementation_todo.md#contract-承接矩阵实施时填写)、[总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)和[前端接力边界](frontend_integration_contracts.md)。 | `pending`：TODO 全部未勾选，尚无 production implementation/test evidence。 |
+| `GLOBAL-C01`–`GLOBAL-C11`、`M9-C01`–`M9-C11`、`M9-A01`–`M9-A08` | [M9 Contract 承接矩阵](M9/m9_implementation_todo.md#contract-承接矩阵实施时填写)、[总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)和[前端接力边界](frontend_integration_contracts.md)。 | 状态与 production/test/docs 证据逐项见矩阵；provider、三平台、容量按未运行事实保留 `partial`。 |
 
 M6 将原 `M6-C01`–`M6-C15` 收敛到当前唯一 V1，并实现新增的 `M6-C16`–`M6-C19` 与 `M6-A07`–`M6-A10`；既有 M2–M5 contract 未拆分、替换或取消。M2 CI 待验收仍属于 M2 Milestone 7/8，M3 三平台与迁移待验收仍属于 M3 Milestone 2/9，不转移为新的 deferred contract。
 

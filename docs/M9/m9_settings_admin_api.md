@@ -1,6 +1,6 @@
 # M9 Settings / Keys / Admin API
 
-本文冻结 M9 新增 HTTP DTO、status、错误、幂等与前端消费契约。Settings、Keys 与 Admin backend routes 已在 M1–M6 注册；已有 analysis/history/SSE contract 保持 [frontend integration contracts](../frontend_integration_contracts.md) 的当前语义。
+本文冻结 M9 新增 HTTP DTO、status、错误、幂等与前端消费契约。Settings、Keys 与 Admin backend routes 已在 M1–M6 注册；实施证据见 [M9 Implementation TODO](m9_implementation_todo.md)。已有 analysis/history/SSE contract 保持 [frontend integration contracts](../frontend_integration_contracts.md) 的当前语义。
 
 ---
 

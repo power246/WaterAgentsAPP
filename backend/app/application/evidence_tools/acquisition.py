@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+from uuid import NAMESPACE_URL, uuid5
 
 from app.application.evidence_tools.bundle_builder import EvidenceBundleBuilder
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
@@ -387,7 +388,10 @@ class EvidenceAcquisitionService:
             await self._relation_materializer.materialize(
                 scope,
                 _unique_fragment_refs(mutable_fragments),
-                operation_id=f"m5:materialize-relations:{scope.session_id}",
+                operation_id=str(uuid5(
+                    NAMESPACE_URL,
+                    f"m5:materialize-relations:{scope.run_id}:{scope.session_id}",
+                )),
             )
         )
         mutable_fragments.extend(
@@ -516,10 +520,7 @@ class EvidenceAcquisitionService:
                     f"{scope.run_id}:{scope.session_id}:{parameter.code_system}:"
                     f"{parameter.code}:{window.window_id}:no_applicable_evidence"
                 )
-                operation_id = (
-                    f"m5:seal-fact:{parameter.code_system}:{parameter.code}:"
-                    f"{window.window_id}"
-                )
+                operation_id = str(uuid5(NAMESPACE_URL, f"m5:seal-fact:{identity}"))
                 fragment = EvidenceFragment(
                     evidence_id=f"evidence:sha256:{sha256(identity.encode()).hexdigest()}",
                     source="m5_acquisition",

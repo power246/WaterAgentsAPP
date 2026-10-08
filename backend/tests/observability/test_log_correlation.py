@@ -229,6 +229,7 @@ def test_observability_failure_does_not_change_http_or_run_outcomes(monkeypatch,
     async def exercise():
         workflow = None if outcome == "completed" else Workflow()
         async with application(workflow=workflow) as (app, client):
+            log_start = len(application_logs)
             if failure == "redactor":
                 monkeypatch.setattr(json_logging, "redact", broken)
             elif failure == "formatter":
@@ -261,7 +262,7 @@ def test_observability_failure_does_not_change_http_or_run_outcomes(monkeypatch,
                 )
             ).status_code == 422
             if failure == "redactor":
-                assert all(row["event_name"] == "log_format_failed" for row in parsed(application_logs))
+                assert all(row["event_name"] == "log_format_failed" for row in parsed(application_logs[log_start:]))
             assert "private-observability-failure" not in created.text + stream.text
 
     run(exercise)
