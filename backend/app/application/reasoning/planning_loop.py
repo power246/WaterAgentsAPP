@@ -61,10 +61,12 @@ from app.application.reasoning.working_context import (
 )
 from app.domain import (
     DomainModel,
+    ContextPayload,
     EvidenceFragment,
     EvidenceFragmentReference,
     EvidenceToolOptions,
     EvidenceToolRequest,
+    FacilityRecord,
     ItemReference,
     ModelUsageSummary,
     NonEmptyString,
@@ -594,17 +596,58 @@ async def _tool_request(
         raise PlanningLoopError("invalid_planning_tool_arguments") from error
 
 
-def _source_record_view(record: SourceRecord) -> dict[str, object]:
+def _prompt_field_text(value: str) -> tuple[str, bool]:
+    selected = value[:80]
+    try:
+        require_safe_prompt_text(selected)
+    except ValueError:
+        return "[REDACTED]", True
+    return selected, len(selected) != len(value)
+
+
+def _source_record_view(record: SourceRecord) -> tuple[dict[str, object], bool]:
     allowed = {
         "record_type", "observed_time", "valid_time_range", "value",
         "raw_unit", "parameter", "weather_variable", "window_id",
         "result_kind", "result_source", "confidence", "upstream_session_id",
     }
     view = record.model_dump(mode="json", include=allowed, exclude_none=True)
+    location_fields = {"comid", "station_id"}
+    if isinstance(record, FacilityRecord):
+        location_fields.update(
+            {"point", "provider_location_id", "distance_to_target_km"}
+        )
     view["location"] = record.location.model_dump(
-        mode="json", include={"comid", "station_id"}, exclude_none=True
+        mode="json", include=location_fields, exclude_none=True
     )
-    return view
+    truncated = False
+    if isinstance(record, FacilityRecord):
+        view["record_id"], shortened = _prompt_field_text(record.record_id)
+        truncated |= shortened
+        view["spatially_in_scope"] = record.spatially_in_scope
+        provider_location_id = view["location"].get("provider_location_id")
+        if provider_location_id is not None:
+            view["location"]["provider_location_id"], shortened = (
+                _prompt_field_text(provider_location_id)
+            )
+            truncated |= shortened
+        for field in ("registry_id", "facility_id", "permit_id", "program", "status"):
+            value = getattr(record, field)
+            if value is not None:
+                view[field], shortened = _prompt_field_text(value)
+                truncated |= shortened
+        attributes = {}
+        allowed_attributes = {
+            "facility_name", "permit_name", "permit_type", "facility_type",
+            "city", "state", "receiving_waterbody",
+        }
+        for name, value in record.public_attributes:
+            if name in allowed_attributes:
+                attributes[name], shortened = _prompt_field_text(value)
+                truncated |= shortened
+        if attributes:
+            view["public_attributes"] = attributes
+    return view, truncated
 
 
 def _bounded_fragment_summary(
@@ -643,6 +686,18 @@ def _bounded_fragment_summary(
         payload_view["rationale"] = payload.rationale
     if isinstance(payload, ConversionPayload):
         payload_view["input_evidence_ref"] = payload.input_evidence_ref.evidence_id
+    payload_truncated = False
+    if isinstance(payload, ContextPayload):
+        selected_fields = {}
+        allowed_fields = {
+            "program", "status", "facility_id", "weather_variable", "value",
+            "unit", "statistic", "result_kind", "record_type",
+        }
+        for name, value in payload.summary_fields:
+            if name in allowed_fields:
+                selected_fields[name], shortened = _prompt_field_text(value)
+                payload_truncated |= shortened
+        payload_view["summary_fields"] = selected_fields
     base = {
         "data_type": fragment.data_type,
         "collection_status": fragment.collection_status,
@@ -667,19 +722,39 @@ def _bounded_fragment_summary(
             }
             for item_id, page in sorted(latest_pages.items())
         )
-    records = tuple(source_records) + tuple(
-        record
-        for page in latest_pages.values()
-        for record in page.records
-        if record.record_id not in {item.record_id for item in source_records}
-    )
+    records = []
+    seen_record_ids = set()
+    for record in (
+        *(record for _, page in sorted(latest_pages.items()) for record in page.records),
+        *source_records,
+    ):
+        if record.record_id not in seen_record_ids:
+            seen_record_ids.add(record.record_id)
+            records.append(record)
     base["records"] = []
-    truncated = len(records) > _MAX_SUMMARY_RECORDS or any(
+    truncated = payload_truncated or len(records) > _MAX_SUMMARY_RECORDS or any(
         page.next_offset is not None for page in latest_pages.values()
     )
     for record in records[:_MAX_SUMMARY_RECORDS]:
-        view = _source_record_view(record)
+        view, field_truncated = _source_record_view(record)
+        truncated |= field_truncated
         candidate = {**base, "records": [*base["records"], view]}
+        if (
+            isinstance(record, FacilityRecord)
+            and len(canonical_json_text(candidate).encode("utf-8")) > _MAX_SUMMARY_BYTES
+        ):
+            # Keep the identity, status, location, name and type when a provider
+            # supplies many optional facility labels.
+            attributes = view.get("public_attributes", {})
+            view["public_attributes"] = {
+                key: attributes[key]
+                for key in ("facility_name", "facility_type")
+                if key in attributes
+            }
+            view.pop("registry_id", None)
+            view["location"].pop("provider_location_id", None)
+            candidate = {**base, "records": [*base["records"], view]}
+            truncated = True
         if len(canonical_json_text(candidate).encode("utf-8")) > _MAX_SUMMARY_BYTES:
             truncated = True
             break
