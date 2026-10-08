@@ -55,9 +55,14 @@ wateragents-db check
 
 本机迁移验收已确认 Docker Desktop 4.93.0 / Engine 29.8.1 重启后仍使用 D 盘；容器为
 `healthy`，`postgres`、`wateragents`、`wateragents_test` 均存在，迁移前后规范化逻辑
-dump 的 SHA-256 一致；M8 Milestone 2 后当前 schema head 为 `20261007_01`，在既有四表上新增六类 generation/job/projection/consumption 表。migration 受控执行
+dump 的 SHA-256 一致；M8 Milestone 2 时 schema head 为 `20261007_01`，在既有四表上新增六类 generation/job/projection/consumption 表。migration 受控执行
 `CREATE EXTENSION IF NOT EXISTS vector`，正式应用启动与 `wateragents-db check` 只验证
 extension 版本（`>= 0.8.0`）及 schema head，不在启动路径临时安装扩展。
+
+M9 Milestone 2 的代码 head 为 `20261008_01`：在 M8 后新增 typed settings、append-only
+unit policy、Admin operation 与已删除 run 的 idempotency tombstone。`wateragents-db check`
+同时核对 version 1 的 registry digest 和全部 unit entries；不匹配时拒绝启动。
+升级实际数据库前先核对目标库名；不对业务库运行测试命令。
 
 ## 首次启动
 
@@ -94,11 +99,16 @@ docker compose --env-file .env -f compose.yaml exec postgres createdb -U waterag
 ## 测试
 
 `WATERAGENTS_TEST_DB_NAME` 只能设置在测试进程环境中，不能写进 `backend/.env`，且必须与业务库名不同。
+数据库 CLI 的 `--test-database` 会在连接前验证此条件，并显式使用测试库；不要通过
+覆盖 `WATERAGENTS_DB_NAME` 将业务 CLI 指向测试库。PostgreSQL 测试 fixture 会在
+`wateragents_test` 内创建并清理独立 schema。
 
 PowerShell：
 
 ```powershell
 $env:WATERAGENTS_TEST_DB_NAME = 'wateragents_test'
+wateragents-db upgrade --test-database # 仅升级专用测试库
+wateragents-db check --test-database # 仅检查测试库已有 schema
 python -m pytest -q
 python scripts/health_smoke.py
 python scripts/run_history_smoke.py
@@ -109,6 +119,8 @@ bash：
 
 ```bash
 export WATERAGENTS_TEST_DB_NAME='wateragents_test'
+wateragents-db upgrade --test-database # 仅升级专用测试库
+wateragents-db check --test-database # 仅检查测试库已有 schema
 python -m pytest -q
 python scripts/health_smoke.py
 python scripts/run_history_smoke.py

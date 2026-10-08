@@ -60,6 +60,7 @@ class AdminOperation(DomainModel):
                 AdminOperationState.RUNNING, AdminOperationState.INTERRUPTED,
             },
             AdminOperationState.RUNNING: {
+                AdminOperationState.RUNNING,
                 AdminOperationState.SUCCEEDED, AdminOperationState.FAILED,
                 AdminOperationState.INTERRUPTED,
             },

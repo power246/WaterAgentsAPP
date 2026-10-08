@@ -225,8 +225,8 @@ async def _wait_persistence(
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
     postgres_settings: AppSettings,
 ) -> None:
-    assert asyncio.run(check_database_schema(postgres_settings)) == "20261007_01"
-    assert upgrade_database(postgres_settings) == "20261007_01"
+    assert asyncio.run(check_database_schema(postgres_settings)) == "20261008_01"
+    assert upgrade_database(postgres_settings) == "20261008_01"
 
     async def inspect_schema() -> tuple[set[str], set[str], list[object]]:
         engine = create_database_engine(postgres_settings)
@@ -288,11 +288,16 @@ def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
         "rag_case_windows",
         "rag_fragment_projections",
         "rag_consumption_links",
+        "runtime_settings",
+        "unit_policy_versions",
+        "unit_policy_entries",
+        "analysis_run_idempotency_tombstones",
+        "admin_operations",
     }
     assert "ck_analysis_runs_terminal_item_matches_status" in constraints
     assert "ck_analysis_sessions_role_comid" in constraints
     assert "ck_transcript_items_inline_or_preview" in constraints
-    assert schema_diff == []
+    assert schema_diff == [], repr(schema_diff)
 
 
 def test_database_rejects_duplicate_key_sequence_and_agent_identity(

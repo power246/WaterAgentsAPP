@@ -57,6 +57,7 @@ from app.application.transcript_memory.search_policies import (
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
 from app.infrastructure.persistence.rag_consumption import has_valid_consumption_source
 from app.infrastructure.persistence.schema import (
+    analysis_run_idempotency_tombstones,
     analysis_runs,
     analysis_sessions,
     rag_case_projections,
@@ -1455,6 +1456,8 @@ class PostgresRAGRepository:
                             select(
                                 analysis_runs.c.run_id,
                                 analysis_runs.c.status,
+                                analysis_runs.c.idempotency_key,
+                                analysis_runs.c.request_fingerprint,
                             )
                             .where(analysis_runs.c.run_id.in_(target_ids))
                             .order_by(analysis_runs.c.run_id)
@@ -1520,6 +1523,19 @@ class PostgresRAGRepository:
                         analysis_runs.c.run_id.in_(delete_ids)
                     )
                 )
+                tombstones = [
+                    {
+                        "idempotency_key": row["idempotency_key"],
+                        "request_fingerprint": row["request_fingerprint"],
+                        "deleted_run_id": row["run_id"],
+                        "deleted_at": datetime.now(UTC),
+                    }
+                    for row in rows if row["idempotency_key"] is not None
+                ]
+                if tombstones:
+                    await connection.execute(
+                        insert(analysis_run_idempotency_tombstones), tombstones
+                    )
                 return RAGCleanupResult(
                     requested_run_ids=tuple(str(value) for value in requested),
                     deleted_run_ids=delete_order,

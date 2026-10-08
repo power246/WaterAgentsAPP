@@ -14,5 +14,5 @@ class SettingsStorePort(Protocol):
 
     async def append_unit_policy(
         self, *, expected_revision: Revision, expected_unit_version: Version,
-        policy: UnitPolicyVersion,
+        policy: UnitPolicyVersion, replacement: SettingsSnapshot,
     ) -> SettingsSnapshot: ...

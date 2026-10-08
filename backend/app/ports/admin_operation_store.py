@@ -1,4 +1,5 @@
 from typing import Protocol
+from datetime import datetime
 from uuid import UUID
 
 from app.domain.settings_admin import AdminOperation, AdminOperationState
@@ -19,3 +20,5 @@ class AdminOperationStorePort(Protocol):
     async def compare_and_swap_state(
         self, operation: AdminOperation, *, expected: AdminOperationState,
     ) -> AdminOperation: ...
+
+    async def reconcile_interrupted(self, *, now: datetime) -> int: ...

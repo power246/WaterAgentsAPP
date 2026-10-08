@@ -181,39 +181,41 @@
 
 ### 工作
 
-- [ ] 在当前 M8 Alembic head之后新增一个可审查 revision；不得修改或重写已发布 migration。
-- [ ] 创建 singleton `runtime_settings` typed columns/check/FK/revision约束；缺 row时由 service使用 deployment initial defaults，不把完整 `AppSettings` dump写入 JSON。
-- [ ] 创建 append-only `unit_policy_versions` 与 `unit_policy_entries`，包含 registry digest、parameter identity、target unit和 RESTRICT约束；以当前 registry事实建立 version 1并验证 digest/entries一致。
-- [ ] 创建 `analysis_run_idempotency_tombstones`，只保存 key/request fingerprint/deleted run id/time；不保存 body/query/receipt/result。
-- [ ] 创建 `admin_operations`，包含 kind/state/resource/request fingerprint/idempotency key/unique confirmation token digest/bounded safe summary/progress/result/error/timestamps；不创建 confirmation table或 worker-owner/multi-worker列。
-- [ ] 实现 settings repository singleton read/CAS full replacement、unit version append/read、operation insert/read/list/CAS/progress/terminal/reconcile primitives和 tombstone lookup/write。
-- [ ] 对同 resource/kind的 pending/running建立数据库约束或等价原子 conflict；同 token digest、同 idempotency key exact-once，不依赖进程内先查后写。
-- [ ] 扩展 history cleanup store transaction，使 run facts删除、consumption ownership与 idempotency tombstone能在同一事务提交/回滚；此阶段可先实现 repository primitive，不公开 route。
-- [ ] 更新 schema contract、records/mappers、migration CLI/check、测试清理顺序与 Docker指南；专用 test DB与业务库严格隔离。
+- [x] 在当前 M8 Alembic head之后新增一个可审查 revision；不得修改或重写已发布 migration。
+- [x] 创建 singleton `runtime_settings` typed columns/check/FK/revision约束；缺 row时由 service使用 deployment initial defaults，不把完整 `AppSettings` dump写入 JSON。
+- [x] 创建 append-only `unit_policy_versions` 与 `unit_policy_entries`，包含 registry digest、parameter identity、target unit和 RESTRICT约束；以当前 registry事实建立 version 1并验证 digest/entries一致。
+- [x] 创建 `analysis_run_idempotency_tombstones`，只保存 key/request fingerprint/deleted run id/time；不保存 body/query/receipt/result。
+- [x] 创建 `admin_operations`，包含 kind/state/resource/request fingerprint/idempotency key/unique confirmation token digest/bounded safe summary/progress/result/error/timestamps；不创建 confirmation table或 worker-owner/multi-worker列。
+- [x] 实现 settings repository singleton read/CAS full replacement、unit version append/read、operation insert/read/list/CAS/progress/terminal/reconcile primitives和 tombstone lookup/write。
+- [x] 对同 resource/kind的 pending/running建立数据库约束或等价原子 conflict；同 token digest、同 idempotency key exact-once，不依赖进程内先查后写。
+- [x] 扩展 history cleanup store transaction，使 run facts删除、consumption ownership与 idempotency tombstone能在同一事务提交/回滚；此阶段可先实现 repository primitive，不公开 route。
+- [x] 更新 schema contract、records/mappers、migration CLI/check、测试清理顺序与 Docker指南；专用 test DB与业务库严格隔离。
 
 ### Tests
 
-- [ ] fresh database、现有 M8 database upgrade、schema check和受支持 downgrade/upgrade round-trip通过；旧 transcript/RAG事实与 active generation不被重写。
-- [ ] DB integration直接断言 singleton/check/FK/unique/partial-active约束、unit append-only和 bounded typed JSON validation；非法 row不能只靠 application阻止。
-- [ ] 两 transaction settings CAS竞争恰好一方成功；stale revision不丢更新，read顺序/identity稳定。
-- [ ] operation并发创建、同/不同 request fingerprint、token reuse、state CAS、restart query和 terminal immutability有测试，不使用真实 sleep证明竞态。
-- [ ] history delete+tombstone在注入任一步失败时整体回滚；提交后 live idempotency row与 tombstone互斥，无 dangling consumption link。
-- [ ] migration bootstrap的 unit version 1与当前 registry digest/entries一致；registry不匹配时 startup fail closed而非静默重建历史version。
+- [x] fresh database、现有 M8 database upgrade、schema check和受支持 downgrade/upgrade round-trip通过；旧 transcript/RAG事实与 active generation不被重写。
+- [x] DB integration直接断言 singleton/check/FK/unique/partial-active约束、unit append-only和 bounded typed JSON validation；非法 row不能只靠 application阻止。
+- [x] 两 transaction settings CAS竞争恰好一方成功；stale revision不丢更新，read顺序/identity稳定。
+- [x] operation并发创建、同/不同 request fingerprint、token reuse、state CAS、restart query和 terminal immutability有测试，不使用真实 sleep证明竞态。
+- [x] history delete+tombstone在注入任一步失败时整体回滚；提交后 live idempotency row与 tombstone互斥，无 dangling consumption link。
+- [x] migration bootstrap的 unit version 1与当前 registry digest/entries一致；registry不匹配时 startup fail closed而非静默重建历史version。
 
 ### Verify
 
-- [ ] `docker compose config`
-- [ ] 使用专用 `wateragents_test` 运行 `backend/.venv/Scripts/wateragents-db.exe upgrade` 与 `backend/.venv/Scripts/wateragents-db.exe check`
-- [ ] 使用专用测试数据库运行新增 M9 migration/settings/unit/admin/tombstone persistence tests并记录 revision、数据库名与 basetemp。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `docker compose config`
+- [x] 使用专用 `wateragents_test` 运行 `backend/.venv/Scripts/wateragents-db.exe upgrade` 与 `backend/.venv/Scripts/wateragents-db.exe check`
+- [x] 使用专用测试数据库运行新增 M9 migration/settings/unit/admin/tombstone persistence tests并记录 revision、数据库名与 basetemp。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/persistence backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：现有 M8 database可安全升级，四类 M9持久化能力与并发/原子约束可复现；尚未公开 settings/key/admin route，也未改变 provider runtime或实现 frontend。
 
 提交边界：一个 migration、schema/records/repositories、依赖锁如确有需要、database tests与指南；不得包含 keyring、provider HTTP、public route、Admin runner或 frontend。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：在 `codex/m9-milestone-0` 新增 M9 revision `20261008_01`、typed singleton settings、封存后不可变的 unit policy、Admin operation与 idempotency tombstone；实现对应 repository，history cleanup在原有 consumption/run 删除事务末尾写 tombstone。增加显式 `--test-database` CLI 守卫，拒绝测试库名缺失或与业务库相同；Docker指南在原文更新。M3 后续 service负责缺失 settings row 的 deployment defaults，本阶段保持 row absent。
+
+验证：只读核对业务库 `wateragents` 与测试库 `wateragents_test` 不同；使用 CLI `upgrade --test-database` / `check --test-database` 验证专用测试库 head `20261008_01`，并在测试库临时 schema 内验证最终 migration 的 M8 downgrade/CLI upgrade/check round-trip、旧 transcript 与 active generation保持。新增 migration/settings/admin/tombstone focused tests 通过；持久化+架构回归 261 passed（`--basetemp=backend/target/m9-m2-persistence-arch-20261008-c`）；`docker compose config -q`、compileall、`git diff --check` 通过。无公开 route、provider调用或 frontend 变更；真实 provider、跨平台与 M9 最终验收未执行。本地提交见该阶段 HEAD。
 
 ## Milestone 3：Settings、创建快照与浏览器写保护
 

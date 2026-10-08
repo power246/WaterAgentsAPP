@@ -716,3 +716,136 @@ Index(
     rag_consumption_links.c.consumer_session_id,
     rag_consumption_links.c.consumer_item_id,
 )
+
+
+unit_policy_versions = Table(
+    "unit_policy_versions", metadata,
+    Column("version", BigInteger, primary_key=True),
+    Column("registry_digest", Text, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("sealed", Boolean, nullable=False, server_default=text("false")),
+    CheckConstraint("version > 0", name="version_positive"),
+    CheckConstraint("registry_digest ~ '^[0-9a-f]{64}$'", name="digest_sha256"),
+)
+
+unit_policy_entries = Table(
+    "unit_policy_entries", metadata,
+    Column("version", BigInteger, ForeignKey(
+        "unit_policy_versions.version", ondelete="RESTRICT",
+    ), nullable=False),
+    Column("parameter_code_system", Text, nullable=False),
+    Column("parameter_code", Text, nullable=False),
+    Column("target_unit_id", Text, nullable=False),
+    PrimaryKeyConstraint(
+        "version", "parameter_code_system", "parameter_code",
+        name="pk_unit_policy_entries",
+    ),
+    CheckConstraint(
+        "parameter_code_system = 'usgs' AND parameter_code ~ '^[0-9]{5}$'",
+        name="parameter",
+    ),
+    CheckConstraint(
+        "length(btrim(target_unit_id)) BETWEEN 1 AND 100",
+        name="target",
+    ),
+)
+
+runtime_settings = Table(
+    "runtime_settings", metadata,
+    Column("singleton_id", Integer, primary_key=True),
+    Column("schema_version", Integer, nullable=False),
+    Column("revision", BigInteger, nullable=False, unique=True),
+    Column("analysis_timezone", Text, nullable=False),
+    Column("parser_provider", Text, nullable=False),
+    Column("parser_model", Text, nullable=False),
+    Column("waterbody_provider", Text, nullable=False),
+    Column("waterbody_model", Text, nullable=False),
+    Column("memory_mode", Text, nullable=False),
+    Column("time_resolution", Text, nullable=False),
+    Column("desired_embedding_profile_id", Text, nullable=False),
+    Column("active_unit_policy_version", BigInteger, ForeignKey(
+        "unit_policy_versions.version", ondelete="RESTRICT",
+    ), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint("singleton_id = 1", name="singleton"),
+    CheckConstraint("schema_version = 1", name="schema_version"),
+    CheckConstraint("revision > 0", name="revision_positive"),
+    CheckConstraint("length(btrim(analysis_timezone)) BETWEEN 1 AND 100", name="timezone"),
+    CheckConstraint("memory_mode IN ('stateless', 'memory_augmented')", name="memory_mode"),
+    CheckConstraint("time_resolution IN ('auto', '6h', '12h', '24h')", name="time_resolution"),
+    CheckConstraint(
+        "desired_embedding_profile_id ~ '^sha256:[0-9a-f]{64}$'",
+        name="profile_id",
+    ),
+)
+
+analysis_run_idempotency_tombstones = Table(
+    "analysis_run_idempotency_tombstones", metadata,
+    Column("idempotency_key", UUID(as_uuid=True), primary_key=True),
+    Column("request_fingerprint", LargeBinary, nullable=False),
+    Column("deleted_run_id", UUID(as_uuid=True), nullable=False, unique=True),
+    Column("deleted_at", DateTime(timezone=True), nullable=False),
+    CheckConstraint(
+        "octet_length(request_fingerprint) = 32", name="fingerprint_sha256",
+    ),
+    CheckConstraint(
+        "substring(idempotency_key::text from 15 for 1) = '4'", name="key_v4",
+    ),
+)
+
+admin_operations = Table(
+    "admin_operations", metadata,
+    Column("operation_id", UUID(as_uuid=True), primary_key=True),
+    Column("kind", Text, nullable=False),
+    Column("state", Text, nullable=False),
+    Column("resource_identity", Text, nullable=False),
+    Column("request_fingerprint", LargeBinary, nullable=False),
+    Column("idempotency_key", UUID(as_uuid=True), nullable=False),
+    Column("confirmation_token_digest", LargeBinary, nullable=False),
+    Column("safe_request_summary", JSONB, nullable=False),
+    Column("processed_items", Integer, nullable=False, server_default=text("0")),
+    Column("total_items", Integer, nullable=True),
+    Column("succeeded_items", Integer, nullable=False, server_default=text("0")),
+    Column("failed_items", Integer, nullable=False, server_default=text("0")),
+    Column("safe_result", JSONB(none_as_null=True), nullable=True),
+    Column("safe_error", JSONB(none_as_null=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=True),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "kind IN ('history_cleanup', 'profile_handoff', "
+        "'retry_failed_jobs', 'generation_deletion')", name="kind",
+    ),
+    CheckConstraint(
+        "state IN ('pending', 'running', 'succeeded', 'failed', 'interrupted')",
+        name="state",
+    ),
+    CheckConstraint(
+        "length(btrim(resource_identity)) BETWEEN 1 AND 256", name="resource",
+    ),
+    CheckConstraint(
+        "octet_length(request_fingerprint) = 32 AND "
+        "octet_length(confirmation_token_digest) = 32", name="fingerprints",
+    ),
+    CheckConstraint(
+        "processed_items >= 0 AND succeeded_items >= 0 AND failed_items >= 0 "
+        "AND succeeded_items + failed_items <= processed_items AND "
+        "(total_items IS NULL OR (total_items >= 0 AND processed_items <= total_items))",
+        name="progress",
+    ),
+    UniqueConstraint("idempotency_key", name="uq_admin_operations_idempotency_key"),
+    UniqueConstraint(
+        "confirmation_token_digest", name="uq_admin_operations_confirmation_digest",
+    ),
+)
+
+Index(
+    "uq_admin_operations_one_active_resource",
+    admin_operations.c.kind, admin_operations.c.resource_identity,
+    unique=True,
+    postgresql_where=admin_operations.c.state.in_(("pending", "running")),
+)
+Index(
+    "ix_admin_operations_recent",
+    admin_operations.c.created_at.desc(), admin_operations.c.operation_id.desc(),
+)

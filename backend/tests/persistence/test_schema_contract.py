@@ -13,6 +13,11 @@ def test_schema_has_core_transcript_and_m8_rag_tables() -> None:
         "rag_case_windows",
         "rag_fragment_projections",
         "rag_consumption_links",
+        "runtime_settings",
+        "unit_policy_versions",
+        "unit_policy_entries",
+        "analysis_run_idempotency_tombstones",
+        "admin_operations",
     }
 
 
@@ -77,6 +82,8 @@ def test_schema_has_the_declared_query_and_rag_indexes() -> None:
         "ix_rag_fragments_lookup",
         "ix_rag_consumption_source",
         "ix_rag_consumption_consumer",
+        "uq_admin_operations_one_active_resource",
+        "ix_admin_operations_recent",
     }
 
 
