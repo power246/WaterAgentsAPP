@@ -62,6 +62,7 @@ def test_runtime_openapi_is_frontend_type_source_including_session_sse_union(ope
     assert "nodes" in schemas["HydrologyGraph"]["properties"]
     assert "series" in schemas["InferenceResult"]["properties"]
     assert "plain_language_summary" in schemas["RunSummaryResult"]["properties"]
+    assert "unit_options" in schemas["SettingsCatalogProjection"]["properties"]
 
 
 def test_request_response_schema_separation_and_key_allowlist(openapi):

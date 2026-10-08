@@ -10,6 +10,7 @@ from app.application.settings_admin.errors import (
     SettingsUnavailableError,
 )
 from app.domain.memory import MemoryMode
+from app.domain.hydrology import ParameterCapabilityRegistry
 from app.domain.model_catalog_snapshot import ModelCatalogSnapshot
 from app.domain.model_role import ModelRole
 from app.domain.settings_admin import (
@@ -45,6 +46,7 @@ class SettingsService:
     def __init__(
         self, store: SettingsStorePort, catalog: ModelCatalogSnapshot,
         defaults: MutableDefaults, clock: ClockPort,
+        unit_registry: ParameterCapabilityRegistry | None = None,
     ) -> None:
         validate_mutable_defaults(defaults, catalog)
         self._store = store
@@ -53,6 +55,7 @@ class SettingsService:
         self._clock = clock
         self.catalog: SettingsCatalogProjection = safe_settings_catalog(
             catalog, iana_timezones=tuple(sorted(available_timezones())),
+            unit_registry=unit_registry,
         )
 
     async def get_snapshot(self) -> SettingsSnapshot:

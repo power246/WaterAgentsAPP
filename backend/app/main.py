@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 from typing import AsyncContextManager, Coroutine
 from uuid import UUID, uuid4
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from app.api.http.analysis_runs import REQUEST_ID_HEADERS, error_responses
 from app.api.http.analysis_runs import router as analysis_runs_router
@@ -76,6 +78,7 @@ from app.infrastructure.credentials.tester import ProviderCredentialTester
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
 from app.infrastructure.runtime.system_clock import SystemClock
+from app.infrastructure.web.frontend import FrontendResponder
 from app.infrastructure.runtime import (
     M6Runtime,
     M8Runtime,
@@ -132,6 +135,7 @@ def create_app(
     m8_runtime_builder: (
         Callable[..., AsyncContextManager[M8Runtime]] | None
     ) = None,
+    frontend_dist: Path | None = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
     if not _loopback(resolved_settings.host):
@@ -141,9 +145,14 @@ def create_app(
     resolved_parameter_capabilities = (
         parameter_capability_registry or load_parameter_capability_registry()
     )
+    frontend_responder = FrontendResponder(frontend_dist) if frontend_dist is not None else FrontendResponder()
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         configure_logging(resolved_settings.log_level)
+        logging.getLogger("wateragents.startup").info(
+            "Frontend availability: %s.",
+            "available" if frontend_responder.available else "unavailable",
+        )
         engine = None
         coordinator = None
         m8_runtime = None
@@ -182,6 +191,7 @@ def create_app(
                 settings_service = SettingsService(
                     active_settings_store, resolved_model_catalog.snapshot(),
                     initial_defaults, resolved_clock,
+                    unit_registry=resolved_parameter_capabilities,
                 )
             except ValueError as error:
                 raise SettingsConfigurationError(
@@ -443,6 +453,7 @@ def create_app(
     application.state.clock = resolved_clock
     application.state.id_factory = id_factory
     application.state.parameter_capability_registry = resolved_parameter_capabilities
+    application.state.frontend_responder = frontend_responder
     application.add_middleware(
         LocalMutationGuardMiddleware,
         bind_host=resolved_settings.host, bind_port=resolved_settings.port,
@@ -456,6 +467,12 @@ def create_app(
     application.include_router(settings_router)
     application.include_router(keys_router)
     application.include_router(admin_router)
+
+    async def frontend_navigation(request: Request):
+        return await frontend_responder.respond(request, request.path_params.get("full_path", ""))
+
+    application.add_api_route("/", frontend_navigation, methods=["GET", "HEAD"], include_in_schema=False)
+    application.add_api_route("/{full_path:path}", frontend_navigation, methods=["GET", "HEAD"], include_in_schema=False)
 
     generated_openapi = application.openapi
 

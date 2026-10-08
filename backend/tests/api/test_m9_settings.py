@@ -52,6 +52,11 @@ def test_settings_get_put_conflict_and_safe_catalog(caplog) -> None:
             assert body["defaults"]["analysis_timezone"] == "UTC"
             assert body["unit_policy"]["version"] == 1
             assert len(body["unit_policy"]["entries"]) == 154
+            unit_options = body["catalog"]["unit_options"]
+            assert len(unit_options) == 154
+            discharge = next(item for item in unit_options if item["parameter"] == {"code_system": "usgs", "code": "00060"})
+            assert discharge["source_unit_id"] in {unit["unit_id"] for unit in discharge["target_units"]}
+            assert len({unit["dimension_id"] for unit in discharge["target_units"]}) == 1
             assert {"UTC", "Asia/Shanghai"} <= set(body["catalog"]["iana_timezones"])
             assert all("embedding" not in option["roles"] for option in body["catalog"]["models"])
             assert SECRET not in initial.text

@@ -24,6 +24,19 @@ test('workspace routes and form use the current API surface', async ({ page }) =
     status: 200, contentType: 'application/json', body: JSON.stringify(settings),
   }))
   await page.route('**/api/analysis/runs?limit=50', async (route) => route.fulfill({ json: { items: [], next_cursor: null } }))
+  await page.route('**/api/admin/storage', async (route) => route.fulfill({ json: {
+    history: { state: 'available' }, rag_index: { state: 'available' },
+    credential_store: { state: 'available' }, evidence_cache: { state: 'not_present' },
+  } }))
+  await page.route('**/api/admin/rag', async (route) => route.fulfill({ json: {
+    index: { active_generation_id: null, generations: [] },
+    handoff: { desired_profile_digest: 'a'.repeat(64), phase: 'build_required',
+      active_generation_id: null, building_generation_id: null, blocking_reader_count: 0,
+      old_credential_cleanup_ready: false },
+  } }))
+  await page.route('**/api/admin/operations?limit=50', async (route) => route.fulfill({ json: {
+    items: [], next_cursor: null,
+  } }))
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'New analysis' })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Overview' })).toBeVisible()

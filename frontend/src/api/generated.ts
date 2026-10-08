@@ -2373,6 +2373,11 @@ export interface components {
             models: components["schemas"]["ModelOption"][];
             /** Time Resolutions */
             time_resolutions: components["schemas"]["TimeResolutionPreference"][];
+            /**
+             * Unit Options
+             * @default []
+             */
+            unit_options: components["schemas"]["UnitParameterOption"][];
         };
         /** SettingsConflictResponse */
         SettingsConflictResponse: {
@@ -2811,6 +2816,25 @@ export interface components {
          * @enum {string}
          */
         TrendDirection: "rising" | "falling" | "stable" | "uncertain";
+        /** UnitCatalogChoice */
+        UnitCatalogChoice: {
+            /** Dimension Id */
+            dimension_id: string;
+            /** Symbol */
+            symbol: string;
+            /** Unit Id */
+            unit_id: string;
+        };
+        /** UnitParameterOption */
+        UnitParameterOption: {
+            /** Name */
+            name: string;
+            parameter: components["schemas"]["ParameterKey"];
+            /** Source Unit Id */
+            source_unit_id: string;
+            /** Target Units */
+            target_units: components["schemas"]["UnitCatalogChoice"][];
+        };
         /** UnitPolicyChange */
         UnitPolicyChange: {
             /** Dimension Id */

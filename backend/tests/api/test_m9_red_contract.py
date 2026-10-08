@@ -56,7 +56,6 @@ def test_create_contract_declares_deleted_idempotency_receipt(application) -> No
     assert "410" in response_codes
 
 
-@pytest.mark.xfail(strict=True, reason="M9 Milestone 8: same-origin static frontend")
 def test_production_app_registers_static_frontend_navigation(application) -> None:
     assert any(
         (getattr(route, "path", None) == "/")

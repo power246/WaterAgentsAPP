@@ -433,46 +433,48 @@
 
 ### 工作
 
-- [ ] 实现Settings drawer：analysis defaults、Units、Memory/RAG、Credentials和Admin入口；关闭保留当前run视图，未保存draft确认丢弃。
-- [ ] 普通settings full replacement携带revision；409保留draft并展示server current values，要求用户重新确认，不做field-level自动merge。
-- [ ] 实现global unit preview/confirm UI，展示diff/version/registry与required phrase；不能通过普通save或本地checkbox绕过新preview。
-- [ ] 实现OpenAI/Google credential rows与save/delete/test；输入提交后从component state/DOM清除，deployment fallback语义正确，USGS/Grok/arbitrary provider不出现。
-- [ ] 实现Admin storage/RAG/operations页：history cleanup、profile handoff、failed jobs retry、inactive generation delete、active/recent operations；不提供clear-all/evidence-cache/arbitrary SQL/generation文本执行。
-- [ ] Admin preview展示dependencies/cascade/counts/preserved resources/tombstones/reader/usage warning；execute只回传server token/phrase与新UUIDv4 idempotency key，stale/expired重新preview。
-- [ ] operation收到202后只在Admin可见且active时按server hint有界poll；离开停止poll但不取消，返回按identity恢复，terminal停止，不能创建第三SSE。
-- [ ] 配置Vite dev proxy代理`/api`和SSE并保持streaming bytes；业务代码继续只用relative URL。
-- [ ] backend static responder同origin提供`frontend/dist`：API/SSE route优先、HTML navigation fallback、API 404保留JSON、MIME、hashed immutable/index no-cache、HEAD/path traversal/dist missing有界处理。
-- [ ] production composition/health/startup log安全表达frontend available/unavailable；不得fallback到`frontend_bk/`或因dist missing阻止纯API tests/CLI构造app。
-- [ ] 增加desktop/narrow screenshot baselines，以M9自身为准；不要求旧UI逐像素一致，不移动多个已冻结高频入口。
+- [x] 实现Settings drawer：analysis defaults、Units、Memory/RAG、Credentials和Admin入口；关闭保留当前run视图，未保存draft确认丢弃。
+- [x] 普通settings full replacement携带revision；409保留draft并展示server current values，要求用户重新确认，不做field-level自动merge。
+- [x] 实现global unit preview/confirm UI，展示diff/version/registry与required phrase；不能通过普通save或本地checkbox绕过新preview。
+- [x] 实现OpenAI/Google credential rows与save/delete/test；输入提交后从component state/DOM清除，deployment fallback语义正确，USGS/Grok/arbitrary provider不出现。
+- [x] 实现Admin storage/RAG/operations页：history cleanup、profile handoff、failed jobs retry、inactive generation delete、active/recent operations；不提供clear-all/evidence-cache/arbitrary SQL/generation文本执行。
+- [x] Admin preview展示dependencies/cascade/counts/preserved resources/tombstones/reader/usage warning；execute只回传server token/phrase与新UUIDv4 idempotency key，stale/expired重新preview。
+- [x] operation收到202后只在Admin可见且active时按server hint有界poll；离开停止poll但不取消，返回按identity恢复，terminal停止，不能创建第三SSE。
+- [x] 配置Vite dev proxy代理`/api`和SSE并保持streaming bytes；业务代码继续只用relative URL。
+- [x] backend static responder同origin提供`frontend/dist`：API/SSE route优先、HTML navigation fallback、API 404保留JSON、MIME、hashed immutable/index no-cache、HEAD/path traversal/dist missing有界处理。
+- [x] production composition/health/startup log安全表达frontend available/unavailable；不得fallback到`frontend_bk/`或因dist missing阻止纯API tests/CLI构造app。
+- [x] 增加desktop/narrow screenshot baselines，以M9自身为准；不要求旧UI逐像素一致，不移动多个已冻结高频入口。
 
 ### Tests
 
-- [ ] Settings component/integration覆盖defaults/catalog、revision conflict/draft、invalid field、server unavailable、unit preview/confirm和future-run提示。
-- [ ] credential UI测试证明raw value不进DOM snapshot/console/localStorage/error，save不触发test，delete deployment fallback与store unavailable准确。
-- [ ] Admin integration覆盖preview/phrase/token/idempotency、cascade second preview、202/poll/reopen/terminal、stale/expired/conflict与无evidence-cache按钮。
-- [ ] static hosting测试覆盖index/assets/MIME/cache/HEAD/SPA fallback/API 404/SSE headers/path traversal/dist missing；frontend_bk永不读取。
-- [ ] dev proxy integration证明SSE跨chunk实时到达、不buffer/改写，Origin/Host行为满足backend local mutation guard。
-- [ ] visual tests覆盖桌面三栏、窄屏降级、七种地图状态、Settings drawer、Admin operation；动画/时间/随机identity在截图中受控。
-- [ ] production browser smoke从backend-served build访问相对API，无CORS、绝对dev URL、source map secret或archive asset。
+- [x] Settings component/integration覆盖defaults/catalog、revision conflict/draft、invalid field、server unavailable、unit preview/confirm和future-run提示。
+- [x] credential UI测试证明raw value不进DOM snapshot/console/localStorage/error，save不触发test，delete deployment fallback与store unavailable准确。
+- [x] Admin integration覆盖preview/phrase/token/idempotency、cascade second preview、202/poll/reopen/terminal、stale/expired/conflict与无evidence-cache按钮。
+- [x] static hosting测试覆盖index/assets/MIME/cache/HEAD/SPA fallback/API 404/SSE headers/path traversal/dist missing；frontend_bk永不读取。
+- [x] dev proxy integration证明SSE跨chunk实时到达、不buffer/改写，Origin/Host行为满足backend local mutation guard。
+- [x] visual tests覆盖桌面三栏、窄屏降级、七种地图状态、Settings drawer、Admin operation；动画/时间/随机identity在截图中受控。
+- [x] production browser smoke从backend-served build访问相对API，无CORS、绝对dev URL、source map secret或archive asset。
 
 ### Verify
 
-- [ ] `npm --prefix frontend ci`
-- [ ] `npm --prefix frontend run lint`
-- [ ] `npm --prefix frontend run typecheck`
-- [ ] `npm --prefix frontend run test -- --run`
-- [ ] `npm --prefix frontend run build`
-- [ ] `npm --prefix frontend run test:e2e`（使用deterministic fake backend，不产生外部调用）
-- [ ] 运行新增backend static-host/settings/key/admin API integration tests与OpenAPI tests。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/api backend/tests/infrastructure -q`
-- [ ] 对source、bundle、snapshot、console与test artifacts执行secret/archive-path scan。
-- [ ] `git diff --check`
+- [x] `npm --prefix frontend ci`
+- [x] `npm --prefix frontend run lint`
+- [x] `npm --prefix frontend run typecheck`
+- [x] `npm --prefix frontend run test -- --run`
+- [x] `npm --prefix frontend run build`
+- [x] `npm --prefix frontend run test:e2e`（使用deterministic fake backend，不产生外部调用）
+- [x] 运行新增backend static-host/settings/key/admin API integration tests与OpenAPI tests。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture backend/tests/api backend/tests/infrastructure -q`
+- [x] 对source、bundle、snapshot、console与test artifacts执行secret/archive-path scan。
+- [x] `git diff --check`
 
 阶段出口：Settings/Keys/Admin与production-hosted frontend通过同origin真实surface工作；用户离开/重开页面可恢复operation，secret与archive不进入browser/build，API/SSE语义未被SPA破坏。
 
 提交边界：Settings/Admin UI、proxy/static hosting、browser integration/visual tests与必要backend wiring；不得包含真实provider结果、installer/desktop/auth/remote部署或无关UI重设计。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：Settings drawer 接入当前 catalog、revision/full replacement、154 项 registry 单位选项与独立 preview/confirm；密钥只呈现 OpenAI/Google 允许动作，保存清空输入且测试连接须单独触发。Admin 提供 storage/RAG/history cleanup、profile handoff、失败 job retry、inactive generation 删除和 operation 恢复；同类活动 operation 不重复提交。后端按同源提供生产构建，API/SSE 优先，health header 与 startup log 表达 frontend 可用性；Vite 代理保留 SSE 分块和本地 Origin/Host 语义。当前 operation API 未提供 poll hint，Admin 使用立即/1/2/5 秒有界轮询并在页面隐藏或终态停止。新增 Settings、Admin、静态托管、代理和浏览器截图回归，未创建额外说明文档。
+
+验证：`npm ci`、lint、typecheck、OpenAPI drift check、build 与 33 项 frontend 测试通过；Chrome deterministic E2E 4 passed、1 production-only skipped，另以 backend-served build 跑 production Chrome smoke 1 passed。新增及既有 backend architecture/API/infrastructure 使用 `wateragents_test`、`--basetemp=backend/target/m9-m8-broad-pg-final-20261008` 为 726 passed；最后静态缓存调整后 focused API 82 passed。源码、bundle、截图与 test artifacts 共 29 文件扫描无 secret/archive 命中，浏览器 console 断言无提交的假密钥，`git diff --check` 通过。构建报告现有单 JS chunk 约 825 kB 警告；真实 provider、OS credential backend、跨平台浏览器与 M9 整体验收尚未执行。本地提交见该阶段 HEAD。
 
 ## Milestone 9：端到端验收、契约审计与交付证据
 

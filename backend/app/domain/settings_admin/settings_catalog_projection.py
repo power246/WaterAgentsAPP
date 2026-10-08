@@ -8,6 +8,7 @@ from app.domain.time.time_resolution_preference import TimeResolutionPreference
 from app.domain.time.timezone import get_iana_timezone
 from .embedding_profile_option import EmbeddingProfileOption
 from .model_option import ModelOption
+from .unit_parameter_option import UnitParameterOption
 
 
 class SettingsCatalogProjection(DomainModel):
@@ -16,6 +17,7 @@ class SettingsCatalogProjection(DomainModel):
     memory_modes: tuple[MemoryMode, ...]
     time_resolutions: tuple[TimeResolutionPreference, ...]
     iana_timezones: tuple[NonEmptyString, ...]
+    unit_options: tuple[UnitParameterOption, ...] = ()
 
     @field_validator("iana_timezones")
     @classmethod

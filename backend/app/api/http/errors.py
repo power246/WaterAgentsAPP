@@ -346,7 +346,12 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         status, code, message = 503, "service_unavailable", "The service is shutting down."
         retryable = True
     elif isinstance(exception, HTTPException):
-        status = exception.status_code
+        static_api_miss = (
+            exception.status_code == 405
+            and request.url.path.startswith("/api/")
+            and getattr(request.scope.get("route"), "path", None) == "/{full_path:path}"
+        )
+        status = 404 if static_api_miss else exception.status_code
         code, message = {
             400: ("invalid_request", "The request is invalid."),
             404: ("not_found", "The requested resource was not found."),
@@ -354,7 +359,8 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
             422: ("validation_error", "The request is invalid."),
             500: ("internal_error", "The request could not be completed."),
         }.get(status, ("http_error", "The HTTP request could not be completed."))
-        headers.update(exception.headers or {})
+        if not static_api_miss:
+            headers.update(exception.headers or {})
     error = HttpPublicError(
         error_id=request.app.state.id_factory(),
         request_id=request.state.request_id,

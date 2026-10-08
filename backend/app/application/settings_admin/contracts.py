@@ -10,8 +10,8 @@ from app.domain.model_catalog_snapshot import ModelCatalogSnapshot
 from app.domain.model_role import ModelRole
 from app.domain.settings_admin import (
     CredentialName, CredentialSource, CredentialStatus, EmbeddingProfileOption,
-    ModelOption, MutableDefaults, SettingsCatalogProjection, UnitPolicyEntry,
-    UnitPolicyProjection,
+    ModelOption, MutableDefaults, SettingsCatalogProjection, UnitCatalogChoice,
+    UnitParameterOption, UnitPolicyEntry, UnitPolicyProjection,
 )
 from app.domain.time.time_resolution_preference import TimeResolutionPreference
 from app.domain.memory import MemoryMode
@@ -31,6 +31,7 @@ _CREDENTIAL_METADATA = {
 
 def safe_settings_catalog(
     catalog: ModelCatalogSnapshot, *, iana_timezones: tuple[str, ...],
+    unit_registry: ParameterCapabilityRegistry | None = None,
 ) -> SettingsCatalogProjection:
     options = tuple(
         ModelOption(
@@ -51,12 +52,37 @@ def safe_settings_catalog(
         for item in catalog.capabilities
         if item.embedding_profile is not None
     )
+    unit_options = tuple(
+        UnitParameterOption(
+            parameter=capability.key,
+            name=capability.canonical_name,
+            source_unit_id=capability.unit_policy_id,
+            target_units=tuple(
+                UnitCatalogChoice(
+                    unit_id=unit.unit_id,
+                    symbol=unit.symbol,
+                    dimension_id=unit.dimension_id,
+                )
+                for unit in sorted(unit_registry.unit_definitions.values(), key=lambda item: item.unit_id)
+                if unit.dimension_id == unit_registry.unit_definitions[capability.unit_policy_id].dimension_id
+                and (
+                    unit.unit_id == capability.unit_policy_id
+                    or (
+                        unit.kind is not UnitKind.IDENTITY_ONLY
+                        and unit_registry.unit_definitions[capability.unit_policy_id].kind is not UnitKind.IDENTITY_ONLY
+                    )
+                )
+            ),
+        )
+        for capability in unit_registry.capabilities
+    ) if unit_registry is not None else ()
     return SettingsCatalogProjection(
         models=options,
         embedding_profiles=embedding,
         memory_modes=tuple(MemoryMode),
         time_resolutions=tuple(TimeResolutionPreference),
         iana_timezones=iana_timezones,
+        unit_options=unit_options,
     )
 
 

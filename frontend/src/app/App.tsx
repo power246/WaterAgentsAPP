@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useReducer, useState } from 'react'
 import { BrowserRouter, Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError, type Settings, type TranscriptItem } from '../api/http'
+import { AdminPage } from '../features/admin/AdminPage'
 import { subscribe } from '../api/sse'
 import { DetailPanel, type DetailTab } from '../features/analysis/DetailPanel'
 import { NewAnalysisForm } from '../features/analysis/NewAnalysisForm'
@@ -10,23 +11,9 @@ import { graphFromDetail, inferenceFromText, summaryFromText, type InferenceResu
 import { emptyRun, emptyTranscript, runReducer, transcriptReducer } from '../features/analysis/state'
 import { DeleteRun } from '../features/history/DeleteRun'
 import { HistoryList } from '../features/history/HistoryList'
+import { SettingsDrawer } from '../features/settings/SettingsDrawer'
 
 type Mode = 'home' | 'history' | 'run'
-
-function SettingsDrawer({ settings, onClose }: { settings: Settings | null; onClose: () => void }) {
-  return <div className="dialog-backdrop" role="presentation" onClick={onClose}>
-    <aside className="settings-drawer" aria-label="Settings" onClick={(event) => event.stopPropagation()}>
-      <div className="panel-title"><h2>Settings</h2><button type="button" onClick={onClose}>Close</button></div>
-      {settings ? <>
-        <p>Analysis timezone: {settings.defaults.analysis_timezone}</p>
-        <p>Parser: {settings.defaults.parser_model.provider} / {settings.defaults.parser_model.model}</p>
-        <p>Waterbody: {settings.defaults.waterbody_model.provider} / {settings.defaults.waterbody_model.model}</p>
-        <p>Memory: {settings.defaults.memory_mode}</p>
-      </> : <p>Settings unavailable.</p>}
-      <Link to="/admin" onClick={onClose}>Advanced / Admin</Link>
-    </aside>
-  </div>
-}
 
 function Workspace({ mode }: { mode: Mode }) {
   const params = useParams()
@@ -223,20 +210,16 @@ function Workspace({ mode }: { mode: Mode }) {
           result={result} summary={summary} tab={tab} onTab={setTab} onRefresh={refresh} />
       </div>
     </main>
-    {settingsOpen && <SettingsDrawer settings={settings} onClose={() => setSettingsOpen(false)} />}
-    {deleteOpen && runId && <DeleteRun runId={runId} onClose={() => setDeleteOpen(false)} onDeleted={() => {
+    {settingsOpen && (settings
+      ? <SettingsDrawer settings={settings} onSettings={setSettings} onClose={() => setSettingsOpen(false)} />
+      : <div className="dialog-backdrop"><div className="dialog"><p>{settingsError || 'Loading settings…'}</p>
+        <button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div></div>)}
+    {deleteOpen && runId && <DeleteRun runId={runId} onClose={() => setDeleteOpen(false)} onAccepted={() => {
       setDeleteOpen(false)
       setHistoryVersion((value) => value + 1)
-      if (mode === 'history') setSearch({})
-      else navigate('/history')
+      navigate('/admin')
     }} />}
   </div>
-}
-
-function AdminPlaceholder() {
-  return <main className="simple-page"><Link to="/">Water Agents</Link><h1>Advanced / Admin</h1>
-    <p>Administration is available from the backend. Return to analysis or history.</p>
-    <Link to="/history">History</Link></main>
 }
 
 function NotFound() {
@@ -249,7 +232,7 @@ export function App() {
     <Route path="/history" element={<Workspace mode="history" />} />
     <Route path="/runs/:runId" element={<Workspace mode="run" />} />
     <Route path="/runs/:runId/waterbodies/:sessionId" element={<Workspace mode="run" />} />
-    <Route path="/admin" element={<AdminPlaceholder />} />
+    <Route path="/admin" element={<AdminPage />} />
     <Route path="*" element={<NotFound />} />
   </Routes></BrowserRouter>
 }

@@ -11,7 +11,7 @@ from app.domain.settings_admin.settings import (
     Digest, EmbeddingProfileOption, ModelOption, MutableDefaults, ProfileId,
     Revision, SessionUnitOverride, UnitPreference, SettingsCatalogProjection, SettingsSnapshot,
     UnitPolicyChange, UnitPolicyEntry, UnitPolicyPreview, UnitPolicyProjection,
-    UnitPolicyVersion, Version,
+    UnitPolicyVersion, UnitCatalogChoice, UnitParameterOption, Version,
 )
 
 __all__ = [
@@ -24,6 +24,7 @@ __all__ = [
     "IdempotencyTombstone", "ModelOption", "MutableDefaults", "ProfileHandoffResult",
     "ProfileId", "RetryFailedJobsResult", "Revision",
     "SessionUnitOverride", "UnitPreference", "SettingsCatalogProjection", "SettingsSnapshot",
-    "StoredCredential", "UnitPolicyChange", "UnitPolicyEntry", "UnitPolicyPreview",
+    "StoredCredential", "UnitCatalogChoice", "UnitParameterOption",
+    "UnitPolicyChange", "UnitPolicyEntry", "UnitPolicyPreview",
     "UnitPolicyProjection", "UnitPolicyVersion", "Version",
 ]

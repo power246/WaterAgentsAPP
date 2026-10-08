@@ -8,6 +8,19 @@ export type RunHistory = Schema<'RunHistoryResponse'>
 export type SessionTranscript = Schema<'SessionTranscriptResponse'>
 export type ContentResponse = Schema<'TranscriptContentResponse'>
 export type Settings = Schema<'SettingsResponse'>
+export type Defaults = Schema<'MutableDefaults'>
+export type UnitEntry = Schema<'UnitPolicyEntry'>
+export type UnitPreview = Schema<'UnitPolicyPreviewResponse'>
+export type UnitPolicy = Schema<'UnitPolicyResponse'>
+export type KeyStatus = Schema<'KeyStatusItem'>
+export type KeyList = Schema<'KeyStatusResponse'>
+export type KeyTest = Schema<'CredentialTestResponse'>
+export type AdminStorage = Schema<'AdminStorageStatusResponse'>
+export type AdminRag = Schema<'AdminRAGStatusResponse'>
+export type AdminOperationList = Schema<'AdminOperationListResponse'>
+export type ProfilePreview = Schema<'ProfileHandoffPreviewResponse'>
+export type GenerationPreview = Schema<'GenerationPreviewResponse'>
+export type AdminKind = Schema<'AdminActionKind'>
 export type CleanupPreview = Schema<'HistoryCleanupPreviewResponse'>
 export type AdminOperation = Schema<'AdminOperationSnapshot'>
 export type RunSnapshot = Schema<'RunSnapshotEvent'>
@@ -20,6 +33,7 @@ export class ApiError extends Error {
     readonly code: string,
     readonly requestId: string | null,
     readonly historyUrl: string | null = null,
+    readonly currentSettings: Settings | null = null,
   ) {
     super(code)
   }
@@ -79,13 +93,60 @@ function adminOperation(value: unknown): value is AdminOperation {
   return record(value) && typeof value.operation_id === 'string' && typeof value.state === 'string'
 }
 
-function errorEnvelope(value: unknown): { code: string; historyUrl: string | null } {
-  if (!record(value)) return { code: 'invalid_error_response', historyUrl: null }
+function unitPreview(value: unknown): value is UnitPreview {
+  return record(value) && record(value.proposed) && Array.isArray(value.changes) &&
+    Array.isArray(value.affected_dimensions) && typeof value.registry_digest === 'string'
+}
+
+function unitPolicy(value: unknown): value is UnitPolicy {
+  return record(value) && Number.isSafeInteger(value.version) && Array.isArray(value.entries) &&
+    typeof value.registry_digest === 'string'
+}
+
+function keyStatus(value: unknown): value is KeyStatus {
+  return record(value) && (value.key_name === 'openai' || value.key_name === 'google_geocoding') &&
+    typeof value.configured === 'boolean' && typeof value.source === 'string' &&
+    typeof value.store_available === 'boolean'
+}
+
+function keyList(value: unknown): value is KeyList {
+  return record(value) && Array.isArray(value.keys) && value.keys.every(keyStatus)
+}
+
+function keyTest(value: unknown): value is KeyTest {
+  return record(value) && typeof value.key_name === 'string' &&
+    (value.status === 'succeeded' || value.status === 'failed')
+}
+
+function adminStorage(value: unknown): value is AdminStorage {
+  return record(value) && record(value.history) && record(value.rag_index) &&
+    record(value.evidence_cache) && record(value.credential_store)
+}
+
+function adminRag(value: unknown): value is AdminRag {
+  return record(value) && record(value.index) && record(value.handoff)
+}
+
+function operationList(value: unknown): value is AdminOperationList {
+  return record(value) && Array.isArray(value.items) && value.items.every(adminOperation)
+}
+
+function profilePreview(value: unknown): value is ProfilePreview {
+  return record(value) && record(value.handoff) && typeof value.estimated_jobs === 'number'
+}
+
+function generationPreview(value: unknown): value is GenerationPreview {
+  return record(value) && typeof value.generation_id === 'string' && typeof value.affected_jobs === 'number'
+}
+
+function errorEnvelope(value: unknown): { code: string; historyUrl: string | null; currentSettings: Settings | null } {
+  if (!record(value)) return { code: 'invalid_error_response', historyUrl: null, currentSettings: null }
   const detail = value.error
   return {
     code: record(detail) && typeof detail.code === 'string' ? detail.code : 'invalid_error_response',
     historyUrl: typeof value.history_url === 'string' && value.history_url.startsWith('/api/analysis/runs/')
       ? value.history_url : null,
+    currentSettings: settingsResponse(value.current_settings) ? value.current_settings : null,
   }
 }
 
@@ -100,7 +161,7 @@ export class ApiClient {
 
   private async send<T>(
     path: `/api/${string}`,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     valid: (value: unknown) => value is T,
     options: { body?: string; headers?: HeadersInit; signal?: AbortSignal } = {},
   ): Promise<T> {
@@ -128,7 +189,7 @@ export class ApiClient {
     }
     if (!response.ok) {
       const detail = errorEnvelope(value)
-      throw new ApiError(response.status, detail.code, requestId, detail.historyUrl)
+      throw new ApiError(response.status, detail.code, requestId, detail.historyUrl, detail.currentSettings)
     }
     if (!valid(value)) throw new ApiError(response.status, 'invalid_response', requestId)
     return value
@@ -136,6 +197,86 @@ export class ApiClient {
 
   settings(signal?: AbortSignal): Promise<Settings> {
     return this.send('/api/settings', 'GET', settingsResponse, { signal })
+  }
+
+  replaceSettings(expectedRevision: number, defaults: Defaults): Promise<Settings> {
+    return this.send('/api/settings', 'PUT', settingsResponse, {
+      body: JSON.stringify({ expected_revision: expectedRevision, defaults }),
+    })
+  }
+
+  previewUnitPolicy(baseVersion: number, entries: UnitEntry[]): Promise<UnitPreview> {
+    return this.send('/api/settings/unit-policies/preview', 'POST', unitPreview, {
+      body: JSON.stringify({ base_version: baseVersion, entries }),
+    })
+  }
+
+  confirmUnitPolicy(token: string, phrase: string): Promise<UnitPolicy> {
+    return this.send('/api/settings/unit-policies', 'POST', unitPolicy, {
+      body: JSON.stringify({ confirmation_token: token, confirmation_phrase: phrase }),
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    })
+  }
+
+  keys(signal?: AbortSignal): Promise<KeyList> {
+    return this.send('/api/keys', 'GET', keyList, { signal })
+  }
+
+  saveKey(name: KeyStatus['key_name'], value: string): Promise<KeyStatus> {
+    return this.send(`/api/keys/${name}`, 'PUT', keyStatus, { body: JSON.stringify({ value }) })
+  }
+
+  deleteKey(name: KeyStatus['key_name']): Promise<KeyStatus> {
+    return this.send(`/api/keys/${name}`, 'DELETE', keyStatus)
+  }
+
+  testKey(name: KeyStatus['key_name']): Promise<KeyTest> {
+    return this.send(`/api/keys/${name}/test`, 'POST', keyTest)
+  }
+
+  adminStorage(signal?: AbortSignal): Promise<AdminStorage> {
+    return this.send('/api/admin/storage', 'GET', adminStorage, { signal })
+  }
+
+  adminRag(signal?: AbortSignal): Promise<AdminRag> {
+    return this.send('/api/admin/rag', 'GET', adminRag, { signal })
+  }
+
+  operations(cursor?: string, signal?: AbortSignal): Promise<AdminOperationList> {
+    const query = new URLSearchParams({ limit: '50' })
+    if (cursor) query.set('cursor', cursor)
+    return this.send(`/api/admin/operations?${query}`, 'GET', operationList, { signal })
+  }
+
+  previewHistoryCleanup(selection: Schema<'HistoryCleanupPreviewRequest'>['selection'], cascade: boolean): Promise<CleanupPreview> {
+    return this.send('/api/admin/history-cleanups/preview', 'POST', cleanupPreview, {
+      body: JSON.stringify({ selection, cascade_consumers: cascade }),
+    })
+  }
+
+  previewProfileHandoff(): Promise<ProfilePreview> {
+    return this.send('/api/admin/rag/profile-handoffs/preview', 'POST', profilePreview)
+  }
+
+  previewFailedJobs(generationId: string, safeErrorCodes: string[], limit: number): Promise<GenerationPreview> {
+    return this.send(`/api/admin/rag/generations/${encodeURIComponent(generationId)}/failed-jobs/retry-preview`,
+      'POST', generationPreview, { body: JSON.stringify({ safe_error_codes: safeErrorCodes, limit }) })
+  }
+
+  previewGenerationDeletion(generationId: string): Promise<GenerationPreview> {
+    return this.send(`/api/admin/rag/generations/${encodeURIComponent(generationId)}/deletion-preview`, 'POST', generationPreview)
+  }
+
+  executeAdmin(kind: AdminKind, token: string, phrase: string, generationId?: string): Promise<AdminOperation> {
+    const generation = generationId ? encodeURIComponent(generationId) : ''
+    const path: `/api/${string}` = kind === 'history_cleanup' ? '/api/admin/history-cleanups'
+      : kind === 'profile_handoff' ? '/api/admin/rag/profile-handoffs'
+        : kind === 'retry_failed_jobs' ? `/api/admin/rag/generations/${generation}/failed-jobs/retries`
+          : `/api/admin/rag/generations/${generation}/deletions`
+    return this.send(path, 'POST', adminOperation, {
+      body: JSON.stringify({ confirmation_token: token, confirmation_phrase: phrase }),
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+    })
   }
 
   create(submission: Submission): Promise<CreatedRun> {
@@ -178,20 +319,15 @@ export class ApiClient {
   }
 
   previewRunCleanup(runId: string, cascadeConsumers: boolean): Promise<CleanupPreview> {
-    return this.send('/api/admin/history-cleanups/preview', 'POST', cleanupPreview, {
-      body: JSON.stringify({ selection: { kind: 'runs', run_ids: [runId] }, cascade_consumers: cascadeConsumers }),
-    })
+    return this.previewHistoryCleanup({ kind: 'runs', run_ids: [runId] }, cascadeConsumers)
   }
 
   executeRunCleanup(token: string, phrase: string): Promise<AdminOperation> {
-    return this.send('/api/admin/history-cleanups', 'POST', adminOperation, {
-      body: JSON.stringify({ confirmation_token: token, confirmation_phrase: phrase }),
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
-    })
+    return this.executeAdmin('history_cleanup', token, phrase)
   }
 
-  operation(operationId: string): Promise<AdminOperation> {
-    return this.send(`/api/admin/operations/${encodeURIComponent(operationId)}`, 'GET', adminOperation)
+  operation(operationId: string, signal?: AbortSignal): Promise<AdminOperation> {
+    return this.send(`/api/admin/operations/${encodeURIComponent(operationId)}`, 'GET', adminOperation, { signal })
   }
 }
 

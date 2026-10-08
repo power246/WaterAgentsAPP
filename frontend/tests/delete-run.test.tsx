@@ -25,7 +25,7 @@ it('requires a fresh whole-run cascade preview and the exact server phrase for o
     state: 'pending', resource_identity: 'history', progress: { processed_items: 0, total_items: 2, succeeded_items: 0, failed_items: 0 },
     safe_result: null, safe_error: null, created_at: '2026-10-08T00:00:00Z', started_at: null, finished_at: null,
   })
-  render(<DeleteRun runId={runId} onClose={() => undefined} onDeleted={() => undefined} />)
+  render(<DeleteRun runId={runId} onClose={() => undefined} onAccepted={() => undefined} />)
   expect(await screen.findByText(/2 runs, 3 sessions/)).toBeInTheDocument()
   expect(screen.getByText(dependency)).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Preview whole-run cascade' }))
