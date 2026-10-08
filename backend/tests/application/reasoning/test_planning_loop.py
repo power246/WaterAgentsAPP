@@ -226,6 +226,59 @@ def test_full_and_stationless_inputs_still_require_an_explicit_planning_turn():
     asyncio.run(exercise())
 
 
+def test_inspection_page_is_visible_in_the_next_model_request():
+    async def exercise():
+        model = DeterministicWaterbodyModelPort()
+        scope, _, loop, task = await _fixture(model, water_mode="full")
+        handoff = await loop._acquisition.start(scope)
+        source_item_id = handoff.source_record_allowlist[0]
+        model._scripts = (
+            (
+                ToolCallCompleted(
+                    **_event_values(OPS[0]),
+                    provider_call_id="inspect-page-1",
+                    name="inspect_evidence_records",
+                    arguments=json.dumps({
+                        "window_ids": [scope.time_windows[0].window_id],
+                        "parameter_keys": [
+                            scope.requested_parameters[0].model_dump(mode="json")
+                        ],
+                        "options": {
+                            "source_item_id": source_item_id,
+                            "page_offset": 0,
+                            "record_limit": 8,
+                        },
+                    }),
+                ),
+                Terminal(
+                    **_event_values(OPS[0]),
+                    provider_response_id="inspection-response",
+                    finish_reason=WaterbodyFinishReason.COMPLETED,
+                ),
+            ),
+            _ready_script(OPS[1]),
+        )
+
+        await loop.run(
+            task,
+            deadline=FixedClock().now() + timedelta(minutes=5),
+            initial_handoff=handoff,
+        )
+
+        page = handoff.executor.inspection_page(scope.run_id, "inspect-page-1")
+        assert page is not None and page.records
+        body = json.loads(model.calls[1].messages[-1].text)
+        summaries = [json.loads(item["summary"]) for item in body["evidence_summaries"]]
+        assert any(
+            summary.get("inspections", [{}])[0].get("total_records")
+            == page.total_records
+            and any(record.get("value") == "7" for record in summary["records"])
+            for summary in summaries
+        )
+
+    asyncio.run(exercise())
+
+
 def test_multi_turn_tools_rebuild_bundles_and_exact_duplicates_reuse_provider_work():
     async def exercise():
         weather = FakeCollectionPort(lambda plan: complete_batch(plan))

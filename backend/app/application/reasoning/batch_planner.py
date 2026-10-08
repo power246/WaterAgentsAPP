@@ -903,6 +903,7 @@ def _batch_context(
         recent_messages=base.recent_messages,
         facts=(),
         evidence_summaries=summaries,
+        dependency_context=base.dependency_context,
     )
 
 
@@ -978,6 +979,7 @@ def _synthesis_context(
         recent_messages=(),
         facts=facts,
         evidence_summaries=summaries,
+        dependency_context=base.dependency_context,
     )
 
 

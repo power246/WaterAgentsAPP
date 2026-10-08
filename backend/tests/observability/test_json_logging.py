@@ -87,6 +87,30 @@ def test_formatter_has_stable_fields_and_ignores_unapproved_extras():
     }
 
 
+def test_provider_and_summary_failures_keep_safe_diagnostic_fields():
+    provider = logging.makeLogRecord({
+        "msg": "provider_request_failed", "provider": "usgs",
+        "provider_operation": "collect", "provider_status": 503,
+        "provider_error": "PortUnavailableError", "provider_attempts": 3,
+        "headers": {"Authorization": "Bearer hidden"},
+    })
+    summary = logging.makeLogRecord({
+        "msg": "run_summary_model_failed", "run_id": str(UUID(int=1)),
+        "session_id": str(UUID(int=2)), "failure_code": "waterbody_model_timeout",
+        "model_calls": 2,
+    })
+    provider_json = json.loads(JsonFormatter().format(provider))
+    summary_json = json.loads(JsonFormatter().format(summary))
+    assert provider_json["provider_status"] == 503
+    assert provider_json["provider_attempts"] == 3
+    assert provider_json["provider_error"] == "PortUnavailableError"
+    assert "headers" not in provider_json
+    assert summary_json["run_id"] == str(UUID(int=1))
+    assert summary_json["session_id"] == str(UUID(int=2))
+    assert summary_json["failure_code"] == "waterbody_model_timeout"
+    assert summary_json["model_calls"] == 2
+
+
 @pytest.mark.parametrize("chain", ["cause", "context", "group"])
 def test_exception_chain_keeps_diagnostics_without_source_lines_or_locals(chain):
     try:

@@ -14,11 +14,43 @@ from tests.application.analysis_runs._m7_projection_support import (
     HoldingWorkflow,
     complete_m7_run,
     coordinator_for,
+    prepare_m7_run,
 )
 
 
 def run(exercise) -> None:
     asyncio.run(asyncio.wait_for(exercise, timeout=10))
+
+
+def test_slow_run_stream_delivers_terminal_snapshot_before_closing() -> None:
+    async def exercise() -> None:
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(InMemoryTranscriptStore(), workflow)
+        try:
+            prepared = await prepare_m7_run(coordinator, workflow)
+            stream = await coordinator.subscribe_run(prepared.run_id)
+            assert (await anext(stream)).status is RunStatus.RUNNING
+
+            await coordinator.complete_run(prepared.run_id, prepared.topology_result)
+            workflow.release.set()
+            runtime = coordinator._runs[prepared.run_id]
+            async with asyncio.timeout(2):
+                while True:
+                    async with runtime.condition:
+                        if coordinator._run_stream_closed_locked(runtime):
+                            break
+                    await asyncio.sleep(0)
+
+            final = await anext(stream)
+            assert final.status is RunStatus.COMPLETED
+            assert final.result_ref is not None
+            with pytest.raises(StopAsyncIteration):
+                await anext(stream)
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise())
 
 
 def test_summary_and_topology_results_share_their_terminal_writer_groups() -> None:

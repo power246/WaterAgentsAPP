@@ -5,6 +5,7 @@ from typing import Protocol
 
 from app.application.canonical_json import canonical_json_digest
 from app.application.evidence_tools.scope import EvidenceSessionScope
+from app.application.query_understanding import append_evidence_rules
 from app.application.transcript_memory.search import (
     RAGSearchInvalidError,
     RAGSearchService,
@@ -61,6 +62,22 @@ class TranscriptEvidenceProducer:
         if existing is not None:
             if not _same_search_scope(existing, scope):
                 raise ValueError("historical search scope identity collision")
+            if existing.evidence_rule_plan != scope.evidence_rule_plan:
+                previous = existing.evidence_rule_plan
+                candidate = scope.evidence_rule_plan
+                previous_ids = {rule.rule_id for rule in previous.appended_rules}
+                additions = tuple(
+                    rule for rule in candidate.appended_rules
+                    if rule.rule_id not in previous_ids
+                )
+                if (
+                    candidate.baseline_rules != previous.baseline_rules
+                    or any(rule.origin_session_id != scope.session_id for rule in additions)
+                    or append_evidence_rules(previous, additions) != candidate
+                ):
+                    raise ValueError("historical search rules must extend the bound plan")
+                self._scopes[key] = scope
+                self._sessions[key] = self._sessions[key].rebind(scope)
             return
         self._scopes[key] = scope
         self._sessions[key] = self._search.bind(scope)

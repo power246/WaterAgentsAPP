@@ -34,6 +34,7 @@ from app.domain import (
     geodesic_distance_km,
     point_to_linestring_distance_km,
 )
+from tests.application.evidence_tools.conftest import make_graph
 
 UNIT = CoverageUnit(
     parameter=ParameterKey(code_system="usgs", code="00060"),
@@ -246,6 +247,29 @@ def test_geometry_unavailable_has_stable_error_without_point_fallback() -> None:
         )
 
     assert captured.value.code == "waterbody_geometry_unavailable"
+
+
+def test_upstream_agent_uses_its_own_geometry_for_facility_plan() -> None:
+    graph = make_graph(with_upstream=True)
+    upstream_geometry = WaterbodyGeometry.from_coordinates(
+        source_comid="200",
+        coordinates=((-77.02, 39.01), (-77.01, 39.01)),
+    )
+    upstream = graph.nodes[1].model_copy(update={
+        "geometry_ref": upstream_geometry.geometry_ref,
+        "geometry_summary": upstream_geometry.summary(),
+    })
+    graph = graph.model_copy(update={
+        "nodes": (graph.nodes[0], upstream),
+        "geometries": {**graph.geometries, upstream_geometry.geometry_ref: upstream_geometry},
+    })
+
+    plan = build_facility_corridor_plan(
+        graph, agent_comid="200", agent_radius_miles=20
+    )
+
+    assert plan.geometry_ref == upstream_geometry.geometry_ref
+    assert plan.geometry_ref != graph.nodes[0].geometry_ref
 
 
 def test_final_filter_deduplicates_and_uses_exact_full_line_distance() -> None:

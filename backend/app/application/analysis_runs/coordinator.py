@@ -2831,16 +2831,18 @@ class RunCoordinator:
         yield current
         while True:
             async with runtime.condition:
-                if self._run_stream_closed_locked(runtime):
-                    return
-                try:
-                    async with asyncio.timeout(self._keepalive_interval):
-                        await runtime.condition.wait_for(
-                            lambda: self._run_snapshot_locked(runtime) != current
-                            or self._run_stream_closed_locked(runtime)
-                        )
-                except TimeoutError:
-                    pass
+                if (
+                    self._run_snapshot_locked(runtime) == current
+                    and not self._run_stream_closed_locked(runtime)
+                ):
+                    try:
+                        async with asyncio.timeout(self._keepalive_interval):
+                            await runtime.condition.wait_for(
+                                lambda: self._run_snapshot_locked(runtime) != current
+                                or self._run_stream_closed_locked(runtime)
+                            )
+                    except TimeoutError:
+                        pass
                 updated = self._run_snapshot_locked(runtime)
                 closed = self._run_stream_closed_locked(runtime)
             changed = updated != current

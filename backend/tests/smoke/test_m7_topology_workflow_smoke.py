@@ -1,7 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -33,7 +33,10 @@ from app.application.reasoning.batch_planner import (
     ModelFitCapability,
     ModelSizeEstimate,
 )
-from app.application.reasoning.model_models import Terminal, WaterbodyFinishReason
+from app.application.reasoning import WaterbodyAgentRunStatus
+from app.application.reasoning.model_models import (
+    Terminal, WaterbodyFinishReason, WaterbodyModelPhase,
+)
 from app.application.run_summary.input_builder import RunSummaryInputBuilder
 from app.application.run_summary.models import RunSummaryAgentMessage, RunSummaryResult
 from app.application.run_summary.runner import (
@@ -53,6 +56,7 @@ from app.infrastructure.runtime.m7 import (
     CompleteRunSummaryBoundary,
     ProductionRunSummaryRunnerFactory,
 )
+from app.ports import WaterbodyModelCancelledError
 from tests.application.analysis_runs._topology_scheduler_support import (
     RUN_ID,
     ConcurrencyProbe,
@@ -71,6 +75,12 @@ from tests.application.evidence_tools.test_upstream_result_store import (
     dependency_outcome,
     inference_result,
     resolved_result,
+)
+from tests.application.evidence_tools.fakes import FixedClock
+from tests.application.reasoning.test_planning_loop import _fixture
+from tests.application.reasoning.test_runner import (
+    AdaptiveWaterbodyModelPort,
+    _runner,
 )
 from tests.m4_support import (
     WATERBODY_MODEL,
@@ -120,6 +130,47 @@ class ProviderCancelledSummaryRouter(RecordingModelFitRouter):
             finish_reason=WaterbodyFinishReason.CANCELLED,
         )
 
+
+class ProviderCancelledBranchFactory(WorkflowNodeRunnerFactory):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.provider_outcome = None
+
+    async def run(self, request):
+        if request.node.comid != "100":
+            return await super().run(request)
+        port = AdaptiveWaterbodyModelPort(
+            fail_phase=WaterbodyModelPhase.EVIDENCE_PLANNING,
+            failure_type=WaterbodyModelCancelledError,
+        )
+        _, _, loop, task = await _fixture(port, water_mode="full")
+        self.provider_outcome = await _runner(loop, port).run(
+            task, deadline=FixedClock().now() + timedelta(minutes=5)
+        )
+        assert self.provider_outcome.status is WaterbodyAgentRunStatus.FAILED
+        self.requests.append(request)
+        session = await self.operations.prepare_agent_session(
+            request.run_id, agent_role=AgentRole.WATERBODY,
+            target_comid=request.node.comid,
+        )
+        manifest = await self.store.build_manifest(
+            session_id=session.session_id, target_comid=request.node.comid,
+        )
+        manifest_item = await self.operations.reserve_transcript_item(
+            request.run_id, session_id=session.session_id,
+        )
+        await self.operations.finalize_transcript_item(
+            request.run_id, manifest_item.item_id,
+            "waterbody_dependency_manifest", 1, manifest,
+        )
+        self.manifests.append(manifest)
+        await self.operations.mark_agent_session_running(
+            request.run_id, session.session_id,
+        )
+        terminal = await self.operations.fail_agent_session(
+            request.run_id, session.session_id, self.provider_outcome.error,
+        )
+        return await self.assembler.dependency_outcome(request.run_id, terminal)
 
 class FixtureSummaryStage:
     def __init__(self, operations, *, fail: bool = False) -> None:
@@ -234,6 +285,7 @@ async def complete_workflow_runtime(
     summary_provider_cancelled=False,
     settings=None,
     transcript_store=None,
+    node_factory_class=WorkflowNodeRunnerFactory,
 ):
     graph = topology(*paths)
     base_context = analysis_context("M7 fixed topology smoke")
@@ -269,7 +321,7 @@ async def complete_workflow_runtime(
         coordinator = application.state.run_coordinator
         reader = FakeResultReader()
         assembler = TopologyResultAssembler(reader)
-        node_factory = WorkflowNodeRunnerFactory(
+        node_factory = node_factory_class(
             coordinator,
             reader,
             statuses,
@@ -445,6 +497,36 @@ def test_fixed_profiles_complete_once_with_summary_refs(
                 dependency.dependency_status
                 for dependency in target_manifest.dependencies
             } == direct_statuses
+
+    asyncio.run(exercise())
+
+
+def test_provider_cancelled_branch_fails_without_cancelling_target_workflow() -> None:
+    async def exercise() -> None:
+        async with complete_workflow_runtime(
+            (("100", TARGET), ("200", TARGET)),
+            {"200": DependencyStatus.USABLE, TARGET: DependencyStatus.INSUFFICIENT},
+            node_factory_class=ProviderCancelledBranchFactory,
+        ) as runtime:
+            created, snapshot = await run_to_quiescence(runtime)
+            sessions = await runtime.coordinator.list_sessions(created.run_id)
+            branch = next(item for item in sessions if item.target_comid == "100")
+            target = next(item for item in sessions if item.target_comid == TARGET)
+            target_request = next(
+                item for item in runtime.node_factory.requests
+                if item.node.comid == TARGET
+            )
+
+            assert runtime.node_factory.provider_outcome.error.code == (
+                "waterbody_model_cancelled"
+            )
+            assert branch.status is AgentSessionStatus.FAILED
+            assert target.status is AgentSessionStatus.COMPLETED
+            assert {
+                item.status for item in target_request.dependency_outcomes
+            } == {DependencyStatus.INVALID, DependencyStatus.USABLE}
+            assert snapshot.status is RunStatus.COMPLETED
+            assert snapshot.result_ref is not None
 
     asyncio.run(exercise())
 

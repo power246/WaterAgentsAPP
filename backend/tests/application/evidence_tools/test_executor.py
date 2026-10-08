@@ -11,6 +11,7 @@ from app.application.evidence_tools import (
     EvidenceToolLimits,
     create_evidence_tool_registry,
 )
+from app.application.evidence_tools.scope import assemble_evidence_session_scope
 from app.domain import (
     CollectionStatus,
     CoverageStatus,
@@ -35,8 +36,10 @@ from app.domain import (
     SourceRecordReference,
     TranscriptEvidenceRequest,
     WaterObservationRecord,
+    WaterbodyGeometry,
 )
 from app.infrastructure.config import load_parameter_capability_registry
+from tests.application.evidence_tools.conftest import make_context
 from tests.application.evidence_tools.fakes import (
     FakeCollectionPort,
     FixedClock,
@@ -90,6 +93,55 @@ def test_scope_violation_is_rejected_before_audit_records(evidence_scope) -> Non
 
         assert store.calls == []
         assert store.results == []
+
+    asyncio.run(exercise())
+
+
+def test_upstream_facility_collection_uses_agent_geometry(scope_factory) -> None:
+    async def exercise() -> None:
+        base = scope_factory(with_upstream=True)
+        upstream_geometry = WaterbodyGeometry.from_coordinates(
+            source_comid="200",
+            coordinates=((-77.02, 39.01), (-77.01, 39.01)),
+        )
+        upstream = base.topology.nodes[1].model_copy(update={
+            "geometry_ref": upstream_geometry.geometry_ref,
+            "geometry_summary": upstream_geometry.summary(),
+        })
+        topology = base.topology.model_copy(update={
+            "nodes": (base.topology.nodes[0], upstream),
+            "geometries": {
+                **base.topology.geometries,
+                upstream_geometry.geometry_ref: upstream_geometry,
+            },
+        })
+        scope = assemble_evidence_session_scope(
+            run_id=base.run_id,
+            session_id=base.session_id,
+            session_fact=base.session_ref,
+            analysis_context_ref=base.analysis_context_ref,
+            topology_ref=base.topology_ref,
+            context=make_context(),
+            topology=topology,
+            agent_comid="200",
+            registry=load_parameter_capability_registry(),
+            cancel_token=base.cancel_token,
+        )
+        provider = FakeCollectionPort(
+            lambda provider_request: complete_batch(provider_request)
+        )
+        runtime = executor(MemoryEvidenceStore(), facility_port=provider)
+
+        result = await runtime.execute(
+            scope,
+            request(
+                scope, "collect_facility_evidence", "upstream-facility",
+                options=EvidenceToolOptions(facility_radius_miles=20),
+            ),
+        )
+
+        assert result.execution_status is EvidenceToolExecutionStatus.COMPLETED
+        assert provider.calls[0][0].geometry_ref == upstream_geometry.geometry_ref
 
     asyncio.run(exercise())
 

@@ -157,6 +157,11 @@ class RAGSearchSession:
         self._embedding = embedding if embedding is not None else service._embedding
         self._embedding_cache: dict[tuple[str, str], EmbeddingVector] = {}
 
+    def rebind(self, scope: EvidenceSessionScope) -> RAGSearchSession:
+        updated = RAGSearchSession(service=self._service, scope=scope)
+        updated._embedding_cache = self._embedding_cache
+        return updated
+
     async def search(
         self,
         intent: HistoricalSearchIntentV1,

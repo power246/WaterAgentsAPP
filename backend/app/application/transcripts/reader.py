@@ -458,8 +458,18 @@ class TranscriptReader:
         stored_items: list[StoredTranscriptItem] = []
         contents: list[StoredTranscriptContent] = []
         for item in live.items:
+            preview_body = (
+                self._registry.public_safe_body(
+                    item.content.content_type,
+                    item.content.content_schema_version,
+                    item.content.safe_body,
+                )
+                if item.content.content_bytes > self._inline_content_bytes
+                else None
+            )
             location = locate_content(
                 item.content.safe_body,
+                preview_body=preview_body,
                 inline_content_bytes=self._inline_content_bytes,
                 preview_bytes=self._preview_bytes,
             )

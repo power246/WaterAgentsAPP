@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from hashlib import sha256
 
 from app.application.evidence_policy import temporal_relation_matches
@@ -24,9 +25,16 @@ from app.domain import (
     QualitySummary,
     RelationSupportPayload,
     ReferenceScope,
+    SourceRecord,
     TimeRange,
     UpstreamResultPayload,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedBundleInputs:
+    fragments: tuple[tuple[EvidenceFragmentReference, EvidenceFragment], ...]
+    source_records: tuple[tuple[str, tuple[SourceRecord, ...]], ...]
 
 
 class EvidenceBundleBuilder:
@@ -41,6 +49,7 @@ class EvidenceBundleBuilder:
         fragment_refs: tuple[EvidenceFragmentReference, ...],
         tool_result_refs: tuple[ItemReference, ...],
         created_at,
+        validated_inputs: list[ValidatedBundleInputs] | None = None,
     ) -> EvidenceBundle:
         _ensure_unique_refs(fragment_refs, tool_result_refs)
         fragments = tuple(
@@ -69,7 +78,9 @@ class EvidenceBundleBuilder:
                 }
             )
         )
-        await self._validate_source_records(scope, fragments, source_item_ids)
+        records_by_item = await self._validate_source_records(
+            scope, fragments, source_item_ids
+        )
         fragment_item_ids = {reference.item_id for reference in fragment_refs}
         nested_item_ids = {
             item_id
@@ -116,6 +127,14 @@ class EvidenceBundleBuilder:
             created_at=created_at,
         )
         await self._validate_reference_scope(scope, bundle, fragments)
+        if validated_inputs is not None:
+            validated_inputs.append(ValidatedBundleInputs(
+                fragments=tuple(
+                    (reference, by_evidence_id[reference.evidence_id][1])
+                    for reference in ordered_fragment_refs
+                ),
+                source_records=tuple(sorted(records_by_item.items())),
+            ))
         return bundle
 
     async def build_and_write(self, scope: EvidenceSessionScope, **kwargs):
@@ -231,6 +250,7 @@ class EvidenceBundleBuilder:
                     record.record_id for record in records_by_item[reference.item_id]
                 }:
                     raise EvidenceScopeViolationError()
+        return records_by_item
 
     def _build_cells(self, scope, by_evidence_id):
         cells = []

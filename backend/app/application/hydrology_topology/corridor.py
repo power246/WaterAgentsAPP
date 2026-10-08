@@ -137,6 +137,7 @@ def describe_facility_corridor(
 def build_facility_corridor_plan(
     graph: HydrologyGraph,
     *,
+    agent_comid: str | None = None,
     agent_radius_miles: str | int | float | Decimal,
     center_budget: int = FACILITY_CENTER_BUDGET,
 ) -> FacilityCorridorPlan:
@@ -146,7 +147,11 @@ def build_facility_corridor_plan(
         or not 1 <= center_budget <= FACILITY_CENTER_BUDGET
     ):
         raise ValueError("facility center budget must be between 1 and 32")
-    geometry = _target_geometry(graph)
+    geometry = (
+        _target_geometry(graph)
+        if agent_comid is None
+        else _geometry_for_comid(graph, agent_comid)
+    )
     exact_radius = _validate_agent_radius(agent_radius_miles)
     provider_radius = _provider_radius(exact_radius)
     center_count = _estimated_center_count(geometry, provider_radius)
@@ -226,14 +231,19 @@ def filter_facilities_to_corridor(
 
 def _target_geometry(graph: HydrologyGraph) -> WaterbodyGeometry:
     target = next(node for node in graph.nodes if node.is_target)
-    if target.geometry_ref is None:
+    return _geometry_for_comid(graph, target.comid)
+
+
+def _geometry_for_comid(graph: HydrologyGraph, comid: str) -> WaterbodyGeometry:
+    node = next((item for item in graph.nodes if item.comid == comid), None)
+    if node is None or node.geometry_ref is None:
         raise WaterbodyGeometryUnavailableError(
-            "target waterbody geometry is unavailable"
+            "waterbody geometry is unavailable"
         )
-    geometry = graph.geometries.get(target.geometry_ref)
+    geometry = graph.geometries.get(node.geometry_ref)
     if geometry is None:
         raise WaterbodyGeometryUnavailableError(
-            "target waterbody geometry is unavailable"
+            "waterbody geometry is unavailable"
         )
     return geometry
 

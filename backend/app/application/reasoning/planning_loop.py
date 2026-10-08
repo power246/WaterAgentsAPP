@@ -12,6 +12,7 @@ from pydantic import Field, TypeAdapter, field_validator
 from app.application.evidence_tools import (
     EvidenceAcquisitionHandoff,
     EvidenceAcquisitionService,
+    EvidenceInspectionPage,
     EvidenceScopeViolationError,
 )
 from app.application.query_understanding import (
@@ -60,6 +61,7 @@ from app.application.reasoning.working_context import (
 )
 from app.domain import (
     DomainModel,
+    EvidenceFragment,
     EvidenceToolOptions,
     EvidenceToolRequest,
     ItemReference,
@@ -68,6 +70,7 @@ from app.domain import (
     ParameterCapabilityRegistry,
     ParameterKey,
     SourceRecordReference,
+    SourceRecord,
 )
 from app.ports.waterbody_model import WaterbodyModelPort
 
@@ -78,6 +81,8 @@ if TYPE_CHECKING:
 _MAX_CONTEXT_FACTS = 120
 _MAX_CONTEXT_SUMMARIES = 64
 _MAX_CONTEXT_BLOCKERS = 16
+_MAX_SUMMARY_RECORDS = 8
+_MAX_SUMMARY_BYTES = 1500
 _MAX_RULE_PROPOSALS_PER_TURN = 4
 
 
@@ -572,6 +577,95 @@ async def _tool_request(
         raise PlanningLoopError("invalid_planning_tool_arguments") from error
 
 
+def _source_record_view(record: SourceRecord) -> dict[str, object]:
+    allowed = {
+        "record_type", "observed_time", "valid_time_range", "value",
+        "raw_unit", "parameter", "weather_variable", "window_id",
+        "result_kind", "result_source", "confidence", "upstream_session_id",
+    }
+    view = record.model_dump(mode="json", include=allowed, exclude_none=True)
+    view["location"] = record.location.model_dump(
+        mode="json", include={"comid", "station_id"}, exclude_none=True
+    )
+    return view
+
+
+def _bounded_fragment_summary(
+    fragment: EvidenceFragment,
+    source_records: tuple[SourceRecord, ...],
+    inspection_pages: tuple[EvidenceInspectionPage, ...],
+) -> tuple[str, bool]:
+    payload = fragment.payload
+    payload_fields = {
+        "payload_type", "displayed_value", "displayed_unit", "value", "unit",
+        "method", "valid_input_count", "suspicious_input_count",
+        "invalid_input_count", "upstream_session_id", "result_ref",
+        "inference_strength", "status",
+    }
+    payload_view = payload.model_dump(
+        mode="json", include=payload_fields, exclude_none=True
+    )
+    if payload.payload_type == "historical_inference":
+        payload_view["cell_projection"] = payload.cell_projection.model_dump(
+            mode="json",
+            include={
+                "parameter", "window_id", "time_range", "outcome_status",
+                "representative_value", "unit_id", "trend", "risk_level",
+                "confidence", "source", "quality_flags",
+            },
+            exclude_none=True,
+        )
+    base = {
+        "data_type": fragment.data_type,
+        "collection_status": fragment.collection_status,
+        "applicability": fragment.applicability,
+        "quality_class": fragment.quality_class,
+        "coverage_status": fragment.coverage.status,
+        "parameters": fragment.parameter_refs,
+        "time_range": fragment.time_range,
+        "relation_id": fragment.relation_id,
+        "payload": payload_view,
+    }
+    latest_pages = {
+        page.source_item_id: page for page in inspection_pages
+    }
+    if latest_pages:
+        base["inspections"] = tuple(
+            {
+                "source_item_id": item_id,
+                "offset": page.offset,
+                "total_records": page.total_records,
+                "next_offset": page.next_offset,
+            }
+            for item_id, page in sorted(latest_pages.items())
+        )
+    records = tuple(source_records) + tuple(
+        record
+        for page in latest_pages.values()
+        for record in page.records
+        if record.record_id not in {item.record_id for item in source_records}
+    )
+    base["records"] = []
+    truncated = len(records) > _MAX_SUMMARY_RECORDS or any(
+        page.next_offset is not None for page in latest_pages.values()
+    )
+    for record in records[:_MAX_SUMMARY_RECORDS]:
+        view = _source_record_view(record)
+        candidate = {**base, "records": [*base["records"], view]}
+        if len(canonical_json_text(candidate).encode("utf-8")) > _MAX_SUMMARY_BYTES:
+            truncated = True
+            break
+        base["records"].append(view)
+    summary = canonical_json_text(base)
+    if len(summary.encode("utf-8")) > _MAX_SUMMARY_BYTES:
+        raise PlanningLoopError("evidence_prompt_projection_too_large")
+    try:
+        require_safe_prompt_text(summary)
+    except ValueError as error:
+        raise PlanningLoopError("evidence_prompt_projection_invalid") from error
+    return summary, truncated
+
+
 async def _working_context(
     task: ValidatedWaterbodyAgentTask,
     handoff: EvidenceAcquisitionHandoff,
@@ -619,24 +713,28 @@ async def _working_context(
         )
 
     summaries = []
+    fragments_by_ref = dict(handoff.validated_inputs.fragments)
+    source_cache = {
+        item_id: {record.record_id: record for record in records}
+        for item_id, records in handoff.validated_inputs.source_records
+    }
     for reference in sorted(
         handoff.fragment_allowlist,
         key=lambda item: (item.evidence_id, item.item_id),
     )[:_MAX_CONTEXT_SUMMARIES]:
-        fragment = await handoff.read_port.read_fragment(
-            task.task.evidence_scope,
-            reference,
+        fragment = fragments_by_ref[reference]
+        source_item_ids = tuple(dict.fromkeys(
+            item.item_id for item in fragment.source_record_refs
+        ))
+        source_records = tuple(
+            source_cache[item.item_id][item.record_id]
+            for item in fragment.source_record_refs
         )
-        summary = canonical_json_text(
-            {
-                "data_type": fragment.data_type,
-                "collection_status": fragment.collection_status,
-                "applicability": fragment.applicability,
-                "quality_class": fragment.quality_class,
-                "coverage_status": fragment.coverage.status,
-                "parameters": fragment.parameter_refs,
-                "relation_id": fragment.relation_id,
-            }
+        inspection_pages = handoff.executor.inspection_pages(
+            handoff.run_id, source_item_ids
+        )
+        summary, truncated = _bounded_fragment_summary(
+            fragment, source_records, inspection_pages
         )
         summaries.append(
             BoundedEvidenceSummary(
@@ -652,7 +750,7 @@ async def _working_context(
                     if fragment.series_identity is not None
                     else ()
                 ),
-                truncated=False,
+                truncated=truncated,
             )
         )
 
@@ -677,35 +775,38 @@ async def _working_context(
             )
         )
     )
-    return build_working_context_projection(
-        run_id=task.task.run_id,
-        session_id=task.task.session_id,
-        target_comid=task.task.target_comid,
-        scope_digest=scope_digest,
-        bundle_ref=handoff.bundle_ref,
-        bundle_digest=handoff.bundle.bundle_id,
-        rule_plan_digest=handoff.rule_plan_digest,
-        capability_registry_digest=handoff.capability_registry_digest,
-        reference_allowlist=allowlist,
-        recent_messages=(),
-        facts=tuple(facts),
-        evidence_summaries=tuple(summaries),
-        dependency_context=(
-            build_dependency_prompt_block(
-                task.task.dependency_manifest,
-                mode=task.context.mode,
-                windows=tuple(
-                    DependencyPromptWindow(
-                        window_id=window.window_id,
-                        mode=task.context.time_segments[window.segment_index].mode,
+    try:
+        return build_working_context_projection(
+            run_id=task.task.run_id,
+            session_id=task.task.session_id,
+            target_comid=task.task.target_comid,
+            scope_digest=scope_digest,
+            bundle_ref=handoff.bundle_ref,
+            bundle_digest=handoff.bundle.bundle_id,
+            rule_plan_digest=handoff.rule_plan_digest,
+            capability_registry_digest=handoff.capability_registry_digest,
+            reference_allowlist=allowlist,
+            recent_messages=(),
+            facts=tuple(facts),
+            evidence_summaries=tuple(summaries),
+            dependency_context=(
+                build_dependency_prompt_block(
+                    task.task.dependency_manifest,
+                    mode=task.context.mode,
+                    windows=tuple(
+                        DependencyPromptWindow(
+                            window_id=window.window_id,
+                            mode=task.context.time_segments[window.segment_index].mode,
+                        )
+                        for window in scope.time_windows
                     )
-                    for window in scope.time_windows
-                ),
-            )
-            if task.task.dependency_manifest is not None
-            else None
-        ),
-    )
+                )
+                if task.task.dependency_manifest is not None
+                else None
+            ),
+        )
+    except ValueError as error:
+        raise PlanningLoopError("evidence_prompt_projection_too_large") from error
 
 
 def _prompt_budget(

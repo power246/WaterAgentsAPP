@@ -417,6 +417,18 @@ class EvidenceToolExecutor:
     ) -> EvidenceInspectionPage | None:
         return self._inspection_pages.get((run_id, tool_call_id))
 
+    def inspection_pages(
+        self,
+        run_id: str,
+        source_item_ids: tuple[str, ...],
+    ) -> tuple[EvidenceInspectionPage, ...]:
+        allowed = set(source_item_ids)
+        return tuple(
+            page
+            for (page_run_id, _), page in self._inspection_pages.items()
+            if page_run_id == run_id and page.source_item_id in allowed
+        )
+
     def live_dedup_counts(self, run_id: str) -> tuple[int, int]:
         return self._single_flight.live_counts(run_id)
 
@@ -651,6 +663,7 @@ class EvidenceToolExecutor:
             try:
                 plan = build_facility_corridor_plan(
                     scope.topology,
+                    agent_comid=scope.agent_comid,
                     agent_radius_miles=request.options.facility_radius_miles,
                     center_budget=min(
                         self._limits.facility_max_centers,

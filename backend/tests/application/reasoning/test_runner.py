@@ -34,6 +34,7 @@ from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POL
 from app.domain import AssessmentAvailability, OutcomeStatus
 from app.infrastructure.config import load_parameter_capability_registry
 from app.ports import (
+    WaterbodyModelCancelledError,
     WaterbodyModelContentFilteredError,
     WaterbodyModelProtocolError,
     WaterbodyModelTimeoutError,
@@ -372,6 +373,18 @@ def test_runner_executes_planning_batches_synthesis_and_deterministic_assembly()
             WaterbodyModelPhase.REASONING_BATCH,
             WaterbodyModelPhase.OVERALL_SYNTHESIS,
         ]
+        for call in port.calls:
+            body = json.loads(call.messages[-1].text)
+            summaries = body.get(
+                "evidence_summaries", body.get("bounded_reference_summaries", ())
+            )
+            assert any(
+                any(
+                    record.get("value") == "7" and record.get("raw_unit") == "mg/l"
+                    for record in json.loads(item["summary"])["records"]
+                )
+                for item in summaries
+            ), call.phase
 
     asyncio.run(exercise())
 
@@ -509,6 +522,11 @@ def test_cancel_before_runner_start_wins_without_calls_or_result():
         (
             WaterbodyModelUnavailableError,
             "waterbody_model_unavailable",
+            True,
+        ),
+        (
+            WaterbodyModelCancelledError,
+            "waterbody_model_cancelled",
             True,
         ),
         (
