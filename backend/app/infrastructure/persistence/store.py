@@ -87,6 +87,7 @@ def _session_summary_from_rows(
     )
     result_ref = None
     result_summary = None
+    terminal_error_code = "transcript_content_corrupt"
     if (
         row["agent_role"] != AgentRole.QUERY_PARSER.value
         and row["status"] == AgentSessionStatus.COMPLETED.value
@@ -96,6 +97,15 @@ def _session_summary_from_rows(
             terminal = items.get(terminal_id)
             if terminal is None:
                 raise ValueError("completed result session has no terminal item")
+            if (
+                terminal.run_id != row["run_id"]
+                or terminal.session_id != row["session_id"]
+                or terminal.content_type != "lifecycle_event"
+            ):
+                raise ValueError("completed result terminal identity is invalid")
+            if terminal.content_schema_version != 2:
+                terminal_error_code = "transcript_content_unsupported"
+                raise ValueError("completed result terminal version is unsupported")
             body = (
                 terminal.inline_body
                 if terminal.inline_body is not None
@@ -105,6 +115,8 @@ def _session_summary_from_rows(
             )
             if body is None:
                 raise ValueError("completed result terminal content is unavailable")
+            if len(body.encode("utf-8")) != terminal.content_bytes:
+                raise ValueError("completed result terminal content length is invalid")
             event = SessionCompletedEvent.model_validate_json(body)
             if (
                 event.run_id != row["run_id"]
@@ -123,7 +135,7 @@ def _session_summary_from_rows(
                 item_id=terminal_id or row["session_id"],
                 error=PublicError(
                     error_id=uuid4(),
-                    code="transcript_content_corrupt",
+                    code=terminal_error_code,
                     message="The session terminal record is invalid.",
                     failed_stage="transcript_read",
                     retryable=False,

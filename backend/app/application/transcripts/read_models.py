@@ -58,7 +58,7 @@ class ReadSessionSummary(DomainModel):
     updated_at: UtcDatetime
     result_ref: SessionResultReference | None = None
     result_summary: SessionResultSummary | None = None
-    terminal_corrupt: StrictBool = Field(default=False, exclude=True)
+    terminal_corrupt: StrictBool = False
 
     @model_validator(mode="after")
     def validate_read_state(self) -> "ReadSessionSummary":
