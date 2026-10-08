@@ -20,7 +20,7 @@ M3 工程文档入口：[实施详细设计](M3/m3_transcript_history_implementa
 
 领域边界按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)：run 覆盖一次用户提交的完整分析，是历史分页对象；session 是单个 Agent 的独立上下文与完整执行 loop，包括问题解析 session、各水体 session 和一次最终汇总 session。水体 Agent 等待所有直接上游依赖收敛后只触发一次；汇总 Agent 等全部 active 水体收敛后只触发一次。此前整次分析的创建幂等、整体状态、SSE、取消、保存重试和清理职责归到 run；四表职责与两层记录归属已按 D53 确认，路径按 D65 确认，具体列与身份约束见 M3 实施详细设计。完整业务流程见下文第 1.2 节。
 
-M2 的旧整体 session 模型只保留为历史实现证据；当前 `backend/` 已迁移到 M3 的 run 根协议，Agent session 是 run 下的独立上下文，旧 `/api/analysis/sessions` 不提供兼容别名。新后端的需求和契约只以本文档与后续新架构设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
+M2 的旧整体 session 模型只保留为历史实现证据；当前 `backend/` 已迁移到 M3 的 run 根协议，Agent session 是 run 下的独立上下文，旧 `/api/analysis/sessions` 不提供兼容别名。新后端的需求和契约只以本文档与后续新架构设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为业务需求、行为、数据源、兼容目标或测试 oracle。用户明确授权的一次旧UI只读调研结果已经转化为M9 D18/D19；归档本身仍不是实现输入。
 
 ## 0. 仓库目录约定
 
@@ -28,9 +28,9 @@ M2 的旧整体 session 模型只保留为历史实现证据；当前 `backend/`
 
 - `backend/`：新后端实现目录。后续所有新架构代码都写在这里。
 - `backend_bk/`：与新后端完全独立的旧后端归档，新后端完成后整体丢弃。
-- `frontend_bk/`：待重构前端的历史归档，不是新后端或未来新前端的设计输入。
+- `frontend_bk/`：旧系统历史归档；只有已经写入M9新设计的视觉布局结论可继承，旧源码/契约不是输入。
 
-设计、实现、测试、评审和验收 `backend/` 时，Agent 不得读取 `backend_bk/` 或 `frontend_bk/` 来推导功能，也不得导入、复制、适配、枚举或测试归档中的代码与契约。未来前端重构应基于当时确认的产品设计和新后端契约独立完成。只有用户明确要求维护或审计旧系统时才可以单独处理这些归档，且结论不得自动进入新设计。
+设计、实现、测试、评审和验收 `backend/`/`frontend/` 时，Agent 不得读取 `backend_bk/` 或 `frontend_bk/` 来推导新功能，也不得导入、复制、适配、枚举或测试归档中的代码与契约；应直接使用M9确认的产品/视觉设计和新后端契约独立完成。只有用户明确要求维护或审计旧系统时才可以单独处理这些归档，且结论不得自动进入新设计。
 
 ## 1. 项目背景
 
@@ -380,25 +380,30 @@ D70 已确认两流正常关闭条件，替代原 M2 单流业务终态即关闭
 
 Interface 层继续提供：
 
-- provider/model/default settings 查询
-- API key 保存、清除和 masked status
-- map key 获取
-- Ollama model list 查询
-- 清理增长型数据的 admin API
+- backend catalog/default settings 查询与 revision-based 完整保存
+- versioned global unit policy preview/确认
+- OpenAI/Google Geocoding API key 保存、清除、masked status 与显式 connection test
+- history/RAG health、preview、confirmation 与 async operation Admin API
+- 当前已有 run/history/transcript/SSE/cancel/persistence retry API
 
-Admin 清理对象可以包括：
+Admin 清理对象只包括当前真实存在且定义了 ownership 的数据：
 
 - session history
 - transcript items
 - RAG index
 - derived cross-session memory
-- evidence cache
+
+当前没有跨 run、落盘的 evidence cache；M9 不提供虚假清理入口。未来若引入持久化 evidence cache，必须同时定义 owner、TTL/freshness、transcript/source 引用、在途 reader/worker、删除与重建语义。
 
 Admin 清理不应影响：
 
 - API keys
 - provider settings
 - 用户显式保存的配置
+- unit policy 历史版本
+- retained run 所依赖的 source；除非用户明确确认 whole-dependent-run cascade
+
+第一版是 `127.0.0.1` 上的本地单用户 Web 应用，backend 同 origin 托管 `frontend/` production build。该边界不等于允许 cross-site mutation；写操作仍要求 strict JSON、同源/Fetch Metadata 检查，破坏性动作还需要 server preview/confirmation。认证、远程 bind、多用户和桌面壳不在 M9 第一版。
 
 ## 6. Application / Workflow Layer
 
@@ -926,6 +931,8 @@ RAGIndexPort
 RAGJobStorePort
 KeyStorePort
 CachePort
+SettingsStorePort
+AdminOperationStorePort
 ClockPort
 EventPublisherPort
 ```
@@ -948,12 +955,13 @@ Infrastructure 层实现 ports，负责外部系统接入和持久化。
 - Embedding supplier adapter：只接收 canonical case-query batch，严格验证 profile、数量、顺序、维度与有限数值。
 - Transcript database repository。
 - PostgreSQL RAG repository：generation/job/case/window/fragment/consumption-link 与 exact pgvector/full-text search。
-- Key store repository。
-- Cache repository。
+- OS user credential-store adapter；不得以明文 JSON/file fallback 持久化 secret。
+- Settings/Admin PostgreSQL repository。
+- Cache repository只在出现真实持久化 cache 且 ownership 已定义时实现；当前 `CachePort` 接缝不等于已有 evidence cache。
 - HTTP client adapter。
 - Config/lifecycle adapter。
 
-M3 四张事实表保持 transcript/history 权威；M8 在同库增加 generation、job、case/window/fragment projection 与 consumption-link 派生表，具体列/约束见 M8 实施设计。M9 增加增长型数据清理时必须按 cross-run consumption ownership 处理 retained references，不能只删 source 留下悬空 transcript，也不能删除 API keys。
+M3 四张事实表保持 transcript/history 权威；M8 在同库增加 generation、job、case/window/fragment projection 与 consumption-link 派生表，具体列/约束见 M8 实施设计。M9 增加 mutable current settings、versioned unit policy、有界进程内 Admin preview registry、持久化 operation 与 deleted-run idempotency tombstone；增长型数据清理必须按 cross-run consumption ownership 处理 retained references，不能只删 source 留下悬空 transcript，也不能删除 API keys/settings/unit policy versions。具体见 [M9 实施设计](M9/m9_implementation_design.md)与 [Implementation TODO](M9/m9_implementation_todo.md)。
 
 ## 13. 第一版端到端流程
 

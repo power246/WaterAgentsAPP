@@ -12,14 +12,14 @@
 
 领域边界按 [M3 D50](M3/m3_transcript_history_design.md#d50run-覆盖整次分析session-对应独立-agent-上下文) 和 [D51](M3/m3_transcript_history_design.md#d51问题解析-agent-也属于-run-下的独立-session)：run 是一次用户提交的完整分析和历史分页对象；session 是单个 Agent 的独立上下文与完整 loop，包括问题解析 session 和各水体 session。解析 session 不绑定 COMID，水体 session 绑定对应 COMID 并等待所有上游结束后只触发一次。完整流程见 [总体设计第 1.2 节](backend_architecture_skeleton.md#12-从用户提问到历史记录阅读的完整流程)。旧设计中整次分析的创建幂等、整体状态、SSE、取消、保存重试和清理职责归到 run；M3 按 D53 四表职责集中修订模型、存储、接口及引用校验，D33 去重原则与既有持久化保证保留；所有表的时间要求按 D54/D55 落实。
 
-M2 的旧整体 session 模型只保留为历史实现证据；M3 已在 `backend/` 实现 run 根协议，Agent session 是 run 下的独立上下文，旧 `/api/analysis/sessions` 不提供兼容别名。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为需求来源、行为参考、数据源清单、兼容目标或测试 oracle。
+M2 的旧整体 session 模型只保留为历史实现证据；M3 已在 `backend/` 实现 run 根协议，Agent session 是 run 下的独立上下文，旧 `/api/analysis/sessions` 不提供兼容别名。新后端的需求和契约只以架构文档、milestone 文档和后续新功能设计为准。`backend_bk/`、`frontend_bk/` 和 `docs/backend_refactor_contract.md` 完全不属于新后端上下文，不能成为业务需求、行为、数据源、兼容目标或测试 oracle。用户于2026-10-08明确授权的一次`frontend_bk/`只读UI调研例外已经收敛为M9 D18/D19视觉决策；后续只读M9文档，不再从归档推导要求。
 
 ## 0. 仓库目录约定
 
 - `backend/` 是新后端实现目录，也是所有 milestone 的开发和验收目标。
 - `backend_bk/` 是与新后端完全独立的旧后端归档，新后端完成后整体丢弃。
-- `frontend_bk/` 是待重构前端的历史归档，不是新后端或未来新前端的设计输入。
-- 后续 Agent 设计、实现、测试、评审或验收 `backend/` 时，不得读取、导入、复制、适配、枚举或测试 `backend_bk/` 与 `frontend_bk/` 的代码和契约。未来前端重构基于当时确认的产品设计和新后端契约独立进行。
+- `frontend_bk/` 是旧系统历史归档；只有已经冻结到M9文档的视觉布局结论可作新前端输入，旧源码/契约本身不是输入。
+- 后续 Agent 设计、实现、测试、评审或验收 `backend/` 与 `frontend/` 时，不得读取、导入、复制、适配、枚举或测试 `backend_bk/` 与 `frontend_bk/` 的代码和契约；直接使用M9已确认的视觉/产品设计和新后端契约独立实现。
 
 ## 1. Milestone 原则
 
@@ -585,40 +585,43 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
 
 主要产物：
 
-- settings API
-- key store API
-- admin cleanup API
-- provider/model 配置
-- 最小真实外部 adapter 接入
-- 第一版端到端 demo script 或验收用例
+- `frontend/` 中独立的 React + TypeScript + Vite 本地 Web 应用
+- typed settings/unit-policy API
+- OpenAI/Google Geocoding OS credential-store API
+- history/RAG preview-confirm-operation Admin API
+- production static hosting 与最小真实外部 adapter 接入
+- 第一版离线 fake E2E、opt-in real-provider smoke 和启动说明
 
 主要能力：
 
-- 管理 provider/model/default settings。
+- 管理 backend catalog 允许的默认模型与普通 defaults；base URL、capability 和硬预算保持 deployment-only。
 - 动态修改默认 IANA analysis timezone；已有 session 不受影响。
-- 保存、清除和 masked 展示 API keys。
+- 保存、清除和 masked 展示 OpenAI/Google Geocoding API keys；USGS 仍为 deployment-only optional config。
 - 提供自定义单位验证入口：单位 tool 先做确定性解析，Agent 判断是否适用于参数；默认只生成 session override。
 - 全局单位表更新需要用户显式确认并保存版本记录。
-- 清理增长型数据：
+- 通过 server preview、确认 token、幂等 async operation 清理真实存在的增长型数据：
   - session history
   - transcript items
   - RAG index
   - derived cross-session memory
-  - evidence cache
+- 当前没有持久化 evidence cache，因此第一版不提供无效果的 cleanup 按钮/API；未来若引入，必须同时定义 ownership、freshness、删除和重建语义。
 - 按 M8 consumption-link ownership 清理跨 run 历史引用：选择性删除被保留 run 消费的 source 时必须 conflict 或在用户明确授权下级联整个 dependent run，不能改写 retained transcript 或留下悬空 ref。
+- 删除 run 后保留最小 idempotency tombstone；旧 key 同 body 返回 410，不静默重建分析。
 - embedding profile 变更只创建并切换新 generation，不改写既有 run/session/transcript；reindex/index-only cleanup 与删除原历史是两个不同动作。
 - profile变更先保存期望配置并构建/验证新generation，原子激活后才允许清理旧profile credential；切换前旧active search仍须可用。
 - 清理接口不删除 API keys。
 - 端到端 session 能从创建跑到完成或 cancel。
-- 前端按最终 OpenAPI/SSE 契约独立重构，不迁移旧前端字段、事件或交互。
+- 前端按最终 OpenAPI/SSE 契约独立建设；`frontend_bk/` 所属旧系统只提供视觉参考，不迁移/依赖其组件、字段、事件、数据或构建。
+- 桌面端优先保留左侧控制、中间地图、右侧 Overview/Agent/Evidence 的熟悉空间关系，允许克制的局部改良；新实现与旧系统没有兼容关系。
 - 按 M3 D66，执行中选中已有 session 的水体即可观看真实上报过程，不必等整次 run 完成或最终预测出现；不提供向 Agent 追加消息的交互，保留停止整个 run 的操作。关闭查看连接不取消分析，具体 session SSE 协议按后续确认结果实现并验收。
 - demo 启动说明明确单进程、单 worker，不暗示支持共享状态或跨进程 cancel。
+- 第一版由 backend 在 `127.0.0.1` 同 origin 提供 frontend 与 API；不建设桌面壳、认证或远程多用户部署。
 
 阶段自测验收：
 
 - settings/key/admin API 能独立通过测试。
 - 清理增长型数据后，API keys 仍然存在。
-- 使用至少一条真实或 fake 的完整链路完成 demo：
+- 使用 deterministic fake 的完整链路完成默认离线 demo；真实 provider smoke 单独 opt-in 并按 `passed/failed/not run` 记账：
   - 创建 session
   - SSE 订阅事件
   - query understanding
@@ -629,6 +632,8 @@ M3 不建设 transcript_item_links；先按 scope 读取水体全部过程，再
   - 历史详情查询
 - demo 输出包含 quantified、directional 或 indeterminate 结果，以及证据链、置信度和归因总结。
 - 最终前端、OpenAPI、SSE raw frame、错误码、smoke 和后端实现使用同一字段与事件名称。
+
+设计状态（2026-10-08）：M9 产品、前端、policy、API、实施设计与 Milestone 0–9 施工清单已冻结，代码尚未实现，TODO 全部保持未勾选。权威输入见 [总设计](M9/m9_settings_admin_demo_design.md)、[Frontend Experience](M9/m9_frontend_experience_design.md)、[Policy Catalog](M9/m9_settings_admin_policy_catalog.md)、[API](M9/m9_settings_admin_api.md)、[实施设计](M9/m9_implementation_design.md)与 [Implementation TODO](M9/m9_implementation_todo.md)。
 
 ## 12. 跨 Milestone 延后契约登记
 

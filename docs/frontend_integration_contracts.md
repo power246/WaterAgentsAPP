@@ -17,9 +17,11 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M6 reasoning/result | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run` / `partial` | 以现有 result summary/ref、session transcript/SSE、history 与 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md) 作为 M9 接入输入；正式前端仍由 M9 实现，不调用 direct prompt/model/tool surface。 |
 | M7 workflow/summary | Windows 本机实现与集成审计已完成；真实 provider 与三平台 CI 仍为 `not run` / `partial` | M9 直接消费当前 snapshot/history、topology/waterbody/summary refs 与安全失败投影；M7 不提前实现页面、地图连线或 settings/admin。 |
 | M8 transcript memory/RAG | Windows 本机 production implementation、deterministic fake/PG E2E、history/SSE 与 runtime OpenAPI 验收已完成；外部 supplier/容量/Ubuntu/macOS 仍按事实为 `not run` / `partial`，见 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md) | 不新增direct RAG route或第三条SSE。M9按 [M8 API/读取契约](M8/m8_memory_rag_api.md) 消费既有tool/source/fragment/result transcript，区分historical、empty、unavailable与invalid。 |
-| M9 frontend/settings/admin | M8 后端接力证据已具备；最终页面与admin API尚未冻结或实现 | 等M9产品/API设计完成后统一接入、联调和验收。 |
+| M9 frontend/settings/admin | 产品、前端、policy、API、实施设计与Milestone 0–9 TODO已冻结；implementation尚未开始 | 以 `docs/M9` 五份设计与[Implementation TODO](M9/m9_implementation_todo.md)为施工输入；不得把design/TODO complete写成route/UI已实现。 |
 
-正式前端在 M9 依据届时的产品设计、运行时 OpenAPI 和最终 SSE 文档独立重构。`frontend_bk/` 是历史归档，不得复制其字段、事件、组件或 WebSocket 交互，也不要求兼容 M1–M8 的阶段性接口。
+正式前端在 M9 的唯一生产目录是 `frontend/`，依据运行时 OpenAPI、最终 SSE 文档和 [M9 Frontend Experience](M9/m9_frontend_experience_design.md) 独立建设。`frontend_bk/` 所属旧系统与新前端没有代码、API、数据、构建或发布兼容关系；只允许人工参考其可见布局习惯，不 import/迁移其组件、字段、状态或 WebSocket 交互。
+
+M9 桌面主视图优先保持左侧 Controls/New/History、中间 Map、右侧 `Overview / Agent / Evidence` 的空间关系；允许有明确收益的局部排版改良，不要求逐像素复制旧系统。开发期 Vite 代理 `/api`，production 由 backend 在同 origin 提供 `frontend/` build；第一版默认 `127.0.0.1` 本地单用户、单进程/worker，不建设桌面壳、认证或远程多用户部署。新增 settings/keys/admin/unit/operation wire contract 见 [M9 API](M9/m9_settings_admin_api.md)。
 
 **已确认的产品交互目标（M9 实现）**
 
@@ -41,11 +43,13 @@ M7 还会在全部 active 水体收敛后创建一个不绑定 COMID 的 `run_su
 |---|---|
 | BFS 范围内但不参与推理 | 半透明灰色 |
 | 参与推理但尚未开始 | 灰色 |
-| 正在推理 | 蓝色 |
+| 正在推理 | 蓝色 + 轻微呼吸外圈 |
 | 推理完成 | 绿色 |
 | 推理出错 | 红色 |
+| 已开始后真实取消 | 橙色 |
+| 因 run 取消而未执行 | 灰色 + 虚线外圈/停止标记 |
 
-颜色由前端映射，状态来自本次 BFS/推理范围、调度和真实 session 事实；前两种可能没有 session，不能补造空会话或因此建立过程 SSE。真实 session 的 pending/running/completed/failed/cancelled 仍各有原义，水体状态不等同于 session 状态枚举。用户举例的排除原因是上游没有带检测站点的水体，具体判断由 M4 定型。取消后的颜色和标签按 [D72](M3/m3_transcript_history_design.md#d72取消后的水体展示延后到前端设计) 留到 M9 前端设计，后端保留真实 cancelled 状态，本轮不确定其具体呈现。历史只使用本次已保存事实，完整请求/配置/Agent 正文不进入 run 通知，也不因颜色增加后端存储字段。
+颜色由前端映射，状态来自本次 BFS/推理范围、调度和真实 session 事实；前两种可能没有 session，不能补造空会话或因此建立过程 SSE。真实 session 的 pending/running/completed/failed/cancelled 仍各有原义，水体状态不等同于 session 状态枚举。D72 已由 M9 冻结：已有 session 且真实 cancelled 才用橙色；参与节点因整次 run 取消而未创建/未开始时使用灰色虚线/停止标记，不伪造 session；已完成/失败/取消终态不被 run 后续状态批量重染。蓝色呼吸只作用于外圈，截图测试冻结动画。历史只使用本次已保存事实，完整请求/配置/Agent 正文不进入 run 通知，也不因颜色增加后端存储字段。
 
 按 [M3 D44](M3/m3_transcript_history_design.md#d44query-历史列表分页按当次地图进入连续会话记录) 及 D50，前端提供按 run 分页的 query 历史列表。用户选择某次 run 后，显示当时地图上的标点和连线，点击水体标点再进入该 run 下对应 session 的多层会话记录。Agent 过程连续展示，不设置记录的上一页/下一页；同一 query 的不同 run 不合并，同一水体在不同 run 的记录不混合。历史读取使用已保存的当次消息，不重新分析 query 或用当前结果替换旧结果。
 
