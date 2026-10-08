@@ -17,6 +17,23 @@ class SettingsRevisionConflictError(SettingsAdminError):
     status = 409
     public_message = "Settings changed; reload before saving."
 
+    def __init__(self, current=None) -> None:
+        self.current = current
+        super().__init__()
+
+
+class SettingsInvalidDefaultsError(SettingsAdminError):
+    code = "settings_invalid_defaults"
+    status = 422
+    public_message = "The settings selection is invalid."
+
+
+class LocalMutationRejectedError(SettingsAdminError):
+    code = "local_mutation_rejected"
+    status = 403
+    stage = "request_guard"
+    public_message = "The local request origin is not allowed."
+
 
 class SettingsUnavailableError(SettingsAdminError):
     code = "settings_unavailable"
@@ -149,7 +166,8 @@ class RAGRetentionNotElapsedError(SettingsAdminError):
 
 
 M9_PUBLIC_ERRORS = (
-    SettingsRevisionConflictError, SettingsUnavailableError,
+    SettingsRevisionConflictError, SettingsInvalidDefaultsError,
+    LocalMutationRejectedError, SettingsUnavailableError,
     CredentialNotAllowedError, CredentialStoreUnavailableError,
     CredentialMissingError, CredentialTestFailedError, CredentialValueInvalidError,
     UnitUnknownError, UnitDimensionMismatchError, UnitNotApplicableError,

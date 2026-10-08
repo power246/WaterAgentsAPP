@@ -13,6 +13,7 @@ from app.domain.settings_admin import (
     SettingsCatalogProjection, UnitPolicyChange, UnitPolicyEntry, UnitPolicyProjection,
     UnitPolicyVersion, Version,
 )
+from app.api.schemas.analysis_runs import AnalysisRunErrorResponse
 
 
 class SettingsResponse(DomainModel):
@@ -33,6 +34,10 @@ class SettingsResponse(DomainModel):
 class ReplaceSettingsRequest(DomainModel):
     expected_revision: Revision
     defaults: MutableDefaults
+
+
+class SettingsConflictResponse(AnalysisRunErrorResponse):
+    current_settings: SettingsResponse
 
 
 class PreviewUnitPolicyRequest(DomainModel):
@@ -194,7 +199,8 @@ class GenerationPreviewResponse(DomainModel):
 
 
 M9_PUBLIC_SCHEMAS = (
-    SettingsResponse, ReplaceSettingsRequest, PreviewUnitPolicyRequest,
+    SettingsResponse, ReplaceSettingsRequest, SettingsConflictResponse,
+    PreviewUnitPolicyRequest,
     UnitPolicyPreviewResponse, ConfirmActionRequest, UnitPolicyResponse,
     KeyStatusItem, KeyStatusResponse, PutCredentialRequest,
     CredentialTestResponse, AdminStorageStatusResponse, AdminRAGStatusResponse,

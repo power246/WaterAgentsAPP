@@ -184,8 +184,8 @@ def test_create_exact_pending_snapshot_and_configuration(resolution, zone) -> No
                     "parser_model": PARSER_MODEL.model_dump(mode="json"),
                     "waterbody_model": WATERBODY_MODEL.model_dump(mode="json"),
                     "memory_mode": "stateless",
-                    "unit_policy_version": "legacy",
-                    "unit_registry_digest": "unknown",
+                    "unit_policy_version": 1,
+                    "unit_registry_digest": app.state.parameter_capability_registry.manifest_digest,
                 },
             }
             assert response.json() == expected
@@ -915,6 +915,7 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         BASE + "/{run_id}/sessions/{session_id}/events": {"get"},
         BASE + "/{run_id}/cancel": {"post"},
         BASE + "/{run_id}/persistence/retry": {"post"},
+        "/api/settings": {"get", "put"},
     }
     create = paths[BASE]["post"]
     assert "400" in create["responses"]
@@ -997,7 +998,9 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         for operation in path.values():
             for status, response in operation["responses"].items():
                 assert response["headers"]["X-Request-ID"]["schema"] == {"type": "string", "format": "uuid"}
-                if int(status) >= 400:
+                if int(status) >= 400 and not (
+                    operation is paths["/api/settings"]["put"] and status == "409"
+                ):
                     assert response["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisRunErrorResponse")
 
 

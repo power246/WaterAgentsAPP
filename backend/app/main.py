@@ -12,7 +12,9 @@ from app.api.http.analysis_runs import REQUEST_ID_HEADERS, error_responses
 from app.api.http.analysis_runs import router as analysis_runs_router
 from app.api.http.errors import register_error_handlers
 from app.api.http.health import router as health_router
+from app.api.http.settings import router as settings_router
 from app.api.http.request_context import RequestContextMiddleware
+from app.api.http.local_mutation import LocalMutationGuardMiddleware, _loopback
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.api.schemas.settings_admin import M9_PUBLIC_SCHEMAS
 from app.application.analysis_runs.coordinator import RunCoordinator
@@ -23,6 +25,10 @@ from app.application.analysis_runs.persistence import (
 )
 from app.application.analysis_runs.startup_repair import repair_interrupted_runs
 from app.application.settings_admin.errors import M9_PUBLIC_ERRORS
+from app.application.settings_admin.runtime_settings import RuntimeSettingsResolver
+from app.application.settings_admin.settings_service import (
+    SettingsService, deployment_defaults,
+)
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import AnalysisContext
 from app.application.evidence_tools import (
@@ -49,6 +55,8 @@ from app.infrastructure.persistence.database import (
     create_database_engine,
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
+from app.infrastructure.persistence.settings_repository import PostgresSettingsRepository
+from app.infrastructure.persistence.memory_settings import InMemorySettingsRepository
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.infrastructure.runtime import (
     M6Runtime,
@@ -64,6 +72,7 @@ from app.infrastructure.runtime import (
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
+from app.ports.settings_store import SettingsStorePort
 
 
 @asynccontextmanager
@@ -90,6 +99,7 @@ def create_app(
     ] | None = None,
     transcript_registry: TranscriptRegistry | None = None,
     model_catalog: ModelCatalogPort | None = None,
+    settings_store: SettingsStorePort | None = None,
     parameter_capability_registry: ParameterCapabilityRegistry | None = None,
     workflow_task_factory: Callable[
         [Coroutine[object, object, None], str],
@@ -103,6 +113,8 @@ def create_app(
     ) = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
+    if not _loopback(resolved_settings.host):
+        raise SettingsConfigurationError("local API requires a loopback bind host")
     resolved_clock = clock if clock is not None else SystemClock()
     resolved_model_catalog = model_catalog or ModelCatalog(resolved_settings.model_catalog)
     resolved_parameter_capabilities = (
@@ -131,6 +143,29 @@ def create_app(
                 raise SettingsConfigurationError(
                     "a custom transcript store requires an explicit M8 runtime builder"
                 )
+            active_settings_store = settings_store or (
+                PostgresSettingsRepository(
+                    engine, resolved_parameter_capabilities,
+                    operation_timeout_seconds=resolved_settings.db_operation_timeout_seconds,
+                )
+                if engine is not None else InMemorySettingsRepository(
+                    resolved_parameter_capabilities
+                )
+            )
+            try:
+                initial_defaults = deployment_defaults(
+                    resolved_settings.analysis_timezone,
+                    resolved_model_catalog.snapshot(),
+                )
+                settings_service = SettingsService(
+                    active_settings_store, resolved_model_catalog.snapshot(),
+                    initial_defaults, resolved_clock,
+                )
+            except ValueError as error:
+                raise SettingsConfigurationError(
+                    "deployment settings catalog is invalid"
+                ) from error
+            settings_resolver = RuntimeSettingsResolver(settings_service)
             runtime_context = (
                 _provided_runtime(workflow)
                 if workflow is not None
@@ -157,6 +192,7 @@ def create_app(
                     transcript_store=active_store,
                     model_catalog=resolved_model_catalog,
                     analysis_timezone=resolved_settings.analysis_timezone,
+                    settings_resolver=settings_resolver,
                     workflow=runtime.workflow,
                     id_factory=id_factory,
                     record_id_factory=record_id_factory,
@@ -271,6 +307,7 @@ def create_app(
                         )
                     await m8_runtime.start()
                     application.state.run_coordinator = coordinator
+                    application.state.settings_service = settings_service
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store
                     application.state.m8_runtime = m8_runtime
@@ -299,12 +336,17 @@ def create_app(
     application.state.clock = resolved_clock
     application.state.id_factory = id_factory
     application.state.parameter_capability_registry = resolved_parameter_capabilities
+    application.add_middleware(
+        LocalMutationGuardMiddleware,
+        bind_host=resolved_settings.host, bind_port=resolved_settings.port,
+    )
     application.add_middleware(RequestContextMiddleware, id_factory=id_factory)
     register_error_handlers(application)
     application.include_router(
         health_router, responses={**error_responses(405, 500), 200: {"headers": REQUEST_ID_HEADERS}}
     )
     application.include_router(analysis_runs_router)
+    application.include_router(settings_router)
 
     generated_openapi = application.openapi
 

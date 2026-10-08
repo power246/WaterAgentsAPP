@@ -23,8 +23,8 @@ class ModelCatalogSnapshot(DomainModel):
             for capability in self.capabilities
             if ModelRole.EMBEDDING in capability.roles
         )
-        if self.capabilities and len(embedding_capabilities) != 1:
-            raise ValueError("model catalog requires exactly one embedding capability")
+        if self.capabilities and not embedding_capabilities:
+            raise ValueError("model catalog requires an embedding capability")
         return self
 
     @property

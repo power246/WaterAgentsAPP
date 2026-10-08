@@ -190,7 +190,7 @@ def test_default_app_validates_database_before_m4_and_still_fails_closed(
     application = create_app(AppSettings(_env_file=None))
 
     async def exercise() -> None:
-        with pytest.raises(SettingsConfigurationError, match="query_parser"):
+        with pytest.raises(SettingsConfigurationError, match="deployment settings catalog"):
             async with application.router.lifespan_context(application):
                 raise AssertionError("misconfigured app started")
 

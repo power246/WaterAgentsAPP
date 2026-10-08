@@ -560,7 +560,8 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
     schema = application.openapi()
     paths = set(schema["paths"])
 
-    assert len(paths) == 10
+    assert len(paths) == 11
+    assert "/api/settings" in paths
     assert not any(
         forbidden in path
         for path in paths

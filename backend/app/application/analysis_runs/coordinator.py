@@ -139,6 +139,7 @@ from app.domain.time.time_resolution_preference_source import (
 from app.domain.time.timezone import get_iana_timezone
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
+from app.application.settings_admin.runtime_settings import RuntimeSettingsResolver
 from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
@@ -266,6 +267,7 @@ class RunCoordinator:
         ],
         model_catalog: ModelCatalogPort,
         analysis_timezone: str = "America/Chicago",
+        settings_resolver: RuntimeSettingsResolver | None = None,
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
@@ -311,6 +313,7 @@ class RunCoordinator:
         self._transcript_store = transcript_store
         self._model_catalog = model_catalog
         self._analysis_timezone = analysis_timezone
+        self._settings_resolver = settings_resolver
         self._id_factory = id_factory
         self._record_id_factory = record_id_factory
         self._logger = (
@@ -440,6 +443,15 @@ class RunCoordinator:
                     )
                     return existing.creation.receipt_snapshot()
 
+            resolved_configuration = configuration_override
+            if self._settings_resolver is not None and resolved_configuration is None:
+                try:
+                    raw_body.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise InvalidSubmissionEncodingError() from error
+                request = AnalysisRequestV1.model_validate_json(raw_body)
+                resolved_configuration = await self._settings_resolver.resolve(request)
+
             async with self._runs_lock:
                 if self._closing:
                     raise ServiceShuttingDownError()
@@ -453,7 +465,7 @@ class RunCoordinator:
                             raw_body,
                             fingerprint,
                             idempotency_key,
-                            configuration_override,
+                            resolved_configuration,
                         )
                         initial = True
                 else:
@@ -461,7 +473,7 @@ class RunCoordinator:
                         raw_body,
                         fingerprint,
                         None,
-                        configuration_override,
+                        resolved_configuration,
                     )
                     initial = True
             try:
@@ -556,7 +568,11 @@ class RunCoordinator:
         validation_errors: list[dict[str, object]] = []
         if request.date_range is not None:
             local_today = timestamp.astimezone(
-                get_iana_timezone(self._analysis_timezone)
+                get_iana_timezone(
+                    configuration_override.analysis_timezone
+                    if configuration_override is not None
+                    else self._analysis_timezone
+                )
             ).date()
             earliest = local_today - timedelta(days=7)
             latest = local_today + timedelta(days=7)

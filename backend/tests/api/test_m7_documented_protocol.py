@@ -111,6 +111,7 @@ def test_runtime_registry_and_openapi_match_the_m7_contract() -> None:
     paths = set(create_test_app().openapi()["paths"])
     assert paths == {
         "/health",
+        "/api/settings",
         "/api/analysis/runs",
         "/api/analysis/runs/{run_id}",
         "/api/analysis/runs/{run_id}/cancel",

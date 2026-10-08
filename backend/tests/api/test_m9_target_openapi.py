@@ -38,8 +38,14 @@ def openapi():
     return create_app(AppSettings(_env_file=None)).openapi()
 
 
-@pytest.mark.parametrize("path,method,status", TARGET_ROUTES)
-@pytest.mark.xfail(strict=True, reason="M9 M3-M6/M8 register real routes and headers")
+@pytest.mark.parametrize("path,method,status", [
+    item if item[0] == "/api/settings" else pytest.param(
+        *item, marks=pytest.mark.xfail(
+            strict=True, reason="Later M9 milestones register remaining routes",
+        ),
+    )
+    for item in TARGET_ROUTES
+])
 def test_target_route_method_status_and_request_id_header(openapi, path, method, status):
     operation = openapi["paths"][path][method]
     responses = operation["responses"]

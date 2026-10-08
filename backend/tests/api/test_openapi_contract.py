@@ -1,7 +1,7 @@
 from tests.m4_support import create_test_app
 
 
-def test_m7_extends_current_schemas_without_adding_routes() -> None:
+def test_m7_schemas_remain_with_m9_settings_route() -> None:
     schema = create_test_app().openapi()
     assert set(schema["paths"]) == {
         "/health",
@@ -14,6 +14,7 @@ def test_m7_extends_current_schemas_without_adding_routes() -> None:
         "/api/analysis/runs/{run_id}/sessions/{session_id}/events",
         "/api/analysis/runs/{run_id}/sessions/{session_id}/transcript",
         "/api/analysis/runs/{run_id}/transcript/{item_id}/content",
+        "/api/settings",
     }
     schemas = schema["components"]["schemas"]
     assert {

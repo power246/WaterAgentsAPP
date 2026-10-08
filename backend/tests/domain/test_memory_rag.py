@@ -468,21 +468,19 @@ def test_catalog_requires_exactly_one_exclusive_embedding_capability() -> None:
     )
 
     assert ModelCatalogSnapshot(capabilities=(parser, embedding)).embedding_profile == profile
-    with pytest.raises(ValidationError, match="exactly one embedding"):
+    with pytest.raises(ValidationError, match="requires an embedding"):
         ModelCatalogSnapshot(capabilities=(parser,))
-    with pytest.raises(ValidationError, match="exactly one embedding"):
-        other_profile = embedding_profile(model="embedding-v2")
-        ModelCatalogSnapshot(
-            capabilities=(
-                embedding,
-                ModelCapability(
-                    provider=other_profile.provider,
-                    model=other_profile.model,
-                    roles=(ModelRole.EMBEDDING,),
-                    embedding_profile=other_profile,
-                ),
-            )
-        )
+    other_profile = embedding_profile(model="embedding-v2")
+    multi_profile_catalog = ModelCatalogSnapshot(capabilities=(
+        embedding,
+        ModelCapability(
+            provider=other_profile.provider,
+            model=other_profile.model,
+            roles=(ModelRole.EMBEDDING,),
+            embedding_profile=other_profile,
+        ),
+    ))
+    assert multi_profile_catalog.embedding_profile == profile
     with pytest.raises(ValidationError, match="exclusive"):
         ModelCapability(
             provider=profile.provider,

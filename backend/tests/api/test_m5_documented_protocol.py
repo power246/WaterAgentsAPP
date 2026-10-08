@@ -126,6 +126,7 @@ def test_runtime_registry_openapi_and_manifest_match_documented_fixed_counts() -
     paths = set(create_test_app().openapi()["paths"])
     assert paths == {
         "/health",
+        "/api/settings",
         "/api/analysis/runs",
         "/api/analysis/runs/{run_id}",
         "/api/analysis/runs/{run_id}/cancel",

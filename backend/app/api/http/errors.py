@@ -14,6 +14,7 @@ from app.api.schemas.analysis_runs import (
     RunStatusResponse,
     ValidationViolation,
 )
+from app.api.schemas.settings_admin import SettingsResponse
 from app.application.analysis_runs.coordinator import (
     AgentSessionNotFoundError,
     EventCursorAheadError,
@@ -33,7 +34,10 @@ from app.application.analysis_runs.creation import (
     InvalidSubmissionEncodingError,
 )
 from app.application.analysis_runs.models import CorrelationContext, RunStatus
-from app.application.settings_admin.errors import SettingsAdminError
+from app.application.settings_admin.errors import (
+    SettingsAdminError, SettingsRevisionConflictError,
+)
+from app.domain.settings_admin import SettingsSnapshot
 from app.application.transcripts.reader import (
     InvalidHistoryCursorError,
     PersistenceRetryUnavailableError,
@@ -362,12 +366,23 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         history_url=history_url,
     )
     headers["X-Request-ID"] = str(error.request_id)
+    if request.url.path.startswith("/api/settings"):
+        headers["Cache-Control"] = "no-store"
     log_http(
         request, "http_request_failed", status, error=error,
         exception_type=type(exception).__name__,
         exception=exception if status >= 500 and not isinstance(exception, HTTPException) else None,
     )
-    return JSONResponse(envelope.model_dump(mode="json"), status_code=status, headers=headers)
+    body = envelope.model_dump(mode="json")
+    if (
+        isinstance(exception, SettingsRevisionConflictError)
+        and isinstance(exception.current, SettingsSnapshot)
+    ):
+        body["current_settings"] = SettingsResponse(
+            **exception.current.model_dump(mode="python"),
+            catalog=request.app.state.settings_service.catalog,
+        ).model_dump(mode="json")
+    return JSONResponse(body, status_code=status, headers=headers)
 
 
 def register_error_handlers(application: FastAPI) -> None:

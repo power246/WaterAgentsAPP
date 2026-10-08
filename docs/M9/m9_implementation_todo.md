@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；本文件只把设计转换为 coding agent 可执行的施工与验证清单。M9 production implementation、migration、公开 API、`frontend/` 应用、联调和验收均尚未开始。本文所有复选框必须保持未勾选，直到对应代码、focused tests、阶段出口与完成记录都有实际证据。
+> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–3 已实现并保留本地提交，Milestone 4–9、`frontend/` 应用、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
 
 本清单执行以下权威文档：
 
@@ -221,40 +221,42 @@
 
 ### 工作
 
-- [ ] 实现 `SettingsService`：validated deployment initial defaults、safe role-filtered model/profile/timezone/memory/resolution catalog、singleton snapshot与 revision CAS full replacement。
-- [ ] 普通 Settings PUT只允许 timezone/parser model/waterbody model/memory mode/resolution/desired embedding profile；active unit policy只读展示，不能混入普通 replacement。
-- [ ] desired embedding profile保存只更新期望 identity，不在同一 request内调用 provider、启动 generation或切换 active。
-- [ ] 实现 `GET /api/settings` 与 `PUT /api/settings` 的严格 DTO/status/error/no-store/request-id；`409 settings_revision_conflict`返回安全 current settings extension并保留前端可重试语义。
-- [ ] 建立统一 local mutation guard：loopback Host/bind假设、strict `application/json`、Origin same-origin、`Sec-Fetch-Site: cross-site`拒绝、无宽松 CORS、无 GET/form/query mutation；明确无 Origin的本地 CLI分支。
-- [ ] 将 `RuntimeSettingsResolver` 接入 create boundary：request显式 model/memory/resolution继续由当前 catalog校验；server固化当前 analysis timezone、active unit version/digest，且在 run/idempotency receipt提交前完成。
-- [ ] 保持 model/memory/resolution在 create body显式提交；settings仅用于 frontend预填，不让 route静默用当前值覆盖已发送 request。
-- [ ] 原子更新 writer/PostgreSQL/history/detail/SSE/smoke fixtures，使新 run保存完整 configuration，旧 run明确 legacy/unknown；history显示原 IANA identity而非 browser/current setting。
-- [ ] settings变更与并发 create使用可控 gate证明：变更前接受的 run保留旧 snapshot，变更后新 run使用新 timezone/unit identity，不产生半旧半新配置。
-- [ ] production composition只创建一个 SettingsService/repository/resolver；route不直接读取 env、SQL或 model config file。
+- [x] 实现 `SettingsService`：validated deployment initial defaults、safe role-filtered model/profile/timezone/memory/resolution catalog、singleton snapshot与 revision CAS full replacement。
+- [x] 普通 Settings PUT只允许 timezone/parser model/waterbody model/memory mode/resolution/desired embedding profile；active unit policy只读展示，不能混入普通 replacement。
+- [x] desired embedding profile保存只更新期望 identity，不在同一 request内调用 provider、启动 generation或切换 active。
+- [x] 实现 `GET /api/settings` 与 `PUT /api/settings` 的严格 DTO/status/error/no-store/request-id；`409 settings_revision_conflict`返回安全 current settings extension并保留前端可重试语义。
+- [x] 建立统一 local mutation guard：loopback Host/bind假设、strict `application/json`、Origin same-origin、`Sec-Fetch-Site: cross-site`拒绝、无宽松 CORS、无 GET/form/query mutation；明确无 Origin的本地 CLI分支。
+- [x] 将 `RuntimeSettingsResolver` 接入 create boundary：request显式 model/memory/resolution继续由当前 catalog校验；server固化当前 analysis timezone、active unit version/digest，且在 run/idempotency receipt提交前完成。
+- [x] 保持 model/memory/resolution在 create body显式提交；settings仅用于 frontend预填，不让 route静默用当前值覆盖已发送 request。
+- [x] 原子更新 writer/PostgreSQL/history/detail/SSE/smoke fixtures，使新 run保存完整 configuration，旧 run明确 legacy/unknown；history显示原 IANA identity而非 browser/current setting。
+- [x] settings变更与并发 create使用可控 gate证明：变更前接受的 run保留旧 snapshot，变更后新 run使用新 timezone/unit identity，不产生半旧半新配置。
+- [x] production composition只创建一个 SettingsService/repository/resolver；route不直接读取 env、SQL或 model config file。
 
 ### Tests
 
-- [ ] GET/PUT覆盖 revision 0 deployment defaults、first insert、full replacement、stale revision、unknown field、invalid timezone/model/role/profile/enum和 DB unavailable。
-- [ ] mutation guard覆盖 same-origin browser、cross-site、Origin mismatch、bad/missing content type、form/query/GET、loopback CLI与 proxy host边界；拒绝发生在 service side effect之前。
-- [ ] create snapshot测试覆盖 settings race、explicit create fields、timezone/unit identity、legacy read、DST和原 IANA展示；当前 settings变化不改写旧 history。
-- [ ] desired profile保存断言 `0 provider call / 0 generation build / 0 active switch`，只改变future desired projection。
-- [ ] route/error/log capture证明 deployment config与 secret不进入 Settings response、conflict extension、validation、日志或 OpenAPI example。
-- [ ] M1–M8 create/history/SSE/idempotency回归保持，settings route不能新增第三 stream或改变现有 route名称。
+- [x] GET/PUT覆盖 revision 0 deployment defaults、first insert、full replacement、stale revision、unknown field、invalid timezone/model/role/profile/enum和 DB unavailable。
+- [x] mutation guard覆盖 same-origin browser、cross-site、Origin mismatch、bad/missing content type、form/query/GET、loopback CLI与 proxy host边界；拒绝发生在 service side effect之前。
+- [x] create snapshot测试覆盖 settings race、explicit create fields、timezone/unit identity、legacy read、DST和原 IANA展示；当前 settings变化不改写旧 history。
+- [x] desired profile保存断言 `0 provider call / 0 generation build / 0 active switch`，只改变future desired projection。
+- [x] route/error/log capture证明 deployment config与 secret不进入 Settings response、conflict extension、validation、日志或 OpenAPI example。
+- [x] M1–M8 create/history/SSE/idempotency回归保持，settings route不能新增第三 stream或改变现有 route名称。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcripts backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_history.py -q`
-- [ ] 运行新增 settings service/API/mutation-guard tests与 snapshot persistence tests。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
-- [ ] 使用专用 PostgreSQL运行 settings CAS/create/history/restart focused integration。
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcripts backend/tests/api/test_analysis_runs.py backend/tests/api/test_analysis_history.py -q`
+- [x] 运行新增 settings service/API/mutation-guard tests与 snapshot persistence tests。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
+- [x] 使用专用 PostgreSQL运行 settings CAS/create/history/restart focused integration。
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：Settings API、same-origin mutation policy与future-run configuration materialization通过真实 production path；历史保留原timezone/unit identity，尚未动态替换 provider credentials或公开 Admin动作。
 
 提交边界：SettingsService/route/schema、mutation guard、create resolver与 snapshot/history消费者、focused tests；不得包含 OS keyring、per-run provider重组、unit intent、Admin runner或 frontend。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：`codex/m9-milestone-0` 基于 `origin/main` 的 `cf7eed7` 完成 SettingsService、safe catalog、`GET/PUT /api/settings`、revision CAS/current conflict extension、local mutation guard 与 create 前的 RuntimeSettingsResolver。新 run 保存原 IANA timezone 和 active unit version/digest；旧 run 的 legacy/unknown 保持可读，SSE 沿用现有无 configuration 的安全投影。多 profile 目录仅扩展可选的 desired identity，保存不触发 provider/generation/active 切换；M4 再处理 provider lease 与凭据。
+
+验证：分析/历史 153 passed，OpenAPI/架构 160 passed；扩展 API/application/domain/infrastructure 1919 passed、1 skipped（未配置专用 DB 时跳过 PostgreSQL 用例）、24 xfailed（后续 M9 route 预期红）；最后的 Content-Type 边界改动后 Settings/create/SSE 126 passed。专用 `wateragents_test` 隔离 schema 中 settings CAS、并发前后 run、legacy history 与应用重启 1 passed；compileall 与 `git diff --check` 通过。secret 未进入 Settings 响应、409 extension、验证响应、日志与 OpenAPI；真实 provider、OS keychain、跨平台及 M9 整体验收未运行。本地提交见该阶段 HEAD。
 
 ## Milestone 4：OS credentials 与 per-run/attempt provider runtime
 
