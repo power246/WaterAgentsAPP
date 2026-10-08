@@ -42,8 +42,46 @@ def test_ci_runs_install_tests_and_both_smokes_on_all_supported_operating_system
     assert 'NO_PROXY: ""' in workflow
 
 
-def test_ci_commands_do_not_require_a_platform_specific_shell() -> None:
+def test_ci_installs_and_verifies_pgvector_before_running_database_tests() -> None:
     workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    postgres_index = workflow.index("ikalnytskyi/action-setup-postgres@v8")
+    verify_index = workflow.index("Verify pgvector availability")
+    test_index = workflow.index(
+        "uv run --project backend --locked python -m pytest backend/tests -q"
+    )
+
+    platform_installations = (
+        (
+            "Install pgvector on Ubuntu",
+            "if: runner.os == 'Linux'",
+            "sudo apt-get install -y postgresql-17-pgvector",
+        ),
+        (
+            "Install pgvector on macOS",
+            "if: runner.os == 'macOS'",
+            "run: brew install pgvector",
+        ),
+        (
+            "Install pgvector on Windows",
+            "if: runner.os == 'Windows'",
+            "nmake /NOLOGO /F Makefile.win install",
+        ),
+    )
+    for step_name, condition, install_command in platform_installations:
+        install_index = workflow.index(step_name)
+        assert postgres_index < install_index < verify_index < test_index
+        assert condition in workflow
+        assert install_command in workflow
+
+    assert "git clone --branch v0.8.7 --depth 1" in workflow
+    assert workflow.count("shell: cmd") == 1
+    assert "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public" in workflow
+    assert "SELECT extversion FROM pg_extension WHERE extname = 'vector'" in workflow
+
+
+def test_shared_ci_commands_do_not_require_a_platform_specific_shell() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    shared_steps = workflow[workflow.index("astral-sh/setup-uv@v6") :]
     platform_specific_commands = (
         "source ",
         "Activate.ps1",
@@ -52,7 +90,7 @@ def test_ci_commands_do_not_require_a_platform_specific_shell() -> None:
         "start /b",
     )
 
-    assert not any(command in workflow for command in platform_specific_commands)
+    assert not any(command in shared_steps for command in platform_specific_commands)
 
 
 def test_ci_model_catalog_matches_the_runtime_settings_schema() -> None:

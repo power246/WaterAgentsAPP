@@ -42,6 +42,30 @@ jobs:
           password: wateragents-ci-password
           database: wateragents_m9
           port: "5432"
+      - name: Install pgvector on Ubuntu
+        if: runner.os == 'Linux'
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-17-pgvector
+      - name: Install pgvector on macOS
+        if: runner.os == 'macOS'
+        run: brew install pgvector
+      - name: Install pgvector on Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+          cd /d %RUNNER_TEMP%
+          git clone --branch v0.8.7 --depth 1 https://github.com/pgvector/pgvector.git
+          cd pgvector
+          nmake /NOLOGO /F Makefile.win
+          nmake /NOLOGO /F Makefile.win install
+      - name: Verify pgvector availability
+        env:
+          PGPASSWORD: wateragents-ci-password
+        run: |
+          psql --host=127.0.0.1 --port=5432 --username=wateragents --dbname=wateragents_m9 --set=ON_ERROR_STOP=1 --command="CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public"
+          psql --host=127.0.0.1 --port=5432 --username=wateragents --dbname=wateragents_m9 --set=ON_ERROR_STOP=1 --command="SELECT extversion FROM pg_extension WHERE extname = 'vector'"
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
