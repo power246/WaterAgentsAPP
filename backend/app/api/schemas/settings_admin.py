@@ -3,7 +3,7 @@
 from typing import Annotated, Literal, Self
 from uuid import UUID
 
-from pydantic import Field, SecretStr, StrictBool, StringConstraints, model_validator
+from pydantic import Field, SecretStr, StrictBool, StringConstraints, field_validator, model_validator
 
 from app.domain.common import DomainModel, NonEmptyString, UtcDatetime
 from app.domain.memory_rag import RAGIndexHealth, RAGProfileHandoffState
@@ -81,12 +81,13 @@ class KeyStatusResponse(DomainModel):
 class PutCredentialRequest(DomainModel):
     value: SecretStr
 
-    @model_validator(mode="after")
-    def validate_value(self) -> Self:
-        value = self.value.get_secret_value()
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, secret: SecretStr) -> SecretStr:
+        value = secret.get_secret_value()
         if not value.strip() or "\x00" in value or len(value) > 4096:
             raise ValueError("credential value is invalid")
-        return self
+        return secret
 
 
 class CredentialTestResponse(DomainModel):

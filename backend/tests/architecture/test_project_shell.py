@@ -27,6 +27,7 @@ def test_project_metadata_separates_runtime_and_development_dependencies() -> No
         "alembic",
         "fastapi",
         "httpx",
+            "keyring",
             "pgvector",
         "psycopg",
         "pydantic",

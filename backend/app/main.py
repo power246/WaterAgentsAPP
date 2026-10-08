@@ -13,6 +13,7 @@ from app.api.http.analysis_runs import router as analysis_runs_router
 from app.api.http.errors import register_error_handlers
 from app.api.http.health import router as health_router
 from app.api.http.settings import router as settings_router
+from app.api.http.keys import router as keys_router
 from app.api.http.request_context import RequestContextMiddleware
 from app.api.http.local_mutation import LocalMutationGuardMiddleware, _loopback
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
@@ -28,6 +29,9 @@ from app.application.settings_admin.errors import M9_PUBLIC_ERRORS
 from app.application.settings_admin.runtime_settings import RuntimeSettingsResolver
 from app.application.settings_admin.settings_service import (
     SettingsService, deployment_defaults,
+)
+from app.application.settings_admin.credential_service import (
+    CredentialService, CredentialTester,
 )
 from app.application.analysis_runs.workflow import AnalysisWorkflow
 from app.application.query_understanding import AnalysisContext
@@ -57,12 +61,18 @@ from app.infrastructure.persistence.database import (
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.persistence.settings_repository import PostgresSettingsRepository
 from app.infrastructure.persistence.memory_settings import InMemorySettingsRepository
+from app.infrastructure.credentials import OSKeyStore
+from app.infrastructure.credentials.memory_key_store import (
+    InMemoryKeyStore, OfflineCredentialTester,
+)
+from app.infrastructure.credentials.tester import ProviderCredentialTester
+from app.infrastructure.http import ProviderHttpClient
+from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.infrastructure.runtime import (
     M6Runtime,
     M8Runtime,
     RuntimeComponents,
-    build_m4_runtime,
     build_m5_runtime,
     build_m6_runtime,
     build_m8_runtime,
@@ -73,11 +83,13 @@ from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
 from app.ports.settings_store import SettingsStorePort
+from app.ports.key_store import KeyStorePort
+from app.domain.settings_admin import CredentialName
 
 
 @asynccontextmanager
 async def _provided_runtime(
-    workflow: AnalysisWorkflow,
+    workflow: AnalysisWorkflow | None,
 ) -> AsyncIterator[RuntimeComponents]:
     yield RuntimeComponents(workflow=workflow)
 
@@ -100,6 +112,8 @@ def create_app(
     transcript_registry: TranscriptRegistry | None = None,
     model_catalog: ModelCatalogPort | None = None,
     settings_store: SettingsStorePort | None = None,
+    key_store: KeyStorePort | None = None,
+    credential_tester: CredentialTester | None = None,
     parameter_capability_registry: ParameterCapabilityRegistry | None = None,
     workflow_task_factory: Callable[
         [Coroutine[object, object, None], str],
@@ -166,18 +180,46 @@ def create_app(
                     "deployment settings catalog is invalid"
                 ) from error
             settings_resolver = RuntimeSettingsResolver(settings_service)
-            runtime_context = (
-                _provided_runtime(workflow)
-                if workflow is not None
-                else build_m4_runtime(
-                    resolved_settings,
-                    clock=resolved_clock,
-                    parameter_capabilities=resolved_parameter_capabilities,
-                    error_id_factory=id_factory,
-                )
+            active_key_store = key_store or (
+                OSKeyStore() if engine is not None else InMemoryKeyStore()
+            )
+            active_tester = credential_tester or (
+                ProviderCredentialTester(openai_base_url=resolved_settings.openai_base_url)
+                if engine is not None else OfflineCredentialTester()
+            )
+            credential_service = CredentialService(
+                active_key_store,
+                {
+                    CredentialName.OPENAI: resolved_settings.openai_api_key,
+                    CredentialName.GOOGLE_GEOCODING: resolved_settings.google_geocoding_api_key,
+                },
+                resolved_clock, active_tester,
             )
             async with AsyncExitStack() as stack:
-                runtime = await stack.enter_async_context(runtime_context)
+                # Provider auth belongs to adapters created for one run. The
+                # application-owned pool has no default credential headers.
+                provider_http = (
+                    await stack.enter_async_context(ProviderHttpClient(
+                        timeout_seconds=max(
+                            resolved_settings.query_parser_timeout_seconds,
+                            resolved_settings.geocoding_timeout_seconds,
+                            resolved_settings.metadata_timeout_seconds,
+                            resolved_settings.reasoning_model_timeout_seconds,
+                            resolved_settings.run_summary_timeout_seconds,
+                            resolved_settings.rag_embedding_timeout_seconds,
+                        ),
+                        max_response_bytes=resolved_settings.provider_http_max_response_bytes,
+                        retry_delay_seconds=resolved_settings.provider_http_retry_delay_seconds,
+                        attempts=2,
+                    )) if workflow is None else None
+                )
+                runtime = await stack.enter_async_context(_provided_runtime(workflow))
+                provider_bundle_factory: RunProviderBundleFactory | None = None
+
+                async def build_run_bundle(configuration):
+                    if provider_bundle_factory is None:
+                        raise RuntimeError("provider bundle factory is not ready")
+                    return await provider_bundle_factory.build(configuration)
                 active_registry = transcript_registry or create_production_registry()
                 await repair_interrupted_runs(
                     active_store,
@@ -194,6 +236,7 @@ def create_app(
                     analysis_timezone=resolved_settings.analysis_timezone,
                     settings_resolver=settings_resolver,
                     workflow=runtime.workflow,
+                    workflow_factory=build_run_bundle if workflow is None else None,
                     id_factory=id_factory,
                     record_id_factory=record_id_factory,
                     shutdown_grace_period=shutdown_grace_period,
@@ -223,32 +266,27 @@ def create_app(
                     preview_bytes=resolved_settings.transcript_preview_bytes // 2,
                 )
                 query_topology_workflow = runtime.query_topology_workflow
-                result_reader = (
-                    TranscriptUpstreamInferenceResultReader(transcript_reader)
-                    if query_topology_workflow is not None
-                    else None
-                )
-                upstream_results = (
-                    RunLocalUpstreamResultRegistry(result_reader)
-                    if result_reader is not None
-                    else None
-                )
+                result_reader = TranscriptUpstreamInferenceResultReader(transcript_reader)
+                upstream_results = RunLocalUpstreamResultRegistry(result_reader)
                 if engine is None and m8_runtime_builder is None:
                     raise SettingsConfigurationError(
                         "production M8 runtime requires the PostgreSQL engine"
                     )
                 active_m8_builder = m8_runtime_builder or build_m8_runtime
-                m8_runtime = await stack.enter_async_context(
-                    active_m8_builder(
-                        resolved_settings,
-                        engine=engine,
-                        transcript_reader=transcript_reader,
-                        transcript_registry=active_registry,
-                        model_catalog=resolved_model_catalog.snapshot(),
-                        clock=resolved_clock,
-                        foundation_validated=foundation_validated,
-                    )
+                m8_options = (
+                    {"credential_service": credential_service, "provider_http": provider_http}
+                    if workflow is None and m8_runtime_builder is None else {}
                 )
+                m8_runtime = await stack.enter_async_context(active_m8_builder(
+                    resolved_settings,
+                    engine=engine,
+                    transcript_reader=transcript_reader,
+                    transcript_registry=active_registry,
+                    model_catalog=resolved_model_catalog.snapshot(),
+                    clock=resolved_clock,
+                    foundation_validated=foundation_validated,
+                    **m8_options,
+                ))
                 try:
                     coordinator.register_run_terminal_persisted_hook(
                         m8_runtime.notify_run_terminal
@@ -270,25 +308,35 @@ def create_app(
                         )
                     )
                     coordinator.register_run_cleanup_hook(m5_runtime.cleanup_run)
-                    active_m6_builder = m6_runtime_builder or build_m6_runtime
-                    m6_runtime = await stack.enter_async_context(
-                        active_m6_builder(
-                            resolved_settings,
-                            operations=coordinator,
-                            m5_runtime=m5_runtime,
+                    if workflow is None:
+                        assert provider_http is not None
+                        provider_bundle_factory = RunProviderBundleFactory(
+                            settings=resolved_settings, credentials=credential_service,
+                            http=provider_http, operations=coordinator,
+                            m5_runtime=m5_runtime, m8_runtime=m8_runtime,
+                            upstream_results=upstream_results,
+                            result_reader=result_reader,
                             capability_registry=resolved_parameter_capabilities,
                             model_catalog=resolved_model_catalog.snapshot(),
-                            clock=resolved_clock,
-                            operation_id_factory=id_factory,
-                            result_id_factory=lambda: str(id_factory()),
-                            error_id_factory=id_factory,
+                            clock=resolved_clock, id_factory=id_factory,
                         )
-                    )
-                    if (
-                        query_topology_workflow is not None
-                        and upstream_results is not None
-                        and result_reader is not None
-                    ):
+                        m6_runtime = None
+                    else:
+                        active_m6_builder = m6_runtime_builder or build_m6_runtime
+                        m6_runtime = await stack.enter_async_context(
+                            active_m6_builder(
+                                resolved_settings,
+                                operations=coordinator,
+                                m5_runtime=m5_runtime,
+                                capability_registry=resolved_parameter_capabilities,
+                                model_catalog=resolved_model_catalog.snapshot(),
+                                clock=resolved_clock,
+                                operation_id_factory=id_factory,
+                                result_id_factory=lambda: str(id_factory()),
+                                error_id_factory=id_factory,
+                            )
+                        )
+                    if query_topology_workflow is not None and m6_runtime is not None:
                         query_topology_workflow.bind_execution_stage(
                             compose_m7_execution_stage(
                                 resolved_settings,
@@ -308,11 +356,14 @@ def create_app(
                     await m8_runtime.start()
                     application.state.run_coordinator = coordinator
                     application.state.settings_service = settings_service
+                    application.state.credential_service = credential_service
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store
                     application.state.m8_runtime = m8_runtime
                     application.state.m5_runtime = m5_runtime
                     application.state.m6_runtime = m6_runtime
+                    application.state.provider_http = provider_http
+                    application.state.provider_bundle_factory = provider_bundle_factory
                     yield
                 finally:
                     try:
@@ -347,6 +398,7 @@ def create_app(
     )
     application.include_router(analysis_runs_router)
     application.include_router(settings_router)
+    application.include_router(keys_router)
 
     generated_openapi = application.openapi
 

@@ -22,6 +22,7 @@ from app.application.analysis_runs.persistence import (
 from app.application.transcripts.buffer import TranscriptBuffer
 from app.application.transcripts.models import TranscriptContentRef
 from app.application.transcripts.stream_models import SessionProcessRecord, StreamingMessage
+from app.application.analysis_runs.workflow import RunWorkflowBundle
 
 
 @dataclass
@@ -39,6 +40,7 @@ class RunRuntime:
     snapshot: AnalysisRunSnapshot
     transcript_buffer: TranscriptBuffer
     query: str = field(repr=False)
+    workflow_bundle: RunWorkflowBundle | None = field(default=None, repr=False)
     analysis_phase: AnalysisPhase = AnalysisPhase.QUEUED
     context_ref: TranscriptContentRef | None = None
     topology_ref: TranscriptContentRef | None = None

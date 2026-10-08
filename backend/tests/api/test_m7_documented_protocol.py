@@ -112,6 +112,9 @@ def test_runtime_registry_and_openapi_match_the_m7_contract() -> None:
     assert paths == {
         "/health",
         "/api/settings",
+        "/api/keys",
+        "/api/keys/{key_name}",
+        "/api/keys/{key_name}/test",
         "/api/analysis/runs",
         "/api/analysis/runs/{run_id}",
         "/api/analysis/runs/{run_id}/cancel",

@@ -15,6 +15,9 @@ def test_m7_schemas_remain_with_m9_settings_route() -> None:
         "/api/analysis/runs/{run_id}/sessions/{session_id}/transcript",
         "/api/analysis/runs/{run_id}/transcript/{item_id}/content",
         "/api/settings",
+        "/api/keys",
+        "/api/keys/{key_name}",
+        "/api/keys/{key_name}/test",
     }
     schemas = schema["components"]["schemas"]
     assert {

@@ -1,5 +1,20 @@
 import json
 import re
+from threading import Lock
+
+_REGISTERED_PRIVATE_VALUES: set[str] = set()
+_REGISTERED_PRIVATE_VALUES_LOCK = Lock()
+
+
+def register_private_value(value: str) -> None:
+    if value:
+        with _REGISTERED_PRIVATE_VALUES_LOCK:
+            _REGISTERED_PRIVATE_VALUES.add(value)
+
+
+def registered_private_values() -> tuple[str, ...]:
+    with _REGISTERED_PRIVATE_VALUES_LOCK:
+        return tuple(_REGISTERED_PRIVATE_VALUES)
 
 REDACTED = "[REDACTED]"
 SENSITIVE_NAME_PATTERN = (

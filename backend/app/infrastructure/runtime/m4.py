@@ -39,7 +39,7 @@ from app.ports.clock import ClockPort
 
 @dataclass(frozen=True)
 class RuntimeComponents:
-    workflow: AnalysisWorkflow
+    workflow: AnalysisWorkflow | None
     query_topology_workflow: QueryTopologyWorkflow | None = None
 
 
@@ -71,6 +71,7 @@ async def build_m4_runtime(
     clock: ClockPort,
     parameter_capabilities: ParameterCapabilityRegistry,
     error_id_factory: Callable[[], UUID],
+    provider_http: ProviderHttpClient | None = None,
 ) -> AsyncIterator[RuntimeComponents]:
     parser_providers = {
         capability.provider.casefold()
@@ -106,13 +107,13 @@ async def build_m4_runtime(
     )
 
     async with AsyncExitStack() as stack:
-        parser_http = await stack.enter_async_context(
+        parser_http = provider_http or await stack.enter_async_context(
             _http_client(settings, timeout=settings.query_parser_timeout_seconds)
         )
-        geocoding_http = await stack.enter_async_context(
+        geocoding_http = provider_http or await stack.enter_async_context(
             _http_client(settings, timeout=settings.geocoding_timeout_seconds)
         )
-        metadata_http = await stack.enter_async_context(
+        metadata_http = provider_http or await stack.enter_async_context(
             _http_client(settings, timeout=settings.metadata_timeout_seconds)
         )
         parser = OpenAIResponsesParserAdapter(

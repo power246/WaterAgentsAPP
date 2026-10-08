@@ -81,9 +81,14 @@ class LocalMutationGuardMiddleware:
         )
         if testserver and authority is None:
             authority = ("testserver", None)
+        listening_port = (
+            server[1]
+            if server and _loopback(server[0]) and type(server[1]) is int
+            else self.bind_port
+        )
         if not testserver and (
             authority is None or not _loopback(authority[0])
-            or authority[1] != self.bind_port
+            or authority[1] != listening_port
         ):
             raise LocalMutationRejectedError()
         method = scope["method"].upper()

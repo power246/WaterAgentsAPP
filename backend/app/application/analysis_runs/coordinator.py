@@ -140,6 +140,7 @@ from app.domain.time.timezone import get_iana_timezone
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
 from app.application.settings_admin.runtime_settings import RuntimeSettingsResolver
+from app.application.analysis_runs.workflow import RunWorkflowBundle
 from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
@@ -271,7 +272,8 @@ class RunCoordinator:
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
-        workflow: AnalysisWorkflow,
+        workflow: AnalysisWorkflow | None,
+        workflow_factory: Callable[[AnalysisConfigurationSnapshot], Awaitable[RunWorkflowBundle]] | None = None,
         shutdown_grace_period: float = 1.0,
         shutdown_save_grace_period: float = 5.0,
         keepalive_interval: float = 15.0,
@@ -327,6 +329,9 @@ class RunCoordinator:
         self._creation_tasks: set[asyncio.Task[AnalysisRunSnapshot]] = set()
         self._runs_lock = asyncio.Lock()
         self._workflow = workflow
+        self._workflow_factory = workflow_factory
+        if workflow is None and workflow_factory is None:
+            raise ValueError("a workflow or per-run workflow factory is required")
         self._shutdown_grace_period = shutdown_grace_period
         self._shutdown_save_grace_period = shutdown_save_grace_period
         self._shutdown_lock = asyncio.Lock()
@@ -452,30 +457,37 @@ class RunCoordinator:
                 request = AnalysisRequestV1.model_validate_json(raw_body)
                 resolved_configuration = await self._settings_resolver.resolve(request)
 
-            async with self._runs_lock:
-                if self._closing:
-                    raise ServiceShuttingDownError()
-                if idempotency_key is not None:
-                    owner = self._creation_owners.get(idempotency_key)
-                    if owner is not None:
-                        self._require_same_fingerprint(owner.fingerprint, fingerprint)
-                        initial = False
+            bundle = (
+                await self._workflow_factory(resolved_configuration)
+                if self._workflow_factory is not None else None
+            )
+            try:
+                async with self._runs_lock:
+                    if self._closing:
+                        raise ServiceShuttingDownError()
+                    if idempotency_key is not None:
+                        owner = self._creation_owners.get(idempotency_key)
+                        if owner is not None:
+                            self._require_same_fingerprint(owner.fingerprint, fingerprint)
+                            initial = False
+                        else:
+                            owner = self._start_creation_owner(
+                                raw_body, fingerprint, idempotency_key,
+                                resolved_configuration, bundle,
+                            )
+                            initial = True
                     else:
                         owner = self._start_creation_owner(
-                            raw_body,
-                            fingerprint,
-                            idempotency_key,
-                            resolved_configuration,
+                            raw_body, fingerprint, None,
+                            resolved_configuration, bundle,
                         )
                         initial = True
-                else:
-                    owner = self._start_creation_owner(
-                        raw_body,
-                        fingerprint,
-                        None,
-                        resolved_configuration,
-                    )
-                    initial = True
+            except BaseException:
+                if bundle is not None:
+                    await bundle.aclose()
+                raise
+            if not initial and bundle is not None:
+                await bundle.aclose()
             try:
                 return await self._await_creation(owner, deadline, initial=initial)
             except CreationRolledBackError:
@@ -526,12 +538,14 @@ class RunCoordinator:
         fingerprint: bytes,
         idempotency_key: UUID | None,
         configuration_override: AnalysisConfigurationSnapshot | None,
+        bundle: RunWorkflowBundle | None = None,
     ) -> _CreationOwner:
         prepared = self._prepare_creation(
             raw_body,
             fingerprint,
             idempotency_key,
             configuration_override,
+            bundle,
         )
         owner = _CreationOwner(fingerprint=fingerprint, prepared=prepared)
         coroutine = self._own_creation(owner)
@@ -557,6 +571,7 @@ class RunCoordinator:
         fingerprint: bytes,
         idempotency_key: UUID | None,
         configuration_override: AnalysisConfigurationSnapshot | None,
+        bundle: RunWorkflowBundle | None = None,
     ) -> _PreparedCreation:
         try:
             raw_body.decode("utf-8")
@@ -627,6 +642,8 @@ class RunCoordinator:
         run_id = self._new_id()
         if run_id in self._runs:
             raise ValueError("The generated run ID already exists.")
+        if bundle is not None:
+            bundle.bind_run(run_id)
         snapshot = AnalysisRunSnapshot(
             run_id=run_id,
             status=RunStatus.PENDING,
@@ -639,6 +656,7 @@ class RunCoordinator:
             snapshot=snapshot,
             transcript_buffer=transcript_buffer,
             query=request.query,
+            workflow_bundle=bundle,
         )
         request_id = request_id_context.get()
         request_item = self._reserve_transcript_item_locked(
@@ -720,13 +738,19 @@ class RunCoordinator:
                 return candidate.snapshot
             return result.creation.receipt_snapshot()
         finally:
-            async with self._runs_lock:
-                if candidate.idempotency_key is not None:
-                    current = self._creation_owners.get(candidate.idempotency_key)
-                    if current is owner:
-                        self._creation_owners.pop(candidate.idempotency_key, None)
-                if self._creation_by_run.get(candidate.snapshot.run_id) is owner:
-                    self._creation_by_run.pop(candidate.snapshot.run_id, None)
+            runtime = owner.prepared.runtime
+            try:
+                if self._runs.get(runtime.snapshot.run_id) is not runtime:
+                    if runtime.workflow_bundle is not None:
+                        await runtime.workflow_bundle.aclose()
+            finally:
+                async with self._runs_lock:
+                    if candidate.idempotency_key is not None:
+                        current = self._creation_owners.get(candidate.idempotency_key)
+                        if current is owner:
+                            self._creation_owners.pop(candidate.idempotency_key, None)
+                    if self._creation_by_run.get(candidate.snapshot.run_id) is owner:
+                        self._creation_by_run.pop(candidate.snapshot.run_id, None)
 
     async def _verify_unknown_creation(
         self,
@@ -1142,7 +1166,12 @@ class RunCoordinator:
             safe_request = AnalysisRequestV1.model_validate_json(
                 runtime.transcript_buffer.items[0].content.safe_body
             )
-            await self._workflow.run(
+            workflow = (
+                runtime.workflow_bundle.workflow
+                if runtime.workflow_bundle is not None else self._workflow
+            )
+            assert workflow is not None
+            await workflow.run(
                 WorkflowContext(
                     running,
                     runtime.query,
@@ -1250,6 +1279,8 @@ class RunCoordinator:
             runtime.workflow_quiesced.set()
             runtime.condition.notify_all()
         self._log_activity("workflow_quiesced", runtime)
+        if runtime.workflow_bundle is not None:
+            await runtime.workflow_bundle.aclose()
 
     @staticmethod
     def _workflow_has_unfinished_outputs_locked(runtime: RunRuntime) -> bool:

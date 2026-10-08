@@ -48,7 +48,7 @@ async def application(*, workflow=None, clock=None):
         transcript_store=InMemoryTranscriptStore(),
     )
     async with app.router.lifespan_context(app):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
             yield app, client
     assert request_id_context.get() is None
     assert all(runtime.workflow_task.done() for runtime in app.state.run_coordinator._runs.values())

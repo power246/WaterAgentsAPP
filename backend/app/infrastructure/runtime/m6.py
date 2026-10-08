@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import ceil
@@ -376,6 +376,7 @@ async def build_m6_runtime(
     operation_id_factory: Callable[[], UUID] = uuid4,
     result_id_factory: Callable[[], str] | None = None,
     error_id_factory: Callable[[], UUID] = uuid4,
+    provider_http: ProviderHttpClient | None = None,
 ) -> AsyncIterator[M6Runtime]:
     providers = {
         capability.provider.casefold()
@@ -398,12 +399,13 @@ async def build_m6_runtime(
     if not api_key:
         raise SettingsConfigurationError("openai_api_key is required")
 
-    async with ProviderHttpClient(
-        timeout_seconds=settings.reasoning_model_timeout_seconds,
-        max_response_bytes=settings.provider_http_max_response_bytes,
-        retry_delay_seconds=settings.provider_http_retry_delay_seconds,
-        attempts=1,
-    ) as http:
+    async with AsyncExitStack() as stack:
+        http = provider_http or await stack.enter_async_context(ProviderHttpClient(
+            timeout_seconds=settings.reasoning_model_timeout_seconds,
+            max_response_bytes=settings.provider_http_max_response_bytes,
+            retry_delay_seconds=settings.provider_http_retry_delay_seconds,
+            attempts=1,
+        ))
         adapter = OpenAIResponsesWaterbodyAdapter(
             http,
             api_key=api_key,
@@ -435,10 +437,8 @@ def safe_m6_metadata(
     model_catalog: ModelCatalogSnapshot,
 ) -> dict[str, object]:
     limits = m6_runtime_limits(settings)
-    openai_available = (
-        settings.openai_api_key is not None
-        and bool(settings.openai_api_key.get_secret_value())
-    )
+    # A user-store key can be added after startup. This metadata describes
+    # wired adapters, while /api/keys describes current credential status.
     providers = tuple(
         sorted(
             {
@@ -446,7 +446,6 @@ def safe_m6_metadata(
                 for capability in model_catalog.capabilities
                 if ModelRole.WATERBODY in capability.roles
                 and capability.provider.casefold() == "openai"
-                and openai_available
             }
         )
     )

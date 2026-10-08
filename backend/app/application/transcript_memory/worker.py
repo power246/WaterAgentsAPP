@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import timedelta
 from typing import Protocol
 
@@ -92,7 +92,8 @@ class RAGIndexWorker:
         *,
         store: RAGWorkerStore,
         source_loader: RAGCaseSourceLoader,
-        embedding: EmbeddingPort,
+        embedding: EmbeddingPort | None,
+        embedding_factory: Callable[[], Awaitable[EmbeddingPort]] | None = None,
         clock: ClockPort,
         lease_owner: str,
         claim_batch_size: int,
@@ -128,6 +129,9 @@ class RAGIndexWorker:
         self._store = store
         self._source_loader = source_loader
         self._embedding = embedding
+        self._embedding_factory = embedding_factory
+        if embedding is None and embedding_factory is None:
+            raise ValueError("worker embedding port is required")
         self._clock = clock
         self._lease_owner = lease_owner
         self._claim_batch_size = claim_batch_size
@@ -242,7 +246,12 @@ class RAGIndexWorker:
         monotonic = self._monotonic or loop.time
         try:
             async with asyncio.timeout(self._attempt_timeout_seconds):
-                batch = await self._embedding.embed(
+                embedding = (
+                    await self._embedding_factory()
+                    if self._embedding_factory is not None else self._embedding
+                )
+                assert embedding is not None
+                batch = await embedding.embed(
                     generation.profile,
                     texts,
                     monotonic() + self._attempt_timeout_seconds,

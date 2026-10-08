@@ -102,6 +102,9 @@ def test_runtime_registry_openapi_and_risk_levels_match_m6_docs() -> None:
     assert paths == {
         "/health",
         "/api/settings",
+        "/api/keys",
+        "/api/keys/{key_name}",
+        "/api/keys/{key_name}/test",
         "/api/analysis/runs",
         "/api/analysis/runs/{run_id}",
         "/api/analysis/runs/{run_id}/cancel",

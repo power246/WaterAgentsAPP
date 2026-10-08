@@ -226,6 +226,12 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         )
         code = "request_validation_failed" if is_body_error else "validation_error"
         status, message = 422, "The request is invalid."
+        if (
+            request.url.path.startswith("/api/keys/")
+            and validation
+            and all(item.field == ("body", "value") for item in validation)
+        ):
+            code = "credential_value_invalid"
     elif isinstance(exception, UnknownQueryParametersError):
         status, code, message = 422, "validation_error", "The request is invalid."
         validation = tuple(
@@ -366,7 +372,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         history_url=history_url,
     )
     headers["X-Request-ID"] = str(error.request_id)
-    if request.url.path.startswith("/api/settings"):
+    if request.url.path.startswith(("/api/settings", "/api/keys")):
         headers["Cache-Control"] = "no-store"
     log_http(
         request, "http_request_failed", status, error=error,

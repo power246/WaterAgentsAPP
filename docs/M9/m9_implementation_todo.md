@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–3 已实现并保留本地提交，Milestone 4–9、`frontend/` 应用、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
+> 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–4 已实现并保留本地提交，Milestone 5–9、`frontend/` 应用、联调和整体验收尚未完成。复选框只在对应代码、focused tests、阶段出口与完成记录有实际证据后勾选。
 
 本清单执行以下权威文档：
 
@@ -262,40 +262,42 @@
 
 ### 工作
 
-- [ ] 添加并锁定受支持的跨平台 OS credential library；记录实际解析版本与 Windows Credential Manager/macOS Keychain/Linux Secret Service backend要求，不承诺未验证backend。
-- [ ] 实现 namespaced `OSKeyStore` adapter，只接受 `openai/google_geocoding` typed account和 versioned stored envelope；startup/operation识别 secure backend、unavailable与 insecure/plaintext fallback并 fail safe。
-- [ ] effective credential resolver先读 user store，缺 override再读 startup deployment `SecretStr`；masked status只给 source/configured/hint/updated/store availability，不回显或持久化 value。
-- [ ] 实现 `GET /api/keys`、`PUT/DELETE /api/keys/{key_name}` 与显式 `POST .../test`；save不联网，delete只删 user override，deployment fallback仍显示 configured，test不自动retry且只返回 safe result/error。
-- [ ] 将 private value注册到现有 redaction boundary；route/service/adapter/provider异常在进入 logger/public error前去除 secret、Authorization、OS path/backend internals和 raw body。
-- [ ] 将共享 HTTP pool改为不带固定 Authorization/default secret header；实现 `RunProviderBundleFactory`，从 run configuration与 immutable leases构造 parser、geocoding、waterbody/run-summary、session query-embedding adapters。
-- [ ] analysis workflow/coordinator通过明确 factory/per-run execution context取得 bundle；不得用 ContextVar、全局 mutable adapter field或每次 tool call重读 settings/key。
-- [ ] bundle随 run lifecycle释放；replace/delete key不影响已创建 run，新 run使用新 effective key。cancel/shutdown不泄漏lease，也不错误关闭全局 HTTP/DB资源。
-- [ ] M8 background embedding worker在每个 claimed attempt开始取得一次 lease，attempt内不切换；下一 attempt才读取新key。missing/unavailable按既有 safe retry/failure语义处理，不改run terminal。
-- [ ] production/test/smoke builders走同一个 factory与lease contract；tests只注入 in-memory fake store/provider，绝不访问开发者真实 OS keychain。
+- [x] 添加并锁定受支持的跨平台 OS credential library；记录实际解析版本与 Windows Credential Manager/macOS Keychain/Linux Secret Service backend要求，不承诺未验证backend。
+- [x] 实现 namespaced `OSKeyStore` adapter，只接受 `openai/google_geocoding` typed account和 versioned stored envelope；startup/operation识别 secure backend、unavailable与 insecure/plaintext fallback并 fail safe。
+- [x] effective credential resolver先读 user store，缺 override再读 startup deployment `SecretStr`；masked status只给 source/configured/hint/updated/store availability，不回显或持久化 value。
+- [x] 实现 `GET /api/keys`、`PUT/DELETE /api/keys/{key_name}` 与显式 `POST .../test`；save不联网，delete只删 user override，deployment fallback仍显示 configured，test不自动retry且只返回 safe result/error。
+- [x] 将 private value注册到现有 redaction boundary；route/service/adapter/provider异常在进入 logger/public error前去除 secret、Authorization、OS path/backend internals和 raw body。
+- [x] 将共享 HTTP pool改为不带固定 Authorization/default secret header；实现 `RunProviderBundleFactory`，从 run configuration与 immutable leases构造 parser、geocoding、waterbody/run-summary、session query-embedding adapters。
+- [x] analysis workflow/coordinator通过明确 factory/per-run execution context取得 bundle；不得用 ContextVar、全局 mutable adapter field或每次 tool call重读 settings/key。
+- [x] bundle随 run lifecycle释放；replace/delete key不影响已创建 run，新 run使用新 effective key。cancel/shutdown不泄漏lease，也不错误关闭全局 HTTP/DB资源。
+- [x] M8 background embedding worker在每个 claimed attempt开始取得一次 lease，attempt内不切换；下一 attempt才读取新key。missing/unavailable按既有 safe retry/failure语义处理，不改run terminal。
+- [x] production/test/smoke builders走同一个 factory与lease contract；tests只注入 in-memory fake store/provider，绝不访问开发者真实 OS keychain。
 
 ### Tests
 
-- [ ] fake key store contract覆盖get/set/delete/envelope version/atomic replace/availability/error/mask/allowlist；真实 keychain不作为默认测试前置。
-- [ ] key API覆盖 user/deployment/none source、save无网络、delete fallback、missing/store unavailable、explicit test success/safe failure/transport unavailable和unknown key。
-- [ ] secret scan/capture覆盖 public JSON/OpenAPI/repr/log/traceback/metrics/DOM-bound fixtures；完整/部分secret均不出现，masked hint不可逆且不冒充验证成功。
-- [ ] two-run controlled gate证明旧run持旧lease、新run用新key，replace/delete不切换在途request；同一run parser/geocoding/waterbody/summary/semantic query使用预期lease。
-- [ ] M8 worker attempt测试覆盖key在attempt中替换、下一attempt读取、missing key、cancel、retry和shutdown；provider failure不改变原run状态。
-- [ ] production composition test证明一个共享无secret HTTP pool、per-run adapters和一个M8 worker；没有startup长期captured secret路径或隐藏legacy branch。
+- [x] fake key store contract覆盖get/set/delete/envelope version/atomic replace/availability/error/mask/allowlist；真实 keychain不作为默认测试前置。
+- [x] key API覆盖 user/deployment/none source、save无网络、delete fallback、missing/store unavailable、explicit test success/safe failure/transport unavailable和unknown key。
+- [x] secret scan/capture覆盖 public JSON/OpenAPI/repr/log/traceback/metrics/DOM-bound fixtures；完整/部分secret均不出现，masked hint不可逆且不冒充验证成功。
+- [x] two-run controlled gate证明旧run持旧lease、新run用新key，replace/delete不切换在途request；同一run parser/geocoding/waterbody/summary/semantic query使用预期lease。
+- [x] M8 worker attempt测试覆盖key在attempt中替换、下一attempt读取、missing key、cancel、retry和shutdown；provider failure不改变原run状态。
+- [x] production composition test证明一个共享无secret HTTP pool、per-run adapters和一个M8 worker；没有startup长期captured secret路径或隐藏legacy branch。
 
 ### Verify
 
-- [ ] 运行新增 credential domain/service/OS-adapter/key API tests，明确全部使用fake backend。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m4_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m8_runtime.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcript_memory backend/tests/api/test_openapi_contract.py -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] 运行新增 credential domain/service/OS-adapter/key API tests，明确全部使用fake backend。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m4_runtime.py backend/tests/infrastructure/test_m6_runtime.py backend/tests/infrastructure/test_m8_runtime.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/analysis_runs backend/tests/application/transcript_memory backend/tests/api/test_openapi_contract.py -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：OpenAI/Google key可通过安全OS store管理，公开面只有masked状态；所有可变secret沿per-run或per-attempt lease进入真实provider path，旧run不受后续修改影响，且没有默认测试访问真实keychain/网络。
 
 提交边界：dependency lock、OS adapter、CredentialService/API、redaction、provider/runtime factory与focused regressions；不得包含真实credential、真实provider artifact、unit intent、Admin cleanup或 frontend。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：锁定并安装 `keyring==25.7.0`；生产 `OSKeyStore` 仅接受 Windows `WinVaultKeyring`、macOS `Keyring`、Linux `SecretService.Keyring` 且 priority 为正的 backend，其他 backend/unavailable 关闭 user-store 操作；三个平台的真实系统 keychain 均未作为测试前置，也未声称跨平台实机通过。`CredentialService` 提供 user→deployment precedence、masked status 与显式一次测试，OS envelope 固定 service/typed account/schema version。生产启动不再用 startup OpenAI/Google key 建长期 adapter；共享无默认 secret header 的 provider pool 由 run factory 以一次性 lease 构造 M4/M6/M7/查询 embedding，M8 index worker 每个 claimed batch attempt 重新 lease。创建失败、完成、取消和 shutdown 释放 bundle；公开响应、日志、traceback 与 OpenAPI 只保留安全投影。
+
+验证：fake key/API/run/attempt 新用例 10 passed；M4/M6/M8 runtime 扩展 58 passed，analysis/transcript-memory/OpenAPI 191 passed，architecture 159 passed；真实 loopback Host/Origin 与 SSE smoke 9 passed；专用 `wateragents_test` 隔离 PostgreSQL 完整后端回归 2320 passed、19 xfailed（后续 M9 预期红）；compileall、`git diff --check` 通过。真实 provider、三个 OS keychain 实机及 M9 整体验收尚未运行。
 
 ## Milestone 5：全局单位 policy 与 session override
 

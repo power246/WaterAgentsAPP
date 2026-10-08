@@ -30,6 +30,11 @@ from app.domain import (
     ModelCatalogSnapshot,
     RAGIndexGenerationStatus,
 )
+from app.domain.settings_admin import CredentialName
+from app.application.settings_admin.credential_service import CredentialService
+from app.application.settings_admin.errors import (
+    CredentialMissingError, CredentialStoreUnavailableError,
+)
 from app.infrastructure.adapters import OpenAIEmbeddingAdapter
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
 from app.infrastructure.http import ProviderHttpClient
@@ -42,6 +47,7 @@ from app.ports import (
     ClockPort,
     EmbeddingCancelledError,
     EmbeddingPort,
+    PortAuthenticationError,
     InvalidPortResponseError,
     PortConfigurationError,
     PortRateLimitError,
@@ -89,6 +95,51 @@ class _ObservedEmbeddingPort:
         return result
 
 
+class AttemptEmbeddingFactory:
+    """Read one effective lease for each claimed embedding batch attempt."""
+
+    def __init__(self, *, credentials: CredentialService,
+                 http: ProviderHttpClient, settings: AppSettings,
+                 metrics: RAGRuntimeMetrics, monotonic: Callable[[], float]) -> None:
+        self._credentials = credentials
+        self._http = http
+        self._settings = settings
+        self._metrics = metrics
+        self._monotonic = monotonic
+
+    async def __call__(self) -> EmbeddingPort:
+        try:
+            lease = await self._credentials.lease(CredentialName.OPENAI)
+        except (CredentialMissingError, CredentialStoreUnavailableError):
+            raise PortAuthenticationError(
+                "Embedding credential is unavailable.",
+                provider="openai", operation="embedding",
+            ) from None
+        return _ObservedEmbeddingPort(
+            OpenAIEmbeddingAdapter(
+                self._http, api_key=lease.value.get_secret_value(),
+                base_url=self._settings.openai_base_url,
+            ),
+            self._metrics, stage="indexing", monotonic=self._monotonic,
+        )
+
+
+class RunEmbeddingRegistry:
+    def __init__(self) -> None:
+        self._ports: dict[str, EmbeddingPort] = {}
+
+    def bind(self, run_id: str, port: EmbeddingPort) -> None:
+        if run_id in self._ports:
+            raise ValueError("run embedding is already bound")
+        self._ports[run_id] = port
+
+    def get(self, run_id: str) -> EmbeddingPort | None:
+        return self._ports.get(run_id)
+
+    def release(self, run_id: str) -> None:
+        self._ports.pop(run_id, None)
+
+
 class _ObservedSearchIndex:
     def __init__(
         self,
@@ -122,8 +173,24 @@ class M8Runtime:
     desired_profile: EmbeddingProfile
     clock: ClockPort
     shutdown_grace_seconds: float
+    run_embeddings: RunEmbeddingRegistry | None = None
     _task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
     _stopping: bool = field(default=False, init=False, repr=False)
+
+    def bind_run_embedding(self, run_id: str, port: EmbeddingPort) -> None:
+        if self.run_embeddings is None:
+            raise RuntimeError("run embedding registry is unavailable")
+        self.run_embeddings.bind(
+            run_id,
+            _ObservedEmbeddingPort(
+                port, self.metrics, stage="search",
+                monotonic=asyncio.get_running_loop().time,
+            ),
+        )
+
+    def release_run_embedding(self, run_id: str) -> None:
+        if self.run_embeddings is not None:
+            self.run_embeddings.release(run_id)
 
     async def start(self) -> None:
         if self._task is not None:
@@ -252,6 +319,8 @@ async def build_m8_runtime(
     foundation_validated: bool,
     embedding_port: EmbeddingPort | None = None,
     lease_owner_factory: Callable[[], str] | None = None,
+    credential_service: CredentialService | None = None,
+    provider_http: ProviderHttpClient | None = None,
 ) -> AsyncIterator[M8Runtime]:
     try:
         desired_profile = validate_desired_embedding_profile(model_catalog)
@@ -261,10 +330,17 @@ async def build_m8_runtime(
         raise SettingsConfigurationError(
             "RAG database schema or vector foundation is not validated"
         )
+    if credential_service is not None and provider_http is None:
+        raise SettingsConfigurationError("dynamic embedding requires a shared HTTP pool")
+    if credential_service is not None and desired_profile.provider.casefold() != "openai":
+        raise SettingsConfigurationError("unsupported embedding provider configuration")
 
     async with AsyncExitStack() as stack:
+        dynamic = credential_service is not None
+        if dynamic and embedding_port is not None:
+            raise SettingsConfigurationError("dynamic embedding cannot use a fixed adapter")
         active_embedding = embedding_port
-        if active_embedding is None:
+        if not dynamic and active_embedding is None:
             if desired_profile.provider.casefold() != "openai":
                 raise SettingsConfigurationError(
                     "unsupported embedding provider configuration: "
@@ -336,17 +412,23 @@ async def build_m8_runtime(
                 "M8 generation startup validation failed"
             ) from error
 
-        search_embedding = _ObservedEmbeddingPort(
-            active_embedding,
-            metrics,
-            stage="search",
-            monotonic=loop.time,
+        run_embeddings = RunEmbeddingRegistry() if dynamic else None
+        search_embedding = (
+            None if dynamic else _ObservedEmbeddingPort(
+                active_embedding, metrics, stage="search", monotonic=loop.time,
+            )
         )
-        worker_embedding = _ObservedEmbeddingPort(
-            active_embedding,
-            metrics,
-            stage="indexing",
-            monotonic=loop.time,
+        worker_embedding = (
+            None if dynamic else _ObservedEmbeddingPort(
+                active_embedding, metrics, stage="indexing", monotonic=loop.time,
+            )
+        )
+
+        attempt_embedding = (
+            AttemptEmbeddingFactory(
+                credentials=credential_service, http=provider_http,
+                settings=settings, metrics=metrics, monotonic=loop.time,
+            ) if dynamic else None
         )
         generations = GenerationService(repository)
         operations = RAGMaintenanceOperations(
@@ -363,6 +445,7 @@ async def build_m8_runtime(
             index=_ObservedSearchIndex(repository, metrics),
             source_loader=source_reader,
             embedding=search_embedding,
+            embedding_for_run=run_embeddings.get if run_embeddings is not None else None,
             preview_max_bytes=settings.evidence_preview_max_bytes,
         )
         producer = TranscriptEvidenceProducer(
@@ -374,6 +457,7 @@ async def build_m8_runtime(
             store=repository,
             source_loader=source_reader,
             embedding=worker_embedding,
+            embedding_factory=attempt_embedding,
             clock=clock,
             lease_owner=(lease_owner_factory or (lambda: f"m8-{uuid4()}"))(),
             claim_batch_size=settings.rag_worker_claim_batch_size,
@@ -403,6 +487,7 @@ async def build_m8_runtime(
             desired_profile=desired_profile,
             clock=clock,
             shutdown_grace_seconds=settings.rag_worker_shutdown_grace_seconds,
+            run_embeddings=run_embeddings,
         )
         yield runtime
 

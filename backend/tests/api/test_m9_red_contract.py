@@ -24,7 +24,6 @@ def test_settings_routes_follow_the_frozen_contract(application) -> None:
     assert "post" in paths.get("/api/settings/unit-policies", {})
 
 
-@pytest.mark.xfail(strict=True, reason="M9 Milestones 1 and 4: OS key status and routes")
 def test_keys_expose_masked_status_and_explicit_test_only(application) -> None:
     paths = application.openapi()["paths"]
     assert "get" in paths.get("/api/keys", {})
