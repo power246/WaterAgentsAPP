@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Generic, Protocol, TypeVar, cast
 from uuid import UUID
 
@@ -17,7 +16,6 @@ from app.application.transcripts.reader import (
 )
 from app.application.transcripts.registry import TranscriptRegistry
 from app.domain.domain_model import DomainModel
-from app.domain.evidence.serialization import canonical_model_bytes
 from app.domain.evidence.evidence_fragment import EvidenceFragment
 from app.domain.hydrology.hydrology_graph import HydrologyGraph
 from app.domain.inference.inference_result import InferenceResult
@@ -50,11 +48,6 @@ class TypedRAGSourceItem(Generic[SourceBodyT]):
     item: StoredTranscriptItem
     body: SourceBodyT
     references: tuple[UUID, ...]
-
-    @property
-    def body_digest(self) -> str:
-        return f"sha256:{sha256(canonical_model_bytes(self.body)).hexdigest()}"
-
 
 class TranscriptRAGCaseSourceReader:
     """Rehydrate one job from the authoritative persisted transcript in one read."""

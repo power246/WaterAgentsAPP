@@ -143,18 +143,6 @@ class ReasoningSkeletonProjection(DomainModel):
         return self
 
 
-class ReasoningCellClaim(DomainModel):
-    cell_id: NonEmptyString
-    parameter: ParameterKey
-    window_id: NonEmptyString
-    evidence_refs: tuple[NonEmptyString, ...]
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return ensure_unique_tuple(value, field_name="claim evidence_refs")
-
-
 class ResultSkeleton(DomainModel):
     schema_version: int = 1
     result_id: NonEmptyString
@@ -476,25 +464,6 @@ def build_result_skeleton(
 
 def validate_result_skeleton(value: ResultSkeleton) -> ResultSkeleton:
     return ResultSkeleton.model_validate(value.model_dump(mode="python"))
-
-
-def validate_agent_cell_claims(
-    skeleton: ResultSkeleton,
-    claims: tuple[ReasoningCellClaim | dict, ...],
-) -> tuple[ReasoningCellClaim, ...]:
-    validated = tuple(ReasoningCellClaim.model_validate(claim) for claim in claims)
-    by_id = {scope.cell_id: scope for scope in skeleton.supported_scopes}
-    if len({claim.cell_id for claim in validated}) != len(validated):
-        raise ResultSkeletonValidationError("duplicate_reasoning_cell_claim")
-    for claim in validated:
-        scope = by_id.get(claim.cell_id)
-        if scope is None:
-            raise ResultSkeletonValidationError("reasoning_cell_not_supported")
-        if claim.parameter != scope.parameter or claim.window_id != scope.window_id:
-            raise ResultSkeletonValidationError("reasoning_cell_identity_mismatch")
-        if not set(claim.evidence_refs) <= set(scope.allowed_evidence_refs):
-            raise ResultSkeletonValidationError("reasoning_evidence_out_of_scope")
-    return validated
 
 
 def _fixed_cell(

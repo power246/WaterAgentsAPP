@@ -364,7 +364,7 @@ async def test_evidence_content_uses_existing_writer_reader_history_and_session_
             completed_at=StepClock().now(),
         )
         result_ref = await transcript.write_result(scope, result)
-        bundle, bundle_ref = await EvidenceBundleBuilder(
+        built = await EvidenceBundleBuilder(
             reader=transcript,
             writer=transcript,
         ).build_and_write(
@@ -373,6 +373,7 @@ async def test_evidence_content_uses_existing_writer_reader_history_and_session_
             tool_result_refs=(result_ref,),
             created_at=StepClock().now(),
         )
+        bundle, bundle_ref = built.bundle, built.reference
 
         runtime = coordinator._runs[created.run_id]
         await wait_until(

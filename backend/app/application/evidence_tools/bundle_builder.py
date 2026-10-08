@@ -37,6 +37,19 @@ class ValidatedBundleInputs:
     source_records: tuple[tuple[str, tuple[SourceRecord, ...]], ...]
 
 
+@dataclass(frozen=True, slots=True)
+class BuiltEvidenceBundle:
+    bundle: EvidenceBundle
+    validated_inputs: ValidatedBundleInputs
+
+
+@dataclass(frozen=True, slots=True)
+class WrittenEvidenceBundle:
+    bundle: EvidenceBundle
+    reference: ItemReference
+    validated_inputs: ValidatedBundleInputs
+
+
 class EvidenceBundleBuilder:
     def __init__(self, *, reader: EvidenceToolReader, writer: EvidenceToolWriter):
         self._reader = reader
@@ -49,8 +62,7 @@ class EvidenceBundleBuilder:
         fragment_refs: tuple[EvidenceFragmentReference, ...],
         tool_result_refs: tuple[ItemReference, ...],
         created_at,
-        validated_inputs: list[ValidatedBundleInputs] | None = None,
-    ) -> EvidenceBundle:
+    ) -> BuiltEvidenceBundle:
         _ensure_unique_refs(fragment_refs, tool_result_refs)
         fragments = tuple(
             [
@@ -127,22 +139,27 @@ class EvidenceBundleBuilder:
             created_at=created_at,
         )
         await self._validate_reference_scope(scope, bundle, fragments)
-        if validated_inputs is not None:
-            validated_inputs.append(ValidatedBundleInputs(
+        return BuiltEvidenceBundle(
+            bundle=bundle,
+            validated_inputs=ValidatedBundleInputs(
                 fragments=tuple(
                     (reference, by_evidence_id[reference.evidence_id][1])
                     for reference in ordered_fragment_refs
                 ),
                 source_records=tuple(sorted(records_by_item.items())),
-            ))
-        return bundle
+            ),
+        )
 
-    async def build_and_write(self, scope: EvidenceSessionScope, **kwargs):
-        bundle = await self.build(scope, **kwargs)
-        reference = await self._writer.write_bundle(scope, bundle)
+    async def build_and_write(self, scope: EvidenceSessionScope, **kwargs) -> WrittenEvidenceBundle:
+        built = await self.build(scope, **kwargs)
+        reference = await self._writer.write_bundle(scope, built.bundle)
         if not reference.item_id:
             raise EvidenceScopeViolationError()
-        return bundle, reference
+        return WrittenEvidenceBundle(
+            bundle=built.bundle,
+            reference=reference,
+            validated_inputs=built.validated_inputs,
+        )
 
     def _validate_fragments(self, scope, by_evidence_id):
         allowed_parameters = set(

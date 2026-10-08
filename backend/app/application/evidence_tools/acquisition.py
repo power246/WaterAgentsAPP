@@ -405,22 +405,20 @@ class EvidenceAcquisitionService:
             )
         )
 
-        validated_inputs: list[ValidatedBundleInputs] = []
-        bundle, bundle_ref = await self._bundle_builder.build_and_write(
+        built = await self._bundle_builder.build_and_write(
             scope,
             fragment_refs=_unique_fragment_refs(mutable_fragments),
             tool_result_refs=_unique_item_refs(list(result_refs)),
             created_at=self._clock.now(),
-            validated_inputs=validated_inputs,
         )
-        if len(validated_inputs) != 1:
-            raise EvidenceScopeViolationError()
+        bundle = built.bundle
+        bundle_ref = built.reference
         return EvidenceAcquisitionHandoff(
             run_id=scope.run_id,
             session_id=scope.session_id,
             bundle_ref=bundle_ref,
             bundle=bundle,
-            validated_inputs=validated_inputs[0],
+            validated_inputs=built.validated_inputs,
             bundle_binding_digest=_bundle_binding_digest(bundle_ref, bundle),
             rule_plan=scope.evidence_rule_plan,
             rule_plan_digest=scope.evidence_rule_plan.plan_digest,

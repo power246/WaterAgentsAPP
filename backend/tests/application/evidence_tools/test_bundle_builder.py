@@ -140,13 +140,15 @@ async def test_bundle_has_exact_target_and_discharge_cells_with_reference_closur
 ):
     store, artifacts = await assembled(evidence_scope)
     builder = EvidenceBundleBuilder(reader=store, writer=store)
-    bundle = await builder.build(
+    built = await builder.build(
         evidence_scope,
         fragment_refs=(*artifacts.fragment_refs, *artifacts.collection_fact_refs),
         tool_result_refs=(ItemReference(item_id="tool-result-1"),),
         created_at=FixedClock().now(),
     )
 
+    bundle = built.bundle
+    assert built.validated_inputs.fragments
     assert len(bundle.cells) == len(evidence_scope.time_windows) * 2
     assert {cell.role for cell in bundle.cells} == {
         EvidenceCellRole.TARGET,
@@ -181,12 +183,13 @@ async def test_target_and_discharge_missing_states_are_independent(
             and fragment.data_type != "collection_fact"
         )
     )
-    bundle = await EvidenceBundleBuilder(reader=store, writer=store).build(
+    built = await EvidenceBundleBuilder(reader=store, writer=store).build(
         evidence_scope,
         fragment_refs=refs,
         tool_result_refs=(ItemReference(item_id="tool-result-1"),),
         created_at=FixedClock().now(),
     )
+    bundle = built.bundle
     cells = {
         (cell.window_id, cell.role): cell
         for cell in bundle.cells
@@ -217,12 +220,13 @@ async def test_incomplete_windows_block_without_erasing_independently_complete_w
         complete=False,
         completed_ranges=completed,
     )
-    bundle = await EvidenceBundleBuilder(reader=store, writer=store).build(
+    built = await EvidenceBundleBuilder(reader=store, writer=store).build(
         evidence_scope,
         fragment_refs=(*artifacts.fragment_refs, *artifacts.collection_fact_refs),
         tool_result_refs=(ItemReference(item_id="tool-result-1"),),
         created_at=FixedClock().now(),
     )
+    bundle = built.bundle
     by_window = {
         window.window_id: {
             cell.status for cell in bundle.cells if cell.window_id == window.window_id
@@ -248,12 +252,13 @@ async def test_all_unproven_windows_produce_a_deterministic_all_blocked_bundle(
         complete=False,
         completed_ranges=(),
     )
-    bundle = await EvidenceBundleBuilder(reader=store, writer=store).build(
+    built = await EvidenceBundleBuilder(reader=store, writer=store).build(
         evidence_scope,
         fragment_refs=(*artifacts.fragment_refs, *artifacts.collection_fact_refs),
         tool_result_refs=(ItemReference(item_id="tool-result-1"),),
         created_at=FixedClock().now(),
     )
+    bundle = built.bundle
     assert {cell.status for cell in bundle.cells} == {EvidenceCellStatus.BLOCKED}
     assert {reason for cell in bundle.cells for reason in cell.reasons} == {
         "incomplete_source"
@@ -379,9 +384,9 @@ async def test_bundle_serialization_is_order_independent_and_write_failure_is_no
         tool_result_refs=(ItemReference(item_id="tool-result-1"),),
         created_at=FixedClock().now(),
     )
-    assert canonical_model_bytes(first) == canonical_model_bytes(second)
+    assert canonical_model_bytes(first.bundle) == canonical_model_bytes(second.bundle)
 
-    values = first.model_dump(mode="python")
+    values = first.bundle.model_dump(mode="python")
     values["fragments"] = []
     with pytest.raises(ValidationError):
         EvidenceBundle.model_validate(values)
