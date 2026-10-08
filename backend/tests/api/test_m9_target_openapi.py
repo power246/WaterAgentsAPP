@@ -39,7 +39,7 @@ def openapi():
 
 
 @pytest.mark.parametrize("path,method,status", [
-    item if item[0] == "/api/settings" or item[0].startswith("/api/keys") else pytest.param(
+    item if item[0].startswith("/api/settings") or item[0].startswith("/api/keys") else pytest.param(
         *item, marks=pytest.mark.xfail(
             strict=True, reason="Later M9 milestones register remaining routes",
         ),

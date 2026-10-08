@@ -16,7 +16,6 @@ def application():
     return create_app(AppSettings(_env_file=None))
 
 
-@pytest.mark.xfail(strict=True, reason="M9 Milestones 1 and 3: settings routes")
 def test_settings_routes_follow_the_frozen_contract(application) -> None:
     paths = application.openapi()["paths"]
     assert {"get", "put"} <= set(paths.get("/api/settings", {}))

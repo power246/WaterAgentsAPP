@@ -87,6 +87,7 @@ class ReasoningTranscriptStore:
             ),
             requested_parameters=scope.requested_parameters,
             supporting_parameters=scope.supporting_parameters,
+            unit_preferences=task.context.unit_preferences,
             window_ids=tuple(window.window_id for window in scope.time_windows),
             waterbody_model=task.task.waterbody_model,
             memory_mode=task.task.memory_mode,
@@ -281,6 +282,7 @@ class ReasoningTranscriptStore:
                 validation_issue_codes=tuple(
                     dict.fromkeys(issue.code for issue in audit.initial_issues)
                 ),
+                unit_decisions=audit.unit_decisions,
             ),
             operation_id=request.operation_id,
         )

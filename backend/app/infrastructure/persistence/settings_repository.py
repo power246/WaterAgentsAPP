@@ -1,6 +1,7 @@
 """Transactional singleton settings and append-only unit policy persistence."""
 
 import asyncio
+from uuid import UUID
 
 from sqlalchemy import insert, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -16,7 +17,7 @@ from app.domain.settings_admin import (
     SettingsSnapshot, UnitPolicyEntry, UnitPolicyProjection, UnitPolicyVersion,
 )
 from app.infrastructure.persistence.schema import (
-    runtime_settings, unit_policy_entries, unit_policy_versions,
+    runtime_settings, unit_policy_confirmations, unit_policy_entries, unit_policy_versions,
 )
 
 
@@ -88,6 +89,8 @@ class PostgresSettingsRepository:
     async def append_unit_policy(
         self, *, expected_revision: int, expected_unit_version: int,
         policy: UnitPolicyVersion, replacement: SettingsSnapshot,
+        idempotency_key: UUID | None = None, request_fingerprint: bytes | None = None,
+        confirmation_token_digest: bytes | None = None,
     ) -> SettingsSnapshot:
         if (
             policy.version != expected_unit_version + 1
@@ -95,6 +98,10 @@ class PostgresSettingsRepository:
             or replacement.unit_policy.version != policy.version
             or replacement.unit_policy.registry_digest != policy.registry_digest
             or replacement.unit_policy.entries != policy.entries
+            or (idempotency_key is not None and (
+                request_fingerprint is None or len(request_fingerprint) != 32
+                or confirmation_token_digest is None or len(confirmation_token_digest) != 32
+            ))
         ):
             raise UnitPolicyRevisionConflictError()
         validate_unit_policy(policy, self._registry)
@@ -138,9 +145,32 @@ class PostgresSettingsRepository:
                         await self._update_settings(
                             connection, replacement, expected_revision=expected_revision,
                         )
+                    if idempotency_key is not None:
+                        await connection.execute(insert(unit_policy_confirmations).values(
+                            idempotency_key=idempotency_key,
+                            request_fingerprint=request_fingerprint,
+                            confirmation_token_digest=confirmation_token_digest,
+                            version=policy.version,
+                        ))
                     return replacement
         except IntegrityError as error:
             raise UnitPolicyRevisionConflictError() from error
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise SettingsUnavailableError() from error
+
+    async def read_unit_policy_confirmation(
+        self, idempotency_key: UUID,
+    ) -> tuple[bytes, int] | None:
+        try:
+            async with asyncio.timeout(self._timeout):
+                async with self._engine.connect() as connection:
+                    row = (await connection.execute(select(
+                        unit_policy_confirmations.c.request_fingerprint,
+                        unit_policy_confirmations.c.version,
+                    ).where(
+                        unit_policy_confirmations.c.idempotency_key == idempotency_key
+                    ))).one_or_none()
+                    return (row[0], row[1]) if row is not None else None
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise SettingsUnavailableError() from error
 

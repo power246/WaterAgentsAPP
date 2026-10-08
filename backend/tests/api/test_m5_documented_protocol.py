@@ -127,6 +127,8 @@ def test_runtime_registry_openapi_and_manifest_match_documented_fixed_counts() -
     assert paths == {
         "/health",
         "/api/settings",
+        "/api/settings/unit-policies/preview",
+        "/api/settings/unit-policies",
         "/api/keys",
         "/api/keys/{key_name}",
         "/api/keys/{key_name}/test",

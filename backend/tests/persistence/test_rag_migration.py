@@ -132,6 +132,6 @@ def test_existing_four_table_schema_downgrade_upgrade_round_trip() -> None:
             "transcript_contents",
         } <= downgraded
 
-        assert upgrade_database(settings) == "20261008_01"
-        assert asyncio.run(check_database_schema(settings)) == "20261008_01"
+        assert upgrade_database(settings) == "20261008_02"
+        assert asyncio.run(check_database_schema(settings)) == "20261008_02"
         assert RAG_TABLES <= asyncio.run(table_names(settings))

@@ -118,6 +118,16 @@ async def validate_waterbody_agent_task(
         run.configuration.analysis_timezone == context.analysis_timezone,
         "task_run_context_timezone_mismatch",
     )
+    _require(
+        not context.unit_preferences or (
+            run.configuration.unit_registry_digest != "unknown"
+            and all(
+                item.registry_digest == run.configuration.unit_registry_digest
+                for item in context.unit_preferences
+            )
+        ),
+        "task_unit_registry_mismatch",
+    )
     _validate_scope_facts(scope, context=context, topology=topology)
     if task.dependency_manifest is not None:
         _validate_dependency_manifest(task, task.dependency_manifest)

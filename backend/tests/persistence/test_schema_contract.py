@@ -16,6 +16,7 @@ def test_schema_has_core_transcript_and_m8_rag_tables() -> None:
         "runtime_settings",
         "unit_policy_versions",
         "unit_policy_entries",
+        "unit_policy_confirmations",
         "analysis_run_idempotency_tombstones",
         "admin_operations",
     }

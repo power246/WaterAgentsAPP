@@ -8,7 +8,7 @@ from app.domain.settings_admin.credentials_admin import (
 )
 from app.domain.settings_admin.settings import (
     Digest, EmbeddingProfileOption, ModelOption, MutableDefaults, ProfileId,
-    Revision, SessionUnitOverride, SettingsCatalogProjection, SettingsSnapshot,
+    Revision, SessionUnitOverride, UnitPreference, SettingsCatalogProjection, SettingsSnapshot,
     UnitPolicyChange, UnitPolicyEntry, UnitPolicyPreview, UnitPolicyProjection,
     UnitPolicyVersion, Version,
 )
@@ -21,7 +21,7 @@ __all__ = [
     "EmbeddingProfileOption", "GenerationDeletionResult", "HistoryCleanupResult",
     "IdempotencyTombstone", "ModelOption", "MutableDefaults", "ProfileHandoffResult",
     "ProfileId", "RetryFailedJobsResult", "Revision",
-    "SessionUnitOverride", "SettingsCatalogProjection", "SettingsSnapshot",
+    "SessionUnitOverride", "UnitPreference", "SettingsCatalogProjection", "SettingsSnapshot",
     "StoredCredential", "UnitPolicyChange", "UnitPolicyEntry", "UnitPolicyPreview",
     "UnitPolicyProjection", "UnitPolicyVersion", "Version",
 ]

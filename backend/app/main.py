@@ -30,6 +30,7 @@ from app.application.settings_admin.runtime_settings import RuntimeSettingsResol
 from app.application.settings_admin.settings_service import (
     SettingsService, deployment_defaults,
 )
+from app.application.settings_admin.unit_policy_service import UnitPolicyService
 from app.application.settings_admin.credential_service import (
     CredentialService, CredentialTester,
 )
@@ -180,6 +181,10 @@ def create_app(
                     "deployment settings catalog is invalid"
                 ) from error
             settings_resolver = RuntimeSettingsResolver(settings_service)
+            unit_policy_service = UnitPolicyService(
+                settings=settings_service, store=active_settings_store,
+                registry=resolved_parameter_capabilities, clock=resolved_clock,
+            )
             active_key_store = key_store or (
                 OSKeyStore() if engine is not None else InMemoryKeyStore()
             )
@@ -319,6 +324,7 @@ def create_app(
                             capability_registry=resolved_parameter_capabilities,
                             model_catalog=resolved_model_catalog.snapshot(),
                             clock=resolved_clock, id_factory=id_factory,
+                            unit_policy_store=active_settings_store,
                         )
                         m6_runtime = None
                     else:
@@ -356,6 +362,7 @@ def create_app(
                     await m8_runtime.start()
                     application.state.run_coordinator = coordinator
                     application.state.settings_service = settings_service
+                    application.state.unit_policy_service = unit_policy_service
                     application.state.credential_service = credential_service
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store

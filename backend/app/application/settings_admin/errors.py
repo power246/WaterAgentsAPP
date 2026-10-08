@@ -98,6 +98,12 @@ class UnitPolicyRevisionConflictError(SettingsAdminError):
     public_message = "The unit policy changed; preview again."
 
 
+class UnitPolicyIdempotencyConflictError(SettingsAdminError):
+    code = "idempotency_key_conflict"
+    status = 409
+    public_message = "The idempotency key was already used with a different request body."
+
+
 class AdminPreviewExpiredError(SettingsAdminError):
     code = "admin_preview_expired"
     status = 409
@@ -171,7 +177,8 @@ M9_PUBLIC_ERRORS = (
     CredentialNotAllowedError, CredentialStoreUnavailableError,
     CredentialMissingError, CredentialTestFailedError, CredentialValueInvalidError,
     UnitUnknownError, UnitDimensionMismatchError, UnitNotApplicableError,
-    UnitPolicyRevisionConflictError, AdminPreviewExpiredError,
+    UnitPolicyRevisionConflictError, UnitPolicyIdempotencyConflictError,
+    AdminPreviewExpiredError,
     AdminPreviewStaleError, AdminConfirmationInvalidError,
     AdminOperationConflictError, AdminOperationNotFoundError,
     HistoryCleanupDependencyConflictError, IdempotencyResourceDeletedError,

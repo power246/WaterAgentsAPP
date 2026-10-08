@@ -21,6 +21,7 @@ from app.infrastructure.runtime.m6 import build_m6_runtime
 from app.infrastructure.runtime.m7 import compose_m7_execution_stage
 from app.infrastructure.runtime.m8 import M8Runtime
 from app.ports.clock import ClockPort
+from app.ports.settings_store import SettingsStorePort
 
 
 class RunProviderBundle:
@@ -57,7 +58,8 @@ class RunProviderBundleFactory:
                  result_reader: UpstreamInferenceResultReader,
                  capability_registry: ParameterCapabilityRegistry,
                  model_catalog: ModelCatalogSnapshot, clock: ClockPort,
-                 id_factory: Callable[[], UUID]) -> None:
+                 id_factory: Callable[[], UUID],
+                 unit_policy_store: SettingsStorePort | None = None) -> None:
         self._settings = settings
         self._credentials = credentials
         self._http = http
@@ -70,6 +72,7 @@ class RunProviderBundleFactory:
         self._catalog = model_catalog
         self._clock = clock
         self._id_factory = id_factory
+        self._unit_policy_store = unit_policy_store
 
     async def build(self, configuration: AnalysisConfigurationSnapshot) -> RunProviderBundle:
         if not self._catalog.supports(configuration.parser_model, ModelRole.QUERY_PARSER):
@@ -89,6 +92,7 @@ class RunProviderBundleFactory:
                 settings, clock=self._clock,
                 parameter_capabilities=self._capabilities,
                 error_id_factory=self._id_factory, provider_http=self._http,
+                unit_policy_store=self._unit_policy_store,
             ))
             m6 = await stack.enter_async_context(build_m6_runtime(
                 settings, operations=self._operations, m5_runtime=self._m5_runtime,

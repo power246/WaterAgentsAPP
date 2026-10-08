@@ -35,6 +35,7 @@ from app.domain import (
     ensure_unique_tuple,
 )
 from app.domain.common import UtcDatetime
+from app.domain.settings_admin import UnitPreference
 
 
 class _VersionOneContent(DomainModel):
@@ -57,6 +58,7 @@ class WaterbodyAgentInputV1(_VersionOneContent):
     initial_evidence_bundle_ref: TranscriptContentRef | None = None
     requested_parameters: Annotated[tuple[ParameterKey, ...], Field(min_length=1)]
     supporting_parameters: tuple[ParameterKey, ...] = ()
+    unit_preferences: tuple[UnitPreference, ...] = ()
     window_ids: Annotated[tuple[NonEmptyString, ...], Field(min_length=1)]
     waterbody_model: ModelSelection
     memory_mode: MemoryMode
@@ -86,6 +88,14 @@ class WaterbodyAgentInputV1(_VersionOneContent):
         )
         if set(self.requested_parameters) & set(self.supporting_parameters):
             raise ValueError("requested and supporting parameters must be disjoint")
+        ensure_unique_tuple(
+            tuple(item.parameter for item in self.unit_preferences),
+            field_name="waterbody input unit preferences",
+        )
+        if not {item.parameter for item in self.unit_preferences} <= set(
+            (*self.requested_parameters, *self.supporting_parameters)
+        ):
+            raise ValueError("waterbody unit preferences must stay in session scope")
         ensure_unique_tuple(self.window_ids, field_name="window_ids")
         return self
 
@@ -257,9 +267,14 @@ class ReasoningDecisionV1(_VersionOneContent):
     validated_digest: NonEmptyString | None = None
     repair_of_operation_id: UUID | None = None
     validation_issue_codes: tuple[NonEmptyString, ...] = ()
+    unit_decisions: tuple[UnitPreference, ...] = ()
 
     @model_validator(mode="after")
     def validate_decision(self) -> Self:
+        ensure_unique_tuple(
+            tuple(item.parameter for item in self.unit_decisions),
+            field_name="reasoning unit decisions",
+        )
         ensure_unique_tuple(self.tool_call_ids, field_name="tool_call_ids")
         ensure_unique_tuple(
             self.validation_issue_codes,
@@ -270,6 +285,11 @@ class ReasoningDecisionV1(_VersionOneContent):
             ReasoningDecisionType.OVERALL_SYNTHESIS_VALIDATED,
         }
         if validated:
+            if (
+                self.decision_type is ReasoningDecisionType.OVERALL_SYNTHESIS_VALIDATED
+                and self.unit_decisions
+            ):
+                raise ValueError("only reasoning batches select unit preferences")
             if (
                 self.scope_digest is None
                 or self.accepted_output is None
@@ -287,6 +307,8 @@ class ReasoningDecisionV1(_VersionOneContent):
             if self.phase not in {expected_phase, WaterbodyModelPhase.SCHEMA_REPAIR}:
                 raise ValueError("validated reasoning decision has the wrong phase")
         elif self.decision_type in _PLANNING_DECISIONS:
+            if self.unit_decisions:
+                raise ValueError("planning decisions cannot select unit preferences")
             if (
                 self.phase is not WaterbodyModelPhase.EVIDENCE_PLANNING
                 or self.accepted_output is not None

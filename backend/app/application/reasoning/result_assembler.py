@@ -255,6 +255,7 @@ def _assemble(
         time_resolution=skeleton.time_resolution,
         time_resolution_source=skeleton.time_resolution_source,
         requested_parameters=skeleton.requested_parameters,
+        unit_decisions=_applied_unit_decisions(skeleton, series),
         series=series,
         window_assessments=window_assessments,
         overall_assessment=overall_assessment,
@@ -266,6 +267,32 @@ def _assemble(
         model_execution_summary=execution,
         generated_at=skeleton.generated_at,
     )
+
+
+def _applied_unit_decisions(
+    skeleton: ResultSkeleton,
+    series: tuple[ParameterTimeSeries, ...],
+):
+    decisions = []
+    for preference in skeleton.unit_preferences:
+        preferred_symbol = next(
+            (
+                scope.allowed_unit_ids[-1]
+                for scope in skeleton.supported_scopes
+                if scope.parameter == preference.parameter
+            ),
+            None,
+        )
+        if preferred_symbol is None:
+            continue
+        if any(
+            point.outcome_status is OutcomeStatus.QUANTIFIED
+            and point.unit_id == preferred_symbol
+            for item in series if item.parameter.key == preference.parameter
+            for point in item.points
+        ):
+            decisions.append(preference)
+    return tuple(decisions)
 
 
 def _point_from_draft(

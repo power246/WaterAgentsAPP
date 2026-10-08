@@ -916,6 +916,8 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         BASE + "/{run_id}/cancel": {"post"},
         BASE + "/{run_id}/persistence/retry": {"post"},
         "/api/settings": {"get", "put"},
+        "/api/settings/unit-policies/preview": {"post"},
+        "/api/settings/unit-policies": {"post"},
         "/api/keys": {"get"},
         "/api/keys/{key_name}": {"put", "delete"},
         "/api/keys/{key_name}/test": {"post"},

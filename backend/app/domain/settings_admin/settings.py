@@ -11,4 +11,5 @@ from .unit_policy_version import UnitPolicyVersion
 from .unit_policy_change import UnitPolicyChange
 from .unit_policy_preview import UnitPolicyPreview
 from .session_unit_override import SessionUnitOverride
+from .unit_preference import UnitPreference
 from .settings_snapshot import SettingsSnapshot

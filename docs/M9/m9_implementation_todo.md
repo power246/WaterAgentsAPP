@@ -303,39 +303,41 @@
 
 ### 工作
 
-- [ ] 实现 `UnitPolicyService` 与 reusable bounded confirmation registry；global policy preview绑定base version、normalized entries、registry digest、fact fingerprint、required phrase与expiry，restart后未执行preview失效。
-- [ ] 实现 `POST /api/settings/unit-policies/preview` 与 confirm route；执行只创建append-onlyversion并原子更新settings active version，普通Settings PUT不能旁路。
-- [ ] preview/confirm重新验证ParameterKey、target unit id、alias、dimension、registry digest、base version和current facts；stale/expired/wrong action/wrong phrase/token reuse返回稳定错误且0写入。
-- [ ] 扩展query-understanding typed output，只允许bounded raw unit alias、可选parameter reference/rationale；parser不能提供formula、unit conversion factor或新增parameter。
-- [ ] 实现 `UnitPreferenceResolver`：registry normalization、ambiguity/dimension/sealed parameter scope、global fallback与session override优先级；unknown/ambiguous/incompatible产生typed issue。
-- [ ] 将允许候选加入waterbody reasoning task/skeleton；Agent只判断候选是否适用于参数，不能选择allowlist外unit或修改source value。
-- [ ] conversion继续复用现有 `convert_evidence_unit`/decimal/quality policy；validator确认target unit、registry digest、parameter/window/evidence closure，拒绝前端或模型自算结果。
-- [ ] typed decision/result保存session override source与registry digest；history/replay保持原identity，global policy后续变化不改写旧session或source record。
-- [ ] 更新create snapshot、query/context、M6 result assembler、zero-model/summary、persistence/readers/fixtures的全部消费者；无unit intent时保持当前科学语义。
+- [x] 实现 `UnitPolicyService` 与 reusable bounded confirmation registry；global policy preview绑定base version、normalized entries、registry digest、fact fingerprint、required phrase与expiry，restart后未执行preview失效。
+- [x] 实现 `POST /api/settings/unit-policies/preview` 与 confirm route；执行只创建append-onlyversion并原子更新settings active version，普通Settings PUT不能旁路。
+- [x] preview/confirm重新验证ParameterKey、target unit id、alias、dimension、registry digest、base version和current facts；stale/expired/wrong action/wrong phrase/token reuse返回稳定错误且0写入。
+- [x] 扩展query-understanding typed output，只允许bounded raw unit alias、可选parameter reference/rationale；parser不能提供formula、unit conversion factor或新增parameter。
+- [x] 实现 `UnitPreferenceResolver`：registry normalization、ambiguity/dimension/sealed parameter scope、global fallback与session override优先级；unknown/ambiguous/incompatible产生typed issue。
+- [x] 将允许候选加入waterbody reasoning task/skeleton；Agent只判断候选是否适用于参数，不能选择allowlist外unit或修改source value。
+- [x] conversion继续复用现有 `convert_evidence_unit`/decimal/quality policy；validator确认target unit、registry digest、parameter/window/evidence closure，拒绝前端或模型自算结果。
+- [x] typed decision/result保存session override source与registry digest；history/replay保持原identity，global policy后续变化不改写旧session或source record。
+- [x] 更新create snapshot、query/context、M6 result assembler、zero-model/summary、persistence/readers/fixtures的全部消费者；无unit intent时保持当前科学语义。
 
 ### Tests
 
-- [ ] global policy preview/confirm覆盖valid、base stale、registry drift、unknown/duplicateparameter、unknown/incompatibletarget、token expiry/reuse/action mismatch与transaction rollback。
-- [ ] query unit intent正反fixture覆盖alias、ambiguous、unknown、parameter-specific、scope外parameter、formula injection、duplicate和bounded size。
-- [ ] precedence测试覆盖session override > global entry > source unit，无override不改变当前结果；global更新只影响新run。
-- [ ] reasoning/validator fixture证明Agent只能在候选中判断applicability，conversion由确定性工具完成，dimension/closure不匹配fail closed。
-- [ ] history/persistence round-trip保留unit policy version/digest与session override source；旧记录显示legacy/unknown，不被current policy补写。
-- [ ] unit功能不改变M5 target/discharge gates、M8 historical contextual-only权限或source facts/confidence/quality。
+- [x] global policy preview/confirm覆盖valid、base stale、registry drift、unknown/duplicateparameter、unknown/incompatibletarget、token expiry/reuse/action mismatch与transaction rollback。
+- [x] query unit intent正反fixture覆盖alias、ambiguous、unknown、parameter-specific、scope外parameter、formula injection、duplicate和bounded size。
+- [x] precedence测试覆盖session override > global entry > source unit，无override不改变当前结果；global更新只影响新run。
+- [x] reasoning/validator fixture证明Agent只能在候选中判断applicability，conversion由确定性工具完成，dimension/closure不匹配fail closed。
+- [x] history/persistence round-trip保留unit policy version/digest与session override source；旧记录显示legacy/unknown，不被current policy补写。
+- [x] unit功能不改变M5 target/discharge gates、M8 historical contextual-only权限或source facts/confidence/quality。
 
 ### Verify
 
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_policy backend/tests/application/reasoning backend/tests/domain -q`
-- [ ] 运行新增 unit policy service/API/query-intent/snapshot focused tests。
-- [ ] 使用专用PostgreSQL运行unit version/confirmation/create/history integration tests。
-- [ ] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m6_runtime.py backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
-- [ ] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
-- [ ] `git diff --check`
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/application/evidence_policy backend/tests/application/reasoning backend/tests/domain -q`
+- [x] 运行新增 unit policy service/API/query-intent/snapshot focused tests。
+- [x] 使用专用PostgreSQL运行unit version/confirmation/create/history integration tests。
+- [x] `backend/.venv/Scripts/python.exe -B -m pytest backend/tests/infrastructure/test_m6_runtime.py backend/tests/api/test_openapi_contract.py backend/tests/architecture -q`
+- [x] `backend/.venv/Scripts/python.exe -B -m compileall -q backend/app backend/scripts`
+- [x] `git diff --check`
 
 阶段出口：global unit policy只有preview/confirm可append并影响future run，session override在sealed scope内经过deterministic normalization与M6 validator闭环；旧history/source facts保持不变。
 
 提交边界：confirmation registry、unit service/API、query intent/resolver/reasoning/validator、snapshot/history与focused tests；不得包含Admin cleanup/RAG route、frontend或未授权真实provider请求。
 
-完成记录：实施后按文末模板填写。
+完成记录（2026-10-08）：全局单位策略经有界进程内 preview/单次确认、专用 PostgreSQL 回执与同事务 append-only version/settings 指针更新生效；重启后未确认 token 失效，相同 idempotency bytes 可重放。查询解析只保留有界单位别名，resolver 在 sealed 参数范围内确定 session override 优先级；M6 planning/skeleton 限定候选，decimal conversion 和证据闭包验证沿用既有工具与 validator，已验证 decision/result 记录来源及 registry digest。旧 run 配置、history 与 source record 不被当前 policy 改写。
+
+验证：专用 `wateragents_test` PostgreSQL 完整后端回归 2341 passed、16 xfailed（后续 M9 预期红）；M5 确认、回滚、重启、query intent 与 reasoning focused 用例通过，compileall 和 `git diff --check` 通过。未运行真实 provider 请求或跨平台实机验收。
 
 ## Milestone 6：Admin operation、history tombstone 与 RAG 运维
 

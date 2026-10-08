@@ -121,7 +121,7 @@ def test_m9_migration_round_trip_preserves_m8_transcripts_and_registry() -> None
         command.downgrade(alembic_config(settings), "20261007_01")
         generation_id = asyncio.run(verify_survival(settings, source))
         assert run_database_cli(["upgrade", "--test-database"]) == 0
-        assert asyncio.run(check_database_schema(settings)) == "20261008_01"
+        assert asyncio.run(check_database_schema(settings)) == "20261008_02"
         assert run_database_cli(["check", "--test-database"]) == 0
         async def check_preserved():
             engine = create_database_engine(settings)
@@ -203,6 +203,40 @@ def test_settings_singleton_constraints_append_only_and_cas_race() -> None:
                         await connection.execute(update(runtime_settings).where(
                             runtime_settings.c.singleton_id == 1
                         ).values(active_unit_policy_version=999))
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
+def test_unit_policy_append_and_settings_pointer_roll_back_together() -> None:
+    async def exercise(settings):
+        engine = create_database_engine(settings)
+        repository = PostgresSettingsRepository(
+            engine, load_parameter_capability_registry(),
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            policy = await repository.read_unit_policy(1)
+            assert policy is not None
+            first = await repository.compare_and_swap(
+                expected_revision=0, replacement=_snapshot(policy, 1),
+            )
+            second = UnitPolicyVersion(
+                version=2, registry_digest=policy.registry_digest,
+                entries=policy.entries, created_at=datetime.now(UTC),
+            )
+            with patch.object(repository, "_update_settings", side_effect=RuntimeError("rollback")):
+                with pytest.raises(RuntimeError, match="rollback"):
+                    await repository.append_unit_policy(
+                        expected_revision=1, expected_unit_version=1,
+                        policy=second, replacement=_snapshot(second, 2),
+                        idempotency_key=uuid4(), request_fingerprint=b"a" * 32,
+                        confirmation_token_digest=b"b" * 32,
+                    )
+            assert await repository.read_unit_policy(2) is None
+            assert await repository.read_current() == first
         finally:
             await engine.dispose()
 

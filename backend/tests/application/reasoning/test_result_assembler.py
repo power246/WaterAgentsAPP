@@ -7,6 +7,7 @@ from app.application.reasoning import (
 from app.domain import (
     AssessmentAvailability,
     EvidenceReference,
+    InferenceResult,
     IndeterminateReason,
     ModelExecutionSummary,
     ModelSelection,
@@ -14,6 +15,8 @@ from app.domain import (
     RiskLevel,
     WaterQualityParameter,
 )
+from app.domain.settings_admin import UnitPreference
+from app.infrastructure.config import load_parameter_capability_registry
 from tests.application.reasoning.m7_support import (
     batch_payload,
     m7_fixture,
@@ -135,6 +138,30 @@ def test_assembler_preserves_validated_agent_judgments_and_reference_closure():
     assert {item.evidence_id for item in result.evidence_chain.references} == set(
         skeleton.evidence_allowlist
     )
+
+
+def test_unit_decision_source_and_digest_survive_result_round_trip():
+    baseline, _, _, _ = m7_fixture()
+    preference = UnitPreference(
+        parameter=baseline.requested_parameters[0],
+        target_unit_id="milligram_per_liter",
+        registry_digest=load_parameter_capability_registry().manifest_digest,
+        source="session_override",
+    )
+    skeleton, plan, catalog, validator = m7_fixture(unit_preference=preference)
+    reasoning, synthesis = _validated_synthesis(skeleton, plan, catalog, validator)
+    result = assemble_inference_result(
+        skeleton,
+        reasoning=reasoning, synthesis=synthesis,
+        parameter_definitions=_parameters(skeleton),
+        evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
+        model_execution_summary=_summary(
+            skeleton, batches=plan.batch_plan.batch_count, synthesis=1,
+        ),
+    )
+    assert result.unit_decisions == (preference,)
+    assert InferenceResult.model_validate_json(result.model_dump_json()) == result
 
 
 def test_assembler_computes_partial_availability_and_blockers_without_risk_rewrite():

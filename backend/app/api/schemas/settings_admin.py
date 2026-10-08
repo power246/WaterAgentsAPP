@@ -55,8 +55,8 @@ class UnitPolicyPreviewResponse(DomainModel):
 
 
 class ConfirmActionRequest(DomainModel):
-    confirmation_token: NonEmptyString
-    confirmation_phrase: NonEmptyString
+    confirmation_token: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    confirmation_phrase: Annotated[str, StringConstraints(min_length=1, max_length=100)]
 
 
 class UnitPolicyResponse(UnitPolicyVersion):

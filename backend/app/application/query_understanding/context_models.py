@@ -3,13 +3,15 @@ from __future__ import annotations
 import json
 from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, StrictBool, field_validator, model_validator
 
 from app.application.analysis_runs.models import AnalysisConfigurationSnapshot
 from app.application.query_understanding.models import ParameterConcept
+from app.application.query_understanding.unit_preferences import ParsedUnitIntent
+from app.domain.settings_admin import UnitPreference
 from app.domain import (
     DomainEnum,
     DomainModel,
@@ -349,6 +351,7 @@ class ParsedIntentV1(DomainModel):
     end_date: date | None = None
     parameters: tuple[ParameterConcept, ...]
     evidence_rules: tuple[ParsedEvidenceRuleV1, ...] = ()
+    unit_intents: Annotated[tuple[ParsedUnitIntent, ...], Field(max_length=6)] = ()
     ambiguities: tuple[ClarificationIssue, ...] = ()
 
     @model_validator(mode="after")
@@ -359,6 +362,11 @@ class ParsedIntentV1(DomainModel):
             raise ValueError("parameters must not be empty")
         ensure_unique_tuple(self.evidence_rules, field_name="evidence_rules")
         ensure_unique_tuple(self.ambiguities, field_name="ambiguities")
+        identities = tuple(
+            (item.raw_unit_alias.casefold(), (item.parameter_reference or "").casefold())
+            for item in self.unit_intents
+        )
+        ensure_unique_tuple(identities, field_name="unit_intents")
         return self
 
 
@@ -473,6 +481,7 @@ class AnalysisContext(DomainModel):
     evidence_rule_plan: EvidenceRulePlan = Field(
         default_factory=empty_evidence_rule_plan
     )
+    unit_preferences: Annotated[tuple[UnitPreference, ...], Field(max_length=154)] = ()
 
     @field_validator("schema_version", mode="before")
     @classmethod
@@ -531,6 +540,10 @@ class AnalysisContext(DomainModel):
             raise ValueError("target and supporting parameters must not overlap")
         if DISCHARGE_KEY not in set(target_keys) | set(support_keys):
             raise ValueError("analysis parameter plan must include usgs:00060 discharge")
+        preference_keys = tuple(item.parameter for item in self.unit_preferences)
+        ensure_unique_tuple(preference_keys, field_name="unit_preferences")
+        if not set(preference_keys) <= set((*target_keys, *support_keys)):
+            raise ValueError("unit preferences must stay in the parameter plan")
         if any(
             rule.output_parameter not in set((*target_keys, *support_keys))
             for rule in self.evidence_rule_plan.effective_rules
@@ -553,6 +566,16 @@ class AnalysisContext(DomainModel):
                 or item.canonical_unit != capability.canonical_unit
             ):
                 raise ValueError("parameter identity must match the capability registry")
+        for preference in self.unit_preferences:
+            capability = registry.get(preference.parameter)
+            target = registry.unit_definitions.get(preference.target_unit_id)
+            if (
+                preference.registry_digest != registry.manifest_digest
+                or capability is None or target is None
+                or registry.unit_definitions[capability.unit_policy_id].dimension_id
+                != target.dimension_id
+            ):
+                raise ValueError("unit preference must match the capability registry")
         for rule in self.evidence_rule_plan.effective_rules:
             if registry.get(rule.output_parameter) is None or any(
                 registry.get(key) is None for key in rule.input_parameters
@@ -589,6 +612,14 @@ class AnalysisContext(DomainModel):
             raise ValueError("waterbody_model must match run configuration")
         if self.memory_mode is not configuration.memory_mode:
             raise ValueError("memory_mode must match run configuration")
+        if self.unit_preferences and (
+            configuration.unit_registry_digest == "unknown"
+            or any(
+                item.registry_digest != configuration.unit_registry_digest
+                for item in self.unit_preferences
+            )
+        ):
+            raise ValueError("unit preferences must match the run registry digest")
 
         preference = configuration.time_resolution_preference
         source = configuration.time_resolution_preference_source

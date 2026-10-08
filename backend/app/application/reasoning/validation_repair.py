@@ -47,7 +47,8 @@ from app.application.reasoning.working_context import (
     WorkingContextProjection,
     require_safe_prompt_payload,
 )
-from app.domain import DomainModel, NonEmptyString
+from app.domain import DomainModel, NonEmptyString, OutcomeStatus, ensure_unique_tuple
+from app.domain.settings_admin import UnitPreference
 from app.ports.errors import WaterbodyModelPortError
 from app.ports.waterbody_model import WaterbodyModelPort
 
@@ -80,6 +81,7 @@ class ValidationExchangeAudit(DomainModel):
     repair_error_code: NonEmptyString | None = None
     accepted_operation_id: UUID | None = None
     validated_digest: NonEmptyString | None = None
+    unit_decisions: tuple[UnitPreference, ...] = ()
 
     @model_validator(mode="after")
     def validate_correlation(self) -> Self:
@@ -127,6 +129,15 @@ class ValidationExchangeAudit(DomainModel):
                 raise ValueError("repair response identity mismatch")
         if (self.accepted_operation_id is None) != (self.validated_digest is None):
             raise ValueError("validated exchange correlation is incomplete")
+        ensure_unique_tuple(
+            tuple(item.parameter for item in self.unit_decisions),
+            field_name="validated unit decisions",
+        )
+        if self.unit_decisions and (
+            self.accepted_operation_id is None
+            or self.original_phase is not WaterbodyModelPhase.REASONING_BATCH
+        ):
+            raise ValueError("only an accepted reasoning batch may select units")
         accepted = self.accepted_operation_id
         allowed = {initial.operation_id}
         if self.repair_request is not None:
@@ -201,6 +212,7 @@ class ValidationExchange:
             context=batch.context,
             cancellation=cancellation,
             validate=lambda value: self._validator.validate_batch(batch, value),
+            batch=batch,
         )
         return ValidatedBatchExchange(validated=validated, audit=audit)
 
@@ -255,6 +267,7 @@ class ValidationExchange:
         context: WorkingContextProjection,
         cancellation: CancellationProbe,
         validate: Callable[[str], ValidatedDraftT],
+        batch: ReasoningBatch | None = None,
     ) -> tuple[ValidatedDraftT, ValidationExchangeAudit]:
         initial_response = await consume_waterbody_model_stream(
             self._model_port,
@@ -285,6 +298,7 @@ class ValidationExchange:
                 initial_issues=(),
                 accepted_operation_id=request.operation_id,
                 validated_digest=validated.validation_digest,
+                unit_decisions=_unit_decisions(batch, validated),
             )
             if self._decision_store is not None:
                 await self._decision_store.write_validated_exchange(audit)
@@ -383,10 +397,37 @@ class ValidationExchange:
             repair_output_id=repair_output.output_id,
             accepted_operation_id=repair_request.operation_id,
             validated_digest=validated.validation_digest,
+            unit_decisions=_unit_decisions(batch, validated),
         )
         if self._decision_store is not None:
             await self._decision_store.write_validated_exchange(audit)
         return validated, audit
+
+
+def _unit_decisions(
+    batch: ReasoningBatch | None,
+    validated: ValidatedReasoningBatch | ValidatedOverallSynthesis,
+) -> tuple[UnitPreference, ...]:
+    if batch is None or not isinstance(validated, ValidatedReasoningBatch):
+        return ()
+    scopes = {scope.cell_id: scope for scope in batch.cells}
+    selected: dict[object, UnitPreference] = {}
+    for cell in validated.cells:
+        scope = scopes[cell.cell_id]
+        if (
+            cell.outcome_status is OutcomeStatus.QUANTIFIED
+            and scope.preferred_target_unit_id is not None
+            and cell.target_unit_id == scope.allowed_unit_ids[-1]
+        ):
+            selected[scope.parameter] = UnitPreference(
+                parameter=scope.parameter,
+                target_unit_id=scope.preferred_target_unit_id,
+                registry_digest=scope.unit_registry_digest,
+                source=scope.unit_preference_source,
+            )
+    return tuple(selected[key] for key in sorted(
+        selected, key=lambda key: (key.code_system, key.code)
+    ))
 
 
 def _structured_output(

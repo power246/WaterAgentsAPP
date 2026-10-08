@@ -289,6 +289,7 @@ def _make_skeleton(
         "time_resolution": resolution,
         "time_resolution_source": TimeResolutionSource.FRONTEND,
         "requested_parameters": parameters,
+        "unit_preferences": (),
         "windows": tuple(windows),
         "cell_order": tuple(cell_order),
         "fixed_cells": tuple(fixed_cells),
@@ -808,5 +809,5 @@ def test_hash_seed_audit_has_a_fixed_plan_digest() -> None:
     skeleton = _make_skeleton(parameter_count=2)
     plan = _plan(skeleton)
     assert plan.plan_digest == (
-        "sha256:99edb3f6eb9631f966795eeb9cf76524487f1d1f43342c547d86c4b0ccc9ce59"
+        "sha256:883b60a1e492a5d3a9e66c06d35dc7139185fdbd11b8ef16b31105c3d0bada1f"
     )

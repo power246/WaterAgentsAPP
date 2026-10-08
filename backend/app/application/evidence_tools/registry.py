@@ -92,15 +92,7 @@ def create_evidence_tool_registry(
             }
         )
     )
-    target_units = tuple(
-        sorted(
-            {
-                unit_id
-                for capability in capability_registry.capabilities
-                for unit_id in capability.accepted_source_units
-            }
-        )
-    )
+    target_units = tuple(sorted(capability_registry.unit_definitions))
 
     def descriptor(
         name: str,

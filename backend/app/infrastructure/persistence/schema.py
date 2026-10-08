@@ -779,6 +779,23 @@ runtime_settings = Table(
     ),
 )
 
+unit_policy_confirmations = Table(
+    "unit_policy_confirmations", metadata,
+    Column("idempotency_key", UUID(as_uuid=True), primary_key=True),
+    Column("request_fingerprint", LargeBinary, nullable=False),
+    Column("confirmation_token_digest", LargeBinary, nullable=False, unique=True),
+    Column("version", BigInteger, ForeignKey(
+        "unit_policy_versions.version", ondelete="RESTRICT",
+    ), nullable=False),
+    CheckConstraint(
+        "octet_length(request_fingerprint) = 32 AND "
+        "octet_length(confirmation_token_digest) = 32", name="fingerprints",
+    ),
+    CheckConstraint(
+        "substring(idempotency_key::text from 15 for 1) = '4'", name="key_v4",
+    ),
+)
+
 analysis_run_idempotency_tombstones = Table(
     "analysis_run_idempotency_tombstones", metadata,
     Column("idempotency_key", UUID(as_uuid=True), primary_key=True),

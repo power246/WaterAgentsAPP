@@ -16,7 +16,7 @@ def test_test_database_flag_checks_separate_name_before_upgrade(monkeypatch, cap
     chosen = []
     monkeypatch.setattr(cli, "load_app_settings", _Settings)
     monkeypatch.setattr(cli, "upgrade_database", lambda settings: (
-        chosen.append(settings.db_name), "20261008_01"
+        chosen.append(settings.db_name), "20261008_02"
     )[1])
     monkeypatch.setenv("WATERAGENTS_TEST_DB_NAME", "wateragents")
     assert cli.run(["upgrade", "--test-database"]) == 1

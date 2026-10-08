@@ -35,6 +35,7 @@ from app.application.reasoning.prompt_builder import (
     EvidencePlanningPromptInput,
     PromptBudgetRemaining,
     PromptBuilder,
+    PromptToolAuthorization,
     WaterbodyStationKind,
     project_authorized_tool_roster,
 )
@@ -262,7 +263,11 @@ class EvidencePlanningLoop:
                     ),
                     gates=sealed.gates,
                     budget=_prompt_budget(handoff, self._limits, planning_calls),
-                    authorized_tools=project_authorized_tool_roster(roster),
+                    authorized_tools=_unit_scoped_tool_roster(
+                        project_authorized_tool_roster(roster),
+                        task, self._capabilities,
+                    ),
+                    unit_preferences=task.context.unit_preferences,
                     authorized_parameters=tuple(
                         dict.fromkeys(
                             (
@@ -323,7 +328,11 @@ class EvidencePlanningLoop:
                     if self._clock.now() >= deadline:
                         convergence = PlanningConvergenceReason.DEADLINE_REACHED
                         break
-                    tool_request = await _tool_request(scope, handoff, event)
+                    tool_request = await _tool_request(
+                        scope, handoff, event,
+                        preferences=task.context.unit_preferences,
+                        registry=self._capabilities,
+                    )
                     previous_results = len(handoff.tool_result_refs)
                     handoff = await self._acquisition.execute_optional(
                         scope,
@@ -484,16 +493,52 @@ def _materialize_rule(
     )
 
 
+def _unit_scoped_tool_roster(
+    roster: tuple[PromptToolAuthorization, ...],
+    task: ValidatedWaterbodyAgentTask,
+    registry: ParameterCapabilityRegistry,
+) -> tuple[PromptToolAuthorization, ...]:
+    allowed = {item.target_unit_id for item in task.context.unit_preferences}
+    for key in (
+        *task.task.evidence_scope.requested_parameters,
+        *task.task.evidence_scope.supporting_parameters,
+    ):
+        capability = registry.get(key)
+        if capability is not None:
+            allowed.add(capability.unit_policy_id)
+    return tuple(
+        tool.model_copy(update={"allowed_target_unit_ids": tuple(sorted(allowed))})
+        if tool.name == "convert_evidence_unit" else tool
+        for tool in roster
+    )
+
+
 async def _tool_request(
     scope,
     handoff: EvidenceAcquisitionHandoff,
     event: ToolCallCompleted,
+    *,
+    preferences=(),
+    registry=None,
 ) -> EvidenceToolRequest:
     try:
         payload = json.loads(event.arguments)
         if set(payload) != {"window_ids", "parameter_keys", "options"}:
             raise ValueError
         options = dict(payload["options"])
+        if event.name == "convert_evidence_unit" and registry is not None:
+            keys = tuple(ParameterKey.model_validate(value) for value in payload["parameter_keys"])
+            if len(keys) != 1:
+                raise ValueError
+            capability = registry.get(keys[0])
+            if capability is None:
+                raise ValueError
+            preference = next((item for item in preferences if item.parameter == keys[0]), None)
+            allowed = {capability.unit_policy_id}
+            if preference is not None:
+                allowed.add(preference.target_unit_id)
+            if options.get("target_unit_id") not in allowed:
+                raise ValueError
         if "fragment_refs" in options:
             by_id = {
                 reference.evidence_id: reference
