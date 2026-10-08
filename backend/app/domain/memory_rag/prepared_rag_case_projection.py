@@ -109,13 +109,14 @@ class PreparedRAGCaseProjectionV1(DomainModel):
             mode="json",
             exclude={"embedding", "projection_digest"},
         )
-        expected_projection = f"sha256:{sha256(json.dumps(
+        projection_bytes = json.dumps(
             projection_values,
             allow_nan=False,
             ensure_ascii=False,
             separators=(',', ':'),
             sort_keys=True,
-        ).encode('utf-8')).hexdigest()}"
+        ).encode("utf-8")
+        expected_projection = f"sha256:{sha256(projection_bytes).hexdigest()}"
         if self.projection_digest == _AUTO_DIGEST:
             object.__setattr__(self, "projection_digest", expected_projection)
         elif self.projection_digest != expected_projection:
