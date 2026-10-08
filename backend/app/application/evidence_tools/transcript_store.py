@@ -294,6 +294,8 @@ class EvidenceTranscriptStore:
             RAGConsumptionSource(
                 source_generation_id=UUID(record.case_ref.generation_id),
                 source_case_id=UUID(record.case_ref.case_id),
+                source_run_id=UUID(record.case_ref.run_id),
+                source_session_id=UUID(record.case_ref.session_id),
                 source_result_item_id=UUID(record.case_ref.result_item_id),
             )
             for record in records

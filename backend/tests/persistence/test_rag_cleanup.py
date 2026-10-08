@@ -83,6 +83,8 @@ async def _link(repository, case, consumer):
         link_id=uuid4(),
         source_generation_id=UUID(case.case_ref.generation_id),
         source_case_id=UUID(case.case_ref.case_id),
+        source_run_id=UUID(case.case_ref.run_id),
+        source_session_id=UUID(case.case_ref.session_id),
         source_result_item_id=UUID(case.case_ref.result_item_id),
         consumer_run_id=consumer.run_id,
         consumer_session_id=consumer.session_id,
@@ -246,6 +248,64 @@ def test_cleanup_rechecks_a_new_consumption_link_after_inspection() -> None:
             async with engine.connect() as connection:
                 assert await _count(connection, analysis_runs) == 2
                 assert await _count(connection, rag_consumption_links) == 1
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
+def test_retired_generation_cleanup_preserves_consumption_source_ownership() -> None:
+    async def exercise(settings) -> None:
+        engine = create_database_engine(settings)
+        repository = PostgresRAGRepository(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        operations, _ = _operations(repository)
+        try:
+            source = await seed_completed_source(engine)
+            old_profile = embedding_profile(dimensions=3)
+            old = await repository.create_building_generation(
+                old_profile,
+                source.completed_at,
+                str(source.result_item_id),
+            )
+            case = await _write_case(
+                repository,
+                source,
+                old.generation_id,
+                old_profile,
+            )
+            await repository.activate_generation(
+                old.generation_id,
+                datetime.now(UTC),
+            )
+            consumer = await seed_completed_source(
+                engine,
+                target_comid="87654321",
+            )
+            link = await _link(repository, case, consumer)
+
+            replacement = await repository.create_building_generation(
+                embedding_profile(dimensions=4),
+                datetime(1970, 1, 1, tzinfo=UTC),
+                "00000000-0000-0000-0000-000000000000",
+            )
+            await repository.activate_generation(
+                replacement.generation_id,
+                datetime.now(UTC) + timedelta(seconds=1),
+            )
+            await operations.delete_retired_generation(old.generation_id)
+
+            assert await repository.read_generation(old.generation_id) is None
+            assert await repository.read_consumption_links(consumer.run_id) == (link,)
+            assert await repository.append_consumption_link(link) == link
+            assert await repository.find_source_delete_conflicts((source.run_id,)) == (
+                link,
+            )
+            with pytest.raises(RAGPersistenceConflictError):
+                await operations.delete_history_runs((str(source.run_id),))
         finally:
             await engine.dispose()
 

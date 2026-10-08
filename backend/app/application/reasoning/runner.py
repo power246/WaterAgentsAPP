@@ -45,6 +45,7 @@ from app.application.reasoning.result_assembler import (
     build_parameter_definitions,
 )
 from app.application.reasoning.result_models import build_result_skeleton
+from app.application.reasoning.sufficiency import sealed_transcript_item_refs
 from app.application.reasoning.task import ValidatedWaterbodyAgentTask
 from app.application.reasoning.validation_repair import (
     ValidationExchange,
@@ -304,6 +305,9 @@ class RunSingleWaterbodyAgent:
                         summary=None,
                     )
                     for reference in planning.sealed_input.fragment_allowlist
+                ),
+                transcript_item_refs=sealed_transcript_item_refs(
+                    planning.sealed_input
                 ),
                 model_execution_summary=execution,
             )

@@ -1702,6 +1702,9 @@ def test_m9_waterbody_result_projection_survives_real_postgres_restart() -> None
                 "run_id": created.run_id,
                 "session_id": session.session_id,
                 "target_comid": "1234567",
+                "analysis_detail": outcome.result.analysis_detail.model_copy(
+                    update={"transcript_item_refs": ()}
+                ),
             })
             completed = await coordinator.complete_waterbody_agent_session(
                 created.run_id,

@@ -106,10 +106,21 @@ def build_prepared_projection(
     fragments = tuple(
         sorted(
             (
-                _fragment_projection(case_ref, result, item, window_ids)
+                projection
                 for item in validated.eligible_fragments
+                for projection in _fragment_projections(
+                    case_ref,
+                    result,
+                    item,
+                    window_ids,
+                )
             ),
-            key=lambda item: item.source_fragment_item_id,
+            key=lambda item: (
+                item.source_fragment_item_id,
+                item.parameter.code_system,
+                item.parameter.code,
+                item.window_id,
+            ),
         )
     )
     return PreparedRAGProjectionBundle(case=case, fragments=fragments)
@@ -203,7 +214,12 @@ def _result_cells(result, window_ids: tuple[str, ...]) -> tuple[HistoricalResult
     )
 
 
-def _fragment_projection(case_ref, result, item, window_ids) -> RAGFragmentProjectionV1:
+def _fragment_projections(
+    case_ref,
+    result,
+    item,
+    window_ids,
+) -> tuple[RAGFragmentProjectionV1, ...]:
     fragment = item.body
     matches = tuple(
         (series.parameter.key, window_ids[index])
@@ -213,21 +229,23 @@ def _fragment_projection(case_ref, result, item, window_ids) -> RAGFragmentProje
     )
     if not matches:
         raise RAGProjectionBuildError("eligible_fragment_has_no_result_cell")
-    parameter, window_id = matches[0]
     provenance_identity = f"sha256:{sha256(canonical_model_bytes(fragment.provenance)).hexdigest()}"
-    return RAGFragmentProjectionV1(
-        case_ref=case_ref,
-        source_fragment_item_id=str(item.item.item_id),
-        evidence_id=fragment.evidence_id,
-        parameter=parameter,
-        window_id=window_id,
-        valid_time_range=fragment.time_range,
-        quality_tier=RAGQualityTier(fragment.quality_class.value),
-        quality_flags=fragment.quality_flags,
-        coverage=fragment.coverage,
-        applicability=fragment.applicability.value,
-        result_eligibility=fragment.result_eligibility,
-        provenance_identity=provenance_identity,
+    return tuple(
+        RAGFragmentProjectionV1(
+            case_ref=case_ref,
+            source_fragment_item_id=str(item.item.item_id),
+            evidence_id=fragment.evidence_id,
+            parameter=parameter,
+            window_id=window_id,
+            valid_time_range=fragment.time_range,
+            quality_tier=RAGQualityTier(fragment.quality_class.value),
+            quality_flags=fragment.quality_flags,
+            coverage=fragment.coverage,
+            applicability=fragment.applicability.value,
+            result_eligibility=fragment.result_eligibility,
+            provenance_identity=provenance_identity,
+        )
+        for parameter, window_id in matches
     )
 
 

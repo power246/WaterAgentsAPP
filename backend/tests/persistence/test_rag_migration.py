@@ -87,7 +87,14 @@ def test_fresh_schema_has_vector_extension_tables_constraints_and_indexes() -> N
         assert "uq_rag_jobs_identity" in constraints
         assert "fk_rag_cases_generation_profile" in constraints
         assert "fk_rag_fragments_source_item" in constraints
-        assert "fk_rag_consumption_source_case" in constraints
+        assert "fk_rag_consumption_source_item" in constraints
+        assert "transcript_items" in constraints["fk_rag_consumption_source_item"]
+        assert "ON DELETE RESTRICT" in constraints["fk_rag_consumption_source_item"]
+        assert all(
+            name != "fk_rag_consumption_source_case" for name in constraints
+        )
+        assert "parameter_key" in constraints["pk_rag_fragment_projections"]
+        assert "window_id" in constraints["pk_rag_fragment_projections"]
         assert "uq_rag_generations_one_active" in indexes
         assert "USING gin" in indexes["ix_rag_cases_search_document_gin"]
         assert "USING gist" in indexes["ix_rag_windows_time_range_gist"]

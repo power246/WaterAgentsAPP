@@ -593,6 +593,8 @@ rag_fragment_projections = Table(
         "generation_id",
         "case_id",
         "source_fragment_item_id",
+        "parameter_key",
+        "window_id",
         name="pk_rag_fragment_projections",
     ),
     CheckConstraint("NOT isempty(valid_time_range)", name="time_range_nonempty"),
@@ -605,19 +607,17 @@ rag_consumption_links = Table(
     Column("link_id", UUID(as_uuid=True), primary_key=True),
     Column("source_generation_id", UUID(as_uuid=True), nullable=False),
     Column("source_case_id", UUID(as_uuid=True), nullable=False),
+    Column("source_run_id", UUID(as_uuid=True), nullable=False),
+    Column("source_session_id", UUID(as_uuid=True), nullable=False),
     Column("source_result_item_id", UUID(as_uuid=True), nullable=False),
     Column("consumer_run_id", UUID(as_uuid=True), nullable=False),
     Column("consumer_session_id", UUID(as_uuid=True), nullable=False),
     Column("consumer_item_id", UUID(as_uuid=True), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     ForeignKeyConstraint(
-        ("source_generation_id", "source_case_id", "source_result_item_id"),
-        (
-            "rag_case_projections.generation_id",
-            "rag_case_projections.case_id",
-            "rag_case_projections.source_result_item_id",
-        ),
-        name="fk_rag_consumption_source_case",
+        ("source_run_id", "source_session_id", "source_result_item_id"),
+        ("transcript_items.run_id", "transcript_items.session_id", "transcript_items.item_id"),
+        name="fk_rag_consumption_source_item",
         ondelete="RESTRICT",
     ),
     ForeignKeyConstraint(
@@ -707,8 +707,8 @@ Index(
 )
 Index(
     "ix_rag_consumption_source",
-    rag_consumption_links.c.source_generation_id,
-    rag_consumption_links.c.source_case_id,
+    rag_consumption_links.c.source_run_id,
+    rag_consumption_links.c.source_result_item_id,
 )
 Index(
     "ix_rag_consumption_consumer",

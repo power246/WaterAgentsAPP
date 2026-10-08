@@ -1870,6 +1870,8 @@ class RunCoordinator:
                         link_id=self._new_record_id(),
                         source_generation_id=source.source_generation_id,
                         source_case_id=source.source_case_id,
+                        source_run_id=source.source_run_id,
+                        source_session_id=source.source_session_id,
                         source_result_item_id=source.source_result_item_id,
                         consumer_run_id=identity.run_id,
                         consumer_session_id=identity.session_id,

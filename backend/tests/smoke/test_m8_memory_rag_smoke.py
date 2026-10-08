@@ -306,20 +306,12 @@ async def _complete_historical_run(
             target_comid=comid,
             session_id=session.session_id,
             fragment_item_id=fragment_item.item_id,
+            transcript_item_refs=(
+                str(fragment_item.item_id),
+                str(source_item.item_id),
+            ),
         )
-        result = result.model_copy(
-            update={
-                "run_id": run_id,
-                "analysis_detail": result.analysis_detail.model_copy(
-                    update={
-                        "transcript_item_refs": (
-                            str(fragment_item.item_id),
-                            str(source_item.item_id),
-                        )
-                    }
-                ),
-            }
-        )
+        result = result.model_copy(update={"run_id": run_id})
         completed = await coordinator.complete_waterbody_agent_session(
             run_id,
             session.session_id,

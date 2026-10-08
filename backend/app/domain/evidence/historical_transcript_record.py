@@ -63,12 +63,13 @@ class HistoricalTranscriptRecord(_SourceRecordBase):
         if any(
             not any(
                 item.parameter == cell.parameter
-                and item.valid_time_range == cell.time_range
+                and item.valid_time_range.start >= cell.time_range.start
+                and item.valid_time_range.end <= cell.time_range.end
                 for cell in self.result_projection.cells
             )
             for item in self.supporting_fragments
         ):
-            raise ValueError("historical fragment time range must match an authorized cell")
+            raise ValueError("historical fragment time range must fit an authorized cell")
         return self
 
     def referenced_item_ids(self) -> tuple[str, ...]:

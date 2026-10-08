@@ -8,25 +8,31 @@ from app.application.transcript_memory import (
     RAGSourceReadError,
     RAGSourceUnavailableError,
     TranscriptRAGCaseSourceReader,
+    build_prepared_projection,
 )
 from app.application.transcripts.read_models import RegisteredRunRead, StoredRunHeader
 from app.domain import (
+    DirectRecordPayload,
     EmbeddingBatch,
     EmbeddingProfile,
     EmbeddingVector,
+    EvidenceSourceRecords,
     HistoricalCaseRef,
     RAGIndexGeneration,
     RAGIndexGenerationStatus,
     RAGIndexJob,
     RAGIndexJobStatus,
+    SourceRecordReference,
 )
 from app.ports import InvalidPortResponseError, PortTimeoutError
 from tests.application.transcript_memory.m3_support import (
     REGISTRY,
     case_source,
     parser_session,
+    typed_item,
 )
 from tests.infrastructure.embeddings.fake import DeterministicEmbeddingPort
+from tests.domain.test_evidence import valid_manifest, valid_source_records
 
 
 NOW = datetime(2026, 10, 8, 9, tzinfo=UTC)
@@ -262,6 +268,123 @@ def test_transcript_source_loader_decodes_authoritative_run_once() -> None:
         assert hydrated.result == loaded.result
         assert loaded.session == source.session
         assert loaded.confirmed_references == source.confirmed_references[:1]
+
+    asyncio.run(exercise())
+
+
+def test_transcript_source_loader_keeps_ineligible_references_for_policy_filtering() -> None:
+    async def exercise() -> None:
+        source = case_source()
+        ineligible_id = UUID("86000000-0000-4000-8000-000000000088")
+        source_record_item_id = UUID(
+            "86000000-0000-4000-8000-000000000089"
+        )
+        manifest = valid_manifest()
+        records = valid_source_records()[:2]
+        source_records = typed_item(
+            content_type="evidence_source_records",
+            body=EvidenceSourceRecords(
+                operation_id=manifest.operation_id,
+                batch_id=manifest.manifest_id,
+                manifest=manifest,
+                records=records,
+            ),
+            item_id=source_record_item_id,
+            session_id=source.session.session_id,
+            sequence=6,
+        )
+        source_ref = SourceRecordReference(
+            item_id=str(source_record_item_id),
+            record_id=records[0].record_id,
+        )
+        eligible_body = source.fragments[0].body.model_copy(
+            update={
+                "payload": DirectRecordPayload(
+                    record_ref=source_ref,
+                    displayed_value="8",
+                    displayed_unit=source.fragments[0].body.payload.displayed_unit,
+                ),
+                "source_record_refs": (source_ref,),
+            }
+        )
+        eligible = typed_item(
+            content_type="evidence_fragment",
+            body=eligible_body,
+            item_id=source.fragments[0].item.item_id,
+            session_id=source.session.session_id,
+            sequence=7,
+        )
+        ineligible = typed_item(
+            content_type="evidence_fragment",
+            body=eligible_body,
+            item_id=ineligible_id,
+            session_id=source.session.session_id,
+            sequence=8,
+        )
+        ineligible = replace(
+            ineligible,
+            item=ineligible.item.model_copy(update={"rag_eligible": False}),
+        )
+        result_body = source.result.body.model_copy(
+            update={
+                "analysis_detail": source.result.body.analysis_detail.model_copy(
+                    update={
+                        "transcript_item_refs": (
+                            str(eligible.item.item_id),
+                            str(ineligible_id),
+                            str(source_record_item_id),
+                        )
+                    }
+                )
+            }
+        )
+        result = typed_item(
+            content_type="inference_result",
+            body=result_body,
+            item_id=source.result.item.item_id,
+            session_id=source.session.session_id,
+            sequence=source.result.item.transcript_sequence,
+        )
+        typed = (
+            source.analysis_context,
+            source.topology,
+            source_records,
+            eligible,
+            ineligible,
+            result,
+        )
+        snapshot = RegisteredRunRead(
+            run=StoredRunHeader(
+                run_id=source.result.item.run_id,
+                status=source.run_status,
+                created_at=NOW - timedelta(minutes=1),
+                updated_at=NOW,
+                query="persisted source fixture",
+                request_item_id=UUID(int=101),
+                created_item_id=UUID(int=102),
+                terminal_item_id=UUID(int=103),
+            ),
+            sessions=(parser_session(), source.session),
+            items=tuple(
+                REGISTRY.parse(item.item, item.item.inline_body or "")
+                for item in typed
+            ),
+        )
+        loaded = await TranscriptRAGCaseSourceReader(
+            _RegisteredRunReader(snapshot),
+            REGISTRY,
+        ).load_case_source(_job())
+        prepared = build_prepared_projection(
+            loaded,
+            generation_id=GENERATION_ID,
+            profile_id=_generation().profile.profile_id,
+        )
+
+        assert len(loaded.fragments) == 2
+        assert loaded.fragments[1].item.rag_eligible is False
+        assert {
+            fragment.source_fragment_item_id for fragment in prepared.fragments
+        } == {str(eligible.item.item_id)}
 
     asyncio.run(exercise())
 

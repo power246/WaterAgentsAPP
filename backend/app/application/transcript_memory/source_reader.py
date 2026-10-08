@@ -263,7 +263,7 @@ class TranscriptRAGCaseSourceReader:
                     self._typed_item(
                         referenced,
                         body_type=EvidenceFragment,
-                        require_rag_candidate=True,
+                        require_rag_candidate=False,
                     )
                 )
 

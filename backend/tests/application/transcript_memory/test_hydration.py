@@ -6,6 +6,7 @@ from uuid import UUID
 import pytest
 
 from app.application.transcript_memory import (
+    ConfirmedSourceReference,
     GenerationService,
     RAGSourceReadError,
     RAGSearchInvalidError,
@@ -229,13 +230,66 @@ def test_hydrator_returns_only_authorized_cells_and_direct_fragments() -> None:
         assert {cell.parameter for cell in record.result_projection.cells} == {
             TARGET_PARAMETER
         }
-        assert len(record.supporting_fragments) <= 2
+        assert len(record.supporting_fragments) == 1
+        assert record.supporting_fragments[0].original_item_id == str(
+            loader.sources.fragments[0].item.item_id
+        )
         assert all(
             fragment.applicability.value == "contextual_only"
             for fragment in record.supporting_fragments
         )
         assert len(record.model_dump_json().encode("utf-8")) <= 16_384
         assert index.queries[0].generation_id == GENERATION_ID
+
+    asyncio.run(exercise())
+
+
+def test_hydrator_ignores_ineligible_referenced_fragments() -> None:
+    async def exercise() -> None:
+        source = case_source(
+            context=make_context(memory_mode=MemoryMode.MEMORY_AUGMENTED)
+        )
+        ineligible_id = UUID("87000000-0000-4000-8000-000000000088")
+        ineligible = replace(
+            source.fragments[0],
+            item=source.fragments[0].item.model_copy(
+                update={
+                    "item_id": ineligible_id,
+                    "transcript_sequence": 10,
+                    "rag_eligible": False,
+                }
+            ),
+        )
+        mixed = replace(
+            source,
+            result=replace(
+                source.result,
+                references=(*source.result.references, ineligible_id),
+            ),
+            fragments=(*source.fragments, ineligible),
+            confirmed_references=(
+                *source.confirmed_references,
+                ConfirmedSourceReference(
+                    run_id=ineligible.item.run_id,
+                    item_id=ineligible_id,
+                    session_id=ineligible.item.session_id,
+                    content_type="evidence_fragment",
+                    content_schema_version=1,
+                ),
+            ),
+        )
+        scope, session, _, _ = _fixture(source=mixed)
+
+        records = await session.search(
+            _intent(scope, HistoricalSearchStrategy.EXACT_COMID_PARAMETER_WINDOW),
+            operation_id="operation-mixed-eligibility",
+        )
+
+        assert len(records) == 1
+        assert tuple(
+            fragment.original_item_id
+            for fragment in records[0].supporting_fragments
+        ) == (str(source.fragments[0].item.item_id),)
 
     asyncio.run(exercise())
 

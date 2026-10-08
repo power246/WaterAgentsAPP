@@ -230,6 +230,14 @@ def test_stationless_all_unusable_commits_zero_model_result() -> None:
         assert outcome.dependency_outcome.usable_cell_refs == ()
         assert len(transcript.inputs) == len(transcript.results) == 1
         assert outcome.result is not None
+        assert outcome.result.analysis_detail.transcript_item_refs == tuple(
+            sorted(
+                {
+                    *(item_id for item_id, _ in evidence_store.fragments),
+                    *(item_id for _, _, item_id in evidence_store.records),
+                }
+            )
+        )
         execution = outcome.result.model_execution_summary
         assert execution.planning_calls == 0
         assert execution.reasoning_batches == 0

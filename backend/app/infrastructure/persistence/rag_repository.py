@@ -1330,7 +1330,6 @@ class PostgresRAGRepository:
         )
         try:
             async with self._transaction() as connection:
-                await connection.execute(statement)
                 row = (
                     await connection.execute(
                         select(rag_consumption_links).where(
@@ -1342,10 +1341,46 @@ class PostgresRAGRepository:
                             == link.consumer_item_id,
                         )
                     )
-                ).mappings().one()
+                ).mappings().one_or_none()
+                if row is None:
+                    source = (
+                        await connection.execute(
+                            select(rag_case_projections.c.case_id)
+                            .where(
+                                rag_case_projections.c.generation_id
+                                == link.source_generation_id,
+                                rag_case_projections.c.case_id
+                                == link.source_case_id,
+                                rag_case_projections.c.source_run_id
+                                == link.source_run_id,
+                                rag_case_projections.c.source_session_id
+                                == link.source_session_id,
+                                rag_case_projections.c.source_result_item_id
+                                == link.source_result_item_id,
+                            )
+                            .with_for_update(key_share=True)
+                        )
+                    ).one_or_none()
+                    if source is None:
+                        raise RAGPersistenceConflictError(
+                            "consumption link has no matching source case"
+                        )
+                    await connection.execute(statement)
+                    row = (
+                        await connection.execute(
+                            select(rag_consumption_links).where(
+                                rag_consumption_links.c.source_generation_id
+                                == link.source_generation_id,
+                                rag_consumption_links.c.source_case_id
+                                == link.source_case_id,
+                                rag_consumption_links.c.consumer_item_id
+                                == link.consumer_item_id,
+                            )
+                        )
+                    ).mappings().one()
         except IntegrityError as error:
             raise RAGPersistenceConflictError(
-                "consumption link has no valid source case or consumer item"
+                "consumption link has no valid source or consumer item"
             ) from error
         persisted = RAGConsumptionLinkRecord.model_validate(dict(row))
         if persisted != link:
@@ -1378,17 +1413,8 @@ class PostgresRAGRepository:
             return ()
         rows = await self._read_all(
             select(rag_consumption_links)
-            .join(
-                rag_case_projections,
-                and_(
-                    rag_case_projections.c.generation_id
-                    == rag_consumption_links.c.source_generation_id,
-                    rag_case_projections.c.case_id
-                    == rag_consumption_links.c.source_case_id,
-                ),
-            )
             .where(
-                rag_case_projections.c.source_run_id.in_(source_run_ids),
+                rag_consumption_links.c.source_run_id.in_(source_run_ids),
                 rag_consumption_links.c.consumer_run_id.not_in(source_run_ids),
             )
             .order_by(
@@ -1533,24 +1559,13 @@ class PostgresRAGRepository:
                             rag_consumption_links.c.link_id,
                             rag_consumption_links.c.source_generation_id,
                             rag_consumption_links.c.source_case_id,
-                            rag_case_projections.c.source_run_id,
+                            rag_consumption_links.c.source_run_id,
                             rag_consumption_links.c.source_result_item_id,
                             rag_consumption_links.c.consumer_run_id,
                             rag_consumption_links.c.consumer_item_id,
                         )
-                        .select_from(
-                            rag_consumption_links.join(
-                                rag_case_projections,
-                                and_(
-                                    rag_case_projections.c.generation_id
-                                    == rag_consumption_links.c.source_generation_id,
-                                    rag_case_projections.c.case_id
-                                    == rag_consumption_links.c.source_case_id,
-                                ),
-                            )
-                        )
                         .where(
-                            rag_case_projections.c.source_run_id.in_(
+                            rag_consumption_links.c.source_run_id.in_(
                                 tuple(frontier)
                             )
                         )
@@ -1724,17 +1739,24 @@ class PostgresRAGRepository:
             cell.parameter for cell in case.result_projection.cells
         }:
             raise ValueError("case parameters must match result projection parameters")
-        identities: set[str] = set()
+        identities: set[tuple[str, ParameterKey, str]] = set()
+        result_cells = {
+            (cell.parameter, cell.window_id)
+            for cell in case.result_projection.cells
+        }
         for fragment in fragments:
             if fragment.case_ref != reference:
                 raise ValueError("fragment belongs to a different case")
-            if fragment.source_fragment_item_id in identities:
-                raise ValueError("duplicate source fragment projection")
-            identities.add(fragment.source_fragment_item_id)
-            if fragment.window_id not in case.window_ids:
-                raise ValueError("fragment window is outside case projection")
-            if fragment.parameter not in case.parameter_keys:
-                raise ValueError("fragment parameter is outside case projection")
+            identity = (
+                fragment.source_fragment_item_id,
+                fragment.parameter,
+                fragment.window_id,
+            )
+            if identity in identities:
+                raise ValueError("duplicate source fragment-cell projection")
+            identities.add(identity)
+            if (fragment.parameter, fragment.window_id) not in result_cells:
+                raise ValueError("fragment cell is outside case projection")
 
     @staticmethod
     def _window_rows(case: RAGCaseProjectionV1) -> list[dict[str, object]]:
@@ -1812,6 +1834,8 @@ class PostgresRAGRepository:
                 await connection.execute(
                     select(
                         rag_fragment_projections.c.source_fragment_item_id,
+                        rag_fragment_projections.c.parameter_key,
+                        rag_fragment_projections.c.window_id,
                         rag_fragment_projections.c.projection_digest,
                     ).where(
                         rag_fragment_projections.c.generation_id
@@ -1823,10 +1847,19 @@ class PostgresRAGRepository:
             ).mappings()
         )
         stored = {
-            str(row["source_fragment_item_id"]): row["projection_digest"] for row in rows
+            (
+                str(row["source_fragment_item_id"]),
+                row["parameter_key"],
+                row["window_id"],
+            ): row["projection_digest"]
+            for row in rows
         }
         submitted = {
-            fragment.source_fragment_item_id: fragment.projection_digest
+            (
+                fragment.source_fragment_item_id,
+                _parameter_key_text(fragment.parameter),
+                fragment.window_id,
+            ): fragment.projection_digest
             for fragment in fragments
         }
         if stored != submitted:

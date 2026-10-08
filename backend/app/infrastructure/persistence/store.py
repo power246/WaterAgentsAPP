@@ -44,6 +44,7 @@ from app.infrastructure.persistence.records import PersistenceBatch, PersistedRu
 from app.infrastructure.persistence.schema import (
     analysis_runs,
     analysis_sessions,
+    rag_case_projections,
     rag_consumption_links,
     transcript_contents,
     transcript_items,
@@ -586,6 +587,28 @@ class PostgresTranscriptStore:
         batch: PersistenceWriteBatch,
     ) -> None:
         if batch.rag_consumption_links:
+            for link in batch.rag_consumption_links:
+                source = (
+                    await connection.execute(
+                        select(rag_case_projections.c.case_id)
+                        .where(
+                            rag_case_projections.c.generation_id
+                            == link.source_generation_id,
+                            rag_case_projections.c.case_id == link.source_case_id,
+                            rag_case_projections.c.source_run_id
+                            == link.source_run_id,
+                            rag_case_projections.c.source_session_id
+                            == link.source_session_id,
+                            rag_case_projections.c.source_result_item_id
+                            == link.source_result_item_id,
+                        )
+                        .with_for_update(key_share=True)
+                    )
+                ).one_or_none()
+                if source is None:
+                    raise PersistenceWriteConflictError(
+                        "RAG consumption link has no matching source case"
+                    )
             await connection.execute(
                 rag_consumption_links.insert(),
                 [

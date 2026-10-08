@@ -22,6 +22,7 @@ from app.application.reasoning.result_models import build_result_skeleton
 from app.application.reasoning.sufficiency import (
     ReasoningGateDecision,
     seal_evidence_input,
+    sealed_transcript_item_refs,
 )
 from app.application.reasoning.task import ValidatedWaterbodyAgentTask
 from app.application.reasoning.transcript_store import ReasoningTranscriptStore
@@ -100,6 +101,7 @@ class DeterministicInsufficientResultAssembler:
                 )
                 for reference in sealed.fragment_allowlist
             ),
+            transcript_item_refs=sealed_transcript_item_refs(sealed),
             model_execution_summary=ModelExecutionSummary(
                 model=task.task.waterbody_model,
                 planning_calls=0,

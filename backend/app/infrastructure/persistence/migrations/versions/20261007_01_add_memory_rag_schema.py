@@ -306,7 +306,13 @@ def upgrade() -> None:
           safe_projection jsonb NOT NULL,
           projection_digest text NOT NULL,
           CONSTRAINT pk_rag_fragment_projections
-            PRIMARY KEY (generation_id, case_id, source_fragment_item_id),
+            PRIMARY KEY (
+              generation_id,
+              case_id,
+              source_fragment_item_id,
+              parameter_key,
+              window_id
+            ),
           CONSTRAINT fk_rag_fragments_case
             FOREIGN KEY (generation_id, case_id)
               REFERENCES rag_case_projections (generation_id, case_id) ON DELETE CASCADE,
@@ -339,16 +345,18 @@ def upgrade() -> None:
           link_id uuid NOT NULL,
           source_generation_id uuid NOT NULL,
           source_case_id uuid NOT NULL,
+          source_run_id uuid NOT NULL,
+          source_session_id uuid NOT NULL,
           source_result_item_id uuid NOT NULL,
           consumer_run_id uuid NOT NULL,
           consumer_session_id uuid NOT NULL,
           consumer_item_id uuid NOT NULL,
           created_at timestamptz NOT NULL,
           CONSTRAINT pk_rag_consumption_links PRIMARY KEY (link_id),
-          CONSTRAINT fk_rag_consumption_source_case
-            FOREIGN KEY (source_generation_id, source_case_id, source_result_item_id)
-              REFERENCES rag_case_projections
-                (generation_id, case_id, source_result_item_id) ON DELETE RESTRICT,
+          CONSTRAINT fk_rag_consumption_source_item
+            FOREIGN KEY (source_run_id, source_session_id, source_result_item_id)
+              REFERENCES transcript_items (run_id, session_id, item_id)
+                ON DELETE RESTRICT,
           CONSTRAINT fk_rag_consumption_consumer_item
             FOREIGN KEY (consumer_run_id, consumer_session_id, consumer_item_id)
               REFERENCES transcript_items (run_id, session_id, item_id) ON DELETE CASCADE,
@@ -359,7 +367,7 @@ def upgrade() -> None:
     )
     op.execute(
         "CREATE INDEX ix_rag_consumption_source ON rag_consumption_links "
-        "(source_generation_id, source_case_id)"
+        "(source_run_id, source_result_item_id)"
     )
     op.execute(
         "CREATE INDEX ix_rag_consumption_consumer ON rag_consumption_links "

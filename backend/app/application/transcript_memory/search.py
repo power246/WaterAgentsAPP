@@ -346,8 +346,6 @@ class RAGSearchSession:
                     authorized_source_window_ids=window_ids,
                 ),
             )
-            if len(validated.eligible_fragments) != len(source.fragments):
-                raise RAGSearchInvalidError("historical_source_fragment_ineligible")
             selected_cells = tuple(
                 sorted(
                     (
@@ -722,6 +720,7 @@ def _saved_path(edges, start: str, target: str) -> tuple[int, float] | None:
 def _supporting_fragments(fragments, selected_cells):
     cells = {(cell.parameter, cell.window_id): cell for cell in selected_cells}
     projections: list[HistoricalSupportingFragmentProjection] = []
+    seen: set[tuple[str, str]] = set()
     for fragment in sorted(
         fragments,
         key=lambda item: (
@@ -733,14 +732,30 @@ def _supporting_fragments(fragments, selected_cells):
         ),
     ):
         cell = cells.get((fragment.parameter, fragment.window_id))
-        if cell is None or fragment.valid_time_range != cell.time_range:
+        identity = (fragment.source_fragment_item_id, fragment.evidence_id)
+        if (
+            cell is None
+            or identity in seen
+            or fragment.valid_time_range.start >= cell.time_range.end
+            or fragment.valid_time_range.end <= cell.time_range.start
+        ):
             continue
+        seen.add(identity)
         projections.append(
             HistoricalSupportingFragmentProjection(
                 original_item_id=fragment.source_fragment_item_id,
                 evidence_id=fragment.evidence_id,
                 parameter=fragment.parameter,
-                valid_time_range=fragment.valid_time_range,
+                valid_time_range=TimeRange(
+                    start=max(
+                        fragment.valid_time_range.start,
+                        cell.time_range.start,
+                    ),
+                    end=min(
+                        fragment.valid_time_range.end,
+                        cell.time_range.end,
+                    ),
+                ),
                 quality_class=EvidenceQualityClass(fragment.quality_tier.value),
             )
         )

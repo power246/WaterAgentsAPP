@@ -241,6 +241,8 @@ def test_consumption_links_are_idempotent_restrict_source_and_cascade_consumer()
                 link_id=uuid4(),
                 source_generation_id=UUID(generation.generation_id),
                 source_case_id=UUID(case.case_ref.case_id),
+                source_run_id=source.run_id,
+                source_session_id=source.session_id,
                 source_result_item_id=source.result_item_id,
                 consumer_run_id=consumer.run_id,
                 consumer_session_id=consumer.session_id,

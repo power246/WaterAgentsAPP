@@ -77,6 +77,8 @@ def _consumer_batch(consumer, case, *, valid_source=True):
         source_case_id=(
             UUID(case.case_ref.case_id) if valid_source else uuid4()
         ),
+        source_run_id=UUID(case.case_ref.run_id),
+        source_session_id=UUID(case.case_ref.session_id),
         source_result_item_id=UUID(case.case_ref.result_item_id),
         consumer_run_id=consumer.run_id,
         consumer_session_id=consumer.session_id,

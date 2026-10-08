@@ -47,6 +47,8 @@ class RAGConsumptionSource(DomainModel):
 
     source_generation_id: UUID
     source_case_id: UUID
+    source_run_id: UUID
+    source_session_id: UUID
     source_result_item_id: UUID
 
 
@@ -56,6 +58,8 @@ class RAGConsumptionLink(DomainModel):
     link_id: UUID
     source_generation_id: UUID
     source_case_id: UUID
+    source_run_id: UUID
+    source_session_id: UUID
     source_result_item_id: UUID
     consumer_run_id: UUID
     consumer_session_id: UUID

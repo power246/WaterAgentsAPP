@@ -23,6 +23,10 @@ from tests.application.reasoning.m7_support import (
 
 
 MODEL = ModelSelection(provider="test-provider", model="waterbody-model")
+TRANSCRIPT_ITEM_REFS = (
+    "10000000-0000-4000-8000-000000000001",
+    "10000000-0000-4000-8000-000000000002",
+)
 
 
 def _parameters(skeleton):
@@ -90,6 +94,7 @@ def test_assembler_preserves_validated_agent_judgments_and_reference_closure():
         synthesis=synthesis,
         parameter_definitions=_parameters(skeleton),
         evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
         model_execution_summary=summary,
     )
     repeated = assemble_inference_result(
@@ -98,6 +103,7 @@ def test_assembler_preserves_validated_agent_judgments_and_reference_closure():
         synthesis=synthesis,
         parameter_definitions=_parameters(skeleton),
         evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
         model_execution_summary=summary,
     )
 
@@ -105,6 +111,7 @@ def test_assembler_preserves_validated_agent_judgments_and_reference_closure():
     assert result.model_dump_json() == repeated.model_dump_json()
     assert result.overall_assessment.risk_level is RiskLevel.LOW
     assert result.overall_confidence == synthesis.overall.confidence
+    assert result.analysis_detail.transcript_item_refs == TRANSCRIPT_ITEM_REFS
     assert tuple(item.parameter.key for item in result.series) == (
         skeleton.requested_parameters
     )
@@ -144,6 +151,7 @@ def test_assembler_computes_partial_availability_and_blockers_without_risk_rewri
         synthesis=synthesis,
         parameter_definitions=_parameters(skeleton),
         evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
         model_execution_summary=_summary(
             skeleton,
             batches=plan.batch_plan.batch_count,
@@ -177,6 +185,7 @@ def test_all_fixed_natural_absence_assembles_full_result_without_model_drafts():
         synthesis=None,
         parameter_definitions=_parameters(skeleton),
         evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
         model_execution_summary=_summary(skeleton, batches=0, synthesis=0),
     )
 
@@ -186,6 +195,7 @@ def test_all_fixed_natural_absence_assembles_full_result_without_model_drafts():
     assert result.overall_assessment.confidence == 0
     assert result.model_execution_summary.reasoning_batches == 0
     assert result.model_execution_summary.synthesis_calls == 0
+    assert result.analysis_detail.transcript_item_refs == TRANSCRIPT_ITEM_REFS
     assert result.model_execution_summary.skipped_cells == len(skeleton.cell_order)
     assert all(
         point.outcome_status is OutcomeStatus.INDETERMINATE
@@ -257,6 +267,7 @@ def test_all_agent_indeterminate_remains_indeterminate_at_every_aggregate_layer(
         synthesis=synthesis,
         parameter_definitions=_parameters(skeleton),
         evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
         model_execution_summary=_summary(
             skeleton,
             batches=plan.batch_plan.batch_count,
@@ -306,6 +317,7 @@ def test_partial_availability_never_rewrites_validated_none_or_high_risk(
         synthesis=synthesis,
         parameter_definitions=_parameters(skeleton),
         evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
         model_execution_summary=_summary(
             skeleton,
             batches=plan.batch_plan.batch_count,

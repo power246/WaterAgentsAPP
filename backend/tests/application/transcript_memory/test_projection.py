@@ -61,7 +61,16 @@ def test_projection_replay_and_canonical_golden_are_stable() -> None:
     assert first.case.canonical_query_digest == GOLDEN_CANONICAL_DIGEST
     assert first.case.case_ref.case_id == "0f74a476-eeb9-5506-819d-6004b80237de"
     assert len(first.case.windows) == 4
-    assert len(first.fragments) == 1
+    assert {
+        (fragment.parameter, fragment.window_id)
+        for fragment in first.fragments
+    } == {
+        (cell.parameter, cell.window_id)
+        for cell in first.case.result_projection.cells
+    }
+    assert {
+        fragment.source_fragment_item_id for fragment in first.fragments
+    } == {str(source.fragments[0].item.item_id)}
 
 
 def test_equivalent_query_input_order_and_hash_seed_do_not_change_bytes() -> None:

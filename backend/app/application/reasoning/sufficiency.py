@@ -279,6 +279,19 @@ class SealedEvidenceInput(DomainModel):
         return _canonical_model_bytes(self)
 
 
+def sealed_transcript_item_refs(
+    sealed_input: SealedEvidenceInput,
+) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                *(reference.item_id for reference in sealed_input.fragment_allowlist),
+                *sealed_input.source_record_allowlist,
+            }
+        )
+    )
+
+
 def seal_evidence_input(
     validated_task: ValidatedWaterbodyAgentTask,
     handoff: EvidenceAcquisitionHandoff,

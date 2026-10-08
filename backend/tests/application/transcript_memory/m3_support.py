@@ -207,6 +207,7 @@ def _result(
     target_comid: str,
     session_id: UUID,
     fragment_item_id: UUID,
+    transcript_item_refs: tuple[str, ...] | None = None,
 ) -> InferenceResult:
     parameter_intent = context.params_used[0]
     parameter = WaterQualityParameter(
@@ -255,7 +256,11 @@ def _result(
         analysis_detail=AnalysisDetail(
             summary="Validated result fixture.",
             steps=(),
-            transcript_item_refs=(str(fragment_item_id),),
+            transcript_item_refs=(
+                transcript_item_refs
+                if transcript_item_refs is not None
+                else (str(fragment_item_id),)
+            ),
         ),
         evidence_chain=EvidenceChain(
             references=(
