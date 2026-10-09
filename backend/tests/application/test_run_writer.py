@@ -334,6 +334,44 @@ def test_same_run_never_overlaps_writes_and_respects_batch_item_target() -> None
     run(exercise)
 
 
+def test_batch_freeze_rechecks_each_selected_item_once(monkeypatch) -> None:
+    async def exercise() -> None:
+        store = GatedStore()
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow)
+        try:
+            created = await coordinator.create_run(create_request_bytes())
+            await workflow.calls.get()
+            await store.started.get()
+            runtime = coordinator._runs[created.run_id]
+            registry = runtime.transcript_buffer._registry
+            recheck = registry.recheck
+            checked = 0
+
+            def counted(*args, **kwargs):
+                nonlocal checked
+                checked += 1
+                return recheck(*args, **kwargs)
+
+            monkeypatch.setattr(registry, "recheck", counted)
+            for index in range(33):
+                identity = await coordinator.reserve_transcript_item(created.run_id)
+                await coordinator.finalize_transcript_item(
+                    created.run_id, identity.item_id, "analysis_request", 1,
+                    create_request(f"fact {index}"),
+                )
+            store.release.set()
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            assert any(len(batch.item_ids) == 33 for batch in store.attempts)
+            assert checked == 33
+        finally:
+            store.release.set()
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
 def test_one_run_freezes_failed_batch_before_new_groups_and_never_writes_empty() -> None:
     async def exercise() -> None:
         store = FailingStore(failures=1)

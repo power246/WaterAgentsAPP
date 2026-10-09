@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from app.domain.settings_admin import AdminCommand
 from app.application.settings_admin.confirmation_registry import ConfirmationRegistry
 from app.application.settings_admin.errors import (
-    AdminConfirmationInvalidError, AdminOperationNotFoundError,
+    AdminConfirmationInvalidError, AdminOperationConflictError, AdminOperationNotFoundError,
     AdminPreviewExpiredError, AdminPreviewStaleError, HistoryCleanupDependencyConflictError,
     HistoryCleanupSelectionTooLargeError,
     CredentialStoreUnavailableError,
@@ -30,7 +30,7 @@ from app.domain import EmbeddingProfile, RAGFailedJobRetryFilter, RAGIndexGenera
 from app.domain.memory_rag import RAGCleanupPlan, RAGProfileHandoffState
 from app.domain.settings_admin import (
     AdminActionKind, AdminConfirmation, AdminOperation, AdminOperationState,
-    AdminProgress, GenerationDeletionResult, HistoryCleanupResult,
+    AdminProgress, AdminSafeError, GenerationDeletionResult, HistoryCleanupResult,
     ProfileHandoffResult, RetryFailedJobsResult,
 )
 from app.ports.admin_operation_store import AdminOperationStorePort
@@ -266,9 +266,7 @@ class AdminService:
         fingerprint = sha256(raw_body).digest()
         receipt = await self._store.read_receipt(idempotency_key)
         if receipt is not None:
-            if not compare_digest(receipt[1], fingerprint):
-                raise UnitPolicyIdempotencyConflictError()
-            return receipt[0]
+            return await self._accept_receipt(receipt, fingerprint, kind)
         try:
             async with self._confirmations.claim(
                 token=token, action=kind.value, phrase=phrase, now=self._clock.now(),
@@ -294,16 +292,57 @@ class AdminService:
                     request_fingerprint=fingerprint,
                     confirmation_token_digest=token_digest, command=command,
                 )
-        except (AdminConfirmationInvalidError, AdminPreviewExpiredError, AdminPreviewStaleError):
+        except (
+            AdminConfirmationInvalidError, AdminPreviewExpiredError,
+            AdminPreviewStaleError, PortUnavailableError,
+        ):
             receipt = await self._store.read_receipt(idempotency_key)
             if receipt is None:
                 raise
-            if not compare_digest(receipt[1], fingerprint):
-                raise UnitPolicyIdempotencyConflictError() from None
-            return receipt[0]
+            return await self._accept_receipt(receipt, fingerprint, kind)
+        if saved.operation_id != operation.operation_id:
+            receipt = await self._store.read_receipt(idempotency_key)
+            if receipt is None:
+                raise PortUnavailableError("committed Admin operation receipt unavailable")
+            return await self._accept_receipt(receipt, fingerprint, kind)
         if saved.state is AdminOperationState.PENDING and self._schedule is not None:
             self._schedule(saved, command)
         return saved
+
+    async def _accept_receipt(
+        self,
+        receipt: tuple[AdminOperation, bytes, AdminCommand | None],
+        fingerprint: bytes,
+        kind: AdminActionKind,
+    ) -> AdminOperation:
+        operation, stored_fingerprint, command = receipt
+        if not compare_digest(stored_fingerprint, fingerprint) or operation.kind is not kind:
+            raise UnitPolicyIdempotencyConflictError()
+        if operation.state is not AdminOperationState.PENDING:
+            return operation
+        if command is not None:
+            if command.kind is not kind or command.resource_identity != operation.resource_identity:
+                raise PortUnavailableError("committed Admin command identity is invalid")
+            if self._schedule is not None:
+                self._schedule(operation, command)
+            return operation
+        data = operation.model_dump(mode="python")
+        data.update(
+            state=AdminOperationState.INTERRUPTED,
+            finished_at=self._clock.now(),
+            safe_error=AdminSafeError(
+                code="operation_interrupted",
+                message="The operation cannot be resumed.", retryable=True,
+            ),
+        )
+        try:
+            return await self._store.compare_and_swap_state(
+                AdminOperation.model_validate(data),
+                expected=AdminOperationState.PENDING,
+            )
+        except AdminOperationConflictError:
+            current = await self._store.get(operation.operation_id)
+            return current if current is not None else operation
 
     async def handle(self, command: AdminCommand):
         if not compare_digest(await self._current_digest(command), command.facts_digest):

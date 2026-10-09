@@ -387,6 +387,35 @@ def test_session_first_read_handoff_and_multiple_subscribers_have_no_gap() -> No
     run(exercise)
 
 
+def test_deleted_session_stops_replaying_a_paused_batch() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (_, coordinator, created, _, _, _):
+            session = await coordinator.prepare_agent_session(
+                created.run_id, agent_role=AgentRole.QUERY_PARSER,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id, session.session_id, "fixture_message", 1,
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id, message.item_id,
+                FixtureMessageV1(
+                    text="body that must not be replayed",
+                    generation_status=GenerationStatus.INCOMPLETE,
+                ),
+            )
+            stream = await coordinator.subscribe_session(created.run_id, session.session_id)
+            first = await anext(stream)
+            assert first is not None
+            runtime = coordinator._runs[created.run_id]
+            async with runtime.condition:
+                runtime.history_deleted = True
+                runtime.condition.notify_all()
+            with pytest.raises(StopAsyncIteration):
+                await anext(stream)
+
+    run(exercise)
+
+
 def test_session_http_handshake_reports_cursor_and_identity_errors() -> None:
     async def exercise() -> None:
         async with run_runtime() as (app, coordinator, created, _, _, _):

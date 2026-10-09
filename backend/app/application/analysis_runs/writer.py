@@ -26,7 +26,6 @@ from app.application.analysis_runs.persistence import (
     RAGConsumptionLink,
 )
 from app.application.transcripts.buffer import (
-    PendingTranscriptReferencesError,
     TranscriptBuffer,
 )
 from app.application.transcripts.models import TranscriptContentRef
@@ -307,6 +306,12 @@ class TranscriptWriter:
             return runtime.persistence_active_batch
         selected: list[PersistenceGroup] = []
         selected_items = 0
+        selected_item_ids: set[UUID] = set()
+        finalized = {
+            item.item_id: item for item in runtime.transcript_buffer.items
+        }
+        reserved_ids = {item.item_id for item in runtime.transcript_items}
+        persisted_ids = runtime.persisted_item_ids
         for group in runtime.persistence_groups:
             if selected and (
                 group.recovery_fact
@@ -314,12 +319,25 @@ class TranscriptWriter:
                 or selected_items + len(group.item_ids) > self._batch_items
             ):
                 break
-            candidate = (*selected, group)
-            try:
-                self._build_batch_locked(runtime, candidate)
-            except PendingTranscriptReferencesError:
+            group_ids = set(group.item_ids)
+            if selected_item_ids & group_ids:
+                raise ValueError("selected transcript item identities must be unique")
+            if not group_ids <= finalized.keys():
+                raise ValueError("selected transcript item is not finalized")
+            available_ids = persisted_ids | selected_item_ids | group_ids
+            waiting = False
+            for item_id in group.item_ids:
+                for reference in finalized[item_id].content.references:
+                    if reference in available_ids:
+                        continue
+                    if reference in reserved_ids:
+                        waiting = True
+                        continue
+                    raise ValueError("transcript reference target does not exist")
+            if waiting:
                 continue
             selected.append(group)
+            selected_item_ids.update(group_ids)
             selected_items += len(group.item_ids)
             if group.recovery_fact or selected_items >= self._batch_items:
                 break

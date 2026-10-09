@@ -2872,7 +2872,8 @@ class RunCoordinator:
                 try:
                     async with asyncio.timeout(self._keepalive_interval):
                         await runtime.condition.wait_for(
-                            lambda: len(session_runtime.process_events) > cursor
+                            lambda: runtime.history_deleted
+                            or len(session_runtime.process_events) > cursor
                             or (
                                 session_runtime.summary.status not in _SESSION_TRANSITIONS
                                 and not any(
@@ -2883,6 +2884,8 @@ class RunCoordinator:
                         )
                 except TimeoutError:
                     pass
+                if runtime.history_deleted:
+                    return
                 batch = tuple(session_runtime.process_events[cursor:])
                 terminal = session_runtime.summary.status not in _SESSION_TRANSITIONS
                 message_active = any(
@@ -2890,11 +2893,17 @@ class RunCoordinator:
                     for item in runtime.streaming_messages.values()
                 )
             for event in batch:
+                async with runtime.condition:
+                    if runtime.history_deleted:
+                        return
                 cursor = event.sequence
                 yield event
             if terminal and not message_active and cursor == len(session_runtime.process_events):
                 return
             if not batch:
+                async with runtime.condition:
+                    if runtime.history_deleted:
+                        return
                 yield None
 
     async def _lookup(self, run_id: UUID | str) -> RunRuntime:
