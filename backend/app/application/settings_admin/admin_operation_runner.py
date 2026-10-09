@@ -100,23 +100,27 @@ class AdminOperationRunner:
         self, desired: AdminOperation, *, expected: AdminOperationState,
     ) -> AdminOperation | None:
         delay = 0.1
+        uncertain = False
         while True:
             try:
                 return await self._store.compare_and_swap_state(desired, expected=expected)
             except AdminOperationConflictError:
-                return None
+                if not uncertain:
+                    return None
             except PortUnavailableError:
-                try:
-                    current = await self._store.get(desired.operation_id)
-                except PortUnavailableError:
-                    current = None
-                if current is not None:
-                    if current.state is desired.state:
-                        return current
-                    if current.state is not expected:
-                        return None
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, 5.0)
+                uncertain = True
+            try:
+                current = await self._store.get(desired.operation_id)
+            except PortUnavailableError:
+                current = None
+            if current is not None:
+                if current.state is desired.state:
+                    return current
+                if current.state is not expected:
+                    return None
+                uncertain = False
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 5.0)
 
 
 def _next(

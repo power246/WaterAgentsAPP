@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { api, type CleanupPreview } from '../src/api/http'
+import { api, ApiError, type CleanupPreview } from '../src/api/http'
 import { DeleteRun } from '../src/features/history/DeleteRun'
 
 const runId = '00000000-0000-4000-8000-000000000001'
@@ -58,4 +58,20 @@ it('keeps the deletion preview and request after a lost response', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Retry deleting these runs' }))
   await waitFor(() => expect(accepted).toHaveBeenCalledOnce())
   expect(execute.mock.calls[1]).toEqual(execute.mock.calls[0])
+})
+
+it('keeps a definite rejection visible until the user requests another preview', async () => {
+  const prepared = vi.spyOn(api, 'previewRunCleanup').mockResolvedValue({ ...preview, cascade_authorized: true,
+    confirmation: { token: 'stale-token', required_phrase: 'DELETE 2 RUNS', expires_at: '2026-10-08T01:00:00Z' } })
+  vi.spyOn(api, 'executeRunCleanup').mockRejectedValue(new ApiError(409, 'admin_preview_stale', 'request'))
+  render(<DeleteRun runId={runId} onClose={() => undefined} onAccepted={() => undefined} />)
+  await screen.findByRole('button', { name: 'Delete these runs' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Confirmation phrase' }), { target: { value: 'DELETE 2 RUNS' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Delete these runs' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('admin_preview_stale')
+  expect(screen.getByRole('button', { name: 'Preview again' })).toBeInTheDocument()
+  expect(prepared).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Preview again' }))
+  await waitFor(() => expect(prepared).toHaveBeenCalledTimes(2))
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })

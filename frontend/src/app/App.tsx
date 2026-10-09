@@ -34,13 +34,14 @@ function Workspace({ mode }: { mode: Mode }) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [mobileTab, setMobileTab] = useState<'controls' | 'map' | 'detail'>('controls')
   const [runError, setRunError] = useState('')
-  const [historyUrl, setHistoryUrl] = useState<string | null>(null)
+  const [historyFallback, setHistoryFallback] = useState<{ runId: string; url: string } | null>(null)
   const runStream = useRef<AbortController | null>(null)
   const [selectedComid, setSelectedComid] = useState<string | null>(null)
   const [mapPoint, setMapPoint] = useState<{ latitude: number; longitude: number } | null>(null)
   const [loadedTopology, setLoadedTopology] = useState<{ key: string; graph: Graph | null; error: string | null } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [historyVersion, setHistoryVersion] = useState(0)
+  const historyUrl = historyFallback?.runId === runId ? historyFallback.url : null
   const historical = mode === 'history' || historyUrl !== null
   const sessionTabOpen = tab === 'agent' || tab === 'evidence'
   const currentDetail = run.detail?.run.run_id === runId ? run.detail : null
@@ -88,7 +89,7 @@ function Workspace({ mode }: { mode: Mode }) {
 
   useEffect(() => {
     dispatchRun({ type: 'open', runId: runId ?? '' })
-    setHistoryUrl(null)
+    setHistoryFallback(null)
     setRunError('')
     setSelectedComid(null)
     if (!runId) return
@@ -102,7 +103,7 @@ function Workspace({ mode }: { mode: Mode }) {
       }, controller.signal).catch((cause: unknown) => {
         if (controller.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
-          setHistoryUrl(cause.historyUrl)
+          setHistoryFallback({ runId, url: cause.historyUrl })
         } else setRunError(cause instanceof ApiError ? cause.code : 'Run stream unavailable')
       })
     }
@@ -156,7 +157,7 @@ function Workspace({ mode }: { mode: Mode }) {
       }, controller.signal).catch((cause: unknown) => {
         if (controller.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
-          setHistoryUrl(cause.historyUrl)
+          setHistoryFallback({ runId, url: cause.historyUrl })
         } else setRunError(cause instanceof ApiError ? cause.code : 'Session stream unavailable')
       })
     }

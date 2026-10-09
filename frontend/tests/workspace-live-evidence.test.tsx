@@ -1,12 +1,14 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { api, type RunSnapshot, type SessionProcess, type TranscriptItem } from '../src/api/http'
+import { api, ApiError, type RunDetail, type RunSnapshot, type SessionProcess, type TranscriptItem } from '../src/api/http'
 import { subscribe } from '../src/api/sse'
 import { App } from '../src/app/App'
 
 vi.mock('../src/api/sse', () => ({ subscribe: vi.fn() }))
 vi.mock('../src/features/analysis/TopologyMap', () => ({ TopologyMap: () => <div /> }))
-vi.mock('../src/features/analysis/NewAnalysisForm', () => ({ NewAnalysisForm: () => <div /> }))
+vi.mock('../src/features/analysis/NewAnalysisForm', () => ({ NewAnalysisForm: ({ onCreated }:
+  { onCreated: (id: string) => void }) => <button onClick={() => onCreated('00000000-0000-4000-8000-000000000004')}>
+    Go to run B</button> }))
 
 const runId = '00000000-0000-4000-8000-000000000001'
 const sessionId = '00000000-0000-4000-8000-000000000002'
@@ -31,7 +33,7 @@ const item: TranscriptItem = {
   confidence: null, provenance: null, parse_error: null,
 }
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); window.history.replaceState({}, '', '/') })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.mocked(subscribe).mockReset(); window.history.replaceState({}, '', '/') })
 
 it('keeps one selected session stream while switching from Agent to Evidence', async () => {
   window.history.replaceState({}, '', `/runs/${runId}/waterbodies/${sessionId}`)
@@ -55,4 +57,33 @@ it('keeps one selected session stream while switching from Agent to Evidence', a
   } })
   expect(await screen.findByText('evidence fragment · 1')).toBeInTheDocument()
   expect(sessionEvents).toHaveLength(1)
+})
+
+it('does not apply run A history fallback to a newly selected run B', async () => {
+  const runB = '00000000-0000-4000-8000-000000000004'
+  const historyUrl = `/api/analysis/runs/${runId}?view=history`
+  window.history.replaceState({}, '', `/runs/${runId}`)
+  vi.spyOn(api, 'settings').mockResolvedValue({} as never)
+  const history = vi.spyOn(api, 'historyAt').mockResolvedValue({
+    run: { run_id: runId, status: 'completed', query: 'Saved run A', created_at: time, updated_at: time,
+      context_summary: null, result_ref: null, result_summary: null },
+    source: 'postgresql', sessions: [], items: [], referenced_items: [], issues: [],
+    persistence: { state: 'up_to_date', warning: null },
+  } as RunDetail)
+  const bSignals: AbortSignal[] = []
+  vi.mocked(subscribe).mockImplementation(async (kind, id, _session, onEvent, signal) => {
+    if (kind !== 'run') return
+    if (id === runId) throw new ApiError(410, 'live_state_gone', null, historyUrl)
+    bSignals.push(signal)
+    onEvent({ name: 'run_snapshot', data: { ...snapshot, run_id: runB } })
+    await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  render(<App />)
+  expect(await screen.findByText('Saved run A')).toBeInTheDocument()
+  expect(history).toHaveBeenCalledWith(historyUrl, expect.any(AbortSignal))
+  fireEvent.click(screen.getByRole('button', { name: 'Go to run B' }))
+  await waitFor(() => expect(bSignals).toHaveLength(1))
+  expect(window.location.pathname).toBe(`/runs/${runB}`)
+  expect(bSignals[0]?.aborted).toBe(false)
+  expect(history).toHaveBeenCalledTimes(1)
 })

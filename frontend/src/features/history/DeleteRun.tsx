@@ -14,12 +14,11 @@ export function DeleteRun({ runId, onClose, onAccepted }: {
   const [error, setError] = useState('')
 
   const loadPreview = useCallback(async (cascade: boolean) => {
-    if (attempt) return
     setError('')
     setPhrase('')
     try { setPreview(await api.previewRunCleanup(runId, cascade)) }
     catch (cause) { setError(cause instanceof ApiError ? cause.code : 'Preview unavailable') }
-  }, [runId, attempt])
+  }, [runId])
 
   useEffect(() => { void loadPreview(false) }, [loadPreview])
 
