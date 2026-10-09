@@ -25,6 +25,7 @@ function safeContent(item: TranscriptItem): string {
 
 function RecordView({ entry, runId, readView }: { entry: ProcessItem; runId: string; readView: 'auto' | 'history' }) {
   const [full, setFull] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [controller, setController] = useState<AbortController | null>(null)
@@ -36,7 +37,11 @@ function RecordView({ entry, runId, readView }: { entry: ProcessItem; runId: str
   const preview = text.length > 700 ? `${text.slice(0, 700)}…` : text
   const body = <>
     <p className="record-meta">{entry.header.occurred_at} · {item?.parse_status ?? (entry.generationStatus || 'generating')}</p>
-    <pre>{(full ?? preview) || 'Generating…'}</pre>
+    <pre>{(full ?? (expanded ? text : preview)) || 'Generating…'}</pre>
+    {item?.content.kind === 'inline' && text.length > 700 &&
+      <button type="button" onClick={() => setExpanded((value) => !value)}>
+        {expanded ? 'Show less' : 'Read full inline content'}
+      </button>}
     {item?.content.kind === 'reference' && <button type="button" disabled={loading} onClick={() => {
       const request = new AbortController()
       setController(request); setLoading(true); setError('')

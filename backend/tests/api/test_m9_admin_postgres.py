@@ -4,6 +4,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import httpx
@@ -86,6 +87,7 @@ def test_history_admin_commit_delete_and_create_tombstone() -> None:
                 assert created.status_code == 201, created.text
                 run_id = created.json()["run_id"]
                 await _ready(application, run_id)
+                delayed_stream = await application.state.run_coordinator.subscribe_run(UUID(run_id))
                 preview = await client.post(
                     "/api/admin/history-cleanups/preview",
                     json={"selection": {"kind": "runs", "run_ids": [run_id]},
@@ -114,11 +116,31 @@ def test_history_admin_commit_delete_and_create_tombstone() -> None:
                     headers={"Idempotency-Key": str(uuid4())},
                 )
                 assert wrong_action.status_code == 409
-                accepted = await client.post(
-                    "/api/admin/history-cleanups", json=execute_body,
-                    headers={"Idempotency-Key": operation_key},
-                )
+                store = application.state.admin_service._store
+                read_receipt = store.read_receipt
+                both_read = asyncio.Event()
+                initial_reads = 0
+
+                async def synchronized_read(key):
+                    nonlocal initial_reads
+                    receipt = await read_receipt(key)
+                    if str(key) == operation_key and receipt is None:
+                        initial_reads += 1
+                        if initial_reads == 2:
+                            both_read.set()
+                        await asyncio.wait_for(both_read.wait(), timeout=3)
+                    return receipt
+
+                with patch.object(store, "read_receipt", synchronized_read):
+                    accepted, duplicate = await asyncio.gather(*(
+                        client.post(
+                            "/api/admin/history-cleanups", json=execute_body,
+                            headers={"Idempotency-Key": operation_key},
+                        ) for _ in range(2)
+                    ))
                 assert accepted.status_code == 202, accepted.text
+                assert duplicate.status_code == 202, duplicate.text
+                assert duplicate.json()["operation_id"] == accepted.json()["operation_id"]
                 operation_id = accepted.json()["operation_id"]
                 terminal = await _terminal(client, operation_id)
                 assert terminal["state"] == "succeeded", terminal
@@ -127,6 +149,10 @@ def test_history_admin_commit_delete_and_create_tombstone() -> None:
                     "retained_idempotency_tombstones": 1,
                 }
                 assert (await client.get(f"/api/analysis/runs/{run_id}?view=history")).status_code == 404
+                assert (await client.get(f"/api/analysis/runs/{run_id}")).status_code == 404
+                assert (await client.get(f"/api/analysis/runs/{run_id}/events")).status_code == 404
+                with pytest.raises(StopAsyncIteration):
+                    await anext(delayed_stream)
                 same = await client.post(
                     "/api/analysis/runs", json=body,
                     headers={"Idempotency-Key": creation_key},

@@ -406,6 +406,7 @@ def create_app(
                             apply_profile=m8_runtime.apply_profile_handoff,
                             notify_maintenance=m8_runtime.notify_admin_maintenance,
                             credential_store_available=credential_store_available,
+                            history_cleanup_guard=coordinator.history_cleanup_guard,
                             id_factory=id_factory,
                         )
                         admin_runner = AdminOperationRunner(

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api, ApiError, type KeyStatus, type Settings, type UnitPreview } from '../src/api/http'
 import { SettingsDrawer } from '../src/features/settings/SettingsDrawer'
@@ -39,6 +39,38 @@ function setup() {
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear() })
+
+it('preserves edits made before the initial settings refresh completes', async () => {
+  let resolve!: (value: Settings) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolve = done }))
+  setup()
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  await act(async () => { resolve({ ...settings, revision: 1 }) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+})
+
+it('preserves an unsaved defaults draft after a unit policy refresh', async () => {
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce({ ...settings,
+    revision: 1, unit_policy: { ...settings.unit_policy, version: 2,
+      entries: [{ parameter: { code_system: 'usgs', code: '00060' }, target_unit_id: 'm3_s' }] } })
+  vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
+  vi.spyOn(api, 'confirmUnitPolicy').mockResolvedValue({ ...unitPreview.proposed, created_at: '2026-10-09T00:00:00Z' })
+  const save = vi.spyOn(api, 'replaceSettings')
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.change(screen.getByLabelText(/Discharge \(usgs:00060\)/), { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  await screen.findByRole('button', { name: 'Confirm unit policy' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Unit confirmation phrase' }),
+    { target: { value: 'APPLY UNIT POLICY 2' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
+  await screen.findByText('Unit policy saved for future runs.')
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+  expect(save).not.toHaveBeenCalled()
+})
 
 it('keeps a full draft through revision conflict and requires explicit reconfirmation', async () => {
   const current = { ...settings, revision: 1, updated_at: '2026-10-08T00:00:00Z' }

@@ -39,7 +39,7 @@ function Workspace({ mode }: { mode: Mode }) {
   const [selectedComid, setSelectedComid] = useState<string | null>(null)
   const [mapPoint, setMapPoint] = useState<{ latitude: number; longitude: number } | null>(null)
   const [loadedTopology, setLoadedTopology] = useState<{ key: string; graph: Graph | null; error: string | null } | null>(null)
-  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [deleteForRunId, setDeleteForRunId] = useState<string | null>(null)
   const [historyVersion, setHistoryVersion] = useState(0)
   const historyUrl = historyFallback?.runId === runId ? historyFallback.url : null
   const historical = mode === 'history' || historyUrl !== null
@@ -51,6 +51,8 @@ function Workspace({ mode }: { mode: Mode }) {
   const topologyItemId = topologyRef?.item_id
   const topologyView = historical ? 'history' : 'auto'
   const topologyKey = topologyRunId && topologyItemId ? `${topologyRunId}:${topologyItemId}:${topologyView}` : null
+
+  useEffect(() => { setDeleteForRunId(null) }, [runId])
 
   useEffect(() => {
     if (!runId || !topologyRunId || !topologyItemId || topologyRunId !== runId || !topologyKey) return
@@ -157,7 +159,7 @@ function Workspace({ mode }: { mode: Mode }) {
       }, controller.signal).catch((cause: unknown) => {
         if (controller.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
-          setHistoryFallback({ runId, url: cause.historyUrl })
+          setHistoryFallback({ runId, url: `/api/analysis/runs/${encodeURIComponent(runId)}?view=history` })
         } else setRunError(cause instanceof ApiError ? cause.code : 'Session stream unavailable')
       })
     }
@@ -189,7 +191,14 @@ function Workspace({ mode }: { mode: Mode }) {
 
   function selectSession(comid: string, id: string | null) {
     setSelectedComid(comid)
-    if (!id || !runId) { setTab('overview'); return }
+    if (!id || !runId) {
+      setTab('overview')
+      if (runId) {
+        if (mode === 'history') setSearch({ run: runId })
+        else navigate(`/runs/${encodeURIComponent(runId)}`)
+      }
+      return
+    }
     setTab('agent')
     setMobileTab('detail')
     if (mode === 'history') setSearch({ run: runId, session: id })
@@ -236,7 +245,7 @@ function Workspace({ mode }: { mode: Mode }) {
             void api.cancel(runId).catch((cause: unknown) => setRunError(cause instanceof ApiError ? cause.code : 'Cancel unavailable'))
           }}>Stop run</button>}
         </div>}
-        {historyDelete && <button type="button" className="danger" onClick={() => setDeleteOpen(true)}>Delete this saved run</button>}
+        {historyDelete && <button type="button" className="danger" onClick={() => setDeleteForRunId(runId)}>Delete this saved run</button>}
         {runError && <p className="error" role="alert">{runError}</p>}
       </aside>
       <div className={`center-panel mobile-${mobileTab}`}>
@@ -258,8 +267,8 @@ function Workspace({ mode }: { mode: Mode }) {
       ? <SettingsDrawer settings={settings} onSettings={setSettings} onClose={() => setSettingsOpen(false)} />
       : <div className="dialog-backdrop"><div className="dialog"><p>{settingsError || 'Loading settings…'}</p>
         <button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div></div>)}
-    {deleteOpen && runId && <DeleteRun runId={runId} onClose={() => setDeleteOpen(false)} onAccepted={() => {
-      setDeleteOpen(false)
+    {deleteForRunId === runId && runId && <DeleteRun key={runId} runId={runId} onClose={() => setDeleteForRunId(null)} onAccepted={() => {
+      setDeleteForRunId(null)
       setHistoryVersion((value) => value + 1)
       navigate('/admin')
     }} />}

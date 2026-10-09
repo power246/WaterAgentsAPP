@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api, ApiError, confirmedRequestRejected, prepareConfirmation,
   type CleanupPreview, type Submission } from '../../api/http'
 
@@ -7,20 +7,45 @@ export function DeleteRun({ runId, onClose, onAccepted }: {
   onClose: () => void
   onAccepted: () => void
 }) {
-  const [preview, setPreview] = useState<CleanupPreview | null>(null)
+  const [loadedPreview, setLoadedPreview] = useState<{ runId: string; data: CleanupPreview } | null>(null)
   const [phrase, setPhrase] = useState('')
-  const [attempt, setAttempt] = useState<Submission | null>(null)
+  const [pendingAttempt, setPendingAttempt] = useState<{ runId: string; submission: Submission } | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const currentRun = useRef(runId)
+  const active = useRef(true)
+  const requestSequence = useRef(0)
+  useLayoutEffect(() => { currentRun.current = runId }, [runId])
+  const preview = loadedPreview?.runId === runId ? loadedPreview.data : null
+  const attempt = pendingAttempt?.runId === runId ? pendingAttempt.submission : null
 
   const loadPreview = useCallback(async (cascade: boolean) => {
+    const requestedRun = runId
+    const request = ++requestSequence.current
     setError('')
     setPhrase('')
-    try { setPreview(await api.previewRunCleanup(runId, cascade)) }
-    catch (cause) { setError(cause instanceof ApiError ? cause.code : 'Preview unavailable') }
+    setLoadedPreview(null)
+    try {
+      const data = await api.previewRunCleanup(requestedRun, cascade)
+      if (!active.current || request !== requestSequence.current || currentRun.current !== requestedRun) return
+      if (data.requested_run_ids.length !== 1 || data.requested_run_ids[0] !== requestedRun) {
+        setError('Preview target changed'); return
+      }
+      setLoadedPreview({ runId: requestedRun, data })
+    } catch (cause) {
+      if (active.current && request === requestSequence.current && currentRun.current === requestedRun) {
+        setError(cause instanceof ApiError ? cause.code : 'Preview unavailable')
+      }
+    }
   }, [runId])
 
-  useEffect(() => { void loadPreview(false) }, [loadPreview])
+  useEffect(() => {
+    const sequence = requestSequence
+    active.current = true
+    setPendingAttempt(null); setSubmitting(false); setPhrase(''); setLoadedPreview(null)
+    void loadPreview(false)
+    return () => { active.current = false; sequence.current++ }
+  }, [loadPreview])
 
   return <div className="dialog-backdrop" role="presentation">
     <section className="dialog" role="dialog" aria-modal="true" aria-label="Delete saved run">
@@ -39,16 +64,22 @@ export function DeleteRun({ runId, onClose, onAccepted }: {
           <input aria-label="Confirmation phrase" value={phrase} disabled={Boolean(attempt)} onChange={(event) => setPhrase(event.target.value)} />
           <button type="button" disabled={submitting || phrase !== preview.confirmation.required_phrase} onClick={() => {
             const submission = attempt ?? prepareConfirmation(preview.confirmation!.token, phrase)
-            setAttempt(submission)
+            const submittedRun = runId
+            setPendingAttempt({ runId: submittedRun, submission })
             setSubmitting(true)
             setError('')
             void api.executeRunCleanup(submission)
-              .then(() => { setAttempt(null); onAccepted() })
+              .then(() => {
+                if (active.current && currentRun.current === submittedRun) {
+                  setPendingAttempt(null); onAccepted()
+                }
+              })
               .catch((cause: unknown) => {
-                if (confirmedRequestRejected(cause)) { setAttempt(null); setPreview(null) }
+                if (!active.current || currentRun.current !== submittedRun) return
+                if (confirmedRequestRejected(cause)) { setPendingAttempt(null); setLoadedPreview(null) }
                 setError(cause instanceof ApiError ? cause.code : 'Delete unavailable')
               })
-              .finally(() => setSubmitting(false))
+              .finally(() => { if (active.current && currentRun.current === submittedRun) setSubmitting(false) })
           }}>{attempt ? 'Retry deleting these runs' : 'Delete these runs'}</button>
         </>}
       </>}

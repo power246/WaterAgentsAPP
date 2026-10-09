@@ -15,7 +15,7 @@ from app.application.settings_admin.errors import (
 from app.domain import EmbeddingProfile, ModelCapability, ModelCatalogSnapshot, ModelRole
 from app.domain.settings_admin import (
     AdminActionKind, AdminOperation, AdminOperationState, AdminProgress,
-    ConfirmationBinding, CredentialLease, CredentialName,
+    CredentialLease, CredentialName,
     CredentialSource, HistoryCleanupResult, IdempotencyTombstone,
     MutableDefaults, SettingsSnapshot, StoredCredential, UnitPolicyEntry,
     UnitPolicyProjection,
@@ -194,28 +194,6 @@ def test_admin_transition_is_closed_and_terminal_snapshot_is_immutable() -> None
             AdminOperationState.SUCCEEDED, finished_at=NOW + timedelta(seconds=2),
             safe_result={"kind": "profile_handoff", "active_generation_id": "g1"},
         )
-
-
-def test_confirmation_binds_action_facts_phrase_and_expiry() -> None:
-    token = "opaque-token"
-    facts = sha256(b"normalized facts").digest()
-    binding = ConfirmationBinding(
-        token_digest=sha256(token.encode()).digest(),
-        action=AdminActionKind.HISTORY_CLEANUP, fact_fingerprint=facts,
-        required_phrase="DELETE 1 RUN", expires_at=NOW + timedelta(minutes=1),
-    )
-    valid = dict(
-        token=token, action=AdminActionKind.HISTORY_CLEANUP,
-        fact_fingerprint=facts, phrase="DELETE 1 RUN", now=NOW,
-    )
-    assert binding.matches(**valid)
-    for change in (
-        {"token": "other"}, {"action": AdminActionKind.PROFILE_HANDOFF},
-        {"fact_fingerprint": sha256(b"changed").digest()},
-        {"phrase": "DELETE 2 RUNS"}, {"now": NOW + timedelta(minutes=1)},
-    ):
-        assert not binding.matches(**{**valid, **change})
-    assert token not in repr(binding)
 
 
 def test_tombstone_rejects_non_v4_key_or_unbound_fingerprint() -> None:

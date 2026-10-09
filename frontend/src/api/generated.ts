@@ -1852,6 +1852,36 @@ export interface components {
              */
             item_id: string;
         };
+        /** ReadSessionSummary */
+        ReadSessionSummary: {
+            agent_role: components["schemas"]["AgentRole"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            result_ref?: components["schemas"]["SessionResultReference"] | null;
+            /** Result Summary */
+            result_summary?: (components["schemas"]["WaterbodySessionResultSummary"] | components["schemas"]["RunSummarySessionResultSummary"]) | null;
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            status: components["schemas"]["AgentSessionStatus"];
+            /** Target Comid */
+            target_comid?: string | null;
+            /**
+             * Terminal Corrupt
+             * @default false
+             */
+            terminal_corrupt: boolean;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * ReadSource
          * @enum {string}
@@ -1982,7 +2012,7 @@ export interface components {
              * Sessions
              * @default []
              */
-            sessions: components["schemas"]["SessionSummary"][];
+            sessions: (components["schemas"]["SessionSummary"] | components["schemas"]["ReadSessionSummary"])[];
             source: components["schemas"]["ReadSource"];
         };
         /** RunHistoryItem */
@@ -2253,7 +2283,8 @@ export interface components {
              * Format: uuid
              */
             run_id: string;
-            session: components["schemas"]["SessionSummary"];
+            /** Session */
+            session: components["schemas"]["SessionSummary"] | components["schemas"]["ReadSessionSummary"];
             source: components["schemas"]["ReadSource"];
             /** Transcript Url */
             transcript_url: string;

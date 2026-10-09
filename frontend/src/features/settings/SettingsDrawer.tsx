@@ -2,10 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, confirmedRequestRejected, prepareConfirmation, type Defaults,
   type KeyStatus, type Settings, type Submission, type UnitEntry, type UnitPreview } from '../../api/http'
-
-function safeError(cause: unknown): string {
-  return cause instanceof ApiError ? `${cause.code}${cause.requestId ? ` (${cause.requestId})` : ''}` : 'Service unavailable'
-}
+import { safeError } from '../../api/safeError'
 
 function CredentialRow({ item, onStatus }: { item: KeyStatus; onStatus: (item: KeyStatus) => void }) {
   const input = useRef<HTMLInputElement>(null)
@@ -63,6 +60,8 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   onClose: () => void
 }) {
   const [server, setServer] = useState(settings)
+  const initialDefaults = useRef(settings.defaults)
+  const initialUnitEntries = useRef(settings.unit_policy.entries)
   const [draft, setDraft] = useState<Defaults>(settings.defaults)
   const [revision, setRevision] = useState(settings.revision)
   const [unitEntries, setUnitEntries] = useState<UnitEntry[]>(settings.unit_policy.entries)
@@ -83,8 +82,10 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     const controller = new AbortController()
     void api.settings(controller.signal).then((current) => {
       if (controller.signal.aborted) return
-      setServer(current); setDraft(current.defaults); setRevision(current.revision)
-      setUnitEntries(current.unit_policy.entries); onSettings(current)
+      setDraft((value) => JSON.stringify(value) === JSON.stringify(initialDefaults.current) ? current.defaults : value)
+      setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(initialUnitEntries.current)
+        ? current.unit_policy.entries : value)
+      setServer(current); setRevision(current.revision); onSettings(current)
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(safeError(cause)) })
     void api.keys(controller.signal).then((result) => { if (!controller.signal.aborted) setKeys(result.keys) })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setKeysError(safeError(cause)) })
@@ -154,8 +155,11 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     }
     try {
       const current = await api.settings()
-      setServer(current); setDraft(current.defaults); setRevision(current.revision)
-      setUnitEntries(current.unit_policy.entries); onSettings(current)
+      setDraft((value) => JSON.stringify(value) === JSON.stringify(server.defaults) ? current.defaults : value)
+      setServer(current); setRevision(current.revision)
+      setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(unitPreview.proposed.entries)
+        ? current.unit_policy.entries : value)
+      onSettings(current)
     } catch (cause) {
       setError(`${safeError(cause)}. Unit policy was accepted; reopen Settings to refresh current values.`)
     } finally { setBusy(false) }

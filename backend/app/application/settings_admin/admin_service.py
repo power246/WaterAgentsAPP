@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from hashlib import sha256
 from hmac import compare_digest
@@ -14,7 +15,7 @@ from app.domain.settings_admin import AdminCommand
 from app.application.settings_admin.confirmation_registry import ConfirmationRegistry
 from app.application.settings_admin.errors import (
     AdminConfirmationInvalidError, AdminOperationNotFoundError,
-    AdminPreviewStaleError, HistoryCleanupDependencyConflictError,
+    AdminPreviewExpiredError, AdminPreviewStaleError, HistoryCleanupDependencyConflictError,
     HistoryCleanupSelectionTooLargeError,
     CredentialStoreUnavailableError,
     RAGGenerationConflictError, RAGGenerationNotFoundError,
@@ -74,6 +75,7 @@ class AdminService:
         apply_profile: Callable[[EmbeddingProfile], Awaitable[str]],
         notify_maintenance: Callable[[], None],
         credential_store_available: Callable[[], Awaitable[bool]] | None = None,
+        history_cleanup_guard: Callable[[tuple[str, ...]], AbstractAsyncContextManager[bool]] | None = None,
         confirmations: ConfirmationRegistry[AdminCommand] | None = None,
         id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
@@ -85,6 +87,7 @@ class AdminService:
         self._apply_profile = apply_profile
         self._notify_maintenance = notify_maintenance
         self._credential_store_available = credential_store_available
+        self._history_cleanup_guard = history_cleanup_guard
         self._confirmations = confirmations or ConfirmationRegistry()
         self._id_factory = id_factory
         self._schedule: Callable[[AdminOperation, AdminCommand], None] | None = None
@@ -266,30 +269,38 @@ class AdminService:
             if not compare_digest(receipt[1], fingerprint):
                 raise UnitPolicyIdempotencyConflictError()
             return receipt[0]
-        async with self._confirmations.claim(
-            token=token, action=kind.value, phrase=phrase, now=self._clock.now(),
-        ) as (command, token_digest):
-            if generation_id is not None and command.generation_id != generation_id:
-                raise AdminConfirmationInvalidError()
-            if not compare_digest(await self._current_digest(command), command.facts_digest):
-                raise AdminPreviewStaleError()
-            total = (
-                len(command.expected_delete_run_ids)
-                if kind is AdminActionKind.HISTORY_CLEANUP
-                else command.limit if kind is AdminActionKind.RETRY_FAILED_JOBS else 1
-            )
-            operation = AdminOperation(
-                operation_id=self._id_factory(), kind=kind,
-                state=AdminOperationState.PENDING,
-                resource_identity=command.resource_identity,
-                progress=AdminProgress(total_items=total),
-                created_at=self._clock.now(),
-            )
-            saved = await self._store.create(
-                operation, idempotency_key=idempotency_key,
-                request_fingerprint=fingerprint,
-                confirmation_token_digest=token_digest, command=command,
-            )
+        try:
+            async with self._confirmations.claim(
+                token=token, action=kind.value, phrase=phrase, now=self._clock.now(),
+            ) as (command, token_digest):
+                if generation_id is not None and command.generation_id != generation_id:
+                    raise AdminConfirmationInvalidError()
+                if not compare_digest(await self._current_digest(command), command.facts_digest):
+                    raise AdminPreviewStaleError()
+                total = (
+                    len(command.expected_delete_run_ids)
+                    if kind is AdminActionKind.HISTORY_CLEANUP
+                    else command.limit if kind is AdminActionKind.RETRY_FAILED_JOBS else 1
+                )
+                operation = AdminOperation(
+                    operation_id=self._id_factory(), kind=kind,
+                    state=AdminOperationState.PENDING,
+                    resource_identity=command.resource_identity,
+                    progress=AdminProgress(total_items=total),
+                    created_at=self._clock.now(),
+                )
+                saved = await self._store.create(
+                    operation, idempotency_key=idempotency_key,
+                    request_fingerprint=fingerprint,
+                    confirmation_token_digest=token_digest, command=command,
+                )
+        except (AdminConfirmationInvalidError, AdminPreviewExpiredError, AdminPreviewStaleError):
+            receipt = await self._store.read_receipt(idempotency_key)
+            if receipt is None:
+                raise
+            if not compare_digest(receipt[1], fingerprint):
+                raise UnitPolicyIdempotencyConflictError() from None
+            return receipt[0]
         if saved.state is AdminOperationState.PENDING and self._schedule is not None:
             self._schedule(saved, command)
         return saved
@@ -301,12 +312,21 @@ class AdminService:
             before = await self._maintenance.inspect_history_storage(
                 tuple(str(value) for value in command.expected_delete_run_ids)
             )
-            result = await self._maintenance.delete_history_runs(
-                tuple(str(value) for value in command.requested_run_ids),
-                cascade_consumers=command.cascade_consumers,
-                expected_delete_run_ids=tuple(str(value) for value in command.expected_delete_run_ids),
-                expected_dependency_ids=tuple(str(value) for value in command.expected_dependency_ids),
-            )
+            delete_ids = tuple(str(value) for value in command.expected_delete_run_ids)
+            async def delete():
+                return await self._maintenance.delete_history_runs(
+                    tuple(str(value) for value in command.requested_run_ids),
+                    cascade_consumers=command.cascade_consumers,
+                    expected_delete_run_ids=delete_ids,
+                    expected_dependency_ids=tuple(str(value) for value in command.expected_dependency_ids),
+                )
+            if self._history_cleanup_guard is None:
+                result = await delete()
+            else:
+                async with self._history_cleanup_guard(delete_ids) as ready:
+                    if not ready:
+                        raise HistoryCleanupDependencyConflictError()
+                    result = await delete()
             return HistoryCleanupResult(
                 deleted_run_ids=tuple(UUID(value) for value in result.deleted_run_ids),
                 retained_idempotency_tombstones=before.idempotency_keys,
