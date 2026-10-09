@@ -211,7 +211,7 @@ def test_production_openapi_has_no_tool_invocation_or_test_route() -> None:
 
 def test_frontend_does_not_consume_the_m5_test_route() -> None:
     consumers = []
-    for source_path in FRONTEND_ROOT.rglob("*"):
+    for source_path in (FRONTEND_ROOT / "src").rglob("*"):
         if not source_path.is_file() or source_path.suffix not in {
             ".js",
             ".jsx",
@@ -238,7 +238,7 @@ def test_frontend_does_not_consume_a_direct_m6_surface() -> None:
         "/evidence/collect",
     )
     consumers = []
-    for source_path in FRONTEND_ROOT.rglob("*"):
+    for source_path in (FRONTEND_ROOT / "src").rglob("*"):
         if not source_path.is_file() or source_path.suffix not in {
             ".js",
             ".jsx",

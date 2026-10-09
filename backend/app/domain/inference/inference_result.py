@@ -14,6 +14,7 @@ from app.domain.common import (
 )
 from app.domain.evidence.evidence_chain import EvidenceChain
 from app.domain.hydrology.parameter_key import ParameterKey
+from app.domain.settings_admin.unit_preference import UnitPreference
 from app.domain.inference.composite_risk_assessment import CompositeRiskAssessment
 from app.domain.inference.mode import InferenceMode
 from app.domain.inference.model_execution_summary import ModelExecutionSummary
@@ -43,6 +44,7 @@ class InferenceResult(DomainModel):
     time_resolution: TimeResolution = DEFAULT_TIME_RESOLUTION
     time_resolution_source: TimeResolutionSource
     requested_parameters: tuple[ParameterKey, ...]
+    unit_decisions: tuple[UnitPreference, ...] = ()
     series: tuple[ParameterTimeSeries, ...]
     window_assessments: tuple[CompositeRiskAssessment, ...]
     overall_assessment: OverallWaterbodyAssessment
@@ -62,6 +64,12 @@ class InferenceResult(DomainModel):
 
     @model_validator(mode="after")
     def validate_consistency(self) -> Self:
+        ensure_unique_tuple(
+            tuple(item.parameter for item in self.unit_decisions),
+            field_name="unit_decisions",
+        )
+        if not {item.parameter for item in self.unit_decisions} <= set(self.requested_parameters):
+            raise ValueError("unit decisions must stay in requested parameters")
         self._validate_time_segments()
         self._validate_series()
         self._validate_assessments()

@@ -177,11 +177,12 @@ def _job(*, attempts: int = 0, suffix: int = 1) -> RAGIndexJob:
     )
 
 
-def _worker(store, loader, embedding):
+def _worker(store, loader, embedding, *, embedding_factory=None):
     return RAGIndexWorker(
         store=store,
         source_loader=loader,
         embedding=embedding,
+        embedding_factory=embedding_factory,
         clock=_Clock(),
         lease_owner="worker-a",
         claim_batch_size=4,

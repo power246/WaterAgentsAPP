@@ -1,6 +1,6 @@
 # M9 Settings / Keys / Admin API
 
-本文冻结 M9 新增 HTTP DTO、status、错误、幂等与前端消费契约。它是目标设计，当前 production 尚未注册这些 routes。已有 analysis/history/SSE contract 保持 [frontend integration contracts](../frontend_integration_contracts.md) 的当前语义。
+本文冻结 M9 新增 HTTP DTO、status、错误、幂等与前端消费契约。Settings、Keys 与 Admin backend routes 已在 M1–M6 注册；实施证据见 [M9 Implementation TODO](m9_implementation_todo.md)。已有 analysis/history/SSE contract 保持 [frontend integration contracts](../frontend_integration_contracts.md) 的当前语义。
 
 ---
 
@@ -334,8 +334,8 @@ GET /api/admin/operations/{operation_id}
 
 `selection.kind` 为：
 
-- `runs`：1..bounded unique UUIDs；
-- `all_history`：无 run_ids，server 在 preview 时固定选择 fingerprint。
+- `runs`：1..500 个唯一 UUID；
+- `all_history`：无 run_ids，server 在 preview 时固定选择 fingerprint；超过 500 个 run 或依赖链接时返回 `422 history_cleanup_selection_too_large`，可分批清理。
 
 成功 `200 HistoryCleanupPreviewResponse`：
 

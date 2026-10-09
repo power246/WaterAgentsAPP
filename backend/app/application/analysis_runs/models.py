@@ -24,6 +24,7 @@ from app.domain.time.time_resolution_preference_source import (
     TimeResolutionPreferenceSource,
 )
 from app.domain.time.timezone import get_iana_timezone
+from app.domain.settings_admin.settings import Digest, Version
 
 PositiveSequence: TypeAlias = Annotated[int, Field(strict=True, gt=0)]
 StableCode: TypeAlias = Annotated[
@@ -86,6 +87,8 @@ class AnalysisConfigurationSnapshot(DomainModel):
     parser_model: ModelSelection
     waterbody_model: ModelSelection
     memory_mode: MemoryMode
+    unit_policy_version: Version | Literal["legacy"] = "legacy"
+    unit_registry_digest: Digest | Literal["unknown"] = "unknown"
 
     @field_validator("analysis_timezone")
     @classmethod
@@ -102,6 +105,10 @@ class AnalysisConfigurationSnapshot(DomainModel):
             is not TimeResolutionPreference.TWELVE_HOURS
         ):
             raise ValueError("default time resolution preference must be 12h")
+        if (self.unit_policy_version == "legacy") != (
+            self.unit_registry_digest == "unknown"
+        ):
+            raise ValueError("unit policy version and registry digest must form one identity")
         return self
 
 

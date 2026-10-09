@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from heapq import heappop, heappush
 from math import isfinite
-from typing import Protocol
+from typing import Callable, Protocol
 
 from app.application.evidence_tools.scope import EvidenceSessionScope
 from app.application.transcript_memory.embedding_contract import (
@@ -125,6 +125,7 @@ class RAGSearchService:
         index: RAGIndexPort,
         source_loader: HistoricalCaseSourceLoader,
         embedding: EmbeddingPort | None,
+        embedding_for_run: Callable[[str], EmbeddingPort | None] | None = None,
         preview_max_bytes: int = DEFAULT_PREVIEW_MAX_BYTES,
     ) -> None:
         if type(preview_max_bytes) is not int or preview_max_bytes < 2:
@@ -133,18 +134,27 @@ class RAGSearchService:
         self._index = index
         self._source_loader = source_loader
         self._embedding = embedding
+        self._embedding_for_run = embedding_for_run
         self._preview_max_bytes = preview_max_bytes
 
     def bind(self, scope: EvidenceSessionScope) -> RAGSearchSession:
-        return RAGSearchSession(service=self, scope=scope)
+        embedding = (
+            self._embedding_for_run(scope.run_id)
+            if self._embedding_for_run is not None else self._embedding
+        )
+        return RAGSearchSession(service=self, scope=scope, embedding=embedding)
 
 
 class RAGSearchSession:
     """One sealed waterbody session and its successful semantic-vector cache."""
 
-    def __init__(self, *, service: RAGSearchService, scope: EvidenceSessionScope) -> None:
+    def __init__(
+        self, *, service: RAGSearchService, scope: EvidenceSessionScope,
+        embedding: EmbeddingPort | None = None,
+    ) -> None:
         self._service = service
         self._scope = scope
+        self._embedding = embedding if embedding is not None else service._embedding
         self._embedding_cache: dict[tuple[str, str], EmbeddingVector] = {}
 
     async def search(
@@ -230,10 +240,10 @@ class RAGSearchSession:
         cached = self._embedding_cache.get(key)
         if cached is not None:
             return cached
-        if self._service._embedding is None:
+        if self._embedding is None:
             raise RAGSearchUnavailableError("embedding_unavailable")
         try:
-            batch = await self._service._embedding.embed(
+            batch = await self._embedding.embed(
                 profile,
                 (canonical.canonical_text,),
                 deadline,

@@ -40,6 +40,7 @@ def m7_fixture(
     prediction: bool = False,
     attribution_context: bool = False,
     conversion_first: bool = False,
+    unit_preference=None,
 ):
     original = _make_skeleton(
         parameter_count=parameter_count,
@@ -89,11 +90,23 @@ def m7_fixture(
         )
         for index, scope in enumerate(original.supported_scopes)
     )
+    if unit_preference is not None:
+        supported = tuple(
+            scope.model_copy(update={
+                "preferred_target_unit_id": unit_preference.target_unit_id,
+                "unit_preference_source": unit_preference.source,
+                "unit_registry_digest": unit_preference.registry_digest,
+            }) if scope.parameter == unit_preference.parameter else scope
+            for scope in supported
+        )
     skeleton_values = original.model_dump(
         mode="python",
         exclude={"skeleton_digest"},
     )
     skeleton_values["supported_scopes"] = supported
+    if unit_preference is not None:
+        skeleton_values["unit_preferences"] = (unit_preference,)
+        skeleton_values["capability_registry_digest"] = unit_preference.registry_digest
     if multi_series_first:
         skeleton_values["evidence_allowlist"] = tuple(
             sorted((*skeleton_values["evidence_allowlist"], "e:multi"))

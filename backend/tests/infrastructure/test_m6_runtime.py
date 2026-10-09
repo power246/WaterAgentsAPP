@@ -560,7 +560,9 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
     schema = application.openapi()
     paths = set(schema["paths"])
 
-    assert len(paths) == 10
+    assert len(paths) == 28
+    assert "/api/settings" in paths
+    assert "/api/keys" in paths
     assert not any(
         forbidden in path
         for path in paths
@@ -579,13 +581,13 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
     assert "prompt" not in encoded.casefold()
 
 
-def test_safe_metadata_reports_only_configured_credentialed_adapter() -> None:
+def test_safe_metadata_reports_wired_adapter_independent_of_mutable_key() -> None:
     model_catalog = catalog(capability(OPENAI_MODEL, ModelRole.WATERBODY))
 
     assert safe_m6_metadata(
         AppSettings(_env_file=None),
         model_catalog,
-    )["adapter_providers"] == ()
+    )["adapter_providers"] == ("openai",)
     assert safe_m6_metadata(
         AppSettings(_env_file=None, openai_api_key="configured"),
         model_catalog,

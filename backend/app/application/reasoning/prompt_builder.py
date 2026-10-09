@@ -45,6 +45,7 @@ from app.domain import (
     UtcDatetime,
     ensure_unique_tuple,
 )
+from app.domain.settings_admin import UnitPreference
 
 
 class WaterbodyStationKind(DomainEnum):
@@ -119,6 +120,7 @@ class EvidencePlanningPromptInput(_PromptInput):
     budget: PromptBudgetRemaining
     authorized_tools: tuple[PromptToolAuthorization, ...]
     authorized_parameters: tuple[ParameterKey, ...] = ()
+    unit_preferences: tuple[UnitPreference, ...] = ()
 
     @model_validator(mode="after")
     def validate_planning_scope(self) -> Self:
@@ -339,6 +341,7 @@ class PromptBuilder:
             "evidence_summaries": prompt.context.evidence_summaries,
             "budget": prompt.budget,
             "authorized_tools": prompt.authorized_tools,
+            "unit_preferences": prompt.unit_preferences,
         }
         _add_dependency_context(body, prompt.context)
         return self._request(

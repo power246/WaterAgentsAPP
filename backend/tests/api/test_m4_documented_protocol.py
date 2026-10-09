@@ -93,7 +93,11 @@ def test_documented_json_fixtures_validate_with_production_models_and_registry()
     ):
         validated = model.model_validate(body)
         encoded = registry.encode(content_type, 1, validated)
-        assert json.loads(encoded.safe_body) == body
+        expected = (
+            {**body, "unit_preferences": []}
+            if content_type == "query_understood" else body
+        )
+        assert json.loads(encoded.safe_body) == expected
 
 
 def test_documented_openapi_and_sse_contract_are_runtime_derived() -> None:

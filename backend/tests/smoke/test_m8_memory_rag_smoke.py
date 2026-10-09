@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -428,6 +429,10 @@ async def _finish_cancelled_fixture(application, prepared: PreparedRun) -> None:
     ].workflow_quiesced.wait()
 
 
+@pytest.mark.skipif(
+    not os.environ.get("WATERAGENTS_TEST_DB_NAME"),
+    reason="dedicated PostgreSQL test database was not configured",
+)
 def test_production_entrypoint_indexes_searches_consumes_and_restarts(
     monkeypatch,
 ) -> None:

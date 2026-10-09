@@ -14,6 +14,7 @@ from app.api.schemas.analysis_runs import (
     RunStatusResponse,
     ValidationViolation,
 )
+from app.api.schemas.settings_admin import SettingsResponse
 from app.application.analysis_runs.coordinator import (
     AgentSessionNotFoundError,
     EventCursorAheadError,
@@ -33,6 +34,10 @@ from app.application.analysis_runs.creation import (
     InvalidSubmissionEncodingError,
 )
 from app.application.analysis_runs.models import CorrelationContext, RunStatus
+from app.application.settings_admin.errors import (
+    SettingsAdminError, SettingsRevisionConflictError,
+)
+from app.domain.settings_admin import SettingsSnapshot
 from app.application.transcripts.reader import (
     InvalidHistoryCursorError,
     PersistenceRetryUnavailableError,
@@ -74,6 +79,11 @@ _SAFE_FIELDS = set(CreateAnalysisRunRequest.model_fields) | {
     "body", "path", "query", "header", "run_id", "session_id", "item_id",
     "last-event-id", "view", "limit", "cursor", "comid", "coordinates",
     "latitude", "longitude", "start_date", "end_date", "provider", "model",
+    "expected_revision", "defaults", "analysis_timezone", "desired_embedding_profile_id",
+    "base_version", "entries", "parameter", "target_unit_id", "key_name",
+    "value", "operation_id", "generation_id", "selection", "run_ids",
+    "cascade_consumers", "confirmation_token", "confirmation_phrase",
+    "safe_error_codes", "registry_digest",
 }
 
 
@@ -216,6 +226,12 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         )
         code = "request_validation_failed" if is_body_error else "validation_error"
         status, message = 422, "The request is invalid."
+        if (
+            request.url.path.startswith("/api/keys/")
+            and validation
+            and all(item.field == ("body", "value") for item in validation)
+        ):
+            code = "credential_value_invalid"
     elif isinstance(exception, UnknownQueryParametersError):
         status, code, message = 422, "validation_error", "The request is invalid."
         validation = tuple(
@@ -237,6 +253,10 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         )
     elif isinstance(exception, InvalidSubmissionEncodingError):
         status, code, message = 400, "invalid_request", "The request is invalid."
+    elif isinstance(exception, SettingsAdminError):
+        status, code, message = exception.status, exception.code, exception.public_message
+        stage, retryable = exception.stage, exception.retryable
+        headers["Cache-Control"] = "no-store"
     elif isinstance(exception, IdempotencyKeyConflictError):
         status, code = 409, "idempotency_key_conflict"
         message = "The idempotency key was already used with a different request body."
@@ -326,7 +346,12 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         status, code, message = 503, "service_unavailable", "The service is shutting down."
         retryable = True
     elif isinstance(exception, HTTPException):
-        status = exception.status_code
+        static_api_miss = (
+            exception.status_code == 405
+            and request.url.path.startswith("/api/")
+            and getattr(request.scope.get("route"), "path", None) == "/{full_path:path}"
+        )
+        status = 404 if static_api_miss else exception.status_code
         code, message = {
             400: ("invalid_request", "The request is invalid."),
             404: ("not_found", "The requested resource was not found."),
@@ -334,7 +359,8 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
             422: ("validation_error", "The request is invalid."),
             500: ("internal_error", "The request could not be completed."),
         }.get(status, ("http_error", "The HTTP request could not be completed."))
-        headers.update(exception.headers or {})
+        if not static_api_miss:
+            headers.update(exception.headers or {})
     error = HttpPublicError(
         error_id=request.app.state.id_factory(),
         request_id=request.state.request_id,
@@ -352,12 +378,23 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         history_url=history_url,
     )
     headers["X-Request-ID"] = str(error.request_id)
+    if request.url.path.startswith(("/api/settings", "/api/keys")):
+        headers["Cache-Control"] = "no-store"
     log_http(
         request, "http_request_failed", status, error=error,
         exception_type=type(exception).__name__,
         exception=exception if status >= 500 and not isinstance(exception, HTTPException) else None,
     )
-    return JSONResponse(envelope.model_dump(mode="json"), status_code=status, headers=headers)
+    body = envelope.model_dump(mode="json")
+    if (
+        isinstance(exception, SettingsRevisionConflictError)
+        and isinstance(exception.current, SettingsSnapshot)
+    ):
+        body["current_settings"] = SettingsResponse(
+            **exception.current.model_dump(mode="python"),
+            catalog=request.app.state.settings_service.catalog,
+        ).model_dump(mode="json")
+    return JSONResponse(body, status_code=status, headers=headers)
 
 
 def register_error_handlers(application: FastAPI) -> None:
@@ -374,5 +411,6 @@ def register_error_handlers(application: FastAPI) -> None:
         IdempotencyKeyConflictError, IdempotencyWaitTimeoutError,
         CreationCommitUnconfirmedError, CreationPersistenceUnavailableError,
         CreationRolledBackError,
+        SettingsAdminError,
     ):
         application.add_exception_handler(exception_type, handle_error)

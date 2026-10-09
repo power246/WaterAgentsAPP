@@ -2,7 +2,7 @@
 
 更新日期：2026-10-08
 
-本文记录经 `$grill-me` 对齐后冻结的 M9 产品与跨域架构决定。当前内容只表示设计完成，不表示 M9 已实现、已联调或已通过第一版验收。分阶段施工、验证门禁与完成证据见 [M9 Implementation TODO](m9_implementation_todo.md)。
+本文记录经 `$grill-me` 对齐后冻结的 M9 产品与跨域架构决定。下文“当前仓库事实”保留设计冻结时的基线；实施状态、未运行的外部边界与逐项证据见 [M9 Implementation TODO](m9_implementation_todo.md)。
 
 ## 1. M9 的定位
 

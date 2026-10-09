@@ -18,6 +18,7 @@ from app.application.reasoning.sufficiency import (
     validate_sealed_evidence_input,
 )
 from app.application.reasoning.task import ValidatedWaterbodyAgentTask
+from app.domain.settings_admin import UnitPreference
 from app.domain import (
     AggregationMethod,
     DomainModel,
@@ -66,6 +67,9 @@ class SupportedCellScope(DomainModel):
     allowed_evidence_refs: tuple[NonEmptyString, ...]
     allowed_result_sources: tuple[ResultSource, ...]
     allowed_unit_ids: tuple[NonEmptyString, ...]
+    preferred_target_unit_id: NonEmptyString | None = None
+    unit_preference_source: str | None = None
+    unit_registry_digest: str | None = None
     allowed_aggregation_methods: tuple[AggregationMethod, ...]
 
     @model_validator(mode="after")
@@ -124,6 +128,9 @@ class AgentReasoningCellScope(DomainModel):
     allowed_evidence_refs: tuple[NonEmptyString, ...]
     allowed_result_sources: tuple[ResultSource, ...]
     allowed_unit_ids: tuple[NonEmptyString, ...]
+    preferred_target_unit_id: NonEmptyString | None = None
+    unit_preference_source: str | None = None
+    unit_registry_digest: str | None = None
     allowed_aggregation_methods: tuple[AggregationMethod, ...]
 
 
@@ -164,6 +171,7 @@ class ResultSkeleton(DomainModel):
     time_resolution: TimeResolution
     time_resolution_source: TimeResolutionSource
     requested_parameters: tuple[ParameterKey, ...]
+    unit_preferences: tuple[UnitPreference, ...] = ()
     windows: tuple[ResultSkeletonWindow, ...]
     cell_order: tuple[NonEmptyString, ...]
     fixed_cells: tuple[FixedSkeletonCell, ...]
@@ -232,6 +240,15 @@ class ResultSkeleton(DomainModel):
         )
         if self.cell_order != expected_cell_order:
             raise ValueError("cell_order must exactly cover parameter/window order")
+        ensure_unique_tuple(
+            tuple(item.parameter for item in self.unit_preferences),
+            field_name="skeleton unit preferences",
+        )
+        if any(
+            item.registry_digest != self.capability_registry_digest
+            for item in self.unit_preferences
+        ):
+            raise ValueError("skeleton unit preferences must match the sealed registry")
         if set((*fixed_ids, *supported_ids)) != set(self.cell_order):
             raise ValueError("fixed and supported cells must exactly cover cell_order")
         if fixed_ids != tuple(
@@ -248,6 +265,18 @@ class ResultSkeleton(DomainModel):
                 or scope.parameter not in self.requested_parameters
             ):
                 raise ValueError("supported scope identity is outside the skeleton")
+            preference = next(
+                (item for item in self.unit_preferences if item.parameter == scope.parameter),
+                None,
+            )
+            if preference is None and scope.preferred_target_unit_id is not None:
+                raise ValueError("unbound unit preference in supported scope")
+            if preference is not None and (
+                scope.preferred_target_unit_id != preference.target_unit_id
+                or scope.unit_preference_source != preference.source
+                or scope.unit_registry_digest != preference.registry_digest
+            ):
+                raise ValueError("supported scope unit preference differs from context")
         bounds_by_cell = {
             _cell_id(parameter, window.window_id): (
                 window.start_time,
@@ -303,6 +332,9 @@ class ResultSkeleton(DomainModel):
                 allowed_evidence_refs=scope.allowed_evidence_refs,
                 allowed_result_sources=scope.allowed_result_sources,
                 allowed_unit_ids=scope.allowed_unit_ids,
+                preferred_target_unit_id=scope.preferred_target_unit_id,
+                unit_preference_source=scope.unit_preference_source,
+                unit_registry_digest=scope.unit_registry_digest,
                 allowed_aggregation_methods=scope.allowed_aggregation_methods,
             )
             for scope in self.supported_scopes
@@ -362,12 +394,18 @@ def build_result_skeleton(
     }
     fixed_cells = []
     supported_scopes = []
+    preferences = {item.parameter: item for item in context.unit_preferences}
     for gate in sealed.gates:
         window = window_by_id[gate.window_id]
         if gate.decision is ReasoningGateDecision.SUPPORTED:
             capability = capability_registry.get(gate.parameter)
             _require(capability is not None, "skeleton_parameter_not_executable")
             target = target_cells[(gate.parameter, gate.window_id)]
+            preference = preferences.get(gate.parameter)
+            preferred_unit = (
+                capability_registry.unit_definitions[preference.target_unit_id]
+                if preference is not None else None
+            )
             supported_scopes.append(
                 SupportedCellScope(
                     cell_id=gate.cell_id,
@@ -375,7 +413,19 @@ def build_result_skeleton(
                     window_id=gate.window_id,
                     allowed_evidence_refs=gate.allowed_evidence_refs,
                     allowed_result_sources=_allowed_sources(window.mode, target),
-                    allowed_unit_ids=(capability.canonical_unit,),
+                    allowed_unit_ids=tuple(dict.fromkeys((
+                        capability.canonical_unit,
+                        *((preferred_unit.symbol,) if preferred_unit is not None else ()),
+                    ))),
+                    preferred_target_unit_id=(
+                        preference.target_unit_id if preference is not None else None
+                    ),
+                    unit_preference_source=(
+                        preference.source if preference is not None else None
+                    ),
+                    unit_registry_digest=(
+                        preference.registry_digest if preference is not None else None
+                    ),
                     allowed_aggregation_methods=_allowed_aggregations(
                         capability_registry,
                         capability,
@@ -398,6 +448,7 @@ def build_result_skeleton(
         "time_resolution": context.time_resolution,
         "time_resolution_source": context.time_resolution_source,
         "requested_parameters": sealed.requested_parameters,
+        "unit_preferences": context.unit_preferences,
         "windows": windows,
         "cell_order": tuple(gate.cell_id for gate in sealed.gates),
         "fixed_cells": tuple(fixed_cells),

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 from collections.abc import Sequence
 
 from app.infrastructure.config.settings import (
@@ -19,6 +20,10 @@ from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="wateragents-db")
     parser.add_argument("command", choices=("upgrade", "check"))
+    parser.add_argument(
+        "--test-database", action="store_true",
+        help="use WATERAGENTS_TEST_DB_NAME after verifying it differs from the business database",
+    )
     return parser
 
 
@@ -27,6 +32,13 @@ def run(argv: Sequence[str] | None = None) -> int:
     configure_asyncio_event_loop()
     try:
         settings = load_app_settings()
+        if arguments.test_database:
+            test_name = os.environ.get("WATERAGENTS_TEST_DB_NAME", "").strip()
+            if not test_name or test_name == settings.db_name:
+                raise DatabaseConfigurationError(
+                    "WATERAGENTS_TEST_DB_NAME must name a separate test database"
+                )
+            settings = settings.model_copy(update={"db_name": test_name})
         if arguments.command == "upgrade":
             revision = upgrade_database(settings)
             print(f"database schema upgraded to {revision}")

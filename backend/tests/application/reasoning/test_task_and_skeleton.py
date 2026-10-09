@@ -48,6 +48,7 @@ from app.domain import (
     TimeResolutionPreferenceSource,
 )
 from app.infrastructure.config import load_parameter_capability_registry
+from app.domain.settings_admin import UnitPreference
 from tests.application.evidence_tools.conftest import (
     MODEL,
     make_context,
@@ -88,6 +89,10 @@ def _run(context, *, model=None, memory_mode=None):
             parser_model=context.parser_model,
             waterbody_model=model or context.waterbody_model,
             memory_mode=memory_mode or context.memory_mode,
+            **({
+                "unit_policy_version": 1,
+                "unit_registry_digest": load_parameter_capability_registry().manifest_digest,
+            } if context.unit_preferences else {}),
         ),
     )
 
@@ -377,6 +382,36 @@ async def test_supported_handoff_builds_stable_skeleton_and_narrow_agent_project
     ):
         assert server_field not in payload
     assert len(projection.cells) == first.supported_cell_count
+
+
+@_async_test
+async def test_unit_preference_is_a_sealed_reasoning_candidate():
+    registry = load_parameter_capability_registry()
+    context = make_context()
+    parameter = context.params_used[0].key
+    context = context.model_copy(update={"unit_preferences": (
+        UnitPreference(
+            parameter=parameter, target_unit_id="micrograms_per_liter",
+            registry_digest=registry.manifest_digest, source="session_override",
+        ),
+    )})
+    validated, handoff, registry = await _validated_fixture(mode="full", context=context)
+    skeleton = build_result_skeleton(
+        validated, seal_evidence_input(validated, handoff, registry), registry,
+        result_id="unit-preference", generated_at=NOW,
+    )
+    assert skeleton.unit_preferences == context.unit_preferences
+    assert all(
+        scope.allowed_unit_ids == ("mg/l", "ug/l")
+        and scope.preferred_target_unit_id == "micrograms_per_liter"
+        and scope.unit_preference_source == "session_override"
+        and scope.unit_registry_digest == registry.manifest_digest
+        for scope in skeleton.supported_scopes
+    )
+    assert all(
+        cell.preferred_target_unit_id == "micrograms_per_liter"
+        for cell in skeleton.agent_projection().cells
+    )
 
 
 @_async_test

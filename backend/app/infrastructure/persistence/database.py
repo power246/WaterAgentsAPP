@@ -12,6 +12,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.infrastructure.config.settings import AppSettings
+from app.infrastructure.config import load_parameter_capability_registry
 
 _REVISION_PATTERN = re.compile(r"^(?P<date>\d{8})_(?P<sequence>\d+)$")
 
@@ -141,6 +142,11 @@ async def check_database_schema(
     script = ScriptDirectory.from_config(config)
     owned_engine = engine is None
     active_engine = engine or create_database_engine(settings)
+    unit_policy_rows: tuple[tuple[str, str, str], ...] = ()
+    unit_policy_digest: str | None = None
+    unit_policy_sealed: bool | None = None
+    active_policy_digest: str | None = None
+    active_policy_unsealed = False
     try:
         async with asyncio.timeout(settings.db_operation_timeout_seconds):
             async with active_engine.connect() as connection:
@@ -164,6 +170,30 @@ async def check_database_schema(
                         "WHERE extname = 'vector'"
                     )
                 )
+                if revisions == (expected,) and expected >= "20261008_01":
+                    unit_policy_digest = await connection.scalar(text(
+                        "SELECT registry_digest FROM unit_policy_versions WHERE version = 1"
+                    ))
+                    unit_policy_sealed = await connection.scalar(text(
+                        "SELECT sealed FROM unit_policy_versions WHERE version = 1"
+                    ))
+                    unit_policy_rows = tuple((await connection.execute(text(
+                        "SELECT parameter_code_system, parameter_code, target_unit_id "
+                        "FROM unit_policy_entries WHERE version = 1 "
+                        "ORDER BY parameter_code_system, parameter_code"
+                    ))).tuples())
+                    active_policy_digest = await connection.scalar(text(
+                        "SELECT u.registry_digest FROM runtime_settings AS s "
+                        "JOIN unit_policy_versions AS u "
+                        "ON u.version = s.active_unit_policy_version "
+                        "WHERE s.singleton_id = 1"
+                    ))
+                    active_policy_unsealed = bool(await connection.scalar(text(
+                        "SELECT NOT u.sealed FROM runtime_settings AS s "
+                        "JOIN unit_policy_versions AS u "
+                        "ON u.version = s.active_unit_policy_version "
+                        "WHERE s.singleton_id = 1"
+                    )))
     except SchemaVersionError:
         raise
     except (SQLAlchemyError, OSError, TimeoutError) as error:
@@ -174,6 +204,22 @@ async def check_database_schema(
 
     _validate_database_revisions(revisions, expected, script)
     _validate_vector_extension(vector_version)
+    if expected >= "20261008_01":
+        registry = load_parameter_capability_registry()
+        baseline = tuple(sorted(
+            (item.key.code_system, item.key.code, item.unit_policy_id)
+            for item in registry.capabilities
+        ))
+        if (
+            unit_policy_digest != registry.manifest_digest
+            or unit_policy_sealed is not True
+            or unit_policy_rows != baseline
+            or active_policy_digest not in {None, registry.manifest_digest}
+            or active_policy_unsealed
+        ):
+            raise IncompatibleSchemaError(
+                "unit policy registry baseline is incompatible with this application"
+            )
     return expected
 
 

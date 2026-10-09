@@ -1,13 +1,17 @@
-from typing import Protocol, TypeVar
+from typing import Protocol
 
-SecretT = TypeVar("SecretT")
+from app.domain.settings_admin import (
+    CredentialName, CredentialStoreAvailability, StoredCredential,
+)
 
 
-class KeyStorePort(Protocol[SecretT]):
-    """None means a key is absent; masked key status is intentionally deferred."""
+class KeyStorePort(Protocol):
+    """Typed OS user-store envelope; None means no user override."""
 
-    async def get(self, key_name: str) -> SecretT | None: ...
+    async def availability(self) -> CredentialStoreAvailability: ...
 
-    async def set(self, key_name: str, value: SecretT) -> None: ...
+    async def get(self, key_name: CredentialName) -> StoredCredential | None: ...
 
-    async def delete(self, key_name: str) -> None: ...
+    async def set(self, key_name: CredentialName, value: StoredCredential) -> None: ...
+
+    async def delete(self, key_name: CredentialName) -> None: ...

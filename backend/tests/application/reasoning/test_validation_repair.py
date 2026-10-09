@@ -21,6 +21,8 @@ from app.application.reasoning.model_models import (
 from app.application.reasoning.prompt_builder import PromptBuilder
 from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POLICY
 from app.ports import WaterbodyModelTimeoutError
+from app.domain.settings_admin import UnitPreference
+from app.infrastructure.config import load_parameter_capability_registry
 from tests.application.reasoning.fakes import DeterministicWaterbodyModelPort
 from tests.application.reasoning.m7_support import (
     batch_payload,
@@ -102,6 +104,26 @@ def test_initial_invalid_repair_valid_is_correlated_and_scoped_once() -> None:
     assert outcome.audit.initial_issues[0].code == "scope_digest_mismatch"
     assert outcome.audit.accepted_operation_id == repair_request.operation_id
     assert outcome.audit.validated_digest == outcome.validated.validation_digest
+
+
+def test_validated_batch_decision_records_applied_unit_source() -> None:
+    baseline, _, _, _ = m7_fixture()
+    preference = UnitPreference(
+        parameter=baseline.requested_parameters[0],
+        target_unit_id="milligram_per_liter",
+        registry_digest=load_parameter_capability_registry().manifest_digest,
+        source="session_override",
+    )
+    _, plan, catalog, validator = m7_fixture(unit_preference=preference)
+    batch = plan.batch_plan.batches[0]
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model,
+                          batch_payload(batch, catalog)),
+    )
+    outcome = asyncio.run(
+        _exchange(fake, validator).run_batch(batch, cancellation=_token())
+    )
+    assert outcome.audit.unit_decisions == (preference,)
 
 
 def test_missing_structured_output_repairs_once_with_bounded_visible_text() -> None:

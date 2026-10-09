@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from dataclasses import dataclass
 from typing import Protocol
 from uuid import UUID
 
@@ -28,7 +29,25 @@ class RAGMaintenanceConflictError(RuntimeError):
     """An internal maintenance request would violate persisted ownership."""
 
 
+@dataclass(frozen=True, slots=True)
+class HistoryStorageFacts:
+    run_ids: tuple[str, ...]
+    sessions: int
+    transcript_items: int
+    idempotency_keys: int
+    all_terminal: bool
+
+
 class RAGMaintenanceStore(Protocol):
+    async def list_history_run_ids(self, *, limit: int) -> tuple[str, ...]: ...
+
+    async def inspect_history_storage(self, run_ids: tuple[str, ...]) -> HistoryStorageFacts: ...
+
+    async def failed_job_codes(self, generation_id: str) -> tuple[str, ...]: ...
+
+    async def count_failed_jobs(
+        self, generation_id: str, safe_error_codes: tuple[str, ...],
+    ) -> int: ...
     async def list_generations(self) -> tuple[RAGIndexGeneration, ...]: ...
 
     async def read_generation(
@@ -64,6 +83,8 @@ class RAGMaintenanceStore(Protocol):
         run_ids: tuple[str, ...],
         *,
         cascade_consumers: bool,
+        expected_delete_run_ids: tuple[str, ...] | None = None,
+        expected_dependency_ids: tuple[str, ...] | None = None,
     ) -> RAGCleanupResult: ...
 
 
@@ -215,6 +236,44 @@ class RAGMaintenanceOperations:
             ),
         )
 
+    async def inspect_generation_deletion(self, generation_id: str) -> RAGIndexGeneration:
+        generation = await self._require_generation(generation_id)
+        if generation.status not in {
+            RAGIndexGenerationStatus.RETIRED,
+            RAGIndexGenerationStatus.FAILED,
+        }:
+            raise RAGMaintenanceConflictError(
+                "only retired or failed generations can be deleted"
+            )
+        if (
+            generation.status is RAGIndexGenerationStatus.RETIRED
+            and generation.retired_at is not None
+            and self._clock.now() < generation.retired_at + self._retention
+        ):
+            raise RAGMaintenanceConflictError(
+                "retired generation retention period has not elapsed"
+            )
+        active = await self._store.read_active_generation()
+        if active is None or active.generation_id == generation_id:
+            raise RAGMaintenanceConflictError("a visible active replacement is required")
+        if await self._generations.reader_count(generation_id):
+            raise RAGMaintenanceConflictError("generation readers must drain")
+        return generation
+
+    async def list_history_run_ids(self, *, limit: int = 501) -> tuple[str, ...]:
+        return await self._store.list_history_run_ids(limit=limit)
+
+    async def inspect_history_storage(self, run_ids: tuple[str, ...]) -> HistoryStorageFacts:
+        return await self._store.inspect_history_storage(run_ids)
+
+    async def failed_job_codes(self, generation_id: str) -> tuple[str, ...]:
+        return await self._store.failed_job_codes(generation_id)
+
+    async def count_failed_jobs(
+        self, generation_id: str, safe_error_codes: tuple[str, ...],
+    ) -> int:
+        return await self._store.count_failed_jobs(generation_id, safe_error_codes)
+
     async def inspect_cleanup_dependencies(
         self,
         run_ids: tuple[str, ...],
@@ -228,11 +287,14 @@ class RAGMaintenanceOperations:
         run_ids: tuple[str, ...],
         *,
         cascade_consumers: bool = False,
+        expected_delete_run_ids: tuple[str, ...] | None = None,
+        expected_dependency_ids: tuple[str, ...] | None = None,
     ) -> RAGCleanupResult:
-        return await self._store.delete_history_runs(
-            _canonical_run_ids(run_ids),
-            cascade_consumers=cascade_consumers,
-        )
+        options = {"cascade_consumers": cascade_consumers}
+        if expected_delete_run_ids is not None:
+            options["expected_delete_run_ids"] = expected_delete_run_ids
+            options["expected_dependency_ids"] = expected_dependency_ids
+        return await self._store.delete_history_runs(_canonical_run_ids(run_ids), **options)
 
     async def inspect_profile_handoff(
         self,

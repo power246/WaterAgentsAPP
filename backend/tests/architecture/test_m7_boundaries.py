@@ -90,8 +90,12 @@ def _owned_workflow_run_calls(app_root: Path) -> tuple[Path, ...]:
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "run"
-                and isinstance(node.func.value, ast.Attribute)
-                and node.func.value.attr == "_workflow"
+                and (
+                    (isinstance(node.func.value, ast.Attribute)
+                     and node.func.value.attr == "_workflow")
+                    or (isinstance(node.func.value, ast.Name)
+                        and node.func.value.id == "workflow")
+                )
             ):
                 continue
             callers.append(source_path.relative_to(app_root))

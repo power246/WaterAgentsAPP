@@ -39,12 +39,18 @@ def _calls_name(path: Path, name: str) -> bool:
     )
 
 
-def test_production_topology_execution_has_one_owner_and_binding() -> None:
+def test_production_topology_execution_uses_run_bundle_binding() -> None:
     assert _named_callers("QueryTopologyWorkflow") == (
         Path("infrastructure/runtime/m4.py"),
     )
-    assert _named_callers("bind_execution_stage") == (Path("main.py"),)
-    assert _named_callers("compose_m7_execution_stage") == (Path("main.py"),)
+    # main.py retains the injected-workflow test path; production binds once
+    # inside each run-owned bundle.
+    assert _named_callers("bind_execution_stage") == (
+        Path("infrastructure/runtime/provider_bundle.py"), Path("main.py"),
+    )
+    assert _named_callers("compose_m7_execution_stage") == (
+        Path("infrastructure/runtime/provider_bundle.py"), Path("main.py"),
+    )
     assert _named_callers("TopologyScheduler") == (
         Path("application/analysis_runs/topology_driven_workflow.py"),
     )

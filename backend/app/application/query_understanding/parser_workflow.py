@@ -34,6 +34,9 @@ from app.application.query_understanding.parser_models import (
 )
 from app.application.query_understanding.parser_port import QueryParserPort
 from app.application.query_understanding.parser_prompt import QueryParserPromptBuilder
+from app.application.query_understanding.unit_preferences import (
+    UnitPreferenceIssue, UnitPreferenceResolver,
+)
 from app.application.transcripts.models import (
     AnalysisRequestV1,
     GenerationStatus,
@@ -41,6 +44,8 @@ from app.application.transcripts.models import (
 )
 from app.application.transcripts.redaction import redact, redact_text
 from app.ports import PortError, PortTimeoutError
+from app.ports.settings_store import SettingsStorePort
+from app.domain.hydrology import ParameterCapabilityRegistry
 
 
 class QueryContextResolver(Protocol):
@@ -72,6 +77,8 @@ class QueryParserWorkflow(AnalysisWorkflow):
         error_id_factory: Callable[[], UUID],
         timeout_seconds: float = 45,
         private_values: tuple[str, ...] = (),
+        capability_registry: ParameterCapabilityRegistry | None = None,
+        unit_policy_store: SettingsStorePort | None = None,
     ) -> None:
         if (
             isinstance(timeout_seconds, bool)
@@ -85,6 +92,11 @@ class QueryParserWorkflow(AnalysisWorkflow):
         self._error_id_factory = error_id_factory
         self._timeout_seconds = timeout_seconds
         self._private_values = private_values
+        self._unit_preferences = (
+            UnitPreferenceResolver(capability_registry)
+            if capability_registry is not None else None
+        )
+        self._unit_policy_store = unit_policy_store
 
     async def run(self, context: WorkflowContext) -> None:
         await self.understand(context)
@@ -211,6 +223,46 @@ class QueryParserWorkflow(AnalysisWorkflow):
                 failed_stage=self._resolution_stage(status),
                 retryable=False,
             )
+
+        if self._unit_preferences is not None:
+            policy = None
+            version = context.run.configuration.unit_policy_version
+            if self._unit_policy_store is not None and isinstance(version, int):
+                policy = await self._unit_policy_store.read_unit_policy(version)
+                if (
+                    policy is None
+                    or policy.registry_digest != context.run.configuration.unit_registry_digest
+                ):
+                    await self._fail(
+                        context, session.session_id,
+                        code="unit_registry_changed",
+                        message="The unit registry changed during this analysis.",
+                        failed_stage="query_resolution", retryable=False,
+                    )
+            scoped = tuple(
+                item.key for item in (
+                    *resolution.context.params_used,
+                    *resolution.context.supporting_params,
+                )
+            )
+            try:
+                preferences = self._unit_preferences.resolve(
+                    intents=parsed_intent.unit_intents,
+                    scoped_parameters=scoped,
+                    policy=policy,
+                )
+            except UnitPreferenceIssue as error:
+                await self._fail(
+                    context, session.session_id,
+                    code=error.code,
+                    message="The requested unit could not be applied to this analysis.",
+                    failed_stage="query_resolution", retryable=False,
+                )
+            resolution = resolution.model_copy(update={
+                "context": resolution.context.model_copy(update={
+                    "unit_preferences": preferences,
+                }),
+            })
 
         context.cancellation.checkpoint()
         understood_item = await context.operations.reserve_transcript_item(

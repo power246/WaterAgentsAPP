@@ -1,6 +1,6 @@
 # M9 Frontend Experience 设计
 
-本文冻结 M9 `frontend/` 的页面、交互、状态所有权和前后端消费规则。它是待实现设计，不代表 frontend、settings、keys 或 admin API 已经落地。可序列化字段与 HTTP 语义以 [M9 Settings/Admin API](m9_settings_admin_api.md) 为准；跨域产品边界见 [M9 总设计](m9_settings_admin_demo_design.md)。
+本文冻结 M9 `frontend/` 的页面、交互、状态所有权和前后端消费规则。实现和验收状态以 [M9 Implementation TODO](m9_implementation_todo.md) 的实际证据为准。可序列化字段与 HTTP 语义以 [M9 Settings/Admin API](m9_settings_admin_api.md) 为准；跨域产品边界见 [M9 总设计](m9_settings_admin_demo_design.md)。
 
 ---
 
@@ -79,7 +79,7 @@ session 消息位置由首次 `message_started` 的 sequence/occurred_at 决定�
 - 使用相对 `/api/...` URL；
 - 读取 HTTP status、`Content-Type`、`X-Request-ID` 和结构化 error envelope；
 - mutation 不自动重试；GET 只可对明确 retryable 的网络失败做有界重试；
-- create run 的同一次提交重试复用相同 UUID v4 `Idempotency-Key` 和完全相同 body bytes；用户再次点击 Start 生成新 key；
+- create run 与单位策略/Admin 确认的同一次提交重试复用相同 UUID v4 `Idempotency-Key` 和完全相同 body bytes；确认响应不确定时保留原请求供手动重试，明确拒绝后重新预览；
 - 不把 secret 放入 URL、日志、analytics、localStorage 或错误 toast；
 - route/DTO 类型由 backend OpenAPI 生成或校验，禁止在组件中维护另一套字段名。
 
@@ -88,7 +88,7 @@ session 消息位置由首次 `message_started` 的 sequence/occurred_at 决定�
 统一 fetch-stream client 只消费：
 
 1. `GET /api/analysis/runs/{run_id}/events`：一页一条轻量 run snapshot stream；
-2. `GET /api/analysis/runs/{run_id}/sessions/{session_id}/events`：仅为当前打开的未结束 Agent session 建立一条 process stream。
+2. `GET /api/analysis/runs/{run_id}/sessions/{session_id}/events`：当前未结束 session 的 Agent/Evidence 视图共用一条 process stream。
 
 必须正确处理跨 network chunk 的 UTF-8、CRLF/LF、multi-line `data:`、comment keepalive、空行分帧、event name、id 和 JSON parse failure。不能假设一个 fetch chunk 就是一帧。
 
@@ -104,7 +104,7 @@ session stream：
 
 - 首次打开未结束 session 时不先 GET transcript，无游标订阅即可收到此前全部可见过程并继续 live；
 - 重连原样发送最后已消费的 session SSE integer id；按 SSE id 去重，不能按 `item_id` 丢弃合法的不同 delta；
-- 切换水体/关闭过程视图时关闭旧 session stream，不取消 run/session；
+- 切换水体或离开 Agent/Evidence 视图时关闭旧 session stream；两标签之间切换保持连接，不取消 run/session；
 - 已结束 session 和严格历史使用 GET，不建立 live stream；
 - `400 invalid_event_cursor`、`409 event_cursor_ahead`、`410 live_state_gone` 分别处理；`410` 使用后端 `history_url` 转入真实历史读取；
 - 收到 `stream_end` 只表示该流明确结束，不表示 run 保存完成。
@@ -160,7 +160,7 @@ Stop 只调用 run cancel。关闭页面、切 tab、关闭 session stream 或�
 
 - 有 session 时用 `run_id + session_id` 更新 URL 与右栏；
 - 尚无 session 时显示 topology/scheduling 状态，不伪造空 session；
-- running session 打开 Agent tab 时按需接 session stream；
+- running session 打开 Agent 或 Evidence tab 时按需接同一条 session stream；
 - completed/failed/cancelled 或 history 使用 GET；
 - 节点没有 result 时不画空 chart。
 

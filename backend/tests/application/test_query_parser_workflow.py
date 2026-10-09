@@ -35,6 +35,7 @@ from app.infrastructure.config import (
     load_parameter_capability_registry,
 )
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.persistence.memory_settings import InMemorySettingsRepository
 from app.ports import InvalidPortResponseError, PortUnavailableError
 from tests.m4_support import create_request_bytes, create_test_app
 
@@ -207,14 +208,19 @@ async def parser_runtime(
     *,
     timeout: float = 0.2,
     private_values: tuple[str, ...] = (),
+    unit_policy_store=None,
+    yield_app: bool = False,
 ):
+    registry = load_parameter_capability_registry()
     workflow = QueryParserWorkflow(
         parser,
         resolver,
-        QueryParserPromptBuilder(load_parameter_capability_registry()),
+        QueryParserPromptBuilder(registry),
         error_id_factory=uuid4,
         timeout_seconds=timeout,
         private_values=private_values,
+        capability_registry=registry if unit_policy_store is not None else None,
+        unit_policy_store=unit_policy_store,
     )
     application = create_test_app(
         settings=AppSettings(
@@ -224,9 +230,10 @@ async def parser_runtime(
         clock=FixedClock(),
         workflow=workflow,
         transcript_store=InMemoryTranscriptStore(),
+        settings_store=unit_policy_store,
     )
     async with application.router.lifespan_context(application):
-        yield application.state.run_coordinator
+        yield application if yield_app else application.state.run_coordinator
 
 
 async def wait_quiesced(coordinator, run_id) -> None:
@@ -314,6 +321,60 @@ def test_one_successful_call_persists_real_parser_session_and_unique_context() -
                 "TranscriptItemProcessRecord",
                 "TranscriptItemProcessRecord",
             )
+
+    run(exercise())
+
+
+def test_policy_and_query_unit_override_flow_into_saved_context() -> None:
+    async def exercise() -> None:
+        registry = load_parameter_capability_registry()
+        store = InMemorySettingsRepository(registry)
+        overridden = json.loads(parser_output())
+        overridden["unit_intents"] = [{
+            "raw_unit_alias": "mg/l",
+            "parameter_reference": "dissolved oxygen",
+            "rationale": "User requested mg/l",
+        }]
+        parser = FakeParser(
+            successful_response(),
+            successful_response(json.dumps(overridden)),
+        )
+        async with parser_runtime(
+            parser, FakeContextResolver(), unit_policy_store=store,
+            yield_app=True,
+        ) as application:
+            service = application.state.unit_policy_service
+            change = next(
+                item for item in (await store.read_unit_policy(1)).entries
+                if item.parameter.code == "00300"
+            ).model_copy(update={"target_unit_id": "micrograms_per_liter"})
+            preview = await service.preview(base_version=1, entries=(change,))
+            assert preview.confirmation is not None
+            await service.confirm(
+                token=preview.confirmation.token,
+                phrase=preview.confirmation.required_phrase,
+                idempotency_key=uuid4(), raw_body=b"confirmed policy",
+            )
+            coordinator = application.state.run_coordinator
+            first, _ = await create_and_wait(coordinator, "global preference")
+            second, _ = await create_and_wait(coordinator, "query override")
+            assert first.configuration.unit_policy_version == 2
+            for created, target, source in (
+                (first, "micrograms_per_liter", "global_policy"),
+                (second, "milligram_per_liter", "session_override"),
+            ):
+                _, items = await session_content(coordinator, created.run_id)
+                understood = next(
+                    json.loads(item.content.safe_body)
+                    for item in items
+                    if item.content.content_type == "query_understood"
+                )
+                assert understood["unit_preferences"] == [{
+                    "parameter": {"code_system": "usgs", "code": "00300"},
+                    "target_unit_id": target,
+                    "registry_digest": registry.manifest_digest,
+                    "source": source,
+                }]
 
     run(exercise())
 

@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.application.transcript_memory import (
     GenerationCleanupConflictError,
@@ -25,6 +25,7 @@ from app.infrastructure.persistence.rag_repository import (
 )
 from app.infrastructure.persistence.records import RAGConsumptionLinkRecord
 from app.infrastructure.persistence.schema import (
+    analysis_run_idempotency_tombstones,
     analysis_runs,
     rag_case_projections,
     rag_consumption_links,
@@ -160,6 +161,15 @@ def test_source_cleanup_conflicts_then_cascades_transitive_consumers() -> None:
             source = await seed_completed_source(engine, target_comid="10000001")
             consumer = await seed_completed_source(engine, target_comid="10000002")
             transitive = await seed_completed_source(engine, target_comid="10000003")
+            source_key, transitive_key = uuid4(), uuid4()
+            async with engine.begin() as connection:
+                for run_id, key in (
+                    (source.run_id, source_key),
+                    (transitive.run_id, transitive_key),
+                ):
+                    await connection.execute(update(analysis_runs).where(
+                        analysis_runs.c.run_id == run_id
+                    ).values(idempotency_key=key, request_fingerprint=b"f" * 32))
             profile = embedding_profile()
             generation = await repository.create_building_generation(
                 profile,
@@ -195,6 +205,8 @@ def test_source_cleanup_conflicts_then_cascades_transitive_consumers() -> None:
                 match="retained consumer",
             ):
                 await operations.delete_history_runs((str(source.run_id),))
+            async with engine.connect() as connection:
+                assert await _count(connection, analysis_run_idempotency_tombstones) == 0
 
             deleted = await operations.delete_history_runs(
                 (str(source.run_id),),
@@ -207,6 +219,10 @@ def test_source_cleanup_conflicts_then_cascades_transitive_consumers() -> None:
                 assert await _count(connection, rag_consumption_links) == 0
                 assert await _count(connection, rag_index_jobs) == 0
                 assert await _count(connection, rag_case_projections) == 0
+                keys = set((await connection.execute(select(
+                    analysis_run_idempotency_tombstones.c.idempotency_key
+                ))).scalars())
+                assert keys == {source_key, transitive_key}
         finally:
             await engine.dispose()
 

@@ -47,7 +47,7 @@ class QueryParserPromptBuilder:
         system_payload = {
             "task": (
                 "Extract candidate location, coordinate, local date range, water "
-                "parameter concepts, material ambiguities, and the baseline evidence "
+                "parameter concepts, bounded user unit aliases, material ambiguities, and the baseline evidence "
                 "rules needed to answer the question. Return only JSON matching "
                 "response_schema."
             ),
@@ -59,9 +59,11 @@ class QueryParserPromptBuilder:
                 "discharge support concept, plus one or more executable inputs. Rules express "
                 "only temporal/spatial relationships, a maximum directional inference "
                 "strength, whether collection must be attempted, and a rationale; do "
-                "not choose providers, stations, URLs, channels, units, or fabricate "
+                "not choose providers, stations, URLs, channels, or fabricate "
                 "values. These rules become an inherited baseline that downstream "
-                "waterbody agents may append to but never remove."
+                "waterbody agents may append to but never remove. Unit intents may "
+                "only quote a raw alias and optional parameter reference/rationale; "
+                "never provide formulas, factors, or new parameters."
             ),
             "response_schema": schema,
             "executable_capabilities": capabilities,

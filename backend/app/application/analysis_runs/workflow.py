@@ -235,3 +235,11 @@ class WorkflowContext:
 
 class AnalysisWorkflow(Protocol):
     async def run(self, context: WorkflowContext) -> None: ...
+
+
+class RunWorkflowBundle(Protocol):
+    workflow: AnalysisWorkflow
+
+    def bind_run(self, run_id: UUID) -> None: ...
+
+    async def aclose(self) -> None: ...

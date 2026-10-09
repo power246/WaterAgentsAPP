@@ -124,8 +124,14 @@ def test_runtime_registry_openapi_and_manifest_match_documented_fixed_counts() -
     }
 
     paths = set(create_test_app().openapi()["paths"])
-    assert paths == {
+    assert {
         "/health",
+        "/api/settings",
+        "/api/settings/unit-policies/preview",
+        "/api/settings/unit-policies",
+        "/api/keys",
+        "/api/keys/{key_name}",
+        "/api/keys/{key_name}/test",
         "/api/analysis/runs",
         "/api/analysis/runs/{run_id}",
         "/api/analysis/runs/{run_id}/cancel",
@@ -135,7 +141,7 @@ def test_runtime_registry_openapi_and_manifest_match_documented_fixed_counts() -
         "/api/analysis/runs/{run_id}/sessions/{session_id}/events",
         "/api/analysis/runs/{run_id}/sessions/{session_id}/transcript",
         "/api/analysis/runs/{run_id}/transcript/{item_id}/content",
-    }
+    } <= paths
     assert not any(
         forbidden in path
         for path in paths

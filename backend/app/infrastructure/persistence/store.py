@@ -17,6 +17,7 @@ from app.application.analysis_runs.creation import (
     RunCreationResult,
     StoredRunCreation,
 )
+from app.application.settings_admin.errors import IdempotencyResourceDeletedError
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -43,6 +44,7 @@ from app.application.transcripts.read_models import (
 from app.infrastructure.persistence.records import PersistenceBatch, PersistedRunRecord
 from app.infrastructure.persistence.rag_consumption import has_valid_consumption_source
 from app.infrastructure.persistence.schema import (
+    analysis_run_idempotency_tombstones,
     analysis_runs,
     analysis_sessions,
     rag_consumption_links,
@@ -151,6 +153,17 @@ class PostgresTranscriptStore:
                 raise
             existing = await self.get_creation(candidate.idempotency_key)
             if existing is None:
+                async with self._engine.connect() as connection:
+                    tombstone = (await connection.execute(select(
+                        analysis_run_idempotency_tombstones.c.request_fingerprint
+                    ).where(
+                        analysis_run_idempotency_tombstones.c.idempotency_key
+                        == candidate.idempotency_key
+                    ))).scalar_one_or_none()
+                if tombstone is not None:
+                    if tombstone != candidate.request_fingerprint:
+                        raise IdempotencyKeyConflictError() from None
+                    raise IdempotencyResourceDeletedError() from None
                 raise
             if existing.creation.request_fingerprint != candidate.request_fingerprint:
                 raise IdempotencyKeyConflictError() from None

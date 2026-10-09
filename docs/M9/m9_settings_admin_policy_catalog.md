@@ -1,6 +1,6 @@
 # M9 Settings / Keys / Admin Policy Catalog
 
-本文是 M9 application policy 的设计输入。runtime 不解析 Markdown；实施时必须把规则固化为 typed models、validators、services、repositories、HTTP schemas 和 tests。总体边界见 [M9 总设计](m9_settings_admin_demo_design.md)，可序列化接口见 [M9 API](m9_settings_admin_api.md)。
+本文是 M9 application policy 的设计输入。runtime 不解析 Markdown；规则由 typed models、validators、services、repositories、HTTP schemas 和 tests 承接，实际实施证据见 [M9 Implementation TODO](m9_implementation_todo.md)。总体边界见 [M9 总设计](m9_settings_admin_demo_design.md)，可序列化接口见 [M9 API](m9_settings_admin_api.md)。
 
 ---
 

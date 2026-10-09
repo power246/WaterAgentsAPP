@@ -35,11 +35,12 @@ from app.infrastructure.adapters import (
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
 from app.infrastructure.http import ProviderHttpClient
 from app.ports.clock import ClockPort
+from app.ports.settings_store import SettingsStorePort
 
 
 @dataclass(frozen=True)
 class RuntimeComponents:
-    workflow: AnalysisWorkflow
+    workflow: AnalysisWorkflow | None
     query_topology_workflow: QueryTopologyWorkflow | None = None
 
 
@@ -52,6 +53,7 @@ def compose_m4_workflow(
     parameter_capabilities: ParameterCapabilityRegistry,
     error_id_factory: Callable[[], UUID],
     private_values: tuple[str, ...] = (),
+    unit_policy_store: SettingsStorePort | None = None,
 ) -> QueryTopologyWorkflow:
     parser_workflow = QueryParserWorkflow(
         parser,
@@ -60,6 +62,8 @@ def compose_m4_workflow(
         error_id_factory=error_id_factory,
         timeout_seconds=settings.query_parser_timeout_seconds,
         private_values=private_values,
+        capability_registry=parameter_capabilities,
+        unit_policy_store=unit_policy_store,
     )
     return QueryTopologyWorkflow(parser_workflow, topology_builder)
 
@@ -71,6 +75,8 @@ async def build_m4_runtime(
     clock: ClockPort,
     parameter_capabilities: ParameterCapabilityRegistry,
     error_id_factory: Callable[[], UUID],
+    provider_http: ProviderHttpClient | None = None,
+    unit_policy_store: SettingsStorePort | None = None,
 ) -> AsyncIterator[RuntimeComponents]:
     parser_providers = {
         capability.provider.casefold()
@@ -106,13 +112,13 @@ async def build_m4_runtime(
     )
 
     async with AsyncExitStack() as stack:
-        parser_http = await stack.enter_async_context(
+        parser_http = provider_http or await stack.enter_async_context(
             _http_client(settings, timeout=settings.query_parser_timeout_seconds)
         )
-        geocoding_http = await stack.enter_async_context(
+        geocoding_http = provider_http or await stack.enter_async_context(
             _http_client(settings, timeout=settings.geocoding_timeout_seconds)
         )
-        metadata_http = await stack.enter_async_context(
+        metadata_http = provider_http or await stack.enter_async_context(
             _http_client(settings, timeout=settings.metadata_timeout_seconds)
         )
         parser = OpenAIResponsesParserAdapter(
@@ -167,6 +173,7 @@ async def build_m4_runtime(
         workflow = compose_m4_workflow(
             settings,
             parser=parser,
+            unit_policy_store=unit_policy_store,
             context_resolver=context_resolver,
             topology_builder=topology_builder,
             parameter_capabilities=parameter_capabilities,

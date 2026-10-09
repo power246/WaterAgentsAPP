@@ -58,7 +58,19 @@ Configure PostgreSQL and run the explicit schema commands first; the following s
 python -m app
 ```
 
-The defaults are `127.0.0.1:8000` and analysis timezone `America/Chicago`. Check the service from another terminal:
+The defaults are `127.0.0.1:8000` and analysis timezone `America/Chicago`.
+
+The local demo serves the current React frontend and API from that same loopback origin. Build the frontend once from the repository root before starting the backend; `frontend/dist/` is generated locally and is not committed:
+
+```text
+npm --prefix frontend ci
+npm --prefix frontend run check:api
+npm --prefix frontend run build
+```
+
+Then start one backend process with `python -m app` from `backend/`. The UI is at `http://127.0.0.1:8000/`; `/api` and both SSE streams stay on the same origin. If the frontend build is missing, the API remains available and `/health` reports `X-Frontend-Available: false`. Settings and Admin state use PostgreSQL; OpenAI/Google user overrides use the OS user credential store. Saving a key never tests a provider connection. The first version supports one local process and one worker.
+
+Check the service from another terminal:
 
 ```text
 python -c "import httpx; response = httpx.get('http://127.0.0.1:8000/health', trust_env=False); response.raise_for_status(); print(response.json())"
@@ -97,6 +109,14 @@ python scripts/run_sse_smoke.py
 python scripts/m4_workflow_smoke.py
 python scripts/m7_topology_workflow_smoke.py
 ```
+
+M9's production-composition smoke uses a disposable schema in `WATERAGENTS_TEST_DB_NAME`, the built frontend, a loopback Uvicorn server, and deterministic replacements for external providers and the OS credential store. From the repository root on Windows, after setting the test database name and installing dependencies, run:
+
+```powershell
+python -m dotenv -f backend/.env run --no-override -- python -m pytest backend/tests/smoke/test_m9_production_pg.py -q
+```
+
+Set `WATERAGENTS_M9_BROWSER_E2E=1` in the test process to include the installed Chrome browser against that same backend server. This is an offline fake-provider check; it does not validate real provider credentials, paid traffic, capacity, or Ubuntu/macOS. The exact M9 verification record is in [M9 Implementation TODO](../docs/M9/m9_implementation_todo.md).
 
 Audit the checked-in 154-item capability manifest offline with `python scripts/audit_parameter_capabilities.py`. The optional `--refresh-official` flag performs a bounded read of the official USGS Water Data OGC API v1 parameter catalog and reports drift; it never modifies or enables manifest entries.
 
@@ -184,7 +204,7 @@ Each waterbody token limit belongs to that exact provider/model entry. Copy the 
 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
-Production startup builds and binds the complete topology workflow before accepting traffic. It requires at least one `query_parser` catalog entry (currently with provider `openai`), at least one `waterbody` catalog entry with explicit token limits, plus `WATERAGENTS_OPENAI_API_KEY` and `WATERAGENTS_GOOGLE_GEOCODING_API_KEY`; missing or unsupported components fail startup instead of substituting an empty workflow. The run summarizer uses the run's exact waterbody model and its catalog token limits; it has no separate model setting or tools. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
+Production startup validates the complete topology workflow and requires at least one `query_parser` catalog entry (currently with provider `openai`), one `waterbody` entry with explicit token limits, and one supported embedding profile. It does not permanently capture the OpenAI or Google key at startup: each run leases its effective user-store override or deployment fallback before creation, and each background embedding attempt leases its key when claimed. Missing effective credentials prevent the relevant run or attempt. The run summarizer uses the run's exact waterbody model and catalog token limits; it has no separate model setting or tools. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
 
 ### Local PostgreSQL with Compose
 

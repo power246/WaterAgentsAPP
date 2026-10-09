@@ -23,6 +23,8 @@ from app.application.analysis_runs.creation import (
     RunCreationDisposition,
     RunCreationResult,
 )
+from app.application.settings_admin.errors import IdempotencyResourceDeletedError
+from app.domain.settings_admin import IdempotencyTombstone
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -139,6 +141,8 @@ from app.domain.time.time_resolution_preference_source import (
 from app.domain.time.timezone import get_iana_timezone
 from app.ports.clock import ClockPort
 from app.ports.model_catalog import ModelCatalogPort
+from app.application.settings_admin.runtime_settings import RuntimeSettingsResolver
+from app.application.analysis_runs.workflow import RunWorkflowBundle
 from app.ports.transcript_store import TranscriptStorePort
 
 _UUID = TypeAdapter(UUID)
@@ -266,10 +270,12 @@ class RunCoordinator:
         ],
         model_catalog: ModelCatalogPort,
         analysis_timezone: str = "America/Chicago",
+        settings_resolver: RuntimeSettingsResolver | None = None,
         id_factory: Callable[[], UUID] = uuid4,
         record_id_factory: Callable[[], UUID] = uuid4,
         logger: logging.Logger | None = None,
-        workflow: AnalysisWorkflow,
+        workflow: AnalysisWorkflow | None,
+        workflow_factory: Callable[[AnalysisConfigurationSnapshot], Awaitable[RunWorkflowBundle]] | None = None,
         shutdown_grace_period: float = 1.0,
         shutdown_save_grace_period: float = 5.0,
         keepalive_interval: float = 15.0,
@@ -285,6 +291,7 @@ class RunCoordinator:
         live_state_grace_period: float = 60.0,
         persistence_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         transcript_registry: TranscriptRegistry | None = None,
+        tombstone_lookup: Callable[[UUID], Awaitable[IdempotencyTombstone | None]] | None = None,
     ) -> None:
         if not isfinite(shutdown_grace_period) or shutdown_grace_period < 0:
             raise ValueError("shutdown_grace_period must be finite and non-negative")
@@ -309,8 +316,10 @@ class RunCoordinator:
             raise ValueError("live_state_grace_period must be finite and non-negative")
         self._clock = clock
         self._transcript_store = transcript_store
+        self._tombstone_lookup = tombstone_lookup
         self._model_catalog = model_catalog
         self._analysis_timezone = analysis_timezone
+        self._settings_resolver = settings_resolver
         self._id_factory = id_factory
         self._record_id_factory = record_id_factory
         self._logger = (
@@ -324,6 +333,9 @@ class RunCoordinator:
         self._creation_tasks: set[asyncio.Task[AnalysisRunSnapshot]] = set()
         self._runs_lock = asyncio.Lock()
         self._workflow = workflow
+        self._workflow_factory = workflow_factory
+        if workflow is None and workflow_factory is None:
+            raise ValueError("a workflow or per-run workflow factory is required")
         self._shutdown_grace_period = shutdown_grace_period
         self._shutdown_save_grace_period = shutdown_save_grace_period
         self._shutdown_lock = asyncio.Lock()
@@ -439,31 +451,57 @@ class RunCoordinator:
                         fingerprint,
                     )
                     return existing.creation.receipt_snapshot()
+                if self._tombstone_lookup is not None:
+                    try:
+                        tombstone = await self._tombstone_lookup(idempotency_key)
+                    except Exception as error:
+                        raise CreationPersistenceUnavailableError() from error
+                    if tombstone is not None:
+                        self._require_same_fingerprint(
+                            tombstone.request_fingerprint, fingerprint,
+                        )
+                        raise IdempotencyResourceDeletedError()
 
-            async with self._runs_lock:
-                if self._closing:
-                    raise ServiceShuttingDownError()
-                if idempotency_key is not None:
-                    owner = self._creation_owners.get(idempotency_key)
-                    if owner is not None:
-                        self._require_same_fingerprint(owner.fingerprint, fingerprint)
-                        initial = False
+            resolved_configuration = configuration_override
+            if self._settings_resolver is not None and resolved_configuration is None:
+                try:
+                    raw_body.decode("utf-8")
+                except UnicodeDecodeError as error:
+                    raise InvalidSubmissionEncodingError() from error
+                request = AnalysisRequestV1.model_validate_json(raw_body)
+                resolved_configuration = await self._settings_resolver.resolve(request)
+
+            bundle = (
+                await self._workflow_factory(resolved_configuration)
+                if self._workflow_factory is not None else None
+            )
+            try:
+                async with self._runs_lock:
+                    if self._closing:
+                        raise ServiceShuttingDownError()
+                    if idempotency_key is not None:
+                        owner = self._creation_owners.get(idempotency_key)
+                        if owner is not None:
+                            self._require_same_fingerprint(owner.fingerprint, fingerprint)
+                            initial = False
+                        else:
+                            owner = self._start_creation_owner(
+                                raw_body, fingerprint, idempotency_key,
+                                resolved_configuration, bundle,
+                            )
+                            initial = True
                     else:
                         owner = self._start_creation_owner(
-                            raw_body,
-                            fingerprint,
-                            idempotency_key,
-                            configuration_override,
+                            raw_body, fingerprint, None,
+                            resolved_configuration, bundle,
                         )
                         initial = True
-                else:
-                    owner = self._start_creation_owner(
-                        raw_body,
-                        fingerprint,
-                        None,
-                        configuration_override,
-                    )
-                    initial = True
+            except BaseException:
+                if bundle is not None:
+                    await bundle.aclose()
+                raise
+            if not initial and bundle is not None:
+                await bundle.aclose()
             try:
                 return await self._await_creation(owner, deadline, initial=initial)
             except CreationRolledBackError:
@@ -514,12 +552,14 @@ class RunCoordinator:
         fingerprint: bytes,
         idempotency_key: UUID | None,
         configuration_override: AnalysisConfigurationSnapshot | None,
+        bundle: RunWorkflowBundle | None = None,
     ) -> _CreationOwner:
         prepared = self._prepare_creation(
             raw_body,
             fingerprint,
             idempotency_key,
             configuration_override,
+            bundle,
         )
         owner = _CreationOwner(fingerprint=fingerprint, prepared=prepared)
         coroutine = self._own_creation(owner)
@@ -545,6 +585,7 @@ class RunCoordinator:
         fingerprint: bytes,
         idempotency_key: UUID | None,
         configuration_override: AnalysisConfigurationSnapshot | None,
+        bundle: RunWorkflowBundle | None = None,
     ) -> _PreparedCreation:
         try:
             raw_body.decode("utf-8")
@@ -556,7 +597,11 @@ class RunCoordinator:
         validation_errors: list[dict[str, object]] = []
         if request.date_range is not None:
             local_today = timestamp.astimezone(
-                get_iana_timezone(self._analysis_timezone)
+                get_iana_timezone(
+                    configuration_override.analysis_timezone
+                    if configuration_override is not None
+                    else self._analysis_timezone
+                )
             ).date()
             earliest = local_today - timedelta(days=7)
             latest = local_today + timedelta(days=7)
@@ -611,6 +656,8 @@ class RunCoordinator:
         run_id = self._new_id()
         if run_id in self._runs:
             raise ValueError("The generated run ID already exists.")
+        if bundle is not None:
+            bundle.bind_run(run_id)
         snapshot = AnalysisRunSnapshot(
             run_id=run_id,
             status=RunStatus.PENDING,
@@ -623,6 +670,7 @@ class RunCoordinator:
             snapshot=snapshot,
             transcript_buffer=transcript_buffer,
             query=request.query,
+            workflow_bundle=bundle,
         )
         request_id = request_id_context.get()
         request_item = self._reserve_transcript_item_locked(
@@ -694,6 +742,8 @@ class RunCoordinator:
                 result = await self._transcript_store.create_run(candidate)
             except IdempotencyKeyConflictError:
                 raise
+            except IdempotencyResourceDeletedError:
+                raise
             except Exception:
                 owner.commit_unconfirmed.set()
                 result = await self._verify_unknown_creation(candidate)
@@ -704,13 +754,19 @@ class RunCoordinator:
                 return candidate.snapshot
             return result.creation.receipt_snapshot()
         finally:
-            async with self._runs_lock:
-                if candidate.idempotency_key is not None:
-                    current = self._creation_owners.get(candidate.idempotency_key)
-                    if current is owner:
-                        self._creation_owners.pop(candidate.idempotency_key, None)
-                if self._creation_by_run.get(candidate.snapshot.run_id) is owner:
-                    self._creation_by_run.pop(candidate.snapshot.run_id, None)
+            runtime = owner.prepared.runtime
+            try:
+                if self._runs.get(runtime.snapshot.run_id) is not runtime:
+                    if runtime.workflow_bundle is not None:
+                        await runtime.workflow_bundle.aclose()
+            finally:
+                async with self._runs_lock:
+                    if candidate.idempotency_key is not None:
+                        current = self._creation_owners.get(candidate.idempotency_key)
+                        if current is owner:
+                            self._creation_owners.pop(candidate.idempotency_key, None)
+                    if self._creation_by_run.get(candidate.snapshot.run_id) is owner:
+                        self._creation_by_run.pop(candidate.snapshot.run_id, None)
 
     async def _verify_unknown_creation(
         self,
@@ -1126,7 +1182,12 @@ class RunCoordinator:
             safe_request = AnalysisRequestV1.model_validate_json(
                 runtime.transcript_buffer.items[0].content.safe_body
             )
-            await self._workflow.run(
+            workflow = (
+                runtime.workflow_bundle.workflow
+                if runtime.workflow_bundle is not None else self._workflow
+            )
+            assert workflow is not None
+            await workflow.run(
                 WorkflowContext(
                     running,
                     runtime.query,
@@ -1234,6 +1295,8 @@ class RunCoordinator:
             runtime.workflow_quiesced.set()
             runtime.condition.notify_all()
         self._log_activity("workflow_quiesced", runtime)
+        if runtime.workflow_bundle is not None:
+            await runtime.workflow_bundle.aclose()
 
     @staticmethod
     def _workflow_has_unfinished_outputs_locked(runtime: RunRuntime) -> bool:

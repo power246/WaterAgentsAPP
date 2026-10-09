@@ -17,7 +17,7 @@ M3 的具体字段、十条目标路由、两层 SSE frame、错误和 PostgreSQ
 | M6 reasoning/result | Milestone 0–13 后端本机实现与集成审计已完成；真实 provider 请求和三平台 CI 仍为 `not run` / `partial` | 以现有 result summary/ref、session transcript/SSE、history 与 [M6 API/读取契约](M6/m6_single_agent_reasoning_api.md) 作为 M9 接入输入；正式前端仍由 M9 实现，不调用 direct prompt/model/tool surface。 |
 | M7 workflow/summary | Windows 本机实现与集成审计已完成；真实 provider 与三平台 CI 仍为 `not run` / `partial` | M9 直接消费当前 snapshot/history、topology/waterbody/summary refs 与安全失败投影；M7 不提前实现页面、地图连线或 settings/admin。 |
 | M8 transcript memory/RAG | Windows 本机 production implementation、deterministic fake/PG E2E、history/SSE 与 runtime OpenAPI 验收已完成；外部 supplier/容量/Ubuntu/macOS 仍按事实为 `not run` / `partial`，见 [Milestone 0–10 Implementation TODO](M8/m8_implementation_todo.md) | 不新增direct RAG route或第三条SSE。M9按 [M8 API/读取契约](M8/m8_memory_rag_api.md) 消费既有tool/source/fragment/result transcript，区分historical、empty、unavailable与invalid。 |
-| M9 frontend/settings/admin | 产品、前端、policy、API、实施设计与Milestone 0–9 TODO已冻结；implementation尚未开始 | 以 `docs/M9` 五份设计与[Implementation TODO](M9/m9_implementation_todo.md)为施工输入；不得把design/TODO complete写成route/UI已实现。 |
+| M9 frontend/settings/admin | Milestone 0–8 production backend/frontend 已实现；Milestone 9 验证和未运行外部边界见[Implementation TODO](M9/m9_implementation_todo.md) | 当前 `frontend/` 消费同源 API、两层 SSE 与真实 history；实现状态以 runtime、测试和 M9 契约矩阵共同证明。 |
 
 正式前端在 M9 的唯一生产目录是 `frontend/`，依据运行时 OpenAPI、最终 SSE 文档和 [M9 Frontend Experience](M9/m9_frontend_experience_design.md) 独立建设。`frontend_bk/` 所属旧系统与新前端没有代码、API、数据、构建或发布兼容关系；只允许人工参考其可见布局习惯，不 import/迁移其组件、字段、状态或 WebSocket 交互。
 
