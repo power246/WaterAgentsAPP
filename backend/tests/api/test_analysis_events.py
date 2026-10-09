@@ -217,6 +217,29 @@ def test_run_reconnect_starts_with_one_current_snapshot_and_ignores_header_at_ht
     run(exercise)
 
 
+@pytest.mark.parametrize("snapshot_changed", [False, True])
+def test_deleted_run_stops_a_waiting_stream_before_sending_a_new_snapshot(
+    snapshot_changed: bool,
+) -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (_, coordinator, created, _, _, _):
+            stream = await coordinator.subscribe_run(created.run_id)
+            await anext(stream)
+            waiting = asyncio.create_task(anext(stream))
+            await asyncio.sleep(0)
+            assert not waiting.done()
+            runtime = coordinator._runs[created.run_id]
+            async with runtime.condition:
+                if snapshot_changed:
+                    runtime.waterbody_participation["303"] = True
+                runtime.history_deleted = True
+                runtime.condition.notify_all()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(waiting, timeout=1)
+
+    run(exercise)
+
+
 def test_session_log_exists_without_subscribers_and_preserves_phase_order() -> None:
     async def exercise() -> None:
         async with run_runtime(message_registry=True) as (

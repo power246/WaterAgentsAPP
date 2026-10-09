@@ -102,6 +102,30 @@ def test_external_body_is_stored_once_and_full_content_ref_uses_run_and_item() -
     assert len(batch.items[0].preview_tail.encode("utf-8")) <= 7
 
 
+def test_public_preview_is_computed_only_for_external_content(monkeypatch) -> None:
+    registry = create_production_registry()
+    buffer = TranscriptBuffer(registry)
+    item = buffer.append(
+        _identity(ITEM_ID, 1), "analysis_request", 1, create_request("水"),
+    )
+    public_safe_body = registry.public_safe_body
+    calls = []
+
+    def track_public_safe_body(*args):
+        calls.append(args)
+        return public_safe_body(*args)
+
+    monkeypatch.setattr(registry, "public_safe_body", track_public_safe_body)
+    inline = buffer.to_storage_batch(inline_content_bytes=item.content.content_bytes)
+    assert inline.items[0].inline_body == item.content.safe_body
+    assert calls == []
+
+    external = buffer.to_storage_batch(inline_content_bytes=item.content.content_bytes - 1)
+    assert external.items[0].inline_body is None
+    assert external.items[0].preview_head is not None
+    assert len(calls) == 1
+
+
 def test_redaction_happens_before_live_and_is_rechecked_for_storage() -> None:
     secret = "synthetic-secret-value"
     registry = create_production_registry()

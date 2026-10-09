@@ -72,7 +72,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const [unitEntries, setUnitEntries] = useState<UnitEntry[]>(settings.unit_policy.entries)
   const [unitPreview, setUnitPreview] = useState<UnitPreview | null>(null)
   const [unitPhrase, setUnitPhrase] = useState('')
-  const [unitAttempt, setUnitAttempt] = useState<Submission | null>(null)
+  const [unitAttempt, setUnitAttempt] = useState<{ submission: Submission; proposedEntries: UnitEntry[] } | null>(null)
   const [conflict, setConflict] = useState<Settings | null>(null)
   const [keys, setKeys] = useState<KeyStatus[]>([])
   const [keysError, setKeysError] = useState('')
@@ -173,16 +173,22 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   }
 
   async function confirmUnits() {
-    if (!unitPreview?.confirmation || (!unitAttempt && unitPhrase !== unitPreview.confirmation.required_phrase)) return
-    const preview = previewInput.current
-    if (!unitAttempt && (!preview || preview.request !== previewRequest.current
-      || preview.version !== server.unit_policy.version
-      || preview.entries !== JSON.stringify(unitEntries))) return
-    const submission = unitAttempt ?? prepareConfirmation(unitPreview.confirmation.token, unitPhrase)
-    setUnitAttempt(submission)
+    let attempt = unitAttempt
+    if (!attempt) {
+      if (!unitPreview?.confirmation || unitPhrase !== unitPreview.confirmation.required_phrase) return
+      const preview = previewInput.current
+      if (!preview || preview.request !== previewRequest.current
+        || preview.version !== server.unit_policy.version
+        || preview.entries !== JSON.stringify(unitEntries)) return
+      attempt = {
+        submission: prepareConfirmation(unitPreview.confirmation.token, unitPhrase),
+        proposedEntries: unitPreview.proposed.entries,
+      }
+      setUnitAttempt(attempt)
+    }
     setBusy(true); setError('')
     try {
-      await api.confirmUnitPolicy(submission)
+      await api.confirmUnitPolicy(attempt.submission)
       setUnitAttempt(null); setUnitPreview(null); setUnitPhrase('')
       previewInput.current = null
       setNotice('Unit policy saved for future runs.')
@@ -198,7 +204,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
       const current = await api.settings()
       if (acceptSettings(current)) {
         setDraft((value) => JSON.stringify(value) === JSON.stringify(server.defaults) ? current.defaults : value)
-        setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(unitPreview.proposed.entries)
+        setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(attempt.proposedEntries)
           ? current.unit_policy.entries : value)
       }
     } catch (cause) {
@@ -271,11 +277,12 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
           <ul>{unitPreview.changes.map((change) => <li key={`${change.parameter.code_system}:${change.parameter.code}`}>
             {change.parameter.code_system}:{change.parameter.code} · {change.previous_unit_id ?? 'none'} → {change.target_unit_id}
           </li>)}</ul>
-          {unitPreview.confirmation && <><p>Enter <strong>{unitPreview.confirmation.required_phrase}</strong> to confirm.</p>
+          {unitPreview.confirmation && !unitAttempt && <><p>Enter <strong>{unitPreview.confirmation.required_phrase}</strong> to confirm.</p>
             <input aria-label="Unit confirmation phrase" value={unitPhrase} disabled={Boolean(unitAttempt)} onChange={(event) => setUnitPhrase(event.target.value)} />
             <button type="button" disabled={busy || unitPhrase !== unitPreview.confirmation.required_phrase}
-              onClick={() => void confirmUnits()}>{unitAttempt ? 'Retry unit confirmation' : 'Confirm unit policy'}</button></>}
+              onClick={() => void confirmUnits()}>Confirm unit policy</button></>}
         </div>}
+        {unitAttempt && <button type="button" disabled={busy} onClick={() => void confirmUnits()}>Retry unit confirmation</button>}
       </section>
       <section><h3>Memory / RAG</h3>
         <p>Desired profile: {draft.desired_embedding_profile_id}</p>

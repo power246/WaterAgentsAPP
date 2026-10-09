@@ -2835,11 +2835,14 @@ class RunCoordinator:
                     try:
                         async with asyncio.timeout(self._keepalive_interval):
                             await runtime.condition.wait_for(
-                                lambda: self._run_snapshot_locked(runtime) != current
+                                lambda: runtime.history_deleted
+                                or self._run_snapshot_locked(runtime) != current
                                 or self._run_stream_closed_locked(runtime)
                             )
                     except TimeoutError:
                         pass
+                if runtime.history_deleted:
+                    return
                 updated = self._run_snapshot_locked(runtime)
                 closed = self._run_stream_closed_locked(runtime)
             changed = updated != current

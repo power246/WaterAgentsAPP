@@ -185,6 +185,38 @@ it('retries an uncertain unit confirmation with the same key and body', async ()
   expect(await screen.findByText('Unit policy saved for future runs.')).toBeInTheDocument()
 })
 
+it('keeps the unit retry available after a settings conflict invalidates its preview', async () => {
+  const committed = { ...settings, revision: 1, unit_policy: unitPreview.proposed }
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce(committed)
+  vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
+  const confirm = vi.spyOn(api, 'confirmUnitPolicy').mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({ ...unitPreview.proposed, created_at: '2026-10-08T00:01:00Z' })
+  vi.spyOn(api, 'replaceSettings').mockRejectedValueOnce(
+    new ApiError(409, 'settings_revision_conflict', 'request', null, committed))
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText(/Discharge \(usgs:00060\)/), { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  await screen.findByRole('button', { name: 'Confirm unit policy' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Unit confirmation phrase' }),
+    { target: { value: 'APPLY UNIT POLICY 2' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Response unknown')
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  expect(await screen.findByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+  expect(screen.queryByText('Server unit preview')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Retry unit confirmation' })).toBeEnabled()
+  expect(screen.getByLabelText(/Discharge \(usgs:00060\)/)).toBeDisabled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry unit confirmation' }))
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
+  expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0])
+  expect(await screen.findByText('Unit policy saved for future runs.')).toBeInTheDocument()
+  expect(screen.getByLabelText(/Discharge \(usgs:00060\)/)).toBeEnabled()
+})
+
 it('does not resubmit an accepted unit policy when refreshing settings fails', async () => {
   vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockRejectedValueOnce(new Error('offline'))
   vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
