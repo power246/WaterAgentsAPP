@@ -234,7 +234,7 @@ function Workspace({ mode }: { mode: Mode }) {
     <main className="workspace">
       <aside className={`controls-panel mobile-${mobileTab}`}>
         {mode === 'history' ? <HistoryList selectedRunId={runId} onSelect={selectHistory} refreshVersion={historyVersion} />
-          : settings ? <NewAnalysisForm key={settings.revision} settings={settings}
+          : settings ? <NewAnalysisForm settings={settings}
             mapPoint={mapPoint} onClearMapPoint={() => setMapPoint(null)}
             onCreated={(id) => navigate(`/runs/${id}`)} />
             : <p>{settingsError || 'Loading settings…'}</p>}

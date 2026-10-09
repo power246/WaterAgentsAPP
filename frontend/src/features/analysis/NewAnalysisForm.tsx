@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { api, ApiError, prepareSubmission, type CreateRequest, type Settings, type Submission } from '../../api/http'
 
 type Model = CreateRequest['parser_model']
@@ -22,6 +22,26 @@ export function NewAnalysisForm({ settings, mapPoint, onClearMapPoint, onCreated
   const [pending, setPending] = useState(false)
   const [retry, setRetry] = useState<Submission | null>(null)
   const [error, setError] = useState('')
+  const previousSettings = useRef(settings)
+
+  useEffect(() => {
+    const previous = previousSettings.current
+    previousSettings.current = settings
+    if (previous.revision === settings.revision) return
+    if (
+      query || comid || latitude || longitude || startDate || endDate || mapPoint
+      || pending || retry
+      || JSON.stringify(parserModel) !== JSON.stringify(previous.defaults.parser_model)
+      || JSON.stringify(waterbodyModel) !== JSON.stringify(previous.defaults.waterbody_model)
+      || memoryMode !== previous.defaults.memory_mode
+      || resolution !== previous.defaults.time_resolution
+    ) return
+    setParserModel(settings.defaults.parser_model)
+    setWaterbodyModel(settings.defaults.waterbody_model)
+    setMemoryMode(settings.defaults.memory_mode)
+    setResolution(settings.defaults.time_resolution)
+  }, [settings, query, comid, latitude, longitude, startDate, endDate, mapPoint,
+    pending, retry, parserModel, waterbodyModel, memoryMode, resolution])
 
   useEffect(() => {
     if (mapPoint) {

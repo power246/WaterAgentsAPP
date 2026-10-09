@@ -50,6 +50,58 @@ it('preserves edits made before the initial settings refresh completes', async (
   expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
 })
 
+it('does not replace edits made while a defaults save is pending', async () => {
+  vi.spyOn(api, 'settings').mockResolvedValue(settings)
+  let resolve!: (value: Settings) => void
+  vi.spyOn(api, 'replaceSettings').mockReturnValue(new Promise<Settings>((done) => { resolve = done }))
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+  await act(async () => { resolve({ ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+  expect(screen.getByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+})
+
+it('ignores an initial settings GET that arrives after a successful save', async () => {
+  let resolveGet!: (value: Settings) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  vi.spyOn(api, 'replaceSettings').mockResolvedValue({ ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } })
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  const onSettings = vi.fn()
+  render(<MemoryRouter><SettingsDrawer settings={settings} onSettings={onSettings}
+    onClose={() => undefined} /></MemoryRouter>)
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  expect(await screen.findByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+  await act(async () => { resolveGet(settings) })
+  expect(screen.getByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
+  expect(onSettings).toHaveBeenCalledTimes(1)
+  expect(onSettings).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }))
+})
+
+it('discards a unit preview response after the selection changes', async () => {
+  vi.spyOn(api, 'settings').mockResolvedValue(settings)
+  let resolve!: (value: UnitPreview) => void
+  vi.spyOn(api, 'previewUnitPolicy').mockReturnValue(new Promise<UnitPreview>((done) => { resolve = done }))
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  const unit = screen.getByLabelText(/Discharge \(usgs:00060\)/)
+  fireEvent.change(unit, { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  fireEvent.change(unit, { target: { value: 'ft3_s' } })
+  await act(async () => { resolve(unitPreview) })
+  expect(screen.queryByText('Server unit preview')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Confirm unit policy' })).not.toBeInTheDocument()
+})
+
 it('preserves an unsaved defaults draft after a unit policy refresh', async () => {
   vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce({ ...settings,
     revision: 1, unit_policy: { ...settings.unit_policy, version: 2,
