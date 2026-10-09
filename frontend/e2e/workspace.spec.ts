@@ -110,6 +110,50 @@ test('map renders saved topology status, labels and a frozen running halo', asyn
   await expect(map).toHaveScreenshot('cancelled-topology.png', { animations: 'disabled' })
 })
 
+test('map loads referenced topology in live and history views', async ({ page }) => {
+  const runId = '00000000-0000-4000-8000-000000000021'
+  const itemId = '00000000-0000-4000-8000-000000000022'
+  const time = '2026-10-08T00:00:00Z'
+  const views: string[] = []
+  const graph = { nodes: [{ comid: '123', point: { latitude: 39, longitude: -97 }, participation: 'active' }], geometries: {} }
+  await page.route(/\/api\/settings$/, async (route) => route.fulfill({ json: settings }))
+  await page.route('**/api/analysis/runs?limit=50', async (route) => route.fulfill({ json: { items: [], next_cursor: null } }))
+  await page.route(/\/api\/analysis\/runs\/[^/]+\/events$/, async (route) => route.fulfill({
+    status: 200, contentType: 'text/event-stream',
+    body: `event: run_snapshot\ndata: ${JSON.stringify({
+      schema_version: 1, run_id: runId, status: 'running', analysis_phase: 'topology',
+      created_at: time, updated_at: time, context_ref: null, topology_ref: { run_id: runId, item_id: itemId }, result_ref: null,
+      summary: { status: 'not_started', session_id: null, result_ref: null, error: null },
+      graph_outcome: { coverage: null, usable_nodes: 0, insufficient_nodes: 0, invalid_nodes: 0, cancelled_nodes: 0 },
+      sessions: [], waterbodies: [], persistence: { state: 'pending', warning: null },
+    })}\n\nevent: stream_end\ndata: ${JSON.stringify({ run_id: runId, stream: 'run' })}\n\n`,
+  }))
+  await page.route(/\/api\/analysis\/runs\/[^/?]+\?view=(auto|history)$/, async (route) => {
+    const historical = route.request().url().endsWith('view=history')
+    await route.fulfill({ json: {
+      run: { run_id: runId, status: historical ? 'completed' : 'running', query: 'Referenced topology',
+        created_at: time, updated_at: time, context_summary: null, result_ref: null, result_summary: null },
+      source: historical ? 'postgresql' : 'live', sessions: [], items: [{
+        item_id: itemId, content_type: 'topology_ready', content_ref: { run_id: runId, item_id: itemId },
+        content: { kind: 'reference', preview_head: '{', preview_tail: '}' },
+      }], referenced_items: [], issues: [], persistence: { state: 'saved', warning: null },
+    } })
+  })
+  await page.route(/\/api\/analysis\/runs\/[^/]+\/transcript\/[^/]+\/content\?view=(auto|history)$/, async (route) => {
+    views.push(new URL(route.request().url()).searchParams.get('view') ?? '')
+    await route.fulfill({ json: { run_id: runId, item_id: itemId, text: JSON.stringify(graph) } })
+  })
+  await page.route(/tile\.openstreetmap\.org/, async (route) => route.fulfill({ status: 200, contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9Z9b0WQAAAABJRU5ErkJggg==', 'base64') }))
+
+  await page.goto(`/runs/${runId}`)
+  await expect(page.getByRole('region', { name: 'Topology map' }).getByRole('button', { name: /COMID 123/ })).toBeVisible()
+  await page.goto(`/history?run=${runId}`)
+  await expect(page.getByRole('region', { name: 'Topology map' }).getByRole('button', { name: /COMID 123/ })).toBeVisible()
+  expect(views).toContain('auto')
+  expect(views).toContain('history')
+})
+
 test('create, live run, selected agent, cancel and saved history share the public surface', async ({ page }) => {
   const runId = '00000000-0000-4000-8000-000000000011'
   const sessionId = '00000000-0000-4000-8000-000000000012'

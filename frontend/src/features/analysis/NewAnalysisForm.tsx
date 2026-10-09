@@ -1,11 +1,12 @@
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { api, ApiError, prepareSubmission, type CreateRequest, type Settings, type Submission } from '../../api/http'
 
 type Model = CreateRequest['parser_model']
 
-export function NewAnalysisForm({ settings, mapPoint, onCreated }: {
+export function NewAnalysisForm({ settings, mapPoint, onClearMapPoint, onCreated }: {
   settings: Settings
   mapPoint: { latitude: number; longitude: number } | null
+  onClearMapPoint: () => void
   onCreated: (runId: string) => void
 }) {
   const [query, setQuery] = useState('')
@@ -21,6 +22,15 @@ export function NewAnalysisForm({ settings, mapPoint, onCreated }: {
   const [pending, setPending] = useState(false)
   const [retry, setRetry] = useState<Submission | null>(null)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (mapPoint) {
+      setComid('')
+      setLatitude('')
+      setLongitude('')
+      setError('')
+    }
+  }, [mapPoint])
 
   const modelOptions = (role: 'query_parser' | 'waterbody') => settings.catalog.models
     .filter((option) => option.roles.includes(role) && option.available)
@@ -75,12 +85,20 @@ export function NewAnalysisForm({ settings, mapPoint, onCreated }: {
 
   return <form className="new-analysis" onSubmit={start}>
     <h2>New analysis</h2>
-    <label>Target COMID<input value={comid} onChange={(event) => setComid(event.target.value)} inputMode="numeric" placeholder="Optional" /></label>
+    <label>Target COMID<input value={comid} onChange={(event) => {
+      setComid(event.target.value)
+      setLatitude(''); setLongitude(''); onClearMapPoint()
+    }} inputMode="numeric" placeholder="Optional" /></label>
     <div className="form-row">
-      <label>Latitude<input value={latitude} onChange={(event) => setLatitude(event.target.value)} type="number" step="any" min="-90" max="90" /></label>
-      <label>Longitude<input value={longitude} onChange={(event) => setLongitude(event.target.value)} type="number" step="any" min="-180" max="180" /></label>
+      <label>Latitude<input value={latitude} onChange={(event) => {
+        setLatitude(event.target.value); setComid(''); onClearMapPoint()
+      }} type="number" step="any" min="-90" max="90" /></label>
+      <label>Longitude<input value={longitude} onChange={(event) => {
+        setLongitude(event.target.value); setComid(''); onClearMapPoint()
+      }} type="number" step="any" min="-180" max="180" /></label>
     </div>
-    {mapPoint && <p className="muted">Map point: {mapPoint.latitude.toFixed(4)}, {mapPoint.longitude.toFixed(4)}</p>}
+    {mapPoint && <p className="muted">Map point: {mapPoint.latitude.toFixed(4)}, {mapPoint.longitude.toFixed(4)}
+      <button type="button" onClick={onClearMapPoint}>Clear map point</button></p>}
     <label>Question<textarea value={query} onChange={(event) => setQuery(event.target.value)} required rows={4} placeholder="What should we examine?" /></label>
     <label>Parser model{modelSelect('query_parser', parserModel, setParserModel)}</label>
     <label>Waterbody model{modelSelect('waterbody', waterbodyModel, setWaterbodyModel)}</label>

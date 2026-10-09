@@ -36,6 +36,12 @@ export function graphFromDetail(detail: RunDetail | null): Graph | null {
   return graph(body) ? body : null
 }
 
+export function graphFromText(text: string): Graph | null {
+  let value: unknown
+  try { value = JSON.parse(text) } catch { return null }
+  return graph(value) ? value : null
+}
+
 export function inferenceFromText(text: string, runId: string, sessionId: string): InferenceResult | null {
   let value: unknown
   try { value = JSON.parse(text) } catch { return null }

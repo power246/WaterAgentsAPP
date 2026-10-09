@@ -23,7 +23,7 @@ function PickPoint({ onPick }: { onPick?: (latitude: number, longitude: number) 
   return null
 }
 
-export function TopologyMap({ graph, snapshot, sessions, runStatus, selectedSessionId, onSelect, onPick }: {
+export function TopologyMap({ graph, snapshot, sessions, runStatus, selectedSessionId, onSelect, onPick, topologyMessage }: {
   graph: Graph | null
   snapshot: RunSnapshot | null
   sessions?: RunDetail['sessions']
@@ -31,6 +31,7 @@ export function TopologyMap({ graph, snapshot, sessions, runStatus, selectedSess
   selectedSessionId: string | null
   onSelect: (comid: string, sessionId: string | null) => void
   onPick?: (latitude: number, longitude: number) => void
+  topologyMessage?: string
 }) {
   const nodes = graph?.nodes ?? []
   const located = useMemo(() => (graph?.nodes ?? []).map((node) => {
@@ -40,7 +41,7 @@ export function TopologyMap({ graph, snapshot, sessions, runStatus, selectedSess
   }).filter((value) => value !== null), [graph])
   const points: [number, number][] = useMemo(() => located.map(({ point }) => [point.latitude, point.longitude]), [located])
   return <section className="map-panel" aria-label="Topology map">
-    <div className="panel-title"><h2>Topology</h2><span>{nodes.length ? `${nodes.length} waterbodies` : 'No topology yet'}</span></div>
+    <div className="panel-title"><h2>Topology</h2><span>{nodes.length ? `${nodes.length} waterbodies` : topologyMessage ?? 'No topology yet'}</span></div>
     <div className="map-frame">
       <MapContainer center={[39, -97]} zoom={4} scrollWheelZoom className="map-canvas">
         <TileLayer attribution='&copy; OpenStreetMap contributors' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />

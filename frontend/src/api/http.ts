@@ -306,8 +306,8 @@ export class ApiClient {
     return this.send(`/api/analysis/runs/${encodeURIComponent(runId)}/sessions/${encodeURIComponent(sessionId)}/transcript?view=${view}`, 'GET', sessionTranscript, { signal })
   }
 
-  content(runId: string, itemId: string, view: 'auto' | 'history' = 'auto'): Promise<ContentResponse> {
-    return this.send(`/api/analysis/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(itemId)}/content?view=${view}`, 'GET', transcriptContent)
+  content(runId: string, itemId: string, view: 'auto' | 'history' = 'auto', signal?: AbortSignal): Promise<ContentResponse> {
+    return this.send(`/api/analysis/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(itemId)}/content?view=${view}`, 'GET', transcriptContent, { signal })
   }
 
   cancel(runId: string): Promise<Schema<'RunStatusResponse'>> {

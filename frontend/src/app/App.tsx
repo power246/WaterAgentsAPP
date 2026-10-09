@@ -7,7 +7,8 @@ import { DetailPanel, type DetailTab } from '../features/analysis/DetailPanel'
 import { NewAnalysisForm } from '../features/analysis/NewAnalysisForm'
 import { TopologyMap } from '../features/analysis/TopologyMap'
 import { TimeSeries } from '../features/analysis/TimeSeries'
-import { graphFromDetail, inferenceFromText, summaryFromText, type InferenceResult, type RunSummaryResult } from '../features/analysis/models'
+import { graphFromDetail, graphFromText, inferenceFromText, summaryFromText,
+  type Graph, type InferenceResult, type RunSummaryResult } from '../features/analysis/models'
 import { emptyRun, emptyTranscript, runReducer, transcriptReducer } from '../features/analysis/state'
 import { DeleteRun } from '../features/history/DeleteRun'
 import { HistoryList } from '../features/history/HistoryList'
@@ -36,9 +37,33 @@ function Workspace({ mode }: { mode: Mode }) {
   const [historyReleased, setHistoryReleased] = useState(false)
   const [selectedComid, setSelectedComid] = useState<string | null>(null)
   const [mapPoint, setMapPoint] = useState<{ latitude: number; longitude: number } | null>(null)
+  const [loadedTopology, setLoadedTopology] = useState<{ key: string; graph: Graph | null; error: string | null } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [historyVersion, setHistoryVersion] = useState(0)
   const historical = mode === 'history' || historyReleased
+  const currentDetail = run.detail?.run.run_id === runId ? run.detail : null
+  const topologyItem = currentDetail?.items.find((item) => item.content_type === 'topology_ready')
+  const topologyRef = topologyItem?.content.kind === 'reference' ? topologyItem.content_ref : null
+  const topologyRunId = topologyRef?.run_id
+  const topologyItemId = topologyRef?.item_id
+  const topologyView = historical ? 'history' : 'auto'
+  const topologyKey = topologyRunId && topologyItemId ? `${topologyRunId}:${topologyItemId}:${topologyView}` : null
+
+  useEffect(() => {
+    if (!runId || !topologyRunId || !topologyItemId || topologyRunId !== runId || !topologyKey) return
+    const controller = new AbortController()
+    void api.content(topologyRunId, topologyItemId, topologyView, controller.signal)
+      .then((content) => {
+        if (controller.signal.aborted) return
+        const graph = content.run_id === topologyRunId && content.item_id === topologyItemId
+          ? graphFromText(content.text) : null
+        setLoadedTopology({ key: topologyKey, graph, error: graph ? null : 'invalid_topology_content' })
+      }).catch((cause: unknown) => {
+        if (!controller.signal.aborted) setLoadedTopology({ key: topologyKey, graph: null,
+          error: cause instanceof ApiError ? cause.code : 'topology_unavailable' })
+      })
+    return () => controller.abort()
+  }, [runId, topologyRunId, topologyItemId, topologyView, topologyKey])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -166,7 +191,12 @@ function Workspace({ mode }: { mode: Mode }) {
     setMobileTab('map')
   }
 
-  const graph = graphFromDetail(run.detail)
+  const loaded = loadedTopology?.key === topologyKey ? loadedTopology : null
+  const graph = graphFromDetail(currentDetail) ?? loaded?.graph ?? null
+  const topologyMessage = topologyRef && !graph
+    ? topologyRunId !== runId ? 'Topology unavailable: invalid content reference'
+      : loaded?.error ? `Topology unavailable: ${loaded.error}` : 'Loading topology…'
+    : undefined
   const status = run.snapshot?.status ?? run.detail?.run.status ?? 'pending'
   const historyDelete = historical && runId && run.detail?.source === 'postgresql'
   const refresh = () => { if (runId) void loadRun(runId, historical ? 'history' : 'auto') }
@@ -185,7 +215,8 @@ function Workspace({ mode }: { mode: Mode }) {
       <aside className={`controls-panel mobile-${mobileTab}`}>
         {mode === 'history' ? <HistoryList selectedRunId={runId} onSelect={selectHistory} refreshVersion={historyVersion} />
           : settings ? <NewAnalysisForm key={settings.revision} settings={settings}
-            mapPoint={mapPoint} onCreated={(id) => navigate(`/runs/${id}`)} />
+            mapPoint={mapPoint} onClearMapPoint={() => setMapPoint(null)}
+            onCreated={(id) => navigate(`/runs/${id}`)} />
             : <p>{settingsError || 'Loading settings…'}</p>}
         {mode === 'run' && runId && <div className="run-controls">
           <p><strong>Run</strong> {runId}</p>
@@ -199,6 +230,7 @@ function Workspace({ mode }: { mode: Mode }) {
       </aside>
       <div className={`center-panel mobile-${mobileTab}`}>
         <TopologyMap graph={graph} snapshot={run.snapshot} sessions={run.detail?.sessions} runStatus={status}
+          topologyMessage={topologyMessage}
           selectedSessionId={sessionId} onSelect={selectSession}
           onPick={mode === 'home' ? (latitude, longitude) => setMapPoint({ latitude, longitude }) : undefined} />
         {selectedComid && !sessionId && <p className="map-note">COMID {selectedComid}: session not started. Topology and scheduling status are shown on the map.</p>}
