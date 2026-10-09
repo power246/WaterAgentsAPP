@@ -7,28 +7,23 @@ export type RunState = {
   runId: string | null
   snapshot: RunSnapshot | null
   detail: RunDetail | null
-  sseSeen: boolean
 }
 
-export const emptyRun: RunState = { runId: null, snapshot: null, detail: null, sseSeen: false }
+export const emptyRun: RunState = { runId: null, snapshot: null, detail: null }
 
 export type RunAction =
   | { type: 'open'; runId: string }
   | { type: 'sse'; snapshot: RunSnapshot }
-  | { type: 'get'; detail: RunDetail; snapshot?: RunSnapshot }
+  | { type: 'get'; detail: RunDetail }
 
 export function runReducer(state: RunState, action: RunAction): RunState {
   if (action.type === 'open') return { ...emptyRun, runId: action.runId }
   if (action.type === 'sse') {
     if (state.runId !== action.snapshot.run_id) return state
-    return { ...state, snapshot: action.snapshot, sseSeen: true }
+    return { ...state, snapshot: action.snapshot }
   }
   if (state.runId !== action.detail.run.run_id) return state
-  return {
-    ...state,
-    detail: action.detail,
-    snapshot: state.sseSeen ? state.snapshot : action.snapshot ?? state.snapshot,
-  }
+  return { ...state, detail: action.detail }
 }
 
 export type ProcessItem = {

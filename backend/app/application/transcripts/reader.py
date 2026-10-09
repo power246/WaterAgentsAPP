@@ -379,23 +379,6 @@ class TranscriptReader:
             items=self._visible_items(self._parse_items(selected.stored), view),
         )
 
-    async def read_registered_session_items(
-        self,
-        run_id: UUID,
-        session_id: UUID,
-        view: ReadView,
-    ) -> tuple[ReadTranscriptItem, ...]:
-        selected = await self._select(run_id, view)
-        self._session(selected.stored, session_id)
-        return tuple(
-            item
-            for item in self._visible_items(
-                self._parse_items(selected.stored),
-                view,
-            )
-            if item.item.session_id == session_id and item.body is not None
-        )
-
     async def get_historical_status(self, run_id: UUID) -> RunStatusResponse:
         selected = await self._select(run_id, ReadView.HISTORY)
         run = selected.stored.run

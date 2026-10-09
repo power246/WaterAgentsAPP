@@ -27,8 +27,7 @@ describe('feature state ownership', () => {
   it('keeps a received SSE replacement when an older GET returns late', () => {
     const opened = runReducer(emptyRun, { type: 'open', runId })
     const streamed = runReducer(opened, { type: 'sse', snapshot })
-    const late = runReducer(streamed, { type: 'get', detail,
-      snapshot: { ...snapshot, status: 'pending' } })
+    const late = runReducer(streamed, { type: 'get', detail })
     expect(late.snapshot?.status).toBe('running')
     expect(late.detail?.run.query).toBe('Original question')
     expect(runReducer(late, { type: 'sse', snapshot: { ...snapshot, status: 'completed', persistence: { state: 'retry_exhausted', warning: null } } }).snapshot?.persistence.state)

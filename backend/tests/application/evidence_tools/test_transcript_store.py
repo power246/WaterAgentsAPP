@@ -385,12 +385,12 @@ async def test_evidence_content_uses_existing_writer_reader_history_and_session_
             session.session_id,
             ReadView.AUTO,
         )
-        registered_items = (
-            await application.state.transcript_reader.read_registered_session_items(
-                created.run_id,
-                session.session_id,
-                ReadView.AUTO,
-            )
+        registered = await application.state.transcript_reader.read_registered_run(
+            created.run_id, ReadView.AUTO,
+        )
+        registered_items = tuple(
+            item for item in registered.items
+            if item.item.session_id == session.session_id and item.body is not None
         )
         assert tuple(item.item.item_id for item in registered_items) == tuple(
             item.item_id for item in session_read.items
