@@ -162,7 +162,9 @@ class RAGSearchSession:
         self._embedding_cache: dict[tuple[str, str], EmbeddingVector] = {}
 
     def rebind(self, scope: EvidenceSessionScope) -> RAGSearchSession:
-        updated = RAGSearchSession(service=self._service, scope=scope)
+        updated = RAGSearchSession(
+            service=self._service, scope=scope, embedding=self._embedding
+        )
         updated._embedding_cache = self._embedding_cache
         return updated
 

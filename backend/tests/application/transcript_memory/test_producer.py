@@ -149,11 +149,13 @@ def test_producer_propagates_only_append_only_rules_to_existing_search_session()
     with pytest.raises(ValueError, match="extend"):
         producer.prepare_scope(scope)
 
-    bound = RAGSearchSession(service=object(), scope=scope)
+    embedding = object()
+    bound = RAGSearchSession(service=object(), scope=scope, embedding=embedding)
     bound._embedding_cache[("profile", "query")] = object()
     rebound = bound.rebind(updated)
     assert rebound._scope == updated
     assert bound._scope == scope
+    assert rebound._embedding is embedding
     assert rebound._embedding_cache is bound._embedding_cache
 
 
