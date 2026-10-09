@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, ApiError, type Defaults, type KeyStatus, type Settings, type UnitEntry, type UnitPreview } from '../../api/http'
+import { api, ApiError, confirmedRequestRejected, prepareConfirmation, type Defaults,
+  type KeyStatus, type Settings, type Submission, type UnitEntry, type UnitPreview } from '../../api/http'
 
 function safeError(cause: unknown): string {
   return cause instanceof ApiError ? `${cause.code}${cause.requestId ? ` (${cause.requestId})` : ''}` : 'Service unavailable'
@@ -67,6 +68,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const [unitEntries, setUnitEntries] = useState<UnitEntry[]>(settings.unit_policy.entries)
   const [unitPreview, setUnitPreview] = useState<UnitPreview | null>(null)
   const [unitPhrase, setUnitPhrase] = useState('')
+  const [unitAttempt, setUnitAttempt] = useState<Submission | null>(null)
   const [conflict, setConflict] = useState<Settings | null>(null)
   const [keys, setKeys] = useState<KeyStatus[]>([])
   const [keysError, setKeysError] = useState('')
@@ -126,6 +128,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   }
 
   async function previewUnits() {
+    if (unitAttempt) return
     setBusy(true); setError(''); setUnitPreview(null); setUnitPhrase('')
     try { setUnitPreview(await api.previewUnitPolicy(server.unit_policy.version, unitEntries)) }
     catch (cause) { setError(safeError(cause)) }
@@ -133,22 +136,33 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   }
 
   async function confirmUnits() {
-    if (!unitPreview?.confirmation || unitPhrase !== unitPreview.confirmation.required_phrase) return
+    if (!unitPreview?.confirmation || (!unitAttempt && unitPhrase !== unitPreview.confirmation.required_phrase)) return
+    const submission = unitAttempt ?? prepareConfirmation(unitPreview.confirmation.token, unitPhrase)
+    setUnitAttempt(submission)
     setBusy(true); setError('')
     try {
-      await api.confirmUnitPolicy(unitPreview.confirmation.token, unitPhrase)
-      const current = await api.settings()
-      setServer(current); setDraft(current.defaults); setRevision(current.revision)
-      setUnitEntries(current.unit_policy.entries); setUnitPreview(null); setUnitPhrase('')
-      onSettings(current)
+      await api.confirmUnitPolicy(submission)
+      setUnitAttempt(null); setUnitPreview(null); setUnitPhrase('')
       setNotice('Unit policy saved for future runs.')
     } catch (cause) {
-      setUnitPreview(null); setUnitPhrase('')
-      setError(`${safeError(cause)}. Request a new unit preview before confirming again.`)
+      if (confirmedRequestRejected(cause)) {
+        setUnitAttempt(null); setUnitPreview(null); setUnitPhrase('')
+        setError(`${safeError(cause)}. Request a new unit preview before confirming again.`)
+      } else setError(`${safeError(cause)}. Response unknown; retry this confirmation with the same request.`)
+      setBusy(false)
+      return
+    }
+    try {
+      const current = await api.settings()
+      setServer(current); setDraft(current.defaults); setRevision(current.revision)
+      setUnitEntries(current.unit_policy.entries); onSettings(current)
+    } catch (cause) {
+      setError(`${safeError(cause)}. Unit policy was accepted; reopen Settings to refresh current values.`)
     } finally { setBusy(false) }
   }
 
   function updateUnit(parameter: UnitEntry['parameter'], target: string) {
+    if (unitAttempt) return
     setUnitEntries((current) => current.map((entry) => entry.parameter.code_system === parameter.code_system &&
       entry.parameter.code === parameter.code ? { ...entry, target_unit_id: target } : entry))
     setUnitPreview(null); setUnitPhrase('')
@@ -195,13 +209,13 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
             entry.parameter.code === option.parameter.code)
           return <label key={`${option.parameter.code_system}:${option.parameter.code}`}>
             {option.name} ({option.parameter.code_system}:{option.parameter.code})
-            <select value={selected?.target_unit_id ?? option.source_unit_id}
+            <select value={selected?.target_unit_id ?? option.source_unit_id} disabled={Boolean(unitAttempt)}
               onChange={(event) => updateUnit(option.parameter, event.target.value)}>
               {option.target_units.map((unit) => <option key={unit.unit_id} value={unit.unit_id}>{unit.symbol} · {unit.unit_id}</option>)}
             </select>
           </label>
         })}</div>
-        <button type="button" disabled={busy || !server.catalog.unit_options?.length || !unitsDirty}
+        <button type="button" disabled={busy || Boolean(unitAttempt) || !server.catalog.unit_options?.length || !unitsDirty}
           onClick={() => void previewUnits()}>Preview unit policy</button>
         {unitPreview && <div className="unit-preview">
           <h4>Server unit preview</h4>
@@ -211,9 +225,9 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
             {change.parameter.code_system}:{change.parameter.code} · {change.previous_unit_id ?? 'none'} → {change.target_unit_id}
           </li>)}</ul>
           {unitPreview.confirmation && <><p>Enter <strong>{unitPreview.confirmation.required_phrase}</strong> to confirm.</p>
-            <input aria-label="Unit confirmation phrase" value={unitPhrase} onChange={(event) => setUnitPhrase(event.target.value)} />
+            <input aria-label="Unit confirmation phrase" value={unitPhrase} disabled={Boolean(unitAttempt)} onChange={(event) => setUnitPhrase(event.target.value)} />
             <button type="button" disabled={busy || unitPhrase !== unitPreview.confirmation.required_phrase}
-              onClick={() => void confirmUnits()}>Confirm unit policy</button></>}
+              onClick={() => void confirmUnits()}>{unitAttempt ? 'Retry unit confirmation' : 'Confirm unit policy'}</button></>}
         </div>}
       </section>
       <section><h3>Memory / RAG</h3>

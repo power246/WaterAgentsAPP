@@ -63,7 +63,28 @@ it('requires second dependency preview and server phrase, then tracks accepted o
   expect(confirm).toBeDisabled()
   fireEvent.change(screen.getByRole('textbox', { name: 'Admin confirmation phrase' }), { target: { value: 'DELETE 2 RUNS' } })
   fireEvent.click(confirm)
-  await waitFor(() => expect(execute).toHaveBeenCalledWith('history_cleanup', 'server-token', 'DELETE 2 RUNS', undefined))
+  await waitFor(() => expect(execute).toHaveBeenCalledWith('history_cleanup', expect.objectContaining({
+    key: expect.any(String), bytes: JSON.stringify({ confirmation_token: 'server-token', confirmation_phrase: 'DELETE 2 RUNS' }),
+  }), undefined))
+  expect(await screen.findByText(/accepted. You may leave this page/)).toBeInTheDocument()
+})
+
+it('replays the exact Admin request after an unknown response', async () => {
+  vi.spyOn(api, 'previewHistoryCleanup').mockResolvedValue({ ...preview, cascade_authorized: true,
+    confirmation: { token: 'server-token', required_phrase: 'DELETE 2 RUNS', expires_at: time } })
+  const execute = vi.spyOn(api, 'executeAdmin').mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce(operation)
+  setup()
+  await screen.findByText(/Saved river/)
+  fireEvent.click(screen.getByRole('checkbox', { name: /Saved river/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Preview history cleanup' }))
+  await screen.findByRole('textbox', { name: 'Admin confirmation phrase' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Admin confirmation phrase' }), { target: { value: 'DELETE 2 RUNS' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Execute confirmed operation' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Response unknown')
+  fireEvent.click(screen.getByRole('button', { name: 'Retry confirmed operation' }))
+  await waitFor(() => expect(execute).toHaveBeenCalledTimes(2))
+  expect(execute.mock.calls[1]).toEqual(execute.mock.calls[0])
   expect(await screen.findByText(/accepted. You may leave this page/)).toBeInTheDocument()
 })
 

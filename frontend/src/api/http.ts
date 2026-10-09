@@ -156,6 +156,16 @@ export function prepareSubmission(body: CreateRequest): Submission {
   return Object.freeze({ key: crypto.randomUUID(), bytes: JSON.stringify(body) })
 }
 
+export function prepareConfirmation(token: string, phrase: string): Submission {
+  return Object.freeze({ key: crypto.randomUUID(),
+    bytes: JSON.stringify({ confirmation_token: token, confirmation_phrase: phrase }) })
+}
+
+export function confirmedRequestRejected(cause: unknown): boolean {
+  return cause instanceof ApiError && cause.status >= 400 && cause.status < 500 &&
+    !['invalid_content_type', 'invalid_json', 'invalid_response'].includes(cause.code)
+}
+
 export class ApiClient {
   constructor(private readonly fetcher: typeof fetch = (...args) => fetch(...args)) {}
 
@@ -211,10 +221,9 @@ export class ApiClient {
     })
   }
 
-  confirmUnitPolicy(token: string, phrase: string): Promise<UnitPolicy> {
+  confirmUnitPolicy(submission: Submission): Promise<UnitPolicy> {
     return this.send('/api/settings/unit-policies', 'POST', unitPolicy, {
-      body: JSON.stringify({ confirmation_token: token, confirmation_phrase: phrase }),
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: submission.bytes, headers: { 'Idempotency-Key': submission.key },
     })
   }
 
@@ -267,15 +276,14 @@ export class ApiClient {
     return this.send(`/api/admin/rag/generations/${encodeURIComponent(generationId)}/deletion-preview`, 'POST', generationPreview)
   }
 
-  executeAdmin(kind: AdminKind, token: string, phrase: string, generationId?: string): Promise<AdminOperation> {
+  executeAdmin(kind: AdminKind, submission: Submission, generationId?: string): Promise<AdminOperation> {
     const generation = generationId ? encodeURIComponent(generationId) : ''
     const path: `/api/${string}` = kind === 'history_cleanup' ? '/api/admin/history-cleanups'
       : kind === 'profile_handoff' ? '/api/admin/rag/profile-handoffs'
         : kind === 'retry_failed_jobs' ? `/api/admin/rag/generations/${generation}/failed-jobs/retries`
           : `/api/admin/rag/generations/${generation}/deletions`
     return this.send(path, 'POST', adminOperation, {
-      body: JSON.stringify({ confirmation_token: token, confirmation_phrase: phrase }),
-      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: submission.bytes, headers: { 'Idempotency-Key': submission.key },
     })
   }
 
@@ -322,8 +330,8 @@ export class ApiClient {
     return this.previewHistoryCleanup({ kind: 'runs', run_ids: [runId] }, cascadeConsumers)
   }
 
-  executeRunCleanup(token: string, phrase: string): Promise<AdminOperation> {
-    return this.executeAdmin('history_cleanup', token, phrase)
+  executeRunCleanup(submission: Submission): Promise<AdminOperation> {
+    return this.executeAdmin('history_cleanup', submission)
   }
 
   operation(operationId: string, signal?: AbortSignal): Promise<AdminOperation> {

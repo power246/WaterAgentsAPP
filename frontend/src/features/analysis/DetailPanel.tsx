@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api, ApiError, type RunDetail, type RunSnapshot, type TranscriptItem } from '../../api/http'
 import type { ProcessItem } from './state'
 import type { InferenceResult, RunSummaryResult } from './models'
@@ -23,9 +23,12 @@ function safeContent(item: TranscriptItem): string {
   return JSON.stringify(body, null, 2)
 }
 
-function RecordView({ entry, runId, historical }: { entry: ProcessItem; runId: string; historical?: boolean }) {
+function RecordView({ entry, runId, readView }: { entry: ProcessItem; runId: string; readView: 'auto' | 'history' }) {
   const [full, setFull] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [controller, setController] = useState<AbortController | null>(null)
+  useEffect(() => () => controller?.abort(), [controller])
   const item = entry.finalized
   const message = entry.header.content_type === 'waterbody_agent_message'
   if (!visibleRecords.has(entry.header.content_type)) return null
@@ -34,10 +37,13 @@ function RecordView({ entry, runId, historical }: { entry: ProcessItem; runId: s
   const body = <>
     <p className="record-meta">{entry.header.occurred_at} · {item?.parse_status ?? (entry.generationStatus || 'generating')}</p>
     <pre>{(full ?? preview) || 'Generating…'}</pre>
-    {item?.content.kind === 'reference' && <button type="button" onClick={() => {
-      void api.content(runId, item.item_id, historical ? 'history' : 'auto')
-        .then((response) => setFull(response.text))
-        .catch((cause: unknown) => setError(cause instanceof ApiError ? cause.code : 'Content unavailable'))
+    {item?.content.kind === 'reference' && <button type="button" disabled={loading} onClick={() => {
+      const request = new AbortController()
+      setController(request); setLoading(true); setError('')
+      void api.content(runId, item.item_id, readView, request.signal)
+        .then((response) => { if (!request.signal.aborted) setFull(response.text) })
+        .catch((cause: unknown) => { if (!request.signal.aborted) setError(cause instanceof ApiError ? cause.code : 'Content unavailable') })
+        .finally(() => { if (!request.signal.aborted) setLoading(false) })
     }}>Read saved content</button>}
     {error && <p className="error">{error}</p>}
   </>
@@ -50,11 +56,11 @@ function RecordView({ entry, runId, historical }: { entry: ProcessItem; runId: s
 function ReadItem({ item, runId }: { item: TranscriptItem; runId: string }) {
   if (!visibleRecords.has(item.content_type)) return null
   const entry: ProcessItem = { itemId: item.item_id, header: item, finalized: item, delta: '', generationStatus: null }
-  return <RecordView entry={entry} runId={runId} historical />
+  return <RecordView entry={entry} runId={runId} readView="history" />
 }
 
 export function DetailPanel({ runId, snapshot, detail, sessionId, processItems, referencedItems,
-  result, summary, tab, onTab, onRefresh }: {
+  result, summary, readView, tab, onTab, onRefresh }: {
   runId: string | null
   snapshot: RunSnapshot | null
   detail: RunDetail | null
@@ -63,6 +69,7 @@ export function DetailPanel({ runId, snapshot, detail, sessionId, processItems, 
   referencedItems: TranscriptItem[]
   result: InferenceResult | null
   summary: RunSummaryResult | null
+  readView: 'auto' | 'history'
   tab: DetailTab
   onTab: (tab: DetailTab) => void
   onRefresh: () => void
@@ -123,7 +130,7 @@ export function DetailPanel({ runId, snapshot, detail, sessionId, processItems, 
           </div>)}
         </>}
         <h3>Process</h3>
-        {processItems.length ? processItems.map((item) => <RecordView key={item.itemId} entry={item} runId={runId ?? ''} />)
+        {processItems.length ? processItems.map((item) => <RecordView key={`${readView}:${item.itemId}`} entry={item} runId={runId ?? ''} readView={readView} />)
           : <p className="muted">No visible process records.</p>}
       </>}
     </div>}
@@ -131,7 +138,7 @@ export function DetailPanel({ runId, snapshot, detail, sessionId, processItems, 
       <h2>Evidence</h2>
       {!session ? <p>Select a waterbody with a session.</p> : <>
         <h3>Current evidence</h3>
-        {evidence.length ? evidence.map((item) => <RecordView key={item.itemId} entry={item} runId={runId ?? ''} />)
+        {evidence.length ? evidence.map((item) => <RecordView key={`${readView}:${item.itemId}`} entry={item} runId={runId ?? ''} readView={readView} />)
           : <p className="muted">Current evidence unavailable or empty.</p>}
         <h3>Historical context</h3>
         <p className="muted">Historical records are context only and do not replace current observations.</p>

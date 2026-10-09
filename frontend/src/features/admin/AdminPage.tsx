@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, ApiError, type AdminOperation, type AdminRag, type AdminStorage,
-  type CleanupPreview, type GenerationPreview, type ProfilePreview, type RunHistory } from '../../api/http'
+import { api, ApiError, confirmedRequestRejected, prepareConfirmation, type AdminKind,
+  type AdminOperation, type AdminRag, type AdminStorage, type CleanupPreview,
+  type GenerationPreview, type ProfilePreview, type RunHistory, type Submission } from '../../api/http'
 
 type Preview =
   | { kind: 'history_cleanup'; data: CleanupPreview }
   | { kind: 'profile_handoff'; data: ProfilePreview }
   | { kind: 'retry_failed_jobs' | 'generation_deletion'; generationId: string; data: GenerationPreview }
+type Attempt = { kind: AdminKind; generationId?: string; submission: Submission }
 
 function safeError(cause: unknown): string {
   return cause instanceof ApiError ? `${cause.code}${cause.requestId ? ` (${cause.requestId})` : ''}` : 'Service unavailable'
@@ -27,6 +29,7 @@ export function AdminPage() {
   const [allHistory, setAllHistory] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [phrase, setPhrase] = useState('')
+  const [attempt, setAttempt] = useState<Attempt | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -87,6 +90,7 @@ export function AdminPage() {
   }, [operations, visible])
 
   async function prepare(request: () => Promise<Preview>) {
+    if (attempt) return
     setBusy(true); setError(''); setNotice(''); setPreview(null); setPhrase('')
     try { setPreview(await request()) }
     catch (cause) { setError(safeError(cause)) }
@@ -98,18 +102,23 @@ export function AdminPage() {
   }
 
   async function execute() {
-    if (!preview?.data.confirmation || phrase !== preview.data.confirmation.required_phrase) return
-    if (operations.some((item) => active(item) && item.kind === preview.kind)) return
+    if (!preview?.data.confirmation || (!attempt && phrase !== preview.data.confirmation.required_phrase)) return
+    if (!attempt && operations.some((item) => active(item) && item.kind === preview.kind)) return
+    const confirmed = attempt ?? { kind: preview.kind,
+      generationId: 'generationId' in preview ? preview.generationId : undefined,
+      submission: prepareConfirmation(preview.data.confirmation.token, phrase) }
+    setAttempt(confirmed)
     setBusy(true); setError('')
     try {
-      const operation = await api.executeAdmin(preview.kind, preview.data.confirmation.token, phrase,
-        'generationId' in preview ? preview.generationId : undefined)
+      const operation = await api.executeAdmin(confirmed.kind, confirmed.submission, confirmed.generationId)
       setOperations((current) => [operation, ...current.filter((item) => item.operation_id !== operation.operation_id)])
-      setPreview(null); setPhrase('')
+      setAttempt(null); setPreview(null); setPhrase('')
       setNotice(`Operation ${operation.operation_id} accepted. You may leave this page; it will continue on the server.`)
     } catch (cause) {
-      setPreview(null); setPhrase('')
-      setError(`${safeError(cause)}. Refresh facts and request a new preview.`)
+      if (confirmedRequestRejected(cause)) {
+        setAttempt(null); setPreview(null); setPhrase('')
+        setError(`${safeError(cause)}. Refresh facts and request a new preview.`)
+      } else setError(`${safeError(cause)}. Response unknown; retry this confirmation with the same request.`)
     } finally { setBusy(false) }
   }
 
@@ -157,7 +166,7 @@ export function AdminPage() {
           {run.query} · {run.run_id}
         </label>)}</div>}
         {!allHistory && historyCursor && <button type="button" disabled={busy} onClick={() => void moreHistory()}>Load more saved runs</button>}
-        <button type="button" disabled={busy || (!allHistory && !selected.length)} onClick={() => void prepare(async () => ({
+        <button type="button" disabled={busy || Boolean(attempt) || (!allHistory && !selected.length)} onClick={() => void prepare(async () => ({
           kind: 'history_cleanup', data: await api.previewHistoryCleanup(historySelection(), false),
         }))}>Preview history cleanup</button>
       </section>
@@ -166,7 +175,7 @@ export function AdminPage() {
           <p>Phase: {rag.handoff.phase} · active {rag.handoff.active_generation_id ?? 'none'} · building {rag.handoff.building_generation_id ?? 'none'}</p>
           <p>Blocking readers: {rag.handoff.blocking_reader_count}; credential cleanup ready: {String(rag.handoff.old_credential_cleanup_ready)}</p></>
           : <p className="muted">RAG status unavailable.</p>}
-        <button type="button" disabled={busy || !rag} onClick={() => void prepare(async () => ({
+        <button type="button" disabled={busy || Boolean(attempt) || !rag} onClick={() => void prepare(async () => ({
           kind: 'profile_handoff', data: await api.previewProfileHandoff(),
         }))}>Preview profile handoff</button>
       </section>
@@ -177,12 +186,12 @@ export function AdminPage() {
           <p>Jobs: {generation.job_counts.completed} completed, {generation.job_counts.failed} failed,
             {generation.job_counts.pending} pending, {generation.job_counts.retry_wait} retry wait</p>
           {generation.status === 'building' && generation.job_counts.failed > 0 && generation.last_safe_error_code &&
-            <button type="button" disabled={busy} onClick={() => void prepare(async () => ({
+            <button type="button" disabled={busy || Boolean(attempt)} onClick={() => void prepare(async () => ({
               kind: 'retry_failed_jobs', generationId: generation.generation_id,
               data: await api.previewFailedJobs(generation.generation_id, [generation.last_safe_error_code!], 25),
             }))}>Preview failed jobs retry</button>}
           {(generation.status === 'retired' || generation.status === 'failed') &&
-            <button type="button" disabled={busy} onClick={() => void prepare(async () => ({
+            <button type="button" disabled={busy || Boolean(attempt)} onClick={() => void prepare(async () => ({
               kind: 'generation_deletion', generationId: generation.generation_id,
               data: await api.previewGenerationDeletion(generation.generation_id),
             }))}>Preview inactive generation deletion</button>}
@@ -195,7 +204,7 @@ export function AdminPage() {
           <p>Dependent links: {preview.data.dependencies.length}; cascade required: {String(preview.data.cascade_required)}</p>
           <p>Delete order: {preview.data.delete_order.join(', ') || 'none'}</p>
           <p>Preserved: {preview.data.preserved.join(', ')}</p>
-          {preview.data.cascade_required && !preview.data.cascade_authorized && <button type="button" disabled={busy}
+          {preview.data.cascade_required && !preview.data.cascade_authorized && <button type="button" disabled={busy || Boolean(attempt)}
             onClick={() => void prepare(async () => ({ kind: 'history_cleanup',
               data: await api.previewHistoryCleanup(historySelection(), true) }))}>Preview whole-run cascade</button>}
         </>}
@@ -207,10 +216,10 @@ export function AdminPage() {
             Active readers and retention are checked by the server.</p>}
         {preview.data.confirmation ? <>
           <p>Enter <strong>{preview.data.confirmation.required_phrase}</strong> to confirm.</p>
-          <input aria-label="Admin confirmation phrase" value={phrase} onChange={(event) => setPhrase(event.target.value)} />
+          <input aria-label="Admin confirmation phrase" value={phrase} disabled={Boolean(attempt)} onChange={(event) => setPhrase(event.target.value)} />
           <button type="button" disabled={busy || phrase !== preview.data.confirmation.required_phrase ||
-            operations.some((item) => active(item) && item.kind === preview.kind)}
-            onClick={() => void execute()}>Execute confirmed operation</button>
+            (!attempt && operations.some((item) => active(item) && item.kind === preview.kind))}
+            onClick={() => void execute()}>{attempt ? 'Retry confirmed operation' : 'Execute confirmed operation'}</button>
         </> : <p className="muted">No executable confirmation for these current facts.</p>}
       </section>}
       <section className="admin-card admin-operations"><h2>Active and recent operations</h2>

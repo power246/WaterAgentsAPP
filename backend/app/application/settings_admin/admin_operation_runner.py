@@ -70,19 +70,18 @@ class AdminOperationRunner:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _run_one(self, operation: AdminOperation, command: AdminCommand) -> None:
-        try:
-            running = await self._store.compare_and_swap_state(
-                _next(operation, AdminOperationState.RUNNING, now=self._clock.now()),
-                expected=AdminOperationState.PENDING,
-            )
-        except AdminOperationConflictError:
+        running = await self._persist_state(
+            _next(operation, AdminOperationState.RUNNING, now=self._clock.now()),
+            expected=AdminOperationState.PENDING,
+        )
+        if running is None:
             return
         try:
             result = await self._handle(command)
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            await self._store.compare_and_swap_state(
+            await self._persist_state(
                 _next(running, AdminOperationState.FAILED, now=self._clock.now(),
                       safe_error=_safe_error(error)),
                 expected=AdminOperationState.RUNNING,
@@ -91,11 +90,33 @@ class AdminOperationRunner:
         total = running.progress.total_items or 1
         if command.kind.value == "retry_failed_jobs":
             total = result.retried_jobs
-        await self._store.compare_and_swap_state(
+        await self._persist_state(
             _next(running, AdminOperationState.SUCCEEDED, now=self._clock.now(),
                   safe_result=result, processed=total),
             expected=AdminOperationState.RUNNING,
         )
+
+    async def _persist_state(
+        self, desired: AdminOperation, *, expected: AdminOperationState,
+    ) -> AdminOperation | None:
+        delay = 0.1
+        while True:
+            try:
+                return await self._store.compare_and_swap_state(desired, expected=expected)
+            except AdminOperationConflictError:
+                return None
+            except PortUnavailableError:
+                try:
+                    current = await self._store.get(desired.operation_id)
+                except PortUnavailableError:
+                    current = None
+                if current is not None:
+                    if current.state is desired.state:
+                        return current
+                    if current.state is not expected:
+                        return None
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 5.0)
 
 
 def _next(

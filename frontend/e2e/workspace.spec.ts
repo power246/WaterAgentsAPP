@@ -246,3 +246,90 @@ test('create, live run, selected agent, cancel and saved history share the publi
   expect(runStreams).toBe(1)
   expect(sessionStreams).toBe(1)
 })
+
+test('running Evidence receives the selected session event after switching tabs', async ({ page }) => {
+  const runId = '00000000-0000-4000-8000-000000000031'
+  const sessionId = '00000000-0000-4000-8000-000000000032'
+  const itemId = '00000000-0000-4000-8000-000000000033'
+  const time = '2026-10-08T00:00:00Z'
+  const session = { session_id: sessionId, target_comid: '123', agent_role: 'waterbody', status: 'running',
+    created_at: time, updated_at: time, result_ref: null, result_summary: null }
+  let sessionStreams = 0
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  await page.route(/\/api\/settings$/, async (route) => route.fulfill({ json: settings }))
+  await page.route(/\/api\/analysis\/runs\/[^/]+\/events$/, async (route) => route.fulfill({
+    status: 200, contentType: 'text/event-stream', body: `event: run_snapshot\ndata: ${JSON.stringify({
+      schema_version: 1, run_id: runId, status: 'running', analysis_phase: 'waterbody_execution',
+      created_at: time, updated_at: time, context_ref: null, topology_ref: null, result_ref: null,
+      summary: { status: 'not_started', session_id: null, result_ref: null, error: null },
+      graph_outcome: { coverage: null, usable_nodes: 0, insufficient_nodes: 0, invalid_nodes: 0, cancelled_nodes: 0 },
+      sessions: [session], waterbodies: [], persistence: { state: 'pending', warning: null },
+    })}\n\n`,
+  }))
+  await page.route(/\/api\/analysis\/runs\/[^/]+\/sessions\/[^/]+\/events$/, async (route) => {
+    sessionStreams++
+    await gate
+    const item = { item_id: itemId, run_id: runId, transcript_sequence: 1, occurred_at: time,
+      content_type: 'evidence_fragment', content_schema_version: 1,
+      scope: { session_id: sessionId, agent_role: 'waterbody', target_comid: '123' },
+      correlation: { request_id: null, operation_id: null, error_id: null }, tags: [], rag_eligible: false,
+      content_bytes: 16, content_ref: { run_id: runId, item_id: itemId },
+      content: { kind: 'inline', body: { text: 'Fresh live evidence' } }, parse_status: 'ok',
+      confidence: null, provenance: null, parse_error: null }
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body:
+      `event: transcript_item\nid: 1\ndata: ${JSON.stringify({ schema_version: 1, run_id: runId,
+        session_id: sessionId, sequence: 1, occurred_at: time, payload: { item } })}\n\n` +
+      `event: stream_end\ndata: ${JSON.stringify({ run_id: runId, session_id: sessionId, stream: 'session' })}\n\n` })
+  })
+  await page.goto(`/runs/${runId}/waterbodies/${sessionId}`)
+  await page.getByRole('tab', { name: 'Agent' }).click()
+  await expect.poll(() => sessionStreams).toBe(1)
+  await page.getByRole('tab', { name: 'Evidence' }).click()
+  release()
+  await expect(page.getByText('evidence fragment · 1')).toBeVisible()
+  await page.getByText('evidence fragment · 1').click()
+  await expect(page.getByText('Fresh live evidence')).toBeVisible()
+  expect(sessionStreams).toBe(1)
+})
+
+test('history process content stays on the saved history view', async ({ page }) => {
+  const runId = '00000000-0000-4000-8000-000000000041'
+  const sessionId = '00000000-0000-4000-8000-000000000042'
+  const itemId = '00000000-0000-4000-8000-000000000043'
+  const time = '2026-10-08T00:00:00Z'
+  const contentViews: string[] = []
+  const session = { session_id: sessionId, target_comid: '123', agent_role: 'waterbody', status: 'completed',
+    created_at: time, updated_at: time, result_ref: null, result_summary: null }
+  const item = { item_id: itemId, run_id: runId, transcript_sequence: 1, occurred_at: time,
+    content_type: 'evidence_fragment', content_schema_version: 1,
+    scope: { session_id: sessionId, agent_role: 'waterbody', target_comid: '123' },
+    correlation: { request_id: null, operation_id: null, error_id: null }, tags: [], rag_eligible: false,
+    content_bytes: 20, content_ref: { run_id: runId, item_id: itemId },
+    content: { kind: 'reference', preview_head: 'Saved', preview_tail: 'fragment', truncated: true },
+    parse_status: 'ok', confidence: null, provenance: null, parse_error: null }
+  await page.route(/\/api\/settings$/, async (route) => route.fulfill({ json: settings }))
+  await page.route('**/api/analysis/runs?limit=50', async (route) => route.fulfill({ json: {
+    items: [{ run_id: runId, query: 'Saved river', status: 'completed', created_at: time, updated_at: time,
+      configuration: null, context_summary: null, result_ref: null, result_summary: null, issues: [] }], next_cursor: null,
+  } }))
+  await page.route(/\/api\/analysis\/runs\/[^/?]+\?view=history$/, async (route) => route.fulfill({ json: {
+    run: { run_id: runId, status: 'completed', query: 'Saved river', created_at: time, updated_at: time,
+      context_summary: null, result_ref: null, result_summary: null },
+    source: 'postgresql', sessions: [session], items: [], referenced_items: [], issues: [],
+    persistence: { state: 'saved', warning: null },
+  } }))
+  await page.route(/\/api\/analysis\/runs\/[^/]+\/sessions\/[^/]+\/transcript\?view=history$/, async (route) =>
+    route.fulfill({ json: { run_id: runId, session_id: sessionId, items: [item], referenced_items: [] } }))
+  await page.route(/\/api\/analysis\/runs\/[^/]+\/transcript\/[^/]+\/content\?view=(auto|history)$/, async (route) => {
+    contentViews.push(new URL(route.request().url()).searchParams.get('view') ?? '')
+    await route.fulfill({ json: { run_id: runId, item_id: itemId, content_type: 'evidence_fragment',
+      content_schema_version: 1, content_bytes: 20, text: 'Only saved evidence', issues: [], source: 'postgresql' } })
+  })
+  await page.goto(`/history?run=${runId}&session=${sessionId}`)
+  await page.getByRole('tab', { name: 'Agent' }).click()
+  await page.getByText('evidence fragment · 1').click()
+  await page.getByRole('button', { name: 'Read saved content' }).click()
+  await expect(page.getByText('Only saved evidence')).toBeVisible()
+  expect(contentViews).toEqual(['history'])
+})

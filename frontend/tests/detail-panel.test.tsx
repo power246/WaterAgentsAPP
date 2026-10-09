@@ -33,7 +33,7 @@ it('keeps persistence retry separate from analysis status and shows three tabs',
   const refresh = vi.fn()
   render(<DetailPanel runId={runId} snapshot={snapshot} detail={null} sessionId={sessionId}
     processItems={[]} referencedItems={[]} result={null} summary={null}
-    tab="overview" onTab={() => undefined} onRefresh={refresh} />)
+    readView="auto" tab="overview" onTab={() => undefined} onRefresh={refresh} />)
   expect(screen.getAllByRole('tab')).toHaveLength(3)
   expect(screen.getByText('completed_with_persistence_error', { exact: false })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Retry saving' }))
@@ -45,9 +45,24 @@ it('keeps persistence retry separate from analysis status and shows three tabs',
 it('labels saved historical evidence as context and excludes unrelated records', () => {
   render(<DetailPanel runId={runId} snapshot={snapshot} detail={null} sessionId={sessionId}
     processItems={[]} referencedItems={[historical]} result={null} summary={null}
-    tab="evidence" onTab={() => undefined} onRefresh={() => undefined} />)
+    readView="history" tab="evidence" onTab={() => undefined} onRefresh={() => undefined} />)
   expect(screen.getByText('Historical context')).toBeInTheDocument()
   expect(screen.getByText(/do not replace current observations/)).toBeInTheDocument()
   expect(screen.getByText('evidence fragment · 1')).toBeInTheDocument()
   expect(screen.queryByText(/raw prompt|provider response/i)).not.toBeInTheDocument()
+})
+
+it('reads a process record using the selected history view', async () => {
+  const content = vi.spyOn(api, 'content').mockResolvedValue({ run_id: runId,
+    item_id: historical.item_id, text: 'Saved full evidence', content_type: 'evidence_fragment',
+    content_bytes: 19, content_schema_version: 1, issues: [], source: 'postgresql' })
+  const item: TranscriptItem = { ...historical, content: { kind: 'reference',
+    preview_head: 'Saved', preview_tail: 'evidence', truncated: true } }
+  render(<DetailPanel runId={runId} snapshot={snapshot} detail={null} sessionId={sessionId}
+    processItems={[{ itemId: item.item_id, header: item, finalized: item, delta: '', generationStatus: null }]}
+    referencedItems={[]} result={null} summary={null} readView="history"
+    tab="evidence" onTab={() => undefined} onRefresh={() => undefined} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Read saved content' }))
+  await waitFor(() => expect(content).toHaveBeenCalledWith(runId, item.item_id, 'history', expect.any(AbortSignal)))
+  expect(await screen.findByText('Saved full evidence')).toBeInTheDocument()
 })

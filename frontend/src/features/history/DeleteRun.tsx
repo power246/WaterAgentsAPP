@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, ApiError, type CleanupPreview } from '../../api/http'
+import { api, ApiError, confirmedRequestRejected, prepareConfirmation,
+  type CleanupPreview, type Submission } from '../../api/http'
 
 export function DeleteRun({ runId, onClose, onAccepted }: {
   runId: string
@@ -8,15 +9,17 @@ export function DeleteRun({ runId, onClose, onAccepted }: {
 }) {
   const [preview, setPreview] = useState<CleanupPreview | null>(null)
   const [phrase, setPhrase] = useState('')
+  const [attempt, setAttempt] = useState<Submission | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
   const loadPreview = useCallback(async (cascade: boolean) => {
+    if (attempt) return
     setError('')
     setPhrase('')
     try { setPreview(await api.previewRunCleanup(runId, cascade)) }
     catch (cause) { setError(cause instanceof ApiError ? cause.code : 'Preview unavailable') }
-  }, [runId])
+  }, [runId, attempt])
 
   useEffect(() => { void loadPreview(false) }, [loadPreview])
 
@@ -31,22 +34,28 @@ export function DeleteRun({ runId, onClose, onAccepted }: {
         <p>Preserved: {preview.preserved.join(', ')}</p>
         {preview.delete_run_ids.length > 1 && <ul>{preview.delete_run_ids.map((id) => <li key={id}>{id}</li>)}</ul>}
         {preview.dependencies.length > 0 && <p>Dependent links: {preview.dependencies.length}</p>}
-        {preview.cascade_required && !preview.confirmation && <button type="button" onClick={() => void loadPreview(true)}>Preview whole-run cascade</button>}
+        {preview.cascade_required && !preview.confirmation && <button type="button" disabled={Boolean(attempt)} onClick={() => void loadPreview(true)}>Preview whole-run cascade</button>}
         {preview.confirmation && <>
           <p>Enter <strong>{preview.confirmation.required_phrase}</strong> to confirm.</p>
-          <input aria-label="Confirmation phrase" value={phrase} onChange={(event) => setPhrase(event.target.value)} />
+          <input aria-label="Confirmation phrase" value={phrase} disabled={Boolean(attempt)} onChange={(event) => setPhrase(event.target.value)} />
           <button type="button" disabled={submitting || phrase !== preview.confirmation.required_phrase} onClick={() => {
+            const submission = attempt ?? prepareConfirmation(preview.confirmation!.token, phrase)
+            setAttempt(submission)
             setSubmitting(true)
-            void api.executeRunCleanup(preview.confirmation!.token, phrase)
-              .then(() => onAccepted())
-              .catch((cause: unknown) => { setError(cause instanceof ApiError ? cause.code : 'Delete unavailable'); setPreview(null) })
+            setError('')
+            void api.executeRunCleanup(submission)
+              .then(() => { setAttempt(null); onAccepted() })
+              .catch((cause: unknown) => {
+                if (confirmedRequestRejected(cause)) { setAttempt(null); setPreview(null) }
+                setError(cause instanceof ApiError ? cause.code : 'Delete unavailable')
+              })
               .finally(() => setSubmitting(false))
-          }}>Delete these runs</button>
+          }}>{attempt ? 'Retry deleting these runs' : 'Delete these runs'}</button>
         </>}
       </>}
       <p className="muted">Accepted operations continue and are tracked in Admin.</p>
       {error && <p className="error" role="alert">{error}</p>}
-      {error && <button type="button" onClick={() => void loadPreview(false)}>Preview again</button>}
+      {error && !attempt && <button type="button" onClick={() => void loadPreview(false)}>Preview again</button>}
       <button type="button" onClick={onClose}>Close</button>
     </section>
   </div>

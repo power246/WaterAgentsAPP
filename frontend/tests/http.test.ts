@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ApiClient, ApiError, prepareSubmission, type CreateRequest } from '../src/api/http'
+import { ApiClient, ApiError, prepareConfirmation, prepareSubmission, type CreateRequest } from '../src/api/http'
 
 const request: CreateRequest = {
   query: 'Assess the river', parser_model: { provider: 'openai', model: 'parser' },
@@ -14,6 +14,30 @@ function json(status: number, body: unknown, contentType = 'application/json'): 
 }
 
 describe('typed HTTP policy', () => {
+  it('uses fixed confirmation bytes and key for unit and Admin retries without automatic retry', async () => {
+    const seen: { path: string; body: BodyInit | null | undefined; key: string | null }[] = []
+    let loseResponse = true
+    const client = new ApiClient(async (path, init) => {
+      seen.push({ path: String(path), body: init?.body, key: new Headers(init?.headers).get('Idempotency-Key') })
+      if (loseResponse) { loseResponse = false; throw new TypeError('response lost') }
+      return String(path).includes('unit-policies')
+        ? json(201, { version: 2, entries: [], registry_digest: 'a'.repeat(64) })
+        : json(202, { operation_id: 'operation', state: 'pending' })
+    })
+    const unit = prepareConfirmation('unit-token', 'APPLY UNIT POLICY 2')
+    await expect(client.confirmUnitPolicy(unit)).rejects.toThrow('response lost')
+    expect(seen).toHaveLength(1)
+    await client.confirmUnitPolicy(unit)
+    expect(seen[1]).toEqual(seen[0])
+    expect(seen[0]?.body).toBe(unit.bytes)
+    const admin = prepareConfirmation('admin-token', 'DELETE 2 RUNS')
+    await client.executeRunCleanup(admin)
+    await client.executeRunCleanup(admin)
+    expect(seen[2]).toEqual(seen[3])
+    expect(seen[2]?.body).toBe(admin.bytes)
+    expect(seen[2]?.key).toBe(admin.key)
+  })
+
   it('keeps exact bytes and UUID v4 for a retry of one submission', async () => {
     const seen: { path: string; body: BodyInit | null | undefined; key: string | null }[] = []
     const client = new ApiClient(async (path, init) => {

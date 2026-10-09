@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useState } from 'react'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import { BrowserRouter, Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError, type Settings, type TranscriptItem } from '../api/http'
 import { AdminPage } from '../features/admin/AdminPage'
@@ -34,13 +34,15 @@ function Workspace({ mode }: { mode: Mode }) {
   const [tab, setTab] = useState<DetailTab>('overview')
   const [mobileTab, setMobileTab] = useState<'controls' | 'map' | 'detail'>('controls')
   const [runError, setRunError] = useState('')
-  const [historyReleased, setHistoryReleased] = useState(false)
+  const [historyUrl, setHistoryUrl] = useState<string | null>(null)
+  const runStream = useRef<AbortController | null>(null)
   const [selectedComid, setSelectedComid] = useState<string | null>(null)
   const [mapPoint, setMapPoint] = useState<{ latitude: number; longitude: number } | null>(null)
   const [loadedTopology, setLoadedTopology] = useState<{ key: string; graph: Graph | null; error: string | null } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [historyVersion, setHistoryVersion] = useState(0)
-  const historical = mode === 'history' || historyReleased
+  const historical = mode === 'history' || historyUrl !== null
+  const sessionTabOpen = tab === 'agent' || tab === 'evidence'
   const currentDetail = run.detail?.run.run_id === runId ? run.detail : null
   const topologyItem = currentDetail?.items.find((item) => item.content_type === 'topology_ready')
   const topologyRef = topologyItem?.content.kind === 'reference' ? topologyItem.content_ref : null
@@ -76,6 +78,7 @@ function Workspace({ mode }: { mode: Mode }) {
   const loadRun = useCallback(async (id: string, view: 'auto' | 'history', signal?: AbortSignal, historyUrl?: string) => {
     try {
       const detail = historyUrl ? await api.historyAt(historyUrl, signal) : await api.run(id, view, signal)
+      if (signal?.aborted) return
       dispatchRun({ type: 'get', detail })
       setRunError('')
     } catch (cause) {
@@ -85,7 +88,7 @@ function Workspace({ mode }: { mode: Mode }) {
 
   useEffect(() => {
     dispatchRun({ type: 'open', runId: runId ?? '' })
-    setHistoryReleased(false)
+    setHistoryUrl(null)
     setRunError('')
     setSelectedComid(null)
     if (!runId) return
@@ -93,18 +96,27 @@ function Workspace({ mode }: { mode: Mode }) {
     if (mode === 'history') {
       void loadRun(runId, 'history', controller.signal)
     } else {
+      runStream.current = controller
       void subscribe('run', runId, null, (event) => {
         if (event.name === 'run_snapshot') dispatchRun({ type: 'sse', snapshot: event.data })
       }, controller.signal).catch((cause: unknown) => {
         if (controller.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
-          setHistoryReleased(true)
-          void loadRun(runId, 'history', controller.signal, cause.historyUrl)
+          setHistoryUrl(cause.historyUrl)
         } else setRunError(cause instanceof ApiError ? cause.code : 'Run stream unavailable')
       })
     }
-    return () => controller.abort()
+    return () => { controller.abort(); if (runStream.current === controller) runStream.current = null }
   }, [runId, mode, loadRun])
+
+  useEffect(() => {
+    if (!runId || !historyUrl) return
+    runStream.current?.abort()
+    dispatchRun({ type: 'open', runId })
+    const controller = new AbortController()
+    void loadRun(runId, 'history', controller.signal, historyUrl)
+    return () => controller.abort()
+  }, [runId, historyUrl, loadRun])
 
   const hasRunRefs = Boolean(run.snapshot?.context_ref || run.snapshot?.topology_ref)
   useEffect(() => {
@@ -119,7 +131,7 @@ function Workspace({ mode }: { mode: Mode }) {
     dispatchTranscript({ type: 'open', sessionId: sessionId ?? '' })
     setReferencedItems([])
     setResult(null)
-  }, [runId, sessionId])
+  }, [runId, sessionId, historical])
 
   const sessionStatus = run.snapshot?.sessions.find((item) => item.session_id === sessionId)?.status
     ?? run.detail?.sessions?.find((item) => item.session_id === sessionId)?.status
@@ -130,12 +142,13 @@ function Workspace({ mode }: { mode: Mode }) {
     if (historical || terminal) {
       void api.transcript(runId, sessionId, historical ? 'history' : 'auto', controller.signal)
         .then((data) => {
+          if (controller.signal.aborted) return
           dispatchTranscript({ type: 'history', sessionId, items: data.items ?? [] })
           setReferencedItems(data.referenced_items ?? [])
         }).catch((cause: unknown) => {
           if (!controller.signal.aborted) setRunError(cause instanceof ApiError ? cause.code : 'Transcript unavailable')
         })
-    } else if (sessionStatus && tab === 'agent') {
+    } else if (sessionStatus && sessionTabOpen) {
       void subscribe('session', runId, sessionId, (event) => {
         if (event.name !== 'stream_end' && event.name !== 'run_snapshot') {
           dispatchTranscript({ type: 'event', name: event.name, data: event.data })
@@ -143,15 +156,12 @@ function Workspace({ mode }: { mode: Mode }) {
       }, controller.signal).catch((cause: unknown) => {
         if (controller.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
-          void api.transcript(runId, sessionId, 'history', controller.signal).then((data) => {
-            dispatchTranscript({ type: 'history', sessionId, items: data.items ?? [] })
-            setReferencedItems(data.referenced_items ?? [])
-          }).catch(() => setRunError('History unavailable'))
+          setHistoryUrl(cause.historyUrl)
         } else setRunError(cause instanceof ApiError ? cause.code : 'Session stream unavailable')
       })
     }
     return () => controller.abort()
-  }, [runId, sessionId, historical, tab, sessionStatus])
+  }, [runId, sessionId, historical, sessionTabOpen, sessionStatus, loadRun])
 
   const selectedSession = run.snapshot?.sessions.find((item) => item.session_id === sessionId)
     ?? run.detail?.sessions?.find((item) => item.session_id === sessionId)
@@ -239,7 +249,8 @@ function Workspace({ mode }: { mode: Mode }) {
       <div className={`right-panel mobile-${mobileTab}`}>
         <DetailPanel runId={runId} snapshot={run.snapshot} detail={run.detail}
           sessionId={sessionId} processItems={transcript.items} referencedItems={referencedItems}
-          result={result} summary={summary} tab={tab} onTab={setTab} onRefresh={refresh} />
+          result={result} summary={summary} readView={historical ? 'history' : 'auto'}
+          tab={tab} onTab={setTab} onRefresh={refresh} />
       </div>
     </main>
     {settingsOpen && (settings
