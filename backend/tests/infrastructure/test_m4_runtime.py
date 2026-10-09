@@ -187,7 +187,7 @@ def test_default_app_validates_database_before_m4_and_still_fails_closed(
         "app.main.check_database_schema",
         validate_test_database,
     )
-    application = create_app(AppSettings(_env_file=None))
+    application = create_app(AppSettings(_env_file=None, model_catalog=()))
 
     async def exercise() -> None:
         with pytest.raises(SettingsConfigurationError, match="deployment settings catalog"):

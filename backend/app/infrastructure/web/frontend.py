@@ -34,8 +34,8 @@ class FrontendResponder:
             ) is not None
             cache = "public, max-age=31536000, immutable" if hashed_asset else "no-cache"
             return FileResponse(target, headers={"Cache-Control": cache})
-        if not self.available:
-            raise HTTPException(status_code=503, detail="Frontend unavailable")
         if path and ("text/html" not in request.headers.get("accept", "").lower() or "." in Path(path).name):
             raise HTTPException(status_code=404)
+        if not self.available:
+            raise HTTPException(status_code=503, detail="Frontend unavailable")
         return FileResponse(self.dist / "index.html", media_type="text/html", headers={"Cache-Control": "no-cache"})

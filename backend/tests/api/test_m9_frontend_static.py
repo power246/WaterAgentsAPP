@@ -60,10 +60,16 @@ def test_missing_build_and_traversal_are_bounded(tmp_path) -> None:
                 await client.get("/health"),
                 await client.get("/api/unknown", headers={"Accept": "text/html"}),
                 await client.get("/assets/%2e%2e/secret", headers={"Accept": "text/html"}),
+                await client.get("/missing"),
+                await client.get("/health/"),
+                await client.get("/missing.js", headers={"Accept": "text/html"}),
+                await client.get("/history", headers={"Accept": "text/html"}),
             )
 
-    missing, health, api_missing, traversal = asyncio.run(request())
+    missing, health, api_missing, traversal, unknown, health_slash, asset_missing, navigation = asyncio.run(request())
     assert missing.status_code == 503
     assert health.json() == {"status": "healthy"}
     assert health.headers["x-frontend-available"] == "false"
     assert api_missing.status_code == traversal.status_code == 404
+    assert unknown.status_code == health_slash.status_code == asset_missing.status_code == 404
+    assert navigation.status_code == 503
