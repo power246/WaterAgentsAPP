@@ -103,12 +103,15 @@ it('discards a unit preview response after the selection changes', async () => {
 })
 
 it('preserves an unsaved defaults draft after a unit policy refresh', async () => {
-  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce({ ...settings,
+  const refreshed = { ...settings,
     revision: 1, unit_policy: { ...settings.unit_policy, version: 2,
-      entries: [{ parameter: { code_system: 'usgs', code: '00060' }, target_unit_id: 'm3_s' }] } })
+      entries: [{ parameter: { code_system: 'usgs', code: '00060' }, target_unit_id: 'm3_s' }] } }
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce(refreshed)
   vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
   vi.spyOn(api, 'confirmUnitPolicy').mockResolvedValue({ ...unitPreview.proposed, created_at: '2026-10-09T00:00:00Z' })
-  const save = vi.spyOn(api, 'replaceSettings')
+  const save = vi.spyOn(api, 'replaceSettings').mockResolvedValue({ ...refreshed, revision: 2, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } })
   setup()
   await screen.findByLabelText('OpenAI credential')
   fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
@@ -119,9 +122,14 @@ it('preserves an unsaved defaults draft after a unit policy refresh', async () =
     { target: { value: 'APPLY UNIT POLICY 2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
   await screen.findByText('Unit policy saved for future runs.')
+  await screen.findByText('Revision 1. Changes affect future runs.')
   expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
   expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
   expect(save).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({
+    analysis_timezone: 'America/Denver',
+  })))
 })
 
 it('keeps a full draft through revision conflict and requires explicit reconfirmation', async () => {
@@ -142,6 +150,38 @@ it('keeps a full draft through revision conflict and requires explicit reconfirm
   fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
   await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'America/Denver' })))
   expect(await screen.findByText(/New runs use these values/)).toBeInTheDocument()
+})
+
+it('requires another review when a late settings GET follows reconfirmation', async () => {
+  let resolveGet!: (value: Settings) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  const first = { ...settings, revision: 1 }
+  const newer: Settings = { ...first, revision: 2, defaults: {
+    ...settings.defaults, memory_mode: 'memory_augmented',
+  }, catalog: { ...settings.catalog, memory_modes: ['stateless', 'memory_augmented'] } }
+  const save = vi.spyOn(api, 'replaceSettings')
+    .mockRejectedValueOnce(new ApiError(409, 'settings_revision_conflict', 'request', null, first))
+    .mockResolvedValueOnce({ ...newer, revision: 3, defaults: {
+      ...newer.defaults, analysis_timezone: 'America/Denver', memory_mode: 'stateless',
+    } })
+  setup()
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await screen.findByRole('button', { name: /Reconfirm this draft against revision 1/ })
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 1/ }))
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+
+  await act(async () => { resolveGet(newer) })
+  expect(await screen.findByRole('button', { name: /Reconfirm this draft against revision 2/ })).toBeInTheDocument()
+  expect(screen.getByText(/memory memory_augmented/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeDisabled()
+  expect(save).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 2/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(2, expect.objectContaining({
+    analysis_timezone: 'America/Denver', memory_mode: 'stateless',
+  })))
 })
 
 it('requires a server unit preview and phrase before confirming a version', async () => {

@@ -62,19 +62,20 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const [server, setServer] = useState(settings)
   const serverRevision = useRef(settings.revision)
   const latestSettings = useRef(settings)
+  const reviewedSettings = useRef(settings)
   const unitPolicyVersion = useRef(settings.unit_policy.version)
-  const initialDefaults = useRef(settings.defaults)
   const initialUnitEntries = useRef(settings.unit_policy.entries)
   const draftEditVersion = useRef(0)
   const previewRequest = useRef(0)
   const previewInput = useRef<{ request: number; version: number; entries: string } | null>(null)
   const [draft, setDraft] = useState<Defaults>(settings.defaults)
-  const [revision, setRevision] = useState(settings.revision)
+  const draftRef = useRef(settings.defaults)
   const [unitEntries, setUnitEntries] = useState<UnitEntry[]>(settings.unit_policy.entries)
   const [unitPreview, setUnitPreview] = useState<UnitPreview | null>(null)
   const [unitPhrase, setUnitPhrase] = useState('')
   const [unitAttempt, setUnitAttempt] = useState<{ submission: Submission; proposedEntries: UnitEntry[] } | null>(null)
   const [conflict, setConflict] = useState<Settings | null>(null)
+  const conflictRef = useRef<Settings | null>(null)
   const [keys, setKeys] = useState<KeyStatus[]>([])
   const [keysError, setKeysError] = useState('')
   const [error, setError] = useState('')
@@ -84,8 +85,10 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const unitsDirty = JSON.stringify(unitEntries) !== JSON.stringify(server.unit_policy.entries)
   const dirty = defaultsDirty || unitsDirty
 
-  const acceptSettings = useCallback((current: Settings): boolean => {
+  const acceptSettings = useCallback((current: Settings, source: 'read' | 'conflict' | 'save' = 'read'): boolean => {
     if (current.revision < serverRevision.current) return false
+    const reviewed = reviewedSettings.current
+    const draftDirty = JSON.stringify(draftRef.current) !== JSON.stringify(reviewed.defaults)
     serverRevision.current = current.revision
     latestSettings.current = current
     if (current.unit_policy.version !== unitPolicyVersion.current) {
@@ -96,8 +99,23 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
       setUnitPhrase('')
     }
     setServer(current)
-    setRevision(current.revision)
-    setConflict((shown) => shown && current.revision > shown.revision ? current : shown)
+    if (source === 'save') {
+      reviewedSettings.current = current
+      conflictRef.current = null
+      setConflict(null)
+    } else if (source === 'conflict' || conflictRef.current || (
+      draftDirty && JSON.stringify(current.defaults) !== JSON.stringify(reviewed.defaults)
+    )) {
+      conflictRef.current = current
+      setConflict(current)
+      if (source === 'read') setError('Settings changed on the server. Review current values and explicitly reconfirm this full draft.')
+    } else {
+      reviewedSettings.current = current
+      if (!draftDirty) {
+        draftRef.current = current.defaults
+        setDraft(current.defaults)
+      }
+    }
     onSettings(current)
     return true
   }, [onSettings])
@@ -107,7 +125,6 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     void api.settings(controller.signal).then((current) => {
       if (controller.signal.aborted) return
       if (!acceptSettings(current)) return
-      setDraft((value) => JSON.stringify(value) === JSON.stringify(initialDefaults.current) ? current.defaults : value)
       setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(initialUnitEntries.current)
         ? current.unit_policy.entries : value)
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(safeError(cause)) })
@@ -123,7 +140,8 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
 
   function change<K extends keyof Defaults>(field: K, value: Defaults[K]) {
     draftEditVersion.current += 1
-    setDraft((current) => ({ ...current, [field]: value }))
+    draftRef.current = { ...draftRef.current, [field]: value }
+    setDraft(draftRef.current)
   }
 
   const modelOptions = (role: 'query_parser' | 'waterbody') => server.catalog.models
@@ -138,19 +156,28 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   }
 
   async function saveDefaults() {
+    if (conflictRef.current || reviewedSettings.current.revision !== latestSettings.current.revision) {
+      conflictRef.current = latestSettings.current
+      setConflict(latestSettings.current)
+      return
+    }
     setBusy(true); setError(''); setNotice('')
     const submittedEditVersion = draftEditVersion.current
     try {
-      const current = await api.replaceSettings(revision, draft)
-      if (acceptSettings(current)) {
-        if (draftEditVersion.current === submittedEditVersion) setDraft(current.defaults)
-        setConflict(null)
+      const current = await api.replaceSettings(reviewedSettings.current.revision, draftRef.current)
+      if (acceptSettings(current, 'save')) {
+        if (draftEditVersion.current === submittedEditVersion) {
+          draftRef.current = current.defaults
+          setDraft(current.defaults)
+        }
+        setError('')
       }
       setNotice('Defaults saved. New runs use these values; running runs keep their snapshot.')
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409 && cause.currentSettings) {
-        acceptSettings(cause.currentSettings)
-        setConflict(latestSettings.current)
+        const current = cause.currentSettings.revision < serverRevision.current
+          ? latestSettings.current : cause.currentSettings
+        acceptSettings(current, 'conflict')
         setError('Settings changed on the server. Review current values and explicitly reconfirm this full draft.')
       } else setError(safeError(cause))
     } finally { setBusy(false) }
@@ -206,7 +233,6 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     try {
       const current = await api.settings()
       if (acceptSettings(current)) {
-        setDraft((value) => JSON.stringify(value) === JSON.stringify(server.defaults) ? current.defaults : value)
         setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(attempt.proposedEntries)
           ? current.unit_policy.entries : value)
       }
@@ -255,9 +281,12 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
           <p>Desired profile {conflict.defaults.desired_embedding_profile_id}</p>
           <button type="button" onClick={() => {
             if (conflict.revision !== latestSettings.current.revision) {
+              conflictRef.current = latestSettings.current
               setConflict(latestSettings.current)
               return
             }
+            reviewedSettings.current = latestSettings.current
+            conflictRef.current = null
             setConflict(null); setError('')
           }}>
             Reconfirm this draft against revision {conflict.revision}
