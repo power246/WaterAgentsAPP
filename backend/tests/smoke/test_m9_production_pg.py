@@ -20,6 +20,7 @@ from app.application.reasoning.model_models import (
     StructuredOutputCompleted, Terminal, UsageReported, WaterbodyFinishReason,
     WaterbodyModelRequest,
 )
+from app.application.query_understanding import ParserFinishReason, QueryParserResponse
 from app.infrastructure.config import load_parameter_capability_registry
 from app.domain import (
     DischargeObservationRecord, EvidenceLocation, Provenance, ProviderQuality,
@@ -69,6 +70,29 @@ class _GateParser(FixtureParser):
         self._started.set()
         await self._release.wait()
         return await super().generate(request, on_delta)
+
+
+class _NamedParameterParser(FixtureParser):
+    def __init__(self, concepts):
+        super().__init__(query_fallback=False)
+        self._concepts = concepts
+
+    async def generate(self, request, on_delta):
+        assert request.tools == ()
+        self.calls += 1
+        payload = {
+            "location_mention": None, "coordinate_mention": None,
+            "start_date": None, "end_date": None,
+            "parameters": [
+                {"concept": concept, "rationale": "Explicitly requested.",
+                 "explicitly_named": True}
+                for concept in self._concepts
+            ],
+            "ambiguities": [],
+        }
+        text = json.dumps(payload, separators=(",", ":"))
+        await on_delta(text)
+        return QueryParserResponse(text=text, finish_reason=ParserFinishReason.STOP)
 
 
 class _CountingTester:
@@ -163,7 +187,8 @@ class _OfflineObservation:
         return complete_batch(request, (record,))
 
 
-def _offline_providers(monkeypatch, *, gate_parser=True, gate_waterbody=False):
+def _offline_providers(monkeypatch, *, gate_parser=True, gate_waterbody=False,
+                       parameter_concepts=None):
     registry = load_parameter_capability_registry()
     _OfflineModel.calls = []
     model_started, model_release = asyncio.Event(), asyncio.Event()
@@ -174,6 +199,8 @@ def _offline_providers(monkeypatch, *, gate_parser=True, gate_waterbody=False):
     def parser(*args, **kwargs):
         del args
         leases["parser"].append(kwargs["api_key"])
+        if parameter_concepts is not None:
+            return _NamedParameterParser(parameter_concepts)
         return (_GateParser(started, release) if gate_parser and len(leases["parser"]) == 1
                 else FixtureParser(query_fallback=False))
 
@@ -222,6 +249,69 @@ async def _browser(client, **run_ids):
         check=False,
     )
     assert browser.returncode == 0, browser.stdout + browser.stderr
+
+
+@pytest.mark.parametrize("concepts,expected_codes", [
+    (("Discharge",), {"00060"}),
+    (("Discharge", "dissolved oxygen"), {"00060", "00300"}),
+])
+def test_explicit_discharge_target_reaches_model_and_committed_result(
+    monkeypatch, concepts, expected_codes,
+):
+    _offline_providers(monkeypatch, gate_parser=False, parameter_concepts=concepts)
+    with temporary_migrated_schema() as database:
+        settings = database.model_copy(update={
+            "model_catalog": catalog(),
+            "openai_api_key": SecretStr("fixture-openai-only"),
+            "google_geocoding_api_key": SecretStr("fixture-google-only"),
+            "log_level": "warning",
+        })
+
+        async def exercise():
+            application = create_app(
+                settings, clock=_FixedClock(), key_store=InMemoryKeyStore(),
+                credential_tester=_CountingTester(), shutdown_grace_period=0,
+            )
+            async with running_server(application) as client:
+                body = {
+                    "query": f"Assess {' and '.join(concepts)} for this waterbody.",
+                    "target": {"comid": "100"},
+                    "date_range": {"start_date": "2026-10-08", "end_date": "2026-10-08"},
+                    "parser_model": {"provider": "openai", "model": "parser-v1"},
+                    "waterbody_model": {"provider": "openai", "model": "waterbody-v1"},
+                    "memory_mode": "stateless",
+                }
+                created = await client.post(
+                    "/api/analysis/runs", json=body,
+                    headers={"Idempotency-Key": str(uuid4())},
+                )
+                assert created.status_code == 201, created.text
+                run_id = created.json()["run_id"]
+                for _ in range(300):
+                    detail = await client.get(f"/api/analysis/runs/{run_id}")
+                    if detail.status_code == 200 and detail.json()["run"]["status"] in {
+                        "completed", "failed", "cancelled",
+                    }:
+                        break
+                    await asyncio.sleep(0.02)
+                assert detail.json()["run"]["status"] == "completed", detail.text
+                assert detail.json()["run"]["result_ref"] is not None
+                target = next(session for session in detail.json()["sessions"]
+                              if session["agent_role"] == "waterbody"
+                              and session["target_comid"] == "100")
+                assert target["status"] == "completed"
+                assert target["result_ref"] is not None
+                assert any(getattr(phase, "value", phase) == "reasoning_batch"
+                           for phase in _OfflineModel.calls)
+                transcript = await client.get(
+                    f"/api/analysis/runs/{run_id}/sessions/{target['session_id']}/transcript"
+                )
+                bundle = next(item for item in transcript.json()["items"]
+                              if item["content_type"] == "evidence_bundle")
+                assert {item["code"] for item in bundle["content"]["body"]["requested_parameters"]} == expected_codes
+                assert bundle["content"]["body"]["supporting_parameters"] == []
+
+        asyncio.run(exercise())
 
 
 def test_production_routes_settings_run_sse_history_and_restart(monkeypatch):
