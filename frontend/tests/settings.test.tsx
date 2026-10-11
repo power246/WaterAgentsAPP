@@ -217,6 +217,47 @@ it('keeps the unit retry available after a settings conflict invalidates its pre
   expect(screen.getByLabelText(/Discharge \(usgs:00060\)/)).toBeEnabled()
 })
 
+it('requires review of the latest revision after a unit retry refreshes settings', async () => {
+  const conflicted = { ...settings, revision: 1, unit_policy: unitPreview.proposed }
+  const latest = { ...conflicted, revision: 2, defaults: {
+    ...settings.defaults, memory_mode: 'memory_augmented' as const,
+  }, catalog: { ...settings.catalog, memory_modes: ['stateless', 'memory_augmented'] as Settings['catalog']['memory_modes'] } }
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce(latest)
+  vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
+  vi.spyOn(api, 'confirmUnitPolicy').mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({ ...unitPreview.proposed, created_at: '2026-10-08T00:01:00Z' })
+  const save = vi.spyOn(api, 'replaceSettings').mockRejectedValueOnce(
+    new ApiError(409, 'settings_revision_conflict', 'request', null, conflicted))
+    .mockResolvedValueOnce({ ...latest, revision: 3, defaults: {
+      ...settings.defaults, analysis_timezone: 'America/Denver',
+    } })
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText(/Discharge \(usgs:00060\)/), { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  await screen.findByRole('button', { name: 'Confirm unit policy' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Unit confirmation phrase' }),
+    { target: { value: 'APPLY UNIT POLICY 2' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
+  await screen.findByRole('button', { name: 'Retry unit confirmation' })
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await screen.findByRole('button', { name: /Reconfirm this draft against revision 1/ })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry unit confirmation' }))
+  expect(await screen.findByRole('button', { name: /Reconfirm this draft against revision 2/ })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Reconfirm this draft against revision 1/ })).not.toBeInTheDocument()
+  expect(screen.getByText(/memory memory_augmented/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeDisabled()
+  expect(save).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 2/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(2, expect.objectContaining({
+    analysis_timezone: 'America/Denver', memory_mode: 'stateless',
+  })))
+})
+
 it('does not resubmit an accepted unit policy when refreshing settings fails', async () => {
   vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockRejectedValueOnce(new Error('offline'))
   vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)

@@ -190,7 +190,7 @@ class EvidenceAcquisitionService:
         local_discharge = await self._has_usable_direct(
             scope,
             tuple(fragment_refs),
-            parameters=scope.supporting_parameters,
+            parameters=(_DISCHARGE,),
         )
         usable_upstream = await self._has_usable_upstream(
             scope,
@@ -842,16 +842,16 @@ def _cell_gates(
     by_identity = {
         (cell.parameter, cell.window_id, cell.role): cell for cell in cells
     }
+    discharge_cells = tuple(cell for cell in cells if cell.parameter == _DISCHARGE)
     discharge_by_window = {
         cell.window_id: cell
-        for cell in cells
-        if cell.role is EvidenceCellRole.REQUIRED_SUPPORT
-        and cell.parameter == _DISCHARGE
+        for cell in discharge_cells
     }
     target_cells = tuple(
         cell for cell in cells if cell.role is EvidenceCellRole.TARGET
     )
-    if len(discharge_by_window) != len({cell.window_id for cell in target_cells}):
+    if (len(discharge_by_window) != len(discharge_cells)
+        or len(discharge_by_window) != len({cell.window_id for cell in target_cells})):
         raise EvidenceScopeViolationError()
 
     gates = []
@@ -868,7 +868,7 @@ def _cell_gates(
         reasons = []
         if target.status is not EvidenceCellStatus.SUPPORTED:
             reasons.extend(f"target:{reason}" for reason in target.reasons)
-        if discharge.status is not EvidenceCellStatus.SUPPORTED:
+        if discharge is not target and discharge.status is not EvidenceCellStatus.SUPPORTED:
             reasons.extend(
                 f"required_discharge:{reason}" for reason in discharge.reasons
             )

@@ -783,6 +783,32 @@ def test_reference_only_bundle_has_exact_cell_and_reference_closure() -> None:
     )
 
 
+def test_discharge_target_bundle_allows_an_empty_support_group() -> None:
+    bundle = valid_bundle()
+    values = bundle.model_dump(mode="python")
+    values.update(
+        requested_parameters=(DISCHARGE,),
+        supporting_parameters=(),
+        cells=tuple(
+            cell.model_copy(update={"role": EvidenceCellRole.TARGET})
+            for cell in bundle.cells if cell.parameter == DISCHARGE
+        ),
+        fragment_refs=tuple(
+            reference for reference in bundle.fragment_refs
+            if reference.evidence_id == "ev-aggregate"
+        ),
+    )
+    discharge_bundle = EvidenceBundle.model_validate(values)
+
+    assert discharge_bundle.supporting_parameters == ()
+    assert len(discharge_bundle.cells) == len(discharge_bundle.window_refs)
+    assert EvidenceBundle.model_validate_json(
+        discharge_bundle.model_dump_json()
+    ) == discharge_bundle
+    with pytest.raises(ValidationError):
+        EvidenceBundle.model_validate({**values, "requested_parameters": ()})
+
+
 def test_bundle_validates_resolved_run_and_session_scope() -> None:
     bundle = valid_bundle()
     scopes = tuple(

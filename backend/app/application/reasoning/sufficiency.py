@@ -492,12 +492,16 @@ def _build_gates(
     by_identity = {
         (cell.parameter, cell.window_id, cell.role): cell for cell in cells
     }
+    discharge_role = (
+        EvidenceCellRole.TARGET
+        if discharge in requested_parameters else EvidenceCellRole.REQUIRED_SUPPORT
+    )
     gates = []
     for parameter in requested_parameters:
         for window_id in window_ids:
             target = by_identity[(parameter, window_id, EvidenceCellRole.TARGET)]
             support = by_identity[
-                (discharge, window_id, EvidenceCellRole.REQUIRED_SUPPORT)
+                (discharge, window_id, discharge_role)
             ]
             statuses = {target.status, support.status}
             decision = (
@@ -510,7 +514,7 @@ def _build_gates(
             reasons = []
             if target.status is not EvidenceCellStatus.SUPPORTED:
                 reasons.extend(f"target:{reason}" for reason in target.reasons)
-            if support.status is not EvidenceCellStatus.SUPPORTED:
+            if support is not target and support.status is not EvidenceCellStatus.SUPPORTED:
                 reasons.extend(
                     f"required_discharge:{reason}" for reason in support.reasons
                 )

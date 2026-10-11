@@ -192,6 +192,80 @@ def test_history_admin_commit_delete_and_create_tombstone() -> None:
         asyncio.run(exercise(settings))
 
 
+@pytest.mark.parametrize("committed_before_error", [False, True])
+def test_history_cleanup_reconciles_a_lost_delete_receipt(
+    committed_before_error: bool,
+) -> None:
+    async def exercise(settings):
+        application = create_test_app(
+            settings, m8_runtime_builder=_deterministic_m8,
+            shutdown_grace_period=0,
+        )
+        async with application.router.lifespan_context(application):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=application),
+                base_url="http://testserver",
+            ) as client:
+                body = create_request("history delete receipt lost")
+                creation_key = str(uuid4())
+                created = await client.post(
+                    "/api/analysis/runs", json=body,
+                    headers={"Idempotency-Key": creation_key},
+                )
+                assert created.status_code == 201, created.text
+                run_id = created.json()["run_id"]
+                await _ready(application, run_id)
+                delayed_stream = await application.state.run_coordinator.subscribe_run(UUID(run_id))
+                await anext(delayed_stream)
+                preview = await client.post(
+                    "/api/admin/history-cleanups/preview",
+                    json={"selection": {"kind": "runs", "run_ids": [run_id]},
+                          "cascade_consumers": False},
+                )
+                assert preview.status_code == 200, preview.text
+                confirmation = preview.json()["confirmation"]
+                store = application.state.admin_service._maintenance._store
+                original_delete = store.delete_history_runs
+
+                async def lose_receipt(*args, **kwargs):
+                    if committed_before_error:
+                        await original_delete(*args, **kwargs)
+                    raise OSError("delete receipt lost")
+
+                with patch.object(store, "delete_history_runs", lose_receipt):
+                    accepted = await client.post(
+                        "/api/admin/history-cleanups",
+                        json={
+                            "confirmation_token": confirmation["token"],
+                            "confirmation_phrase": confirmation["required_phrase"],
+                        },
+                        headers={"Idempotency-Key": str(uuid4())},
+                    )
+                    assert accepted.status_code == 202, accepted.text
+                    terminal = await _terminal(client, accepted.json()["operation_id"])
+
+                expected_status = 404 if committed_before_error else 200
+                assert terminal["state"] == (
+                    "succeeded" if committed_before_error else "failed"
+                )
+                assert (await client.get(f"/api/analysis/runs/{run_id}")).status_code == expected_status
+                assert (await client.get(f"/api/analysis/runs/{run_id}/events")).status_code == expected_status
+                assert (await client.get(f"/api/analysis/runs/{run_id}?view=history")).status_code == expected_status
+                replay = await client.post(
+                    "/api/analysis/runs", json=body,
+                    headers={"Idempotency-Key": creation_key},
+                )
+                assert replay.status_code == (410 if committed_before_error else 201)
+                if committed_before_error:
+                    with pytest.raises(StopAsyncIteration):
+                        await anext(delayed_stream)
+                else:
+                    await delayed_stream.aclose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))
+
+
 def test_all_history_preview_is_stale_when_new_run_appears() -> None:
     async def exercise(settings):
         application = create_test_app(

@@ -244,6 +244,10 @@ def build_reasoning_evidence_catalog(
         (cell.parameter, cell.window_id, cell.role): cell for cell in sealed.cells
     }
     discharge = ParameterKey(code_system="usgs", code="00060")
+    discharge_role = (
+        EvidenceCellRole.TARGET
+        if discharge in sealed.requested_parameters else EvidenceCellRole.REQUIRED_SUPPORT
+    )
     scopes = []
     windows = {window.window_id: window for window in sealed.windows}
     for gate in sealed.gates:
@@ -251,19 +255,21 @@ def build_reasoning_evidence_catalog(
             (gate.parameter, gate.window_id, EvidenceCellRole.TARGET)
         ]
         support = cells[
-            (discharge, gate.window_id, EvidenceCellRole.REQUIRED_SUPPORT)
+            (discharge, gate.window_id, discharge_role)
         ]
+        target_direct = tuple(sorted(target.direct_fragment_refs))
+        target_indirect = tuple(sorted(target.allowed_indirect_fragment_refs))
         scope = CellEvidenceValidationScope(
             cell_id=gate.cell_id,
             parameter=gate.parameter,
             time_range=windows[gate.window_id].time_range,
-            target_direct_refs=tuple(sorted(target.direct_fragment_refs)),
-            target_indirect_refs=tuple(
-                sorted(target.allowed_indirect_fragment_refs)
-            ),
-            support_direct_refs=tuple(sorted(support.direct_fragment_refs)),
+            target_direct_refs=target_direct,
+            target_indirect_refs=target_indirect,
+            support_direct_refs=tuple(sorted(
+                set(support.direct_fragment_refs) - set(target_direct)
+            )),
             support_indirect_refs=tuple(
-                sorted(support.allowed_indirect_fragment_refs)
+                sorted(set(support.allowed_indirect_fragment_refs) - set(target_indirect))
             ),
         )
         if scope.allowed_refs != tuple(sorted(gate.allowed_evidence_refs)):

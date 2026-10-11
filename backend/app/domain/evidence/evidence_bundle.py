@@ -50,14 +50,22 @@ class EvidenceBundle(DomainModel):
         get_iana_timezone(value)
         return value
 
-    @field_validator("requested_parameters", "supporting_parameters")
+    @field_validator("requested_parameters")
     @classmethod
-    def validate_parameters(
+    def validate_requested_parameters(
         cls,
         value: tuple[ParameterKey, ...],
     ) -> tuple[ParameterKey, ...]:
         if not value:
-            raise ValueError("bundle parameter groups must not be empty")
+            raise ValueError("bundle requested parameters must not be empty")
+        return ensure_unique_tuple(value, field_name="bundle parameters")
+
+    @field_validator("supporting_parameters")
+    @classmethod
+    def validate_supporting_parameters(
+        cls,
+        value: tuple[ParameterKey, ...],
+    ) -> tuple[ParameterKey, ...]:
         return ensure_unique_tuple(value, field_name="bundle parameters")
 
     @field_validator("window_refs")

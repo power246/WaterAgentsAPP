@@ -133,6 +133,24 @@ def make_context(
     )
 
 
+def make_discharge_context(*, include_oxygen: bool = False) -> AnalysisContext:
+    context = make_context()
+    capability = load_parameter_capability_registry().get(SUPPORT_PARAMETER)
+    assert capability is not None
+    discharge = ResolvedParameterIntent(
+        key=capability.key,
+        canonical_name=capability.canonical_name,
+        canonical_unit=capability.canonical_unit,
+        source=ParameterIntentSource.EXPLICIT,
+        rationale="Requested discharge.",
+    )
+    return AnalysisContext.model_validate(context.model_copy(update={
+        "query": "Analyze discharge and dissolved oxygen." if include_oxygen else "Analyze discharge.",
+        "params_used": (discharge, *context.params_used) if include_oxygen else (discharge,),
+        "supporting_params": (),
+    }).model_dump(mode="python"))
+
+
 def make_graph(
     *,
     with_geometry: bool = True,

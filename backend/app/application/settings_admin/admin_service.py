@@ -352,22 +352,41 @@ class AdminService:
                 tuple(str(value) for value in command.expected_delete_run_ids)
             )
             delete_ids = tuple(str(value) for value in command.expected_delete_run_ids)
-            async def delete():
-                return await self._maintenance.delete_history_runs(
-                    tuple(str(value) for value in command.requested_run_ids),
-                    cascade_consumers=command.cascade_consumers,
-                    expected_delete_run_ids=delete_ids,
-                    expected_dependency_ids=tuple(str(value) for value in command.expected_dependency_ids),
-                )
+            unconfirmed_error: Exception | None = None
+
+            async def delete() -> tuple[str, ...]:
+                nonlocal unconfirmed_error
+                try:
+                    result = await self._maintenance.delete_history_runs(
+                        tuple(str(value) for value in command.requested_run_ids),
+                        cascade_consumers=command.cascade_consumers,
+                        expected_delete_run_ids=delete_ids,
+                        expected_dependency_ids=tuple(str(value) for value in command.expected_dependency_ids),
+                    )
+                    return result.deleted_run_ids
+                except Exception as error:
+                    try:
+                        remaining = await self._maintenance.inspect_history_storage(delete_ids)
+                    except Exception:
+                        unconfirmed_error = error
+                        return ()
+                    if set(remaining.run_ids) == set(delete_ids):
+                        raise
+                    if remaining.run_ids:
+                        unconfirmed_error = error
+                        return ()
+                    return delete_ids
             if self._history_cleanup_guard is None:
-                result = await delete()
+                deleted_run_ids = await delete()
             else:
                 async with self._history_cleanup_guard(delete_ids) as ready:
                     if not ready:
                         raise HistoryCleanupDependencyConflictError()
-                    result = await delete()
+                    deleted_run_ids = await delete()
+            if unconfirmed_error is not None:
+                raise unconfirmed_error
             return HistoryCleanupResult(
-                deleted_run_ids=tuple(UUID(value) for value in result.deleted_run_ids),
+                deleted_run_ids=tuple(UUID(value) for value in deleted_run_ids),
                 retained_idempotency_tombstones=before.idempotency_keys,
             )
         if command.kind is AdminActionKind.PROFILE_HANDOFF:

@@ -43,11 +43,14 @@ from app.domain import (
     TimeResolutionPreferenceSource,
 )
 from app.infrastructure.config import load_parameter_capability_registry
-from tests.application.evidence_tools.conftest import make_context, make_graph
+from tests.application.evidence_tools.conftest import (
+    make_context, make_discharge_context, make_graph,
+)
 from tests.application.evidence_tools.fakes import MemoryEvidenceStore
 from tests.application.evidence_tools.test_acquisition_workflow import (
     _runtime,
     _upstream_port,
+    _water_port,
 )
 
 
@@ -162,6 +165,38 @@ def validated_task(scope, context, graph) -> ValidatedWaterbodyAgentTask:
         context=context,
         topology=graph,
     )
+
+
+def test_explicit_discharge_target_is_usable_for_node_launch() -> None:
+    async def exercise() -> None:
+        context = make_discharge_context()
+        graph = make_graph()
+        scope = assemble_evidence_session_scope(
+            run_id=str(RUN_ID),
+            session_id=str(SESSION_ID),
+            session_fact=ReferenceScope(
+                item_id=str(SESSION_ID), run_id=str(RUN_ID), session_id=str(SESSION_ID),
+            ),
+            analysis_context_ref=ReferenceScope(
+                item_id=str(UUID(int=700)), run_id=str(RUN_ID),
+            ),
+            topology_ref=ReferenceScope(
+                item_id=str(UUID(int=701)), run_id=str(RUN_ID),
+            ),
+            context=context,
+            topology=graph,
+            agent_comid="123",
+            registry=load_parameter_capability_registry(),
+            cancel_token=CancellationToken(asyncio.Event()),
+        )
+        store = MemoryEvidenceStore()
+        handoff = await _runtime(store, water_port=_water_port(scope)).start(scope)
+
+        facts = build_node_launch_facts(validated_task(scope, context, graph), handoff)
+        assert facts.local_target_usable
+        assert facts.local_discharge_usable
+
+    asyncio.run(exercise())
 
 
 def test_stationless_all_unusable_commits_zero_model_result() -> None:

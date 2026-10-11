@@ -61,6 +61,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
 }) {
   const [server, setServer] = useState(settings)
   const serverRevision = useRef(settings.revision)
+  const latestSettings = useRef(settings)
   const unitPolicyVersion = useRef(settings.unit_policy.version)
   const initialDefaults = useRef(settings.defaults)
   const initialUnitEntries = useRef(settings.unit_policy.entries)
@@ -86,6 +87,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const acceptSettings = useCallback((current: Settings): boolean => {
     if (current.revision < serverRevision.current) return false
     serverRevision.current = current.revision
+    latestSettings.current = current
     if (current.unit_policy.version !== unitPolicyVersion.current) {
       unitPolicyVersion.current = current.unit_policy.version
       previewRequest.current += 1
@@ -95,6 +97,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     }
     setServer(current)
     setRevision(current.revision)
+    setConflict((shown) => shown && current.revision > shown.revision ? current : shown)
     onSettings(current)
     return true
   }, [onSettings])
@@ -147,7 +150,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409 && cause.currentSettings) {
         acceptSettings(cause.currentSettings)
-        setConflict(cause.currentSettings)
+        setConflict(latestSettings.current)
         setError('Settings changed on the server. Review current values and explicitly reconfirm this full draft.')
       } else setError(safeError(cause))
     } finally { setBusy(false) }
@@ -250,7 +253,13 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
           <p>Timezone {conflict.defaults.analysis_timezone}; memory {conflict.defaults.memory_mode}; resolution {conflict.defaults.time_resolution}</p>
           <p>Parser {conflict.defaults.parser_model.provider}/{conflict.defaults.parser_model.model}; waterbody {conflict.defaults.waterbody_model.provider}/{conflict.defaults.waterbody_model.model}</p>
           <p>Desired profile {conflict.defaults.desired_embedding_profile_id}</p>
-          <button type="button" onClick={() => { acceptSettings(conflict); setConflict(null); setError('') }}>
+          <button type="button" onClick={() => {
+            if (conflict.revision !== latestSettings.current.revision) {
+              setConflict(latestSettings.current)
+              return
+            }
+            setConflict(null); setError('')
+          }}>
             Reconfirm this draft against revision {conflict.revision}
           </button>
         </div>}
