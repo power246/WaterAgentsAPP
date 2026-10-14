@@ -35,7 +35,11 @@ from app.application.analysis_runs.persistence import (
 )
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.registry import create_production_registry
-from app.application.transcripts.read_models import ReadView
+from app.application.transcripts.read_models import (
+    ReadView,
+    RunDetailResponse,
+    SessionDetailResponse,
+)
 from app.application.transcripts.reader import (
     TranscriptContentUnreadableError,
     TranscriptReader,
@@ -1383,6 +1387,203 @@ def test_real_postgres_corrupt_json_has_safe_fulltext_when_readable(
                         request_item.item_id,
                         ReadView.HISTORY,
                     )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_corrupt_completed_session_terminal_keeps_postgres_history_readable(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, creation = _run_batch()
+        neighbor_run_id, neighbor_creation = _run_batch()
+        request_body = create_request_bytes("valid neighbor").decode()
+        request_item = creation.items[0].model_copy(update={
+            "inline_body": request_body,
+            "content_bytes": len(request_body.encode("utf-8")),
+        })
+        await _commit(postgres_settings, PersistenceBatch(
+            runs=creation.runs,
+            items=(request_item, creation.items[1]),
+        ))
+        await _commit(postgres_settings, neighbor_creation)
+
+        session_id = uuid4()
+        created_id = uuid4()
+        terminal_id = uuid4()
+        now = datetime.now(UTC)
+        created_body = json.dumps({
+            "schema_version": 2,
+            "run_id": str(run_id),
+            "session_id": str(session_id),
+            "sequence": 1,
+            "occurred_at": now.isoformat(),
+            "type": "session_created",
+            "payload": {"status": "pending", "created_at": now.isoformat()},
+        })
+        damaged_body = '{"invalid": true}'
+        await _commit(postgres_settings, PersistenceBatch(
+            sessions=(PersistedSessionRecord(
+                session_id=session_id,
+                run_id=run_id,
+                agent_role="waterbody",
+                target_comid="12345678",
+                status="completed",
+                created_at=now,
+                updated_at=now,
+                created_item_id=created_id,
+                terminal_item_id=terminal_id,
+            ),),
+            items=(
+                _item(
+                    run_id=run_id, item_id=created_id, sequence=3,
+                    session_id=session_id, body=created_body,
+                    content_type="lifecycle_event",
+                ).model_copy(update={"content_schema_version": 2}),
+                _item(
+                    run_id=run_id, item_id=terminal_id, sequence=4,
+                    session_id=session_id, body=damaged_body,
+                    content_type="lifecycle_event",
+                ).model_copy(update={"content_schema_version": 2}),
+            ),
+        ))
+
+        engine = create_database_engine(postgres_settings)
+        store = PostgresTranscriptStore(
+            engine,
+            operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+        )
+        reader = TranscriptReader(
+            NoLiveTranscript(), store, create_production_registry(),
+            error_id_factory=lambda: UUID(int=1),
+            inline_content_bytes=256, preview_bytes=16,
+        )
+        try:
+            page = await store.list_runs(10, None, None)
+            assert {item.run.run_id for item in page.runs} >= {
+                run_id, neighbor_run_id
+            }
+            stored = await store.read_run(run_id)
+            assert stored is not None
+            assert stored.sessions[0].status is AgentSessionStatus.COMPLETED
+            assert stored.sessions[0].result_ref is None
+            assert stored.session_issues[0].item_id == terminal_id
+            detail = await reader.get_run(run_id, ReadView.HISTORY)
+            assert any(issue.item_id == terminal_id for issue in detail.issues)
+            assert any(item.item_id == request_item.item_id for item in detail.items)
+            session = await reader.get_session(run_id, session_id, ReadView.HISTORY)
+            assert session.session.status is AgentSessionStatus.COMPLETED
+            assert session.session.result_ref is None
+            assert session.issues[0].error.code == "transcript_content_corrupt"
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("damage", ("unsupported_version", "external_length"))
+def test_completed_session_does_not_trust_invalid_terminal_metadata(
+    postgres_settings: AppSettings, damage: str,
+) -> None:
+    async def exercise() -> None:
+        run_id, creation = _run_batch()
+        await _commit(postgres_settings, creation)
+        session_id, created_id, terminal_id, result_item_id = (
+            uuid4(), uuid4(), uuid4(), uuid4()
+        )
+        now = datetime.now(UTC)
+        created_body = json.dumps({
+            "schema_version": 2, "run_id": str(run_id),
+            "session_id": str(session_id), "sequence": 1,
+            "occurred_at": now.isoformat(), "type": "session_created",
+            "payload": {"status": "pending", "created_at": now.isoformat()},
+        })
+        terminal_body = json.dumps({
+            "schema_version": 2, "run_id": str(run_id),
+            "session_id": str(session_id), "sequence": 2,
+            "occurred_at": now.isoformat(), "type": "session_completed",
+            "payload": {
+                "status": "completed", "completed_at": now.isoformat(),
+                "result_ref": {
+                    "run_id": str(run_id), "item_id": str(result_item_id),
+                },
+                "result_summary": {
+                    "result_kind": "waterbody", "result_id": "valid-result",
+                    "target_comid": "12345678", "risk_level": "medium",
+                    "availability": "complete", "overall_confidence": 0.8,
+                },
+            },
+        })
+        created_item = _item(
+            run_id=run_id, item_id=created_id, sequence=3,
+            session_id=session_id, body=created_body,
+            content_type="lifecycle_event",
+        ).model_copy(update={"content_schema_version": 2})
+        terminal_item = _item(
+            run_id=run_id, item_id=terminal_id, sequence=4,
+            session_id=session_id, body=terminal_body,
+            content_type="lifecycle_event",
+        ).model_copy(update={"content_schema_version": 2})
+        contents = ()
+        if damage == "external_length":
+            terminal_item = terminal_item.model_copy(update={
+                "inline_body": None, "preview_head": "head",
+                "preview_tail": "tail",
+            })
+            contents = (PersistedTranscriptContentRecord(
+                item_id=terminal_id, body=terminal_body,
+                created_at=terminal_item.created_at,
+            ),)
+        await _commit(postgres_settings, PersistenceBatch(
+            sessions=(PersistedSessionRecord(
+                session_id=session_id, run_id=run_id,
+                agent_role="waterbody", target_comid="12345678",
+                status="completed", created_at=now, updated_at=now,
+                created_item_id=created_id, terminal_item_id=terminal_id,
+            ),),
+            items=(created_item, terminal_item), contents=contents,
+        ))
+        engine = create_database_engine(postgres_settings)
+        try:
+            async with engine.begin() as connection:
+                if damage == "unsupported_version":
+                    await connection.execute(
+                        update(transcript_items)
+                        .where(transcript_items.c.item_id == terminal_id)
+                        .values(content_schema_version=999)
+                    )
+                else:
+                    await connection.execute(
+                        update(transcript_contents)
+                        .where(transcript_contents.c.item_id == terminal_id)
+                        .values(body=terminal_body + " ")
+                    )
+            store = PostgresTranscriptStore(
+                engine,
+                operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+            )
+            reader = TranscriptReader(
+                NoLiveTranscript(), store, create_production_registry(),
+                error_id_factory=lambda: UUID(int=1),
+                inline_content_bytes=256, preview_bytes=16,
+            )
+            listed = await store.list_runs(10, None, None)
+            assert any(item.run.run_id == run_id for item in listed.runs)
+            detail = await reader.get_session(run_id, session_id, ReadView.HISTORY)
+            assert detail.session.result_ref is None
+            assert detail.session.result_summary is None
+            assert detail.session.terminal_corrupt is True
+            expected = (
+                "transcript_content_unsupported"
+                if damage == "unsupported_version"
+                else "transcript_content_corrupt"
+            )
+            assert any(issue.error.code == expected for issue in detail.issues)
+            assert SessionDetailResponse.model_validate_json(detail.model_dump_json()) == detail
+            run_detail = await reader.get_run(run_id, ReadView.HISTORY)
+            assert RunDetailResponse.model_validate_json(run_detail.model_dump_json()) == run_detail
         finally:
             await engine.dispose()
 

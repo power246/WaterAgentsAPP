@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from hashlib import sha256
 from hmac import compare_digest
@@ -13,8 +14,8 @@ from uuid import UUID, uuid4
 from app.domain.settings_admin import AdminCommand
 from app.application.settings_admin.confirmation_registry import ConfirmationRegistry
 from app.application.settings_admin.errors import (
-    AdminConfirmationInvalidError, AdminOperationNotFoundError,
-    AdminPreviewStaleError, HistoryCleanupDependencyConflictError,
+    AdminConfirmationInvalidError, AdminOperationConflictError, AdminOperationNotFoundError,
+    AdminPreviewExpiredError, AdminPreviewStaleError, HistoryCleanupDependencyConflictError,
     HistoryCleanupSelectionTooLargeError,
     CredentialStoreUnavailableError,
     RAGGenerationConflictError, RAGGenerationNotFoundError,
@@ -29,7 +30,7 @@ from app.domain import EmbeddingProfile, RAGFailedJobRetryFilter, RAGIndexGenera
 from app.domain.memory_rag import RAGCleanupPlan, RAGProfileHandoffState
 from app.domain.settings_admin import (
     AdminActionKind, AdminConfirmation, AdminOperation, AdminOperationState,
-    AdminProgress, GenerationDeletionResult, HistoryCleanupResult,
+    AdminProgress, AdminSafeError, GenerationDeletionResult, HistoryCleanupResult,
     ProfileHandoffResult, RetryFailedJobsResult,
 )
 from app.ports.admin_operation_store import AdminOperationStorePort
@@ -74,6 +75,7 @@ class AdminService:
         apply_profile: Callable[[EmbeddingProfile], Awaitable[str]],
         notify_maintenance: Callable[[], None],
         credential_store_available: Callable[[], Awaitable[bool]] | None = None,
+        history_cleanup_guard: Callable[[tuple[str, ...]], AbstractAsyncContextManager[bool]] | None = None,
         confirmations: ConfirmationRegistry[AdminCommand] | None = None,
         id_factory: Callable[[], UUID] = uuid4,
     ) -> None:
@@ -85,6 +87,7 @@ class AdminService:
         self._apply_profile = apply_profile
         self._notify_maintenance = notify_maintenance
         self._credential_store_available = credential_store_available
+        self._history_cleanup_guard = history_cleanup_guard
         self._confirmations = confirmations or ConfirmationRegistry()
         self._id_factory = id_factory
         self._schedule: Callable[[AdminOperation, AdminCommand], None] | None = None
@@ -263,36 +266,83 @@ class AdminService:
         fingerprint = sha256(raw_body).digest()
         receipt = await self._store.read_receipt(idempotency_key)
         if receipt is not None:
-            if not compare_digest(receipt[1], fingerprint):
-                raise UnitPolicyIdempotencyConflictError()
-            return receipt[0]
-        async with self._confirmations.claim(
-            token=token, action=kind.value, phrase=phrase, now=self._clock.now(),
-        ) as (command, token_digest):
-            if generation_id is not None and command.generation_id != generation_id:
-                raise AdminConfirmationInvalidError()
-            if not compare_digest(await self._current_digest(command), command.facts_digest):
-                raise AdminPreviewStaleError()
-            total = (
-                len(command.expected_delete_run_ids)
-                if kind is AdminActionKind.HISTORY_CLEANUP
-                else command.limit if kind is AdminActionKind.RETRY_FAILED_JOBS else 1
-            )
-            operation = AdminOperation(
-                operation_id=self._id_factory(), kind=kind,
-                state=AdminOperationState.PENDING,
-                resource_identity=command.resource_identity,
-                progress=AdminProgress(total_items=total),
-                created_at=self._clock.now(),
-            )
-            saved = await self._store.create(
-                operation, idempotency_key=idempotency_key,
-                request_fingerprint=fingerprint,
-                confirmation_token_digest=token_digest, command=command,
-            )
+            return await self._accept_receipt(receipt, fingerprint, kind)
+        try:
+            async with self._confirmations.claim(
+                token=token, action=kind.value, phrase=phrase, now=self._clock.now(),
+            ) as (command, token_digest):
+                if generation_id is not None and command.generation_id != generation_id:
+                    raise AdminConfirmationInvalidError()
+                if not compare_digest(await self._current_digest(command), command.facts_digest):
+                    raise AdminPreviewStaleError()
+                total = (
+                    len(command.expected_delete_run_ids)
+                    if kind is AdminActionKind.HISTORY_CLEANUP
+                    else command.limit if kind is AdminActionKind.RETRY_FAILED_JOBS else 1
+                )
+                operation = AdminOperation(
+                    operation_id=self._id_factory(), kind=kind,
+                    state=AdminOperationState.PENDING,
+                    resource_identity=command.resource_identity,
+                    progress=AdminProgress(total_items=total),
+                    created_at=self._clock.now(),
+                )
+                saved = await self._store.create(
+                    operation, idempotency_key=idempotency_key,
+                    request_fingerprint=fingerprint,
+                    confirmation_token_digest=token_digest, command=command,
+                )
+        except (
+            AdminConfirmationInvalidError, AdminPreviewExpiredError,
+            AdminPreviewStaleError, PortUnavailableError,
+        ):
+            receipt = await self._store.read_receipt(idempotency_key)
+            if receipt is None:
+                raise
+            return await self._accept_receipt(receipt, fingerprint, kind)
+        if saved.operation_id != operation.operation_id:
+            receipt = await self._store.read_receipt(idempotency_key)
+            if receipt is None:
+                raise PortUnavailableError("committed Admin operation receipt unavailable")
+            return await self._accept_receipt(receipt, fingerprint, kind)
         if saved.state is AdminOperationState.PENDING and self._schedule is not None:
             self._schedule(saved, command)
         return saved
+
+    async def _accept_receipt(
+        self,
+        receipt: tuple[AdminOperation, bytes, AdminCommand | None],
+        fingerprint: bytes,
+        kind: AdminActionKind,
+    ) -> AdminOperation:
+        operation, stored_fingerprint, command = receipt
+        if not compare_digest(stored_fingerprint, fingerprint) or operation.kind is not kind:
+            raise UnitPolicyIdempotencyConflictError()
+        if operation.state is not AdminOperationState.PENDING:
+            return operation
+        if command is not None:
+            if command.kind is not kind or command.resource_identity != operation.resource_identity:
+                raise PortUnavailableError("committed Admin command identity is invalid")
+            if self._schedule is not None:
+                self._schedule(operation, command)
+            return operation
+        data = operation.model_dump(mode="python")
+        data.update(
+            state=AdminOperationState.INTERRUPTED,
+            finished_at=self._clock.now(),
+            safe_error=AdminSafeError(
+                code="operation_interrupted",
+                message="The operation cannot be resumed.", retryable=True,
+            ),
+        )
+        try:
+            return await self._store.compare_and_swap_state(
+                AdminOperation.model_validate(data),
+                expected=AdminOperationState.PENDING,
+            )
+        except AdminOperationConflictError:
+            current = await self._store.get(operation.operation_id)
+            return current if current is not None else operation
 
     async def handle(self, command: AdminCommand):
         if not compare_digest(await self._current_digest(command), command.facts_digest):
@@ -301,14 +351,42 @@ class AdminService:
             before = await self._maintenance.inspect_history_storage(
                 tuple(str(value) for value in command.expected_delete_run_ids)
             )
-            result = await self._maintenance.delete_history_runs(
-                tuple(str(value) for value in command.requested_run_ids),
-                cascade_consumers=command.cascade_consumers,
-                expected_delete_run_ids=tuple(str(value) for value in command.expected_delete_run_ids),
-                expected_dependency_ids=tuple(str(value) for value in command.expected_dependency_ids),
-            )
+            delete_ids = tuple(str(value) for value in command.expected_delete_run_ids)
+            unconfirmed_error: Exception | None = None
+
+            async def delete() -> tuple[str, ...]:
+                nonlocal unconfirmed_error
+                try:
+                    result = await self._maintenance.delete_history_runs(
+                        tuple(str(value) for value in command.requested_run_ids),
+                        cascade_consumers=command.cascade_consumers,
+                        expected_delete_run_ids=delete_ids,
+                        expected_dependency_ids=tuple(str(value) for value in command.expected_dependency_ids),
+                    )
+                    return result.deleted_run_ids
+                except Exception as error:
+                    try:
+                        remaining = await self._maintenance.inspect_history_storage(delete_ids)
+                    except Exception:
+                        unconfirmed_error = error
+                        return ()
+                    if set(remaining.run_ids) == set(delete_ids):
+                        raise
+                    if remaining.run_ids:
+                        unconfirmed_error = error
+                        return ()
+                    return delete_ids
+            if self._history_cleanup_guard is None:
+                deleted_run_ids = await delete()
+            else:
+                async with self._history_cleanup_guard(delete_ids) as ready:
+                    if not ready:
+                        raise HistoryCleanupDependencyConflictError()
+                    deleted_run_ids = await delete()
+            if unconfirmed_error is not None:
+                raise unconfirmed_error
             return HistoryCleanupResult(
-                deleted_run_ids=tuple(UUID(value) for value in result.deleted_run_ids),
+                deleted_run_ids=tuple(UUID(value) for value in deleted_run_ids),
                 retained_idempotency_tombstones=before.idempotency_keys,
             )
         if command.kind is AdminActionKind.PROFILE_HANDOFF:

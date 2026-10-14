@@ -1,18 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, ApiError, confirmedRequestRejected, prepareConfirmation, type AdminKind,
+import { api, confirmedRequestRejected, prepareConfirmation, type AdminKind,
   type AdminOperation, type AdminRag, type AdminStorage, type CleanupPreview,
   type GenerationPreview, type ProfilePreview, type RunHistory, type Submission } from '../../api/http'
+import { safeError } from '../../api/safeError'
 
 type Preview =
   | { kind: 'history_cleanup'; data: CleanupPreview }
   | { kind: 'profile_handoff'; data: ProfilePreview }
   | { kind: 'retry_failed_jobs' | 'generation_deletion'; generationId: string; data: GenerationPreview }
 type Attempt = { kind: AdminKind; generationId?: string; submission: Submission }
-
-function safeError(cause: unknown): string {
-  return cause instanceof ApiError ? `${cause.code}${cause.requestId ? ` (${cause.requestId})` : ''}` : 'Service unavailable'
-}
 
 function active(operation: AdminOperation): boolean {
   return operation.state === 'pending' || operation.state === 'running'
@@ -35,15 +32,17 @@ export function AdminPage() {
   const [notice, setNotice] = useState('')
   const [visible, setVisible] = useState(!document.hidden)
   const pollCount = useRef(0)
+  const operationsRevision = useRef(0)
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const revision = operationsRevision.current
     const results = await Promise.allSettled([
       api.adminStorage(signal), api.adminRag(signal), api.operations(undefined, signal), api.history(undefined, signal),
     ])
     if (signal?.aborted) return
     if (results[0].status === 'fulfilled') setStorage(results[0].value)
     if (results[1].status === 'fulfilled') setRag(results[1].value)
-    if (results[2].status === 'fulfilled') {
+    if (results[2].status === 'fulfilled' && revision === operationsRevision.current) {
       setOperations(results[2].value.items); setCursor(results[2].value.next_cursor)
     }
     if (results[3].status === 'fulfilled') {
@@ -111,6 +110,7 @@ export function AdminPage() {
     setBusy(true); setError('')
     try {
       const operation = await api.executeAdmin(confirmed.kind, confirmed.submission, confirmed.generationId)
+      operationsRevision.current++
       setOperations((current) => [operation, ...current.filter((item) => item.operation_id !== operation.operation_id)])
       setAttempt(null); setPreview(null); setPhrase('')
       setNotice(`Operation ${operation.operation_id} accepted. You may leave this page; it will continue on the server.`)

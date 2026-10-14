@@ -335,6 +335,7 @@ class RunnableAcquisition:
             cells=(
                 SimpleNamespace(
                     role=EvidenceCellRole.TARGET,
+                    parameter=scope.requested_parameters[0],
                     direct_fragment_refs=("evidence:local",),
                 ),
             ),

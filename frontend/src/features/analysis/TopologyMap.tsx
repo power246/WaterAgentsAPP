@@ -10,6 +10,16 @@ const colors: Record<NodeVisual, string> = {
   'cancelled-before-start': '#78818a',
 }
 
+function nodePresentation(node: Graph['nodes'][number], snapshot: RunSnapshot | null,
+  sessions: RunDetail['sessions'] | undefined, runStatus: string) {
+  const summary = snapshot?.waterbodies.find((item) => item.target_comid === node.comid)
+  const session = snapshot?.sessions.find((item) => item.target_comid === node.comid)
+    ?? sessions?.find((item) => item.target_comid === node.comid)
+  const sessionId = summary?.session_id ?? session?.session_id ?? null
+  const status = summary?.session_status ?? session?.status
+  return { sessionId, visual: nodeVisual(summary?.participating ?? node.participation === 'active', status, runStatus) }
+}
+
 function Viewport({ points }: { points: [number, number][] }) {
   const map = useMap()
   useEffect(() => {
@@ -48,12 +58,7 @@ export function TopologyMap({ graph, snapshot, sessions, runStatus, selectedSess
         <Viewport points={points} />
         <PickPoint onPick={onPick} />
         {located.map(({ node, point }) => {
-          const summary = snapshot?.waterbodies.find((item) => item.target_comid === node.comid)
-          const session = snapshot?.sessions.find((item) => item.target_comid === node.comid)
-            ?? sessions?.find((item) => item.target_comid === node.comid)
-          const sessionId = summary?.session_id ?? session?.session_id ?? null
-          const status = summary?.session_status ?? session?.status
-          const visual = nodeVisual(summary?.participating ?? node.participation === 'active', status, runStatus)
+          const { sessionId, visual } = nodePresentation(node, snapshot, sessions, runStatus)
           const selected = Boolean(sessionId && sessionId === selectedSessionId)
           return <Fragment key={node.comid}>
             {visual === 'running' && <CircleMarker center={[point.latitude, point.longitude]} radius={15}
@@ -77,12 +82,7 @@ export function TopologyMap({ graph, snapshot, sessions, runStatus, selectedSess
     </div>
     <div className="node-list" aria-label="Waterbody list">
       {nodes.map((node) => {
-        const summary = snapshot?.waterbodies.find((item) => item.target_comid === node.comid)
-        const session = snapshot?.sessions.find((item) => item.target_comid === node.comid)
-          ?? sessions?.find((item) => item.target_comid === node.comid)
-        const sessionId = summary?.session_id ?? session?.session_id ?? null
-        const status = summary?.session_status ?? session?.status
-        const visual = nodeVisual(summary?.participating ?? node.participation === 'active', status, runStatus)
+        const { sessionId, visual } = nodePresentation(node, snapshot, sessions, runStatus)
         return <button key={node.comid} type="button" onClick={() => onSelect(node.comid, sessionId)}>
           <i className={`legend-dot ${visual}`} />COMID {node.comid} — {visualLabels[visual]}
         </button>

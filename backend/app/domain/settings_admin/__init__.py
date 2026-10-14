@@ -1,7 +1,7 @@
 from app.domain.settings_admin.credentials_admin import (
     AdminActionKind, AdminConfirmation, AdminOperation, AdminOperationState,
-    AdminPreview, AdminProgress, AdminSafeError, AdminSafeResult,
-    ConfirmationBinding, CredentialLease, CredentialName, CredentialSource,
+    AdminProgress, AdminSafeError, AdminSafeResult,
+    CredentialLease, CredentialName, CredentialSource,
     CredentialStatus, CredentialStoreAvailability, GenerationDeletionResult,
     HistoryCleanupResult, IdempotencyTombstone, ProfileHandoffResult,
     RetryFailedJobsResult, StoredCredential,
@@ -9,7 +9,7 @@ from app.domain.settings_admin.credentials_admin import (
 from app.domain.settings_admin.admin_command import AdminCommand
 from app.domain.settings_admin.settings import (
     Digest, EmbeddingProfileOption, ModelOption, MutableDefaults, ProfileId,
-    Revision, SessionUnitOverride, UnitPreference, SettingsCatalogProjection, SettingsSnapshot,
+    Revision, UnitPreference, SettingsCatalogProjection, SettingsSnapshot,
     UnitPolicyChange, UnitPolicyEntry, UnitPolicyPreview, UnitPolicyProjection,
     UnitPolicyVersion, UnitCatalogChoice, UnitParameterOption, Version,
 )
@@ -17,13 +17,13 @@ from app.domain.settings_admin.settings import (
 __all__ = [
     "AdminCommand",
     "AdminActionKind", "AdminConfirmation", "AdminOperation", "AdminOperationState",
-    "AdminPreview", "AdminProgress", "AdminSafeError", "AdminSafeResult",
-    "ConfirmationBinding", "CredentialLease", "CredentialName", "CredentialSource",
+    "AdminProgress", "AdminSafeError", "AdminSafeResult",
+    "CredentialLease", "CredentialName", "CredentialSource",
     "CredentialStatus", "CredentialStoreAvailability", "Digest",
     "EmbeddingProfileOption", "GenerationDeletionResult", "HistoryCleanupResult",
     "IdempotencyTombstone", "ModelOption", "MutableDefaults", "ProfileHandoffResult",
     "ProfileId", "RetryFailedJobsResult", "Revision",
-    "SessionUnitOverride", "UnitPreference", "SettingsCatalogProjection", "SettingsSnapshot",
+    "UnitPreference", "SettingsCatalogProjection", "SettingsSnapshot",
     "StoredCredential", "UnitCatalogChoice", "UnitParameterOption",
     "UnitPolicyChange", "UnitPolicyEntry", "UnitPolicyPreview",
     "UnitPolicyProjection", "UnitPolicyVersion", "Version",

@@ -143,3 +143,71 @@ def test_two_repositories_claim_one_job_exactly_once_and_preserve_attempts() -> 
 
     with temporary_migrated_schema() as settings:
         asyncio.run(exercise(settings))
+
+
+def test_expired_fifth_lease_becomes_failed_and_can_be_maintained() -> None:
+    async def exercise(settings) -> None:
+        engine = create_database_engine(settings)
+        store = PostgresRAGRepository(
+            engine,
+            operation_timeout_seconds=settings.db_operation_timeout_seconds,
+        )
+        try:
+            source = await seed_completed_source(engine)
+            generation = await store.create_building_generation(
+                embedding_profile(), source.completed_at, str(source.result_item_id)
+            )
+            await store.enqueue(pending_job(source, generation.generation_id))
+            for attempt in range(1, 6):
+                claimed = (await store.claim(
+                    generation.generation_id,
+                    "worker-a",
+                    datetime.now(UTC) + timedelta(minutes=1),
+                    1,
+                ))[0]
+                assert claimed.attempts == attempt
+                now = datetime.now(UTC)
+                if attempt < 5:
+                    await store.save(claimed.model_copy(update={
+                        "status": RAGIndexJobStatus.RETRY_WAIT,
+                        "next_attempt_at": now - timedelta(seconds=1),
+                        "lease_owner": None,
+                        "lease_until": None,
+                        "last_safe_error_code": "temporary_unavailable",
+                        "updated_at": now,
+                    }))
+                else:
+                    await store.save(claimed.model_copy(update={
+                        "lease_until": now - timedelta(seconds=1),
+                        "updated_at": now,
+                    }))
+
+            assert await store.claim(
+                generation.generation_id,
+                "worker-b",
+                datetime.now(UTC) + timedelta(minutes=1),
+                1,
+            ) == ()
+            counts = await store.counts(generation.generation_id)
+            assert counts.failed == 1
+            assert counts.leased == 0
+            retried = await store.retry_failed_jobs(
+                generation.generation_id,
+                ("lease_expired_attempts_exhausted",),
+                1,
+                datetime.now(UTC),
+            )
+            assert len(retried) == 1
+            assert retried[0].status is RAGIndexJobStatus.PENDING
+            assert retried[0].attempts == 0
+            assert (await store.claim(
+                generation.generation_id,
+                "worker-c",
+                datetime.now(UTC) + timedelta(minutes=1),
+                1,
+            ))[0].attempts == 1
+        finally:
+            await engine.dispose()
+
+    with temporary_migrated_schema() as settings:
+        asyncio.run(exercise(settings))

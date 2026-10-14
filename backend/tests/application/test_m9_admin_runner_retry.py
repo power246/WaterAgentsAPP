@@ -123,3 +123,55 @@ def test_unambiguous_claim_conflict_does_not_execute_command() -> None:
         await runner.shutdown()
 
     asyncio.run(exercise())
+
+
+def test_old_completion_callback_keeps_replacement_registered_for_shutdown() -> None:
+    async def exercise():
+        generation_id = str(uuid4())
+        command = AdminCommand(
+            kind="generation_deletion", resource_identity=f"rag:{generation_id}",
+            facts_digest="a" * 64, generation_id=generation_id,
+        )
+        pending = AdminOperation(
+            operation_id=uuid4(), kind="generation_deletion", state="pending",
+            resource_identity=command.resource_identity,
+            progress=AdminProgress(total_items=1), created_at=datetime.now(UTC),
+        )
+
+        class ClaimStore:
+            def __init__(self):
+                self.attempts = 0
+
+            async def compare_and_swap_state(self, _operation, *, expected):
+                self.attempts += 1
+                if self.attempts == 1:
+                    raise AdminOperationConflictError()
+                raise PortUnavailableError("database unavailable")
+
+            async def get(self, _operation_id):
+                raise PortUnavailableError("database unavailable")
+
+        store = ClaimStore()
+        calls = 0
+
+        async def handle(_command):
+            nonlocal calls
+            calls += 1
+
+        runner = AdminOperationRunner(store=store, clock=_Clock(), handle=handle)
+        runner.schedule(pending, command)
+        old_task = runner._tasks[pending.operation_id]
+        await asyncio.sleep(0)
+        assert old_task.done()
+        runner.schedule(pending, command)
+        replacement = runner._tasks[pending.operation_id]
+        assert replacement is not old_task
+        await asyncio.sleep(0)
+        assert runner._tasks[pending.operation_id] is replacement
+        assert not replacement.done()
+        await runner.shutdown()
+        assert replacement.done()
+        assert replacement.cancelled()
+        assert calls == 0
+
+    asyncio.run(exercise())

@@ -157,13 +157,17 @@ class TranscriptBuffer:
                     raise ValueError(
                         "generating messages are live-only and cannot be stored"
                     )
-            location = locate_content(
-                content.safe_body,
-                preview_body=self._registry.public_safe_body(
+            preview_body = (
+                self._registry.public_safe_body(
                     content.content_type,
                     content.content_schema_version,
                     content.safe_body,
-                ),
+                )
+                if content.content_bytes > inline_content_bytes else None
+            )
+            location = locate_content(
+                content.safe_body,
+                preview_body=preview_body,
                 inline_content_bytes=inline_content_bytes,
                 preview_bytes=preview_bytes,
             )

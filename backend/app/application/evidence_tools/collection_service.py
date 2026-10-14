@@ -561,6 +561,7 @@ class EvidenceCollectionService:
                     upstream_session_id=record.upstream_session_id,
                     result_ref=record.result_ref,
                     closure_refs=record.evidence_closure_refs,
+                    cell_projection=record.cell_projection,
                 )
                 source_refs = ()
             else:

@@ -52,6 +52,10 @@ from tests.application.evidence_tools.fakes import (
     SequentialIds,
     complete_batch,
 )
+from tests.application.evidence_tools.conftest import (
+    SUPPORT_PARAMETER,
+    make_discharge_context,
+)
 
 
 def _runtime(
@@ -104,7 +108,7 @@ def _water_records(scope, plan, *, include=True, invalid_unit=False):
     assert capability is not None and policy is not None
     record_type = (
         DischargeObservationRecord
-        if parameter == scope.supporting_parameters[0]
+        if parameter == SUPPORT_PARAMETER
         else WaterObservationRecord
     )
     return tuple(
@@ -348,6 +352,26 @@ def test_station_backed_full_partial_empty_and_quality_invalid_paths(scope_facto
                 fragment.source != "topology_ready"
                 for fragment in store.fragments.values()
             )
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("include_oxygen", [False, True])
+def test_discharge_target_builds_a_runnable_bundle_without_support_cells(
+    scope_factory, include_oxygen,
+) -> None:
+    async def exercise() -> None:
+        scope = scope_factory(context=make_discharge_context(
+            include_oxygen=include_oxygen,
+        ))
+        store = MemoryEvidenceStore()
+        handoff = await _runtime(store, water_port=_water_port(scope)).start(scope)
+
+        assert handoff.bundle.supporting_parameters == ()
+        assert handoff.bundle.requested_parameters[0] == SUPPORT_PARAMETER
+        assert all(cell.role is EvidenceCellRole.TARGET for cell in handoff.cells)
+        assert all(gate.status is EvidenceCellStatus.SUPPORTED for gate in handoff.cell_gates)
+        assert not handoff.stop_before_model
 
     asyncio.run(exercise())
 

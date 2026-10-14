@@ -78,6 +78,7 @@ from app.domain.evidence.serialization import (
 )
 from app.domain.evidence.source_record import SourceRecord
 from app.domain.evidence.source_record_reference import SourceRecordReference
+from app.domain.evidence.upstream_result_cell_projection import UpstreamResultCellProjection
 from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
 from app.domain.evidence.upstream_result_record import UpstreamResultRecord
 from app.domain.evidence.upstream_result_request import UpstreamResultRequest
@@ -145,6 +146,7 @@ __all__ = [
     "SafeEvidenceError",
     "SourceRecord",
     "SourceRecordReference",
+    "UpstreamResultCellProjection",
     "UpstreamResultPayload",
     "UpstreamResultRecord",
     "UpstreamResultRequest",

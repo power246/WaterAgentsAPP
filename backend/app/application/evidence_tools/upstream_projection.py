@@ -10,7 +10,8 @@ from app.application.analysis_runs.topology_result_models import (
 )
 from app.application.canonical_json import canonical_json_digest
 from app.application.transcripts.models import ReadTranscriptItem
-from app.application.transcripts.read_models import ReadView
+from app.application.transcripts.read_models import ReadView, RegisteredRunRead
+from app.domain.evidence.upstream_result_cell_projection import UpstreamResultCellProjection
 from app.domain import (
     CollectionCompletionContract,
     CollectionCompletionProof,
@@ -18,6 +19,7 @@ from app.domain import (
     CollectionPageManifest,
     EvidenceLocation,
     EvidenceBundle,
+    EvidenceFragment,
     InferenceResult,
     ItemReference,
     OutcomeStatus,
@@ -26,6 +28,7 @@ from app.domain import (
     ProviderCollectionBatch,
     ProviderQuality,
     TimeRange,
+    UpstreamResultPayload,
     UpstreamResultRecord,
     UpstreamResultRequest,
     canonical_model_bytes,
@@ -46,12 +49,11 @@ class UpstreamInferenceResultReader(Protocol):
 
 
 class RegisteredTranscriptReader(Protocol):
-    async def read_registered_session_items(
+    async def read_registered_run(
         self,
         run_id: UUID,
-        session_id: UUID,
         view: ReadView,
-    ) -> tuple[ReadTranscriptItem, ...]: ...
+    ) -> RegisteredRunRead: ...
 
 
 class TranscriptUpstreamInferenceResultReader:
@@ -66,10 +68,15 @@ class TranscriptUpstreamInferenceResultReader:
     ) -> ResolvedInferenceResult:
         if outcome.result_ref is None:
             raise ValueError("dependency outcome does not reference a result")
-        items = await self._reader.read_registered_session_items(
+        snapshot = await self._reader.read_registered_run(
             outcome.run_id,
-            outcome.session_id,
             ReadView.AUTO,
+        )
+        if snapshot.run.run_id != outcome.run_id:
+            raise ValueError("dependency result run identity does not match")
+        items = tuple(
+            item for item in snapshot.items
+            if item.item.session_id == outcome.session_id and item.body is not None
         )
         item = next(
             (
@@ -86,7 +93,7 @@ class TranscriptUpstreamInferenceResultReader:
             or not isinstance(item.body, InferenceResult)
         ):
             raise ValueError("dependency result is not inference_result v1")
-        closure_ids = _session_result_closure_ids(item, items)
+        closure_ids = _session_result_closure_ids(item, items, snapshot.items)
         if not closure_ids or outcome.result_ref.item_id in closure_ids:
             raise ValueError("dependency result requires a distinct reference closure")
         return ResolvedInferenceResult(
@@ -201,6 +208,18 @@ def project_upstream_results(
                 result_source=point.source,
                 confidence=point.confidence,
                 evidence_closure_refs=resolved.closure_refs,
+                cell_projection=UpstreamResultCellProjection(
+                    parameter=parameter,
+                    window_id=window_id,
+                    time_range=TimeRange(start=point.start_time, end=point.end_time),
+                    outcome_status=point.outcome_status,
+                    representative_value=point.representative_value,
+                    unit_id=point.unit_id,
+                    trend=point.assessment.trend,
+                    risk_level=point.assessment.risk_level,
+                    source=point.source,
+                    confidence=point.confidence,
+                ),
             ))
     ordered = tuple(sorted(
         records,
@@ -249,6 +268,7 @@ def project_upstream_results(
 def _session_result_closure_ids(
     result_item: ReadTranscriptItem,
     session_items: tuple[ReadTranscriptItem, ...],
+    run_items: tuple[ReadTranscriptItem, ...],
 ) -> tuple[UUID, ...]:
     result = result_item.body
     if not isinstance(result, InferenceResult):
@@ -275,6 +295,38 @@ def _session_result_closure_ids(
             *(UUID(reference.item_id) for reference in bundle.closure_refs),
             *(UUID(reference.item_id) for reference in bundle.tool_result_refs),
         )
+        by_id = {item.item.item_id: item for item in run_items if item.body is not None}
+        upstream_owners: dict[UUID, UUID] = {}
+        for reference in bundle.fragment_refs:
+            fragment_item = by_id.get(UUID(reference.item_id))
+            if fragment_item is None or not isinstance(fragment_item.body, EvidenceFragment):
+                continue
+            payload = fragment_item.body.payload
+            if not isinstance(payload, UpstreamResultPayload):
+                continue
+            owner = UUID(payload.upstream_session_id)
+            for upstream_ref in (payload.result_ref, *payload.closure_refs):
+                upstream_id = UUID(upstream_ref.item_id)
+                previous = upstream_owners.setdefault(upstream_id, owner)
+                if previous != owner:
+                    raise ValueError("dependency upstream reference ownership conflicts")
+        closure_refs = {UUID(reference.item_id) for reference in bundle.closure_refs}
+        for upstream_id, owner in upstream_owners.items():
+            item = by_id.get(upstream_id)
+            if (
+                upstream_id not in closure_refs
+                or item is None
+                or item.item.session_id != owner
+            ):
+                raise ValueError("dependency upstream reference closure is incomplete")
+        cross_session = {
+            item_id for item_id in closure_refs
+            if item_id in by_id
+            and by_id[item_id].item.session_id != result_item.item.session_id
+        }
+        if cross_session != set(upstream_owners):
+            raise ValueError("dependency upstream reference closure is incomplete")
+        original = tuple(item_id for item_id in original if item_id not in cross_session)
     else:
         original = tuple(
             UUID(reference)

@@ -36,6 +36,7 @@ from app.application.reasoning.planning_loop import (
     EvidencePlanningOutcome,
     EvidencePlanningStageCounts,
     PlanningConvergenceReason,
+    build_reasoning_evidence_summaries,
     build_reasoning_working_context,
 )
 from app.application.evidence_tools import EvidenceAcquisitionHandoff
@@ -200,11 +201,13 @@ class RunSingleWaterbodyAgent:
                 generated_at=self._clock.now(),
             )
             context = await build_reasoning_working_context(task, planning)
+            evidence_summaries = build_reasoning_evidence_summaries(planning.handoff)
             stage = "batch_planning"
             self._checkpoint(task, deadline, stage=stage)
             plan = self._batch_planner.plan(
                 skeleton,
                 working_context=context,
+                evidence_summaries=evidence_summaries,
                 model_fit=self._model_fit,
                 deadline=deadline,
                 batch_response_schema=reasoning_batch_response_schema(),
@@ -345,6 +348,18 @@ class RunSingleWaterbodyAgent:
                     audits=tuple(audits),
                     planning_counts=None,
                 )
+            if error.code in {
+                "evidence_prompt_projection_invalid",
+                "evidence_prompt_projection_too_large",
+            }:
+                return self._failed(
+                    code="reasoning_evidence_projection_failed",
+                    message="The evidence could not be prepared for model reasoning.",
+                    stage="evidence_planning",
+                    retryable=False,
+                    audits=audits,
+                    planning=planning,
+                )
             return self._failed(
                 code="waterbody_model_response_invalid",
                 message="The waterbody model returned an invalid response.",
@@ -394,7 +409,10 @@ class RunSingleWaterbodyAgent:
                 planning=planning,
             )
         except WaterbodyModelPortError as error:
-            if error.code == "waterbody_model_cancelled":
+            if (
+                error.code == "waterbody_model_cancelled"
+                and task.task.cancellation_token.is_requested()
+            ):
                 return WaterbodyAgentRunOutcome(
                     status=WaterbodyAgentRunStatus.CANCELLED,
                     result=None,
@@ -541,6 +559,8 @@ def _aggregate_usage(planning_usage, audits) -> ModelUsageSummary | None:
 
 
 def _model_error(error: WaterbodyModelPortError) -> tuple[str, str, bool]:
+    if error.code == "waterbody_model_cancelled":
+        return error.code, "The waterbody model request was cancelled by its provider.", True
     if error.code == "waterbody_model_unavailable":
         return error.code, "The waterbody model is unavailable.", True
     if error.code == "waterbody_model_timeout":

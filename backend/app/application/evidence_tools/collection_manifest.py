@@ -1,4 +1,3 @@
-from app.application.evidence_tools.errors import EvidenceCollectionIncompleteError
 from app.application.evidence_tools.scope import EvidenceWindow
 from app.domain import (
     CollectionManifest,
@@ -76,11 +75,6 @@ def build_collection_manifest(
         counts=batch.counts,
         completion_proof=batch.completion_proof,
     )
-
-
-def require_complete_manifest(manifest: CollectionManifest) -> None:
-    if not manifest.completion_proof.complete:
-        raise EvidenceCollectionIncompleteError()
 
 
 def _window_completeness(

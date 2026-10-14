@@ -12,6 +12,8 @@ from app.application.analysis_runs.models import (
     PublicError,
     RunStatus,
     SessionSummary,
+    SessionResultReference,
+    SessionResultSummary,
 )
 from app.application.analysis_runs.persistence import PersistenceInfo
 from app.application.analysis_runs.topology_result_models import (
@@ -45,6 +47,47 @@ class ReadSource(DomainEnum):
 class ReadIssue(DomainModel):
     item_id: UUID
     error: PublicError
+
+
+class ReadSessionSummary(DomainModel):
+    session_id: UUID
+    agent_role: AgentRole
+    target_comid: NonEmptyString | None = None
+    status: AgentSessionStatus
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+    result_ref: SessionResultReference | None = None
+    result_summary: SessionResultSummary | None = None
+    terminal_corrupt: StrictBool = False
+
+    @model_validator(mode="after")
+    def validate_read_state(self) -> "ReadSessionSummary":
+        if (self.agent_role is AgentRole.WATERBODY) != (self.target_comid is not None):
+            raise ValueError("only waterbody sessions require target_comid")
+        if self.updated_at < self.created_at:
+            raise ValueError("updated_at must not precede created_at")
+        has_result = self.result_ref is not None and self.result_summary is not None
+        if (self.result_ref is None) != (self.result_summary is None):
+            raise ValueError("result_ref and result_summary must appear together")
+        completed_result = (
+            self.status is AgentSessionStatus.COMPLETED
+            and self.agent_role is not AgentRole.QUERY_PARSER
+        )
+        if self.terminal_corrupt:
+            if not completed_result or has_result:
+                raise ValueError("corrupt terminal marker requires missing completed result")
+        elif completed_result != has_result:
+            raise ValueError("completed result sessions require a result")
+        if self.agent_role is AgentRole.QUERY_PARSER and has_result:
+            raise ValueError("query_parser sessions must not have a result")
+        if has_result:
+            SessionSummary.model_validate(
+                self.model_dump(mode="python", exclude={"terminal_corrupt"})
+            )
+        return self
+
+
+ReadSession: TypeAlias = SessionSummary | ReadSessionSummary
 
 
 class ContextSummaryLocation(DomainModel):
@@ -180,7 +223,8 @@ class StoredRunHeader(DomainModel):
 
 class StoredRunRead(DomainModel):
     run: StoredRunHeader
-    sessions: tuple[SessionSummary, ...] = ()
+    sessions: tuple[ReadSession, ...] = ()
+    session_issues: tuple[ReadIssue, ...] = ()
     items: tuple[StoredTranscriptItem, ...] = ()
     contents: tuple[StoredTranscriptContent, ...] = ()
 
@@ -189,7 +233,7 @@ class RegisteredRunRead(DomainModel):
     """One persisted run decoded through the production transcript registry."""
 
     run: StoredRunHeader
-    sessions: tuple[SessionSummary, ...] = ()
+    sessions: tuple[ReadSession, ...] = ()
     items: tuple[ReadTranscriptItem, ...] = ()
 
 
@@ -217,7 +261,7 @@ class RunHistoryResponse(DomainModel):
 
 class RunDetailResponse(DomainModel):
     run: RunSummary
-    sessions: tuple[SessionSummary, ...] = ()
+    sessions: tuple[ReadSession, ...] = ()
     items: tuple[TranscriptItemView, ...] = ()
     referenced_items: tuple[TranscriptItemView, ...] = ()
     source: ReadSource
@@ -227,7 +271,7 @@ class RunDetailResponse(DomainModel):
 
 class SessionDetailResponse(DomainModel):
     run_id: UUID
-    session: SessionSummary
+    session: ReadSession
     transcript_url: NonEmptyString
     source: ReadSource
     persistence: PersistenceInfo | None = None

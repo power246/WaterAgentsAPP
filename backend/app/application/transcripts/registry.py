@@ -115,6 +115,43 @@ class ContentRegistration:
         return self.content_type, self.content_schema_version
 
 
+_SENSITIVE_SUMMARY_CONTENT_TYPES = frozenset((
+    "run_summary_model_request",
+    "run_summary_model_response",
+))
+
+
+def _summary_public_body(
+    content_type: str,
+    registration: ContentRegistration | None,
+    safe_body: str,
+) -> str:
+    if registration is not None and registration.public_projection is not None:
+        try:
+            body = registration.adapter.validate_json(safe_body)
+            return _serialize_safe_json(registration.public_projection(body))
+        except (ValidationError, TypeError, ValueError):
+            pass
+
+    # A damaged or future schema must not expose prompts or provider output.
+    raw = json.loads(safe_body)
+    value: dict[str, JsonValue] = {}
+    if isinstance(raw, dict):
+        version = raw.get("schema_version")
+        if type(version) is int and version > 0:
+            value["schema_version"] = version
+        operation_id = raw.get("operation_id")
+        if isinstance(operation_id, str):
+            try:
+                value["operation_id"] = str(UUID(operation_id))
+            except ValueError:
+                pass
+        if content_type == "run_summary_model_response":
+            value["structured_output_present"] = raw.get("structured_output") is not None
+            value["visible_text_present"] = bool(raw.get("visible_text"))
+    return _serialize_safe_json(value)
+
+
 class TranscriptRegistry:
     def __init__(self) -> None:
         self._registrations: dict[tuple[str, int], ContentRegistration] = {}
@@ -294,17 +331,6 @@ class TranscriptRegistry:
             )
         return checked.model_copy(update={"metadata": metadata})
 
-    def parse_many(
-        self,
-        records: tuple[tuple[StoredTranscriptItem, str], ...],
-        *,
-        error_id_factory: Callable[[], UUID] = uuid4,
-    ) -> tuple[ReadTranscriptItem, ...]:
-        return tuple(
-            self.parse(item, body, error_id_factory=error_id_factory)
-            for item, body in records
-        )
-
     def message_projection(
         self,
         content_type: str,
@@ -396,6 +422,8 @@ class TranscriptRegistry:
         registration = self._registrations.get(
             (content_type, content_schema_version)
         )
+        if content_type in _SENSITIVE_SUMMARY_CONTENT_TYPES:
+            return _summary_public_body(content_type, registration, safe_body)
         if registration is None or registration.public_projection is None:
             return safe_body
         body = registration.adapter.validate_json(safe_body)
@@ -410,6 +438,8 @@ class TranscriptRegistry:
         registration = self._registrations.get(
             (content_type, content_schema_version)
         )
+        if content_type in _SENSITIVE_SUMMARY_CONTENT_TYPES:
+            return _summary_public_body(content_type, registration, safe_body)
         if registration is None or not registration.project_full_content:
             return safe_body
         if registration.public_projection is None:

@@ -4,6 +4,12 @@ from uuid import UUID
 
 import pytest
 
+from tests.application.coordinator_inspection import (
+    list_session_transcript_items,
+    list_state_mutations,
+    list_transcript_items,
+)
+
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.application.analysis_runs.coordinator import (
     AgentSessionNotFoundError,
@@ -359,7 +365,7 @@ def test_agent_session_cancel_has_priority_over_concurrent_completion() -> None:
 
 def test_run_scoped_transcript_identity_and_operation_are_stable() -> None:
     async def exercise(coordinator, clock, run_id) -> None:
-        initial = await coordinator.list_transcript_items(run_id)
+        initial = await list_transcript_items(coordinator, run_id)
         assert [item.transcript_sequence for item in initial] == [1, 2]
         assert all(item.session_id is None for item in initial)
 
@@ -386,12 +392,12 @@ def test_run_scoped_transcript_identity_and_operation_are_stable() -> None:
         )
         clock_calls = clock.calls
 
-        all_items = await coordinator.list_transcript_items(run_id)
-        parser_items = await coordinator.list_session_transcript_items(
+        all_items = await list_transcript_items(coordinator, run_id)
+        parser_items = await list_session_transcript_items(coordinator,
             run_id,
             parser.session_id,
         )
-        waterbody_items = await coordinator.list_session_transcript_items(
+        waterbody_items = await list_session_transcript_items(coordinator,
             run_id,
             waterbody.session_id,
         )
@@ -406,7 +412,7 @@ def test_run_scoped_transcript_identity_and_operation_are_stable() -> None:
         assert first_message.created_at < second_message.created_at
         assert len({item.item_id for item in all_items}) == len(all_items)
         assert clock.calls == clock_calls
-        assert await coordinator.list_transcript_items(run_id) == all_items
+        assert await list_transcript_items(coordinator, run_id) == all_items
         assert clock.calls == clock_calls
 
     run_test(exercise)
@@ -435,7 +441,7 @@ def test_concurrent_transcript_allocation_is_unique_and_ordered() -> None:
         )
         assert [
             item.transcript_sequence
-            for item in await coordinator.list_transcript_items(run_id)
+            for item in await list_transcript_items(coordinator, run_id)
         ] == list(range(1, 44))
 
     run_test(exercise)
@@ -470,7 +476,7 @@ def test_running_mutations_exist_without_public_lifecycle_items() -> None:
             agent_role=AgentRole.QUERY_PARSER,
         )
         await coordinator.mark_agent_session_running(run_id, session.session_id)
-        mutations = await coordinator.list_state_mutations(run_id)
+        mutations = await list_state_mutations(coordinator, run_id)
 
         assert [type(item) for item in mutations] == [
             RunStateMutation,

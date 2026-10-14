@@ -59,7 +59,12 @@ class AdminOperationRunner:
             name=f"admin-operation-{operation.operation_id}",
         )
         self._tasks[operation.operation_id] = task
-        task.add_done_callback(lambda _: self._tasks.pop(operation.operation_id, None))
+
+        def forget_finished(finished: asyncio.Task[None]) -> None:
+            if self._tasks.get(operation.operation_id) is finished:
+                self._tasks.pop(operation.operation_id)
+
+        task.add_done_callback(forget_finished)
 
     async def shutdown(self) -> None:
         self._stopping = True

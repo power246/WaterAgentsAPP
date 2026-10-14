@@ -166,7 +166,9 @@ export async function subscribe(
 
 function reconnectDelay(signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, 500)
-    signal.addEventListener('abort', () => { clearTimeout(timer); resolve() }, { once: true })
+    const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }
+    const timer = setTimeout(finish, 500)
+    signal.addEventListener('abort', finish, { once: true })
+    if (signal.aborted) finish()
   })
 }

@@ -20,6 +20,8 @@ _FIELDS = (
     "generation_age_seconds", "job_pending", "job_leased", "job_retry_wait",
     "job_failed", "job_lag_seconds", "embedding_stage", "error_code",
     "strategy", "candidate_count", "result_count", "active_profile_digest",
+    "provider", "provider_operation", "provider_status", "provider_error",
+    "provider_attempts", "run_id", "session_id", "failure_code", "model_calls",
 )
 _FORMAT_FAILURE = (
     '{"timestamp":null,"level":"ERROR","event_name":"log_format_failed",'

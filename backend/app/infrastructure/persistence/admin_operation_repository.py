@@ -37,6 +37,11 @@ def _project(row) -> AdminOperation:
     })
 
 
+def _command(row) -> AdminCommand | None:
+    value = row["safe_request_summary"].get("command")
+    return AdminCommand.model_validate(value) if value is not None else None
+
+
 def _encode_cursor(operation: AdminOperation) -> str:
     value = json.dumps([operation.created_at.isoformat(), str(operation.operation_id)])
     return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
@@ -126,14 +131,16 @@ class PostgresAdminOperationRepository:
             raise PortUnavailableError("admin operation store unavailable") from error
     async def read_receipt(
         self, idempotency_key: UUID,
-    ) -> tuple[AdminOperation, bytes] | None:
+    ) -> tuple[AdminOperation, bytes, AdminCommand | None] | None:
         try:
             async with asyncio.timeout(self._timeout):
                 async with self._engine.connect() as connection:
                     row = (await connection.execute(select(admin_operations).where(
                         admin_operations.c.idempotency_key == idempotency_key
                     ))).mappings().one_or_none()
-            return None if row is None else (_project(row), row["request_fingerprint"])
+            return None if row is None else (
+                _project(row), row["request_fingerprint"], _command(row),
+            )
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise PortUnavailableError("admin operation store unavailable") from error
 
@@ -147,11 +154,7 @@ class PostgresAdminOperationRepository:
                         ).order_by(admin_operations.c.created_at,
                                    admin_operations.c.operation_id)
                     )).mappings())
-            return tuple((
-                _project(row),
-                AdminCommand.model_validate(row["safe_request_summary"]["command"])
-                if "command" in row["safe_request_summary"] else None,
-            ) for row in rows)
+            return tuple((_project(row), _command(row)) for row in rows)
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise PortUnavailableError("admin operation store unavailable") from error
 

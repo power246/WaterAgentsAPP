@@ -48,6 +48,29 @@ describe('single SSE parser and client', () => {
     expect(headers).toEqual([null, '1'])
   })
 
+  it('removes abort listeners after each timed reconnect', async () => {
+    vi.useFakeTimers()
+    try {
+      const controller = new AbortController()
+      const added = vi.spyOn(controller.signal, 'addEventListener')
+      const removed = vi.spyOn(controller.signal, 'removeEventListener')
+      let calls = 0
+      const fetcher: typeof fetch = async () => {
+        calls += 1
+        if (calls <= 20) throw new Error('connection lost')
+        return stream('event: stream_end\ndata: {}\n\n')
+      }
+      const subscription = subscribe('run', runId, null, () => undefined, controller.signal, fetcher)
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        await vi.advanceTimersByTimeAsync(500)
+      }
+      await subscription
+      expect(calls).toBe(21)
+      expect(added.mock.calls.filter(([type]) => type === 'abort')).toHaveLength(20)
+      expect(removed.mock.calls.filter(([type]) => type === 'abort')).toHaveLength(20)
+    } finally { vi.useRealTimers() }
+  })
+
   it('releases the selected session reader on abort without affecting the next session', async () => {
     const first = new AbortController()
     let readerCancelled = false

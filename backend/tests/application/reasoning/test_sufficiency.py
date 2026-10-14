@@ -14,6 +14,7 @@ from app.application.query_understanding import (
     create_evidence_rule_plan,
 )
 from app.application.reasoning import (
+    build_reasoning_evidence_catalog,
     ReasoningGateDecision,
     SealedEvidenceValidationError,
     SealedEvidenceInput,
@@ -30,6 +31,7 @@ from app.domain import (
 from tests.application.evidence_tools.conftest import (
     SUPPORT_PARAMETER,
     TARGET_PARAMETER,
+    make_discharge_context,
     make_context,
 )
 from tests.application.reasoning.test_task_and_skeleton import (
@@ -138,6 +140,34 @@ def _replace_window_statuses(
         if gate_status is EvidenceCellStatus.BLOCKED
         else (),
     )
+
+
+@_async_test
+@pytest.mark.parametrize("include_oxygen", [False, True])
+async def test_discharge_target_seals_and_validates_its_evidence(
+    include_oxygen: bool,
+) -> None:
+    validated, handoff, registry = await _validated_fixture(
+        context=make_discharge_context(include_oxygen=include_oxygen),
+    )
+    sealed = seal_evidence_input(validated, handoff, registry)
+    fragments = tuple([
+        await handoff.read_port.read_fragment(
+            validated.task.evidence_scope, reference,
+        )
+        for reference in sealed.fragment_allowlist
+    ])
+    catalog = build_reasoning_evidence_catalog(sealed, fragments)
+
+    assert sealed.supporting_parameters == ()
+    assert all(gate.decision is ReasoningGateDecision.SUPPORTED for gate in sealed.gates)
+    for scope in catalog.cell_scopes:
+        assert set(scope.allowed_refs) == set(
+            next(gate.allowed_evidence_refs for gate in sealed.gates
+                 if gate.cell_id == scope.cell_id)
+        )
+        assert set(scope.target_direct_refs).isdisjoint(scope.support_direct_refs)
+        assert set(scope.target_indirect_refs).isdisjoint(scope.support_indirect_refs)
 
 
 @_async_test

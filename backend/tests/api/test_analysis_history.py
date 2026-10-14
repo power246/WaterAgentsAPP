@@ -712,6 +712,109 @@ def test_corrupt_items_keep_safe_fulltext_unless_body_is_unreadable(
     run(exercise)
 
 
+@pytest.mark.parametrize("body", ('{"invalid":true}', '{"invalid": true}'))
+def test_invalid_registered_body_is_isolated_regardless_of_json_spacing(body: str) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        async with app_client(store=store) as (_, client):
+            created = await client.post(BASE, json=create_request("spacing check"))
+            run_id = UUID(created.json()["run_id"])
+            request_id = store._runs[run_id].request_item_id
+            item = store._items[request_id]
+            store._items[request_id] = item.model_copy(update={
+                "content_type": "waterbody_model_response",
+                "content_schema_version": 1,
+                "inline_body": body,
+                "content_bytes": len(body.encode("utf-8")),
+            })
+            store._contents.pop(request_id, None)
+            response = await client.get(f"{BASE}/{run_id}?view=history")
+            assert response.status_code == 200
+            payload = response.json()
+            damaged = next(
+                item for item in payload["items"]
+                if item["item_id"] == str(request_id)
+            )
+            assert damaged["parse_status"] == "corrupt"
+            assert damaged["content"] == {"kind": "unparsed"}
+            assert any(
+                issue["item_id"] == str(request_id)
+                and issue["error"]["code"] == "transcript_content_corrupt"
+                for issue in payload["issues"]
+            )
+            assert any(item["item_id"] != str(request_id) for item in payload["items"])
+
+    run(exercise)
+
+
+@pytest.mark.parametrize("content_type", (
+    "run_summary_model_request",
+    "run_summary_model_response",
+))
+@pytest.mark.parametrize("version,issue_code", (
+    (1, "transcript_content_corrupt"),
+    (999, "transcript_content_unsupported"),
+))
+def test_invalid_summary_fulltext_uses_public_projection(
+    content_type: str, version: int, issue_code: str,
+) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        async with app_client(store=store) as (application, client):
+            created = await client.post(BASE, json=create_request("summary projection"))
+            run_id = UUID(created.json()["run_id"])
+            await wait_saved(application, run_id)
+            request_id = store._runs[run_id].request_item_id
+            item = store._items[request_id]
+            private = "PRIVATE_SUMMARY_BODY_MARKER"
+            body = json.dumps({
+                "schema_version": version,
+                "operation_id": str(uuid4()),
+                "invalid": True,
+                "system_prompt": private,
+                "messages": [{"text": private}],
+                "structured_output": private,
+                "visible_text": private,
+            })
+            store._items[request_id] = item.model_copy(update={
+                "content_type": content_type,
+                "content_schema_version": version,
+                "inline_body": body,
+                "content_bytes": len(body.encode("utf-8")),
+            })
+            store._contents.pop(request_id, None)
+
+            detail = await client.get(f"{BASE}/{run_id}?view=history")
+            assert detail.status_code == 200
+            assert private not in detail.text
+            assert any(
+                issue["item_id"] == str(request_id)
+                and issue["error"]["code"] == issue_code
+                for issue in detail.json()["issues"]
+            )
+
+            content = await client.get(
+                f"{BASE}/{run_id}/transcript/{request_id}/content?view=history"
+            )
+            assert content.status_code == 200
+            assert private not in content.text
+            assert any(
+                issue["item_id"] == str(request_id)
+                and issue["error"]["code"] == issue_code
+                for issue in content.json()["issues"]
+            )
+            public = json.loads(content.json()["text"])
+            assert public["schema_version"] == version
+            assert UUID(public["operation_id"])
+            if content_type == "run_summary_model_response":
+                assert public["structured_output_present"] is True
+                assert public["visible_text_present"] is True
+            else:
+                assert "structured_output_present" not in public
+
+    run(exercise)
+
+
 def test_unsupported_fulltext_requires_strict_history_view() -> None:
     async def exercise() -> None:
         store = InMemoryTranscriptStore()

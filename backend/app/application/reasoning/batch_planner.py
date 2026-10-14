@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal, Protocol, Self
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from pydantic import Field, StrictBool, StrictInt, model_validator
+from pydantic import Field, StrictBool, StrictInt, ValidationError, model_validator
 
 from app.application.reasoning.errors import (
     ReasoningPlanError,
@@ -55,6 +55,10 @@ from app.domain import (
 _HARD_MAX_CELLS_PER_BATCH = 32
 _HARD_MAX_BATCHES = 24
 _MAX_SYNTHESIS_BASE_FACTS = 125
+
+
+class _BatchContextTooLarge(ValueError):
+    pass
 
 
 class ModelFitCapability(DomainModel):
@@ -459,6 +463,7 @@ class ReasoningBatchPlanner:
         skeleton: ResultSkeleton,
         *,
         working_context: WorkingContextProjection,
+        evidence_summaries: tuple[BoundedEvidenceSummary, ...] | None = None,
         model_fit: ModelFitCapability,
         deadline: datetime,
         batch_response_schema: WaterbodyJsonSchema,
@@ -487,6 +492,7 @@ class ReasoningBatchPlanner:
                 candidate, fits = self._measure_batch(
                     skeleton=skeleton,
                     base_context=working_context,
+                    evidence_summaries=evidence_summaries,
                     model_fit=model_fit,
                     deadline=deadline,
                     response_schema=batch_response_schema,
@@ -501,6 +507,7 @@ class ReasoningBatchPlanner:
                     candidate, fits = self._measure_batch(
                         skeleton=skeleton,
                         base_context=working_context,
+                        evidence_summaries=evidence_summaries,
                         model_fit=model_fit,
                         deadline=deadline,
                         response_schema=batch_response_schema,
@@ -576,6 +583,7 @@ class ReasoningBatchPlanner:
         *,
         skeleton: ResultSkeleton,
         base_context: WorkingContextProjection,
+        evidence_summaries: tuple[BoundedEvidenceSummary, ...] | None,
         model_fit: ModelFitCapability,
         deadline: datetime,
         response_schema: WaterbodyJsonSchema,
@@ -583,13 +591,17 @@ class ReasoningBatchPlanner:
         parameter: ParameterKey,
         segment_index: int,
         cells: tuple[AgentReasoningCellScope, ...],
-    ) -> tuple[ReasoningBatch, bool]:
-        context = _batch_context(
-            skeleton,
-            base_context,
-            scope_digest=skeleton.agent_projection().scope_digest,
-            cells=cells,
-        )
+    ) -> tuple[ReasoningBatch | None, bool]:
+        try:
+            context = _batch_context(
+                skeleton,
+                base_context,
+                evidence_summaries=evidence_summaries,
+                scope_digest=skeleton.agent_projection().scope_digest,
+                cells=cells,
+            )
+        except _BatchContextTooLarge:
+            return None, False
         model = model_fit.model
         batch_id = _batch_id(
             batch_index=batch_index,
@@ -867,21 +879,44 @@ def _batch_context(
     skeleton: ResultSkeleton,
     base: WorkingContextProjection,
     *,
+    evidence_summaries: tuple[BoundedEvidenceSummary, ...] | None = None,
     scope_digest: str,
     cells: tuple[AgentReasoningCellScope, ...],
 ) -> WorkingContextProjection:
     evidence_refs = {ref for cell in cells for ref in cell.allowed_evidence_refs}
     source_allowlist = set(skeleton.source_record_allowlist)
+    catalog = base.evidence_summaries if evidence_summaries is None else evidence_summaries
+    by_ref = {summary.evidence_ref: summary for summary in catalog}
+    if len(by_ref) != len(catalog):
+        raise ReasoningPlanError("reasoning_evidence_projection_duplicate")
+    required_refs = set(evidence_refs)
+    if evidence_summaries is not None:
+        pending = list(evidence_refs)
+        while pending:
+            reference = pending.pop()
+            summary = by_ref.get(reference)
+            if summary is None:
+                raise ReasoningPlanError("reasoning_evidence_projection_incomplete")
+            for dependency in summary.dependency_evidence_refs:
+                if dependency not in skeleton.evidence_allowlist:
+                    raise ReasoningPlanError("reasoning_evidence_projection_out_of_scope")
+                if dependency not in required_refs:
+                    required_refs.add(dependency)
+                    pending.append(dependency)
     summaries = tuple(
-        summary
-        for summary in base.evidence_summaries
-        if summary.evidence_ref in evidence_refs
-        and set(summary.source_record_item_refs) <= source_allowlist
+        by_ref[reference]
+        for reference in sorted(required_refs)
+        if reference in by_ref
+        and set(by_ref[reference].source_record_item_refs) <= source_allowlist
     )
+    if evidence_summaries is not None and len(summaries) != len(required_refs):
+        raise ReasoningPlanError("reasoning_evidence_projection_incomplete")
+    if len(summaries) > 64:
+        raise _BatchContextTooLarge()
     refs = tuple(
         sorted(
             {
-                *evidence_refs,
+                *required_refs,
                 *(
                     ref
                     for summary in summaries
@@ -890,20 +925,29 @@ def _batch_context(
             }
         )
     )
-    return build_working_context_projection(
-        run_id=skeleton.run_id,
-        session_id=skeleton.session_id,
-        target_comid=skeleton.target_comid,
-        scope_digest=scope_digest,
-        bundle_ref=skeleton.bundle_ref,
-        bundle_digest=skeleton.bundle_digest,
-        rule_plan_digest=skeleton.rule_plan_digest,
-        capability_registry_digest=skeleton.capability_registry_digest,
-        reference_allowlist=refs,
-        recent_messages=base.recent_messages,
-        facts=(),
-        evidence_summaries=summaries,
-    )
+    try:
+        return build_working_context_projection(
+            run_id=skeleton.run_id,
+            session_id=skeleton.session_id,
+            target_comid=skeleton.target_comid,
+            scope_digest=scope_digest,
+            bundle_ref=skeleton.bundle_ref,
+            bundle_digest=skeleton.bundle_digest,
+            rule_plan_digest=skeleton.rule_plan_digest,
+            capability_registry_digest=skeleton.capability_registry_digest,
+            reference_allowlist=refs,
+            recent_messages=base.recent_messages,
+            facts=(),
+            evidence_summaries=summaries,
+            dependency_context=base.dependency_context,
+        )
+    except ValidationError as error:
+        if any(
+            "working context exceeds the bounded byte limit" in item["msg"]
+            for item in error.errors()
+        ):
+            raise _BatchContextTooLarge() from error
+        raise
 
 
 def _synthesis_context(
@@ -978,6 +1022,7 @@ def _synthesis_context(
         recent_messages=(),
         facts=facts,
         evidence_summaries=summaries,
+        dependency_context=base.dependency_context,
     )
 
 

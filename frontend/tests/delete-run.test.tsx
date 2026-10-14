@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { api, ApiError, type CleanupPreview } from '../src/api/http'
 import { DeleteRun } from '../src/features/history/DeleteRun'
 
@@ -13,6 +13,25 @@ const preview: CleanupPreview = {
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+it('never submits a previous run confirmation after the target changes', async () => {
+  const nextRun = '00000000-0000-4000-8000-000000000008'
+  let finishPreview!: (value: CleanupPreview) => void
+  const latePreview = new Promise<CleanupPreview>((resolve) => { finishPreview = resolve })
+  const confirmation = { token: 'first-run-token', required_phrase: 'DELETE 1 RUN', expires_at: '2026-10-09T23:00:00Z' }
+  const first = { ...preview, delete_run_ids: [runId], delete_order: [runId], dependencies: [],
+    cascade_required: false, confirmation }
+  vi.spyOn(api, 'previewRunCleanup').mockResolvedValueOnce(first).mockReturnValueOnce(latePreview)
+  const execute = vi.spyOn(api, 'executeRunCleanup')
+  const view = render(<DeleteRun runId={runId} onClose={() => undefined} onAccepted={() => undefined} />)
+  await screen.findByRole('button', { name: 'Delete these runs' })
+  view.rerender(<DeleteRun runId={nextRun} onClose={() => undefined} onAccepted={() => undefined} />)
+  expect(screen.getByText(`Run ${nextRun}`)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Delete these runs' })).not.toBeInTheDocument()
+  await act(async () => { finishPreview(first) })
+  expect(screen.queryByRole('button', { name: 'Delete these runs' })).not.toBeInTheDocument()
+  expect(execute).not.toHaveBeenCalled()
+})
 
 it('requires a fresh whole-run cascade preview and the exact server phrase for one History run', async () => {
   const prepared = vi.spyOn(api, 'previewRunCleanup')

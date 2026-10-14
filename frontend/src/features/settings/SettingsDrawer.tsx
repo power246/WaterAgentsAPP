@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, ApiError, confirmedRequestRejected, prepareConfirmation, type Defaults,
   type KeyStatus, type Settings, type Submission, type UnitEntry, type UnitPreview } from '../../api/http'
-
-function safeError(cause: unknown): string {
-  return cause instanceof ApiError ? `${cause.code}${cause.requestId ? ` (${cause.requestId})` : ''}` : 'Service unavailable'
-}
+import { safeError } from '../../api/safeError'
 
 function CredentialRow({ item, onStatus }: { item: KeyStatus; onStatus: (item: KeyStatus) => void }) {
   const input = useRef<HTMLInputElement>(null)
@@ -63,13 +60,23 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   onClose: () => void
 }) {
   const [server, setServer] = useState(settings)
+  const serverRevision = useRef(settings.revision)
+  const latestSettings = useRef(settings)
+  const reviewedSettings = useRef(settings)
+  const unitPolicyVersion = useRef(settings.unit_policy.version)
+  const initialUnitEntries = useRef(settings.unit_policy.entries)
+  const draftEditVersion = useRef(0)
+  const acceptedDraftEditVersion = useRef(0)
+  const previewRequest = useRef(0)
+  const previewInput = useRef<{ request: number; version: number; entries: string } | null>(null)
   const [draft, setDraft] = useState<Defaults>(settings.defaults)
-  const [revision, setRevision] = useState(settings.revision)
+  const draftRef = useRef(settings.defaults)
   const [unitEntries, setUnitEntries] = useState<UnitEntry[]>(settings.unit_policy.entries)
   const [unitPreview, setUnitPreview] = useState<UnitPreview | null>(null)
   const [unitPhrase, setUnitPhrase] = useState('')
-  const [unitAttempt, setUnitAttempt] = useState<Submission | null>(null)
+  const [unitAttempt, setUnitAttempt] = useState<{ submission: Submission; proposedEntries: UnitEntry[] } | null>(null)
   const [conflict, setConflict] = useState<Settings | null>(null)
+  const conflictRef = useRef<Settings | null>(null)
   const [keys, setKeys] = useState<KeyStatus[]>([])
   const [keysError, setKeysError] = useState('')
   const [error, setError] = useState('')
@@ -77,27 +84,71 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const [busy, setBusy] = useState(false)
   const defaultsDirty = JSON.stringify(draft) !== JSON.stringify(server.defaults)
   const unitsDirty = JSON.stringify(unitEntries) !== JSON.stringify(server.unit_policy.entries)
-  const dirty = defaultsDirty || unitsDirty
+
+  const acceptSettings = useCallback((current: Settings, source: 'read' | 'conflict' | 'save' = 'read'): boolean => {
+    if (current.revision < serverRevision.current) return false
+    const reviewed = reviewedSettings.current
+    const draftDirty = JSON.stringify(draftRef.current) !== JSON.stringify(reviewed.defaults)
+      || draftEditVersion.current !== acceptedDraftEditVersion.current
+    serverRevision.current = current.revision
+    latestSettings.current = current
+    if (current.unit_policy.version !== unitPolicyVersion.current) {
+      unitPolicyVersion.current = current.unit_policy.version
+      previewRequest.current += 1
+      previewInput.current = null
+      setUnitPreview(null)
+      setUnitPhrase('')
+    }
+    setServer(current)
+    if (source === 'save') {
+      reviewedSettings.current = current
+      conflictRef.current = null
+      setConflict(null)
+    } else if (source === 'conflict' || conflictRef.current || (
+      draftDirty && JSON.stringify(current.defaults) !== JSON.stringify(reviewed.defaults)
+    )) {
+      conflictRef.current = current
+      setConflict(current)
+      if (source === 'read') setError('Settings changed on the server. Review current values and explicitly reconfirm this full draft.')
+    } else {
+      reviewedSettings.current = current
+      if (!draftDirty) {
+        draftRef.current = current.defaults
+        setDraft(current.defaults)
+        acceptedDraftEditVersion.current = draftEditVersion.current
+      }
+    }
+    onSettings(current)
+    return true
+  }, [onSettings])
 
   useEffect(() => {
     const controller = new AbortController()
     void api.settings(controller.signal).then((current) => {
       if (controller.signal.aborted) return
-      setServer(current); setDraft(current.defaults); setRevision(current.revision)
-      setUnitEntries(current.unit_policy.entries); onSettings(current)
+      if (!acceptSettings(current)) return
+      setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(initialUnitEntries.current)
+        ? current.unit_policy.entries : value)
     }).catch((cause: unknown) => { if (!controller.signal.aborted) setError(safeError(cause)) })
     void api.keys(controller.signal).then((result) => { if (!controller.signal.aborted) setKeys(result.keys) })
       .catch((cause: unknown) => { if (!controller.signal.aborted) setKeysError(safeError(cause)) })
     return () => controller.abort()
-  }, [onSettings])
+  }, [acceptSettings])
+
+  function allowDiscard() {
+    const dirty = defaultsDirty || unitsDirty || draftEditVersion.current !== acceptedDraftEditVersion.current
+    return !dirty || window.confirm('Discard unsaved settings and unit changes?')
+  }
 
   function close() {
-    if (dirty && !window.confirm('Discard unsaved settings and unit changes?')) return
+    if (!allowDiscard()) return
     onClose()
   }
 
   function change<K extends keyof Defaults>(field: K, value: Defaults[K]) {
-    setDraft((current) => ({ ...current, [field]: value }))
+    draftEditVersion.current += 1
+    draftRef.current = { ...draftRef.current, [field]: value }
+    setDraft(draftRef.current)
   }
 
   const modelOptions = (role: 'query_parser' | 'waterbody') => server.catalog.models
@@ -112,16 +163,29 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   }
 
   async function saveDefaults() {
+    if (conflictRef.current || reviewedSettings.current.revision !== latestSettings.current.revision) {
+      conflictRef.current = latestSettings.current
+      setConflict(latestSettings.current)
+      return
+    }
     setBusy(true); setError(''); setNotice('')
+    const submittedEditVersion = draftEditVersion.current
     try {
-      const current = await api.replaceSettings(revision, draft)
-      setServer(current); setDraft(current.defaults); setRevision(current.revision)
-      setConflict(null); onSettings(current)
+      const current = await api.replaceSettings(reviewedSettings.current.revision, draftRef.current)
+      if (acceptSettings(current, 'save')) {
+        if (draftEditVersion.current === submittedEditVersion) {
+          draftRef.current = current.defaults
+          setDraft(current.defaults)
+          acceptedDraftEditVersion.current = draftEditVersion.current
+        }
+        setError('')
+      }
       setNotice('Defaults saved. New runs use these values; running runs keep their snapshot.')
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409 && cause.currentSettings) {
-        setConflict(cause.currentSettings)
-        onSettings(cause.currentSettings)
+        const current = cause.currentSettings.revision < serverRevision.current
+          ? latestSettings.current : cause.currentSettings
+        acceptSettings(current, 'conflict')
         setError('Settings changed on the server. Review current values and explicitly reconfirm this full draft.')
       } else setError(safeError(cause))
     } finally { setBusy(false) }
@@ -130,19 +194,41 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   async function previewUnits() {
     if (unitAttempt) return
     setBusy(true); setError(''); setUnitPreview(null); setUnitPhrase('')
-    try { setUnitPreview(await api.previewUnitPolicy(server.unit_policy.version, unitEntries)) }
-    catch (cause) { setError(safeError(cause)) }
+    const request = ++previewRequest.current
+    const version = server.unit_policy.version
+    const entries = JSON.stringify(unitEntries)
+    previewInput.current = null
+    try {
+      const result = await api.previewUnitPolicy(version, unitEntries)
+      if (request === previewRequest.current && version === unitPolicyVersion.current) {
+        previewInput.current = { request, version, entries }
+        setUnitPreview(result)
+      }
+    } catch (cause) {
+      if (request === previewRequest.current) setError(safeError(cause))
+    }
     finally { setBusy(false) }
   }
 
   async function confirmUnits() {
-    if (!unitPreview?.confirmation || (!unitAttempt && unitPhrase !== unitPreview.confirmation.required_phrase)) return
-    const submission = unitAttempt ?? prepareConfirmation(unitPreview.confirmation.token, unitPhrase)
-    setUnitAttempt(submission)
+    let attempt = unitAttempt
+    if (!attempt) {
+      if (!unitPreview?.confirmation || unitPhrase !== unitPreview.confirmation.required_phrase) return
+      const preview = previewInput.current
+      if (!preview || preview.request !== previewRequest.current
+        || preview.version !== server.unit_policy.version
+        || preview.entries !== JSON.stringify(unitEntries)) return
+      attempt = {
+        submission: prepareConfirmation(unitPreview.confirmation.token, unitPhrase),
+        proposedEntries: unitPreview.proposed.entries,
+      }
+      setUnitAttempt(attempt)
+    }
     setBusy(true); setError('')
     try {
-      await api.confirmUnitPolicy(submission)
+      await api.confirmUnitPolicy(attempt.submission)
       setUnitAttempt(null); setUnitPreview(null); setUnitPhrase('')
+      previewInput.current = null
       setNotice('Unit policy saved for future runs.')
     } catch (cause) {
       if (confirmedRequestRejected(cause)) {
@@ -154,8 +240,10 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     }
     try {
       const current = await api.settings()
-      setServer(current); setDraft(current.defaults); setRevision(current.revision)
-      setUnitEntries(current.unit_policy.entries); onSettings(current)
+      if (acceptSettings(current)) {
+        setUnitEntries((value) => JSON.stringify(value) === JSON.stringify(attempt.proposedEntries)
+          ? current.unit_policy.entries : value)
+      }
     } catch (cause) {
       setError(`${safeError(cause)}. Unit policy was accepted; reopen Settings to refresh current values.`)
     } finally { setBusy(false) }
@@ -163,6 +251,8 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
 
   function updateUnit(parameter: UnitEntry['parameter'], target: string) {
     if (unitAttempt) return
+    previewRequest.current += 1
+    previewInput.current = null
     setUnitEntries((current) => current.map((entry) => entry.parameter.code_system === parameter.code_system &&
       entry.parameter.code === parameter.code ? { ...entry, target_unit_id: target } : entry))
     setUnitPreview(null); setUnitPhrase('')
@@ -197,7 +287,17 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
           <p>Timezone {conflict.defaults.analysis_timezone}; memory {conflict.defaults.memory_mode}; resolution {conflict.defaults.time_resolution}</p>
           <p>Parser {conflict.defaults.parser_model.provider}/{conflict.defaults.parser_model.model}; waterbody {conflict.defaults.waterbody_model.provider}/{conflict.defaults.waterbody_model.model}</p>
           <p>Desired profile {conflict.defaults.desired_embedding_profile_id}</p>
-          <button type="button" onClick={() => { setServer(conflict); setRevision(conflict.revision); setConflict(null); setError('') }}>
+          <button type="button" onClick={() => {
+            if (conflict.revision !== latestSettings.current.revision) {
+              conflictRef.current = latestSettings.current
+              setConflict(latestSettings.current)
+              return
+            }
+            reviewedSettings.current = latestSettings.current
+            acceptedDraftEditVersion.current = draftEditVersion.current
+            conflictRef.current = null
+            setConflict(null); setError('')
+          }}>
             Reconfirm this draft against revision {conflict.revision}
           </button>
         </div>}
@@ -224,11 +324,12 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
           <ul>{unitPreview.changes.map((change) => <li key={`${change.parameter.code_system}:${change.parameter.code}`}>
             {change.parameter.code_system}:{change.parameter.code} · {change.previous_unit_id ?? 'none'} → {change.target_unit_id}
           </li>)}</ul>
-          {unitPreview.confirmation && <><p>Enter <strong>{unitPreview.confirmation.required_phrase}</strong> to confirm.</p>
+          {unitPreview.confirmation && !unitAttempt && <><p>Enter <strong>{unitPreview.confirmation.required_phrase}</strong> to confirm.</p>
             <input aria-label="Unit confirmation phrase" value={unitPhrase} disabled={Boolean(unitAttempt)} onChange={(event) => setUnitPhrase(event.target.value)} />
             <button type="button" disabled={busy || unitPhrase !== unitPreview.confirmation.required_phrase}
-              onClick={() => void confirmUnits()}>{unitAttempt ? 'Retry unit confirmation' : 'Confirm unit policy'}</button></>}
+              onClick={() => void confirmUnits()}>Confirm unit policy</button></>}
         </div>}
+        {unitAttempt && <button type="button" disabled={busy} onClick={() => void confirmUnits()}>Retry unit confirmation</button>}
       </section>
       <section><h3>Memory / RAG</h3>
         <p>Desired profile: {draft.desired_embedding_profile_id}</p>
@@ -242,7 +343,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
       </section>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-      <Link to="/admin" onClick={(event) => { if (dirty && !window.confirm('Discard unsaved settings and unit changes?')) event.preventDefault() }}>
+      <Link to="/admin" onClick={(event) => { if (!allowDiscard()) event.preventDefault() }}>
         Advanced / Admin
       </Link>
     </aside>

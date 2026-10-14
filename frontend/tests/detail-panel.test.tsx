@@ -66,3 +66,18 @@ it('reads a process record using the selected history view', async () => {
   await waitFor(() => expect(content).toHaveBeenCalledWith(runId, item.item_id, 'history', expect.any(AbortSignal)))
   expect(await screen.findByText('Saved full evidence')).toBeInTheDocument()
 })
+
+it('expands long inline content locally without requesting another read', () => {
+  const suffix = 'end-of-saved-message'
+  const longItem: TranscriptItem = { ...historical, content: { kind: 'inline', body: `${'a'.repeat(900)}${suffix}` } }
+  const content = vi.spyOn(api, 'content')
+  render(<DetailPanel runId={runId} snapshot={snapshot} detail={null} sessionId={sessionId}
+    processItems={[{ itemId: longItem.item_id, header: longItem, finalized: longItem,
+      delta: '', generationStatus: null }]}
+    referencedItems={[]} result={null} summary={null} readView="history"
+    tab="evidence" onTab={() => undefined} onRefresh={() => undefined} />)
+  expect(screen.queryByText(new RegExp(suffix))).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Read full inline content' }))
+  expect(screen.getByText(new RegExp(suffix))).toBeInTheDocument()
+  expect(content).not.toHaveBeenCalled()
+})

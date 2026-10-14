@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from datetime import timedelta
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from app.application.transcripts.models import (
     MessageEndReason,
     ParseStatus,
     StoredTranscriptItem,
+    TranscriptItem,
     TranscriptContentRef,
 )
 from app.application.transcripts.registry import (
@@ -233,6 +235,67 @@ def test_full_content_reader_applies_summary_request_projection() -> None:
     assert request.messages[0].text not in content.text
     assert "response_schema" not in content.text
     assert content.content_bytes == len(content.text.encode("utf-8"))
+
+
+def test_live_http_long_preview_uses_public_projection() -> None:
+    registry = create_production_registry()
+    summary = summary_input()
+    request = RunSummaryPromptBuilder().build(
+        summary,
+        model=MODEL,
+        input_ref=TranscriptContentRef(run_id=RUN_ID, item_id=INPUT_ITEM_ID),
+        operation_id=UUID("a5a64a52-c1e2-4725-88ee-6c83f105e633"),
+        deadline=NOW + timedelta(minutes=1),
+    )
+    response = RunSummaryModelResponse(
+        run_id=RUN_ID,
+        session_id=SUMMARY_SESSION_ID,
+        operation_id=request.operation_id,
+        model=MODEL,
+        finish_reason=RunSummaryFinishReason.COMPLETED,
+        message_refs=(),
+        structured_output=json.dumps({"internal": "INTERNAL_ONLY_MARKER" + "x" * 80_000}),
+        visible_text="",
+        provider_response_id="response-long",
+    )
+    content = registry.encode("run_summary_model_response", 1, response)
+    header_content = registry.encode("run_summary_model_request", 1, request)
+    items = (
+        TranscriptItem(
+            item_id=UUID(int=11), run_id=RUN_ID, transcript_sequence=1,
+            created_at=NOW, content=header_content,
+        ),
+        TranscriptItem(
+            item_id=UUID(int=12), run_id=RUN_ID, transcript_sequence=2,
+            created_at=NOW, content=header_content,
+        ),
+        TranscriptItem(
+            item_id=UUID(int=13), run_id=RUN_ID,
+            session_id=SUMMARY_SESSION_ID, transcript_sequence=1,
+            created_at=NOW, content=content,
+        ),
+    )
+    live = SimpleNamespace(
+        run=SimpleNamespace(
+            run_id=RUN_ID, status=RunStatus.RUNNING,
+            created_at=NOW, updated_at=NOW,
+        ),
+        query="Read a run.", sessions=(), items=items,
+    )
+    reader = TranscriptReader(
+        object(), object(), registry,
+        error_id_factory=lambda: RUN_ID,
+        inline_content_bytes=1024,
+        preview_bytes=1024,
+    )
+
+    stored = reader._stored_live(live)
+    preview = next(item for item in stored.items if item.item_id == UUID(int=13))
+
+    assert preview.inline_body is None
+    assert "INTERNAL_ONLY_MARKER" not in preview.preview_head
+    assert "INTERNAL_ONLY_MARKER" not in preview.preview_tail
+    assert "structured_output_present" in preview.preview_head
 
 
 def test_registered_item_only_parses_the_requested_item(monkeypatch) -> None:

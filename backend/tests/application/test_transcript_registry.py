@@ -274,13 +274,13 @@ def test_unknown_and_corrupt_history_are_distinct_and_keep_neighbors() -> None:
         "analysis_request", 1, create_request("lake")
     ).safe_body
     fixed_error = iter((UUID(int=1), UUID(int=2))).__next__
-    results = registry.parse_many(
-        (
+    results = tuple(
+        registry.parse(item, body, error_id_factory=fixed_error)
+        for item, body in (
             (_stored(ITEM_ID, body=good_body), good_body),
             (_stored(OTHER_ITEM_ID, version=99, sequence=2, body=good_body), good_body),
             (_stored(UUID(int=9), sequence=3, body='{"query":7}'), '{"query":7}'),
-        ),
-        error_id_factory=fixed_error,
+        )
     )
 
     assert [result.parse_status for result in results] == [

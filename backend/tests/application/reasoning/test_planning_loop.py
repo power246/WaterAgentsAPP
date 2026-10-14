@@ -22,8 +22,13 @@ from app.application.reasoning.model_models import (
 )
 from app.application.reasoning.prompt_builder import PromptBuilder
 from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POLICY
+from app.application.reasoning.planning_loop import _bounded_fragment_summary
+from app.application.evidence_tools.models import EvidenceInspectionPage
 from app.domain import (
     EvidenceLocation,
+    EvidenceToolOptions,
+    EvidenceToolRequest,
+    FacilityRecord,
     ProviderQuality,
     Provenance,
     WeatherObservationRecord,
@@ -56,6 +61,7 @@ from tests.application.reasoning.test_task_and_skeleton import (
     _session,
     _task,
 )
+from tests.domain.test_evidence import sample_fragments, valid_source_records
 
 
 OPS = tuple(
@@ -117,6 +123,7 @@ async def _fixture(
     with_station=True,
     with_upstream=False,
     weather_port=None,
+    facility_port=None,
     upstream_port=None,
     upstream_ready=False,
     cancel_event=None,
@@ -151,6 +158,7 @@ async def _fixture(
             _water_port(scope, mode=water_mode) if with_station else None
         ),
         weather_port=weather_port,
+        facility_port=facility_port,
         upstream_port=upstream_port,
         upstream_ready=upstream_ready,
     )
@@ -224,6 +232,199 @@ def test_full_and_stationless_inputs_still_require_an_explicit_planning_turn():
         assert stationless.counts.preflight_tool_calls == 1
 
     asyncio.run(exercise())
+
+
+def test_inspection_page_is_visible_in_the_next_model_request():
+    async def exercise():
+        model = DeterministicWaterbodyModelPort()
+        scope, _, loop, task = await _fixture(model, water_mode="full")
+        handoff = await loop._acquisition.start(scope)
+        source_item_id = handoff.source_record_allowlist[0]
+        model._scripts = (
+            (
+                ToolCallCompleted(
+                    **_event_values(OPS[0]),
+                    provider_call_id="inspect-page-1",
+                    name="inspect_evidence_records",
+                    arguments=json.dumps({
+                        "window_ids": [scope.time_windows[0].window_id],
+                        "parameter_keys": [
+                            scope.requested_parameters[0].model_dump(mode="json")
+                        ],
+                        "options": {
+                            "source_item_id": source_item_id,
+                            "page_offset": 0,
+                            "record_limit": 8,
+                        },
+                    }),
+                ),
+                Terminal(
+                    **_event_values(OPS[0]),
+                    provider_response_id="inspection-response",
+                    finish_reason=WaterbodyFinishReason.COMPLETED,
+                ),
+            ),
+            _ready_script(OPS[1]),
+        )
+
+        await loop.run(
+            task,
+            deadline=FixedClock().now() + timedelta(minutes=5),
+            initial_handoff=handoff,
+        )
+
+        page = handoff.executor.inspection_page(scope.run_id, "inspect-page-1")
+        assert page is not None and page.records
+        body = json.loads(model.calls[1].messages[-1].text)
+        summaries = [json.loads(item["summary"]) for item in body["evidence_summaries"]]
+        assert any(
+            summary.get("inspections", [{}])[0].get("total_records")
+            == page.total_records
+            and any(record.get("value") == "7" for record in summary["records"])
+            for summary in summaries
+        )
+
+    asyncio.run(exercise())
+
+
+def test_collected_facility_identity_reaches_the_model_request():
+    async def exercise():
+        records = []
+
+        def facility_batch(plan):
+            return complete_batch(plan, records)
+
+        model = DeterministicWaterbodyModelPort(_ready_script(OPS[0]))
+        scope, _, loop, task = await _fixture(
+            model, facility_port=FakeCollectionPort(facility_batch)
+        )
+        records.append(FacilityRecord(
+            provider="epa_echo",
+            channel="cwa_npdes_facility",
+            source_uri="https://example.test/?api_key=PRIVATE_MARKER",
+            retrieved_at=scope.query_envelope.end,
+            observed_time=scope.query_envelope.end,
+            valid_time_range=None,
+            location=EvidenceLocation(
+                point=scope.target_node.point,
+                comid=None,
+                station_id=None,
+                provider_location_id="facility-731",
+                distance_to_target_km=0,
+            ),
+            provider_quality=ProviderQuality(approval="official"),
+            raw_unit=None,
+            provenance=Provenance(
+                provider_record_id="facility-731",
+                facility_final_distance_km=0,
+            ),
+            spatially_in_scope=True,
+            registry_id="echo",
+            facility_id="facility-731",
+            permit_id="permit-731",
+            program="NPDES",
+            status="active",
+            public_attributes=(
+                ("facility_name", "Clearwater Works"),
+                ("facility_type", "industrial"),
+            ),
+        ))
+        handoff = await loop._acquisition.start(scope)
+        handoff = await loop._acquisition.execute_optional(
+            scope,
+            (EvidenceToolRequest(
+                tool_call_id="facility-call",
+                session_id=scope.session_id,
+                tool_name="collect_facility_evidence",
+                purpose="Inspect facility context.",
+                window_ids=(scope.time_windows[0].window_id,),
+                parameter_keys=(scope.requested_parameters[0],),
+                options=EvidenceToolOptions(facility_radius_miles=20),
+            ),),
+            handoff,
+        )
+        await loop.run(
+            task,
+            deadline=FixedClock().now() + timedelta(minutes=5),
+            initial_handoff=handoff,
+        )
+        request_text = model.calls[0].messages[-1].text
+        assert "Clearwater Works" in request_text
+        assert "industrial" in request_text
+        assert "facility-731" in request_text
+        assert "permit-731" in request_text
+        assert "active" in request_text
+        assert "PRIVATE_MARKER" not in request_text
+        assert "source_uri" not in request_text
+
+    asyncio.run(exercise())
+
+
+def test_inspected_later_facility_record_precedes_initial_record_preview():
+    facility = next(
+        record for record in valid_source_records()
+        if isinstance(record, FacilityRecord)
+    )
+    records = tuple(
+        facility.model_copy(update={
+            "record_id": f"facility-{index}",
+            "facility_id": f"facility-{index}",
+            "public_attributes": (("facility_name", f"Facility {index}"),),
+        })
+        for index in range(9)
+    )
+    page = EvidenceInspectionPage(
+        source_item_id="source-facilities",
+        offset=8,
+        limit=1,
+        total_records=9,
+        records=(records[-1],),
+        record_refs=(),
+        next_offset=None,
+    )
+    summary, truncated = _bounded_fragment_summary(
+        sample_fragments()[3], records, (page,)
+    )
+    projected = json.loads(summary)
+    assert projected["records"][0]["facility_id"] == "facility-8"
+    assert projected["records"][0]["public_attributes"]["facility_name"] == "Facility 8"
+    assert truncated is True
+
+
+def test_facility_projection_retains_identity_when_optional_labels_are_large():
+    facility = next(
+        record for record in valid_source_records()
+        if isinstance(record, FacilityRecord)
+    )
+    record = facility.model_copy(update={
+        "registry_id": "registry-" + "r" * 72,
+        "facility_id": "facility-" + "f" * 71,
+        "permit_id": "permit-" + "p" * 73,
+        "status": "active",
+        "public_attributes": (
+            ("facility_name", "Clearwater Works"),
+            ("facility_type", "industrial"),
+            ("permit_name", "n" * 80),
+            ("permit_type", "t" * 80),
+            ("city", "c" * 80),
+            ("state", "s" * 80),
+            ("receiving_waterbody", "w" * 80),
+        ),
+    })
+    summary, truncated = _bounded_fragment_summary(
+        sample_fragments()[3], (record,), ()
+    )
+    projected = json.loads(summary)
+    assert truncated is True
+    assert projected["records"][0]["facility_id"] == record.facility_id
+    assert projected["records"][0]["status"] == "active"
+    assert projected["records"][0]["public_attributes"]["facility_name"] == (
+        "Clearwater Works"
+    )
+    assert projected["records"][0]["public_attributes"]["facility_type"] == (
+        "industrial"
+    )
+    assert len(summary.encode("utf-8")) <= 1500
 
 
 def test_multi_turn_tools_rebuild_bundles_and_exact_duplicates_reuse_provider_work():

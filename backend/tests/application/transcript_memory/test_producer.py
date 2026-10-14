@@ -3,11 +3,21 @@ import asyncio
 import pytest
 
 from app.application.evidence_tools import EvidenceProducerStatus
+from app.application.evidence_tools.scope import with_evidence_rule_plan
+from app.application.query_understanding import (
+    EvidenceInferenceStrength,
+    EvidenceRuleOrigin,
+    EvidenceSpatialRelation,
+    EvidenceTemporalRelation,
+    append_evidence_rules,
+    create_evidence_rule,
+)
 from app.application.transcript_memory import (
     RAGSearchInvalidError,
     RAGSearchUnavailableError,
     TranscriptEvidenceProducer,
 )
+from app.application.transcript_memory.search import RAGSearchSession
 from app.domain import (
     CollectionStatus,
     EvidenceToolExecutionStatus,
@@ -31,6 +41,11 @@ class FakeSearchSession:
         self.outcome = outcome
         self.calls = []
         self.cleared = False
+        self.rebound_scopes = []
+
+    def rebind(self, scope):
+        self.rebound_scopes.append(scope)
+        return self
 
     async def search(self, intent, *, operation_id, deadline=None):
         self.calls.append((intent, operation_id, deadline))
@@ -103,6 +118,45 @@ def test_producer_binds_only_sealed_memory_scope_and_returns_completed_empty(
         assert session.cleared
 
     asyncio.run(exercise())
+
+
+def test_producer_propagates_only_append_only_rules_to_existing_search_session():
+    scope = make_scope(context=make_context(memory_mode=MemoryMode.MEMORY_AUGMENTED))
+    rule = create_evidence_rule(
+        output_parameter=scope.requested_parameters[0],
+        input_parameters=(scope.supporting_parameters[0],),
+        temporal_relation=EvidenceTemporalRelation.SAME_WINDOW,
+        spatial_relation=EvidenceSpatialRelation.SAME_WATERBODY,
+        maximum_inference_strength=EvidenceInferenceStrength.DIRECTIONAL,
+        required_collection_attempt=False,
+        rationale="Discharge supports the target directionally.",
+        origin=EvidenceRuleOrigin.WATERBODY_AGENT,
+        origin_session_id=scope.session_id,
+    )
+    updated = with_evidence_rule_plan(
+        scope, append_evidence_rules(scope.evidence_rule_plan, (rule,))
+    )
+    session = FakeSearchSession()
+    service = FakeSearchService(session)
+    producer = TranscriptEvidenceProducer(service)
+
+    producer.prepare_scope(scope)
+    producer.prepare_scope(updated)
+    producer.prepare_scope(updated)
+
+    assert service.bound == [scope]
+    assert session.rebound_scopes == [updated]
+    with pytest.raises(ValueError, match="extend"):
+        producer.prepare_scope(scope)
+
+    embedding = object()
+    bound = RAGSearchSession(service=object(), scope=scope, embedding=embedding)
+    bound._embedding_cache[("profile", "query")] = object()
+    rebound = bound.rebind(updated)
+    assert rebound._scope == updated
+    assert bound._scope == scope
+    assert rebound._embedding is embedding
+    assert rebound._embedding_cache is bound._embedding_cache
 
 
 @pytest.mark.parametrize(

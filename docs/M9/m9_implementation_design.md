@@ -111,10 +111,10 @@ CredentialLease
 UnitPolicyVersion
 UnitPolicyEntry(parameter_key, target_unit_id)
 UnitPolicyPreview
-SessionUnitOverride
+UnitPreference
 
 AdminActionKind
-AdminPreview
+HistoryPreview / ProfilePreview / GenerationPreview
 AdminConfirmation
 AdminOperation(state/progress/safe result/error)
 IdempotencyTombstone

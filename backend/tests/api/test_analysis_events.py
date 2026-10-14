@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
+from tests.application.coordinator_inspection import set_waterbody_participation
+
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.api.sse.encoder import KEEPALIVE_FRAME, encode_event
 from app.api.sse.response import (
@@ -158,7 +160,7 @@ def test_encoder_uses_optional_integer_id_and_one_json_data_line() -> None:
 def test_run_subscription_assembles_latest_real_state_without_notification_log() -> None:
     async def exercise() -> None:
         async with run_runtime() as (_, coordinator, created, _, _, _):
-            await coordinator.set_waterbody_participation(
+            await set_waterbody_participation(coordinator,
                 created.run_id,
                 {"101": False, "202": True},
             )
@@ -204,13 +206,36 @@ def test_run_reconnect_starts_with_one_current_snapshot_and_ignores_header_at_ht
             first = await coordinator.subscribe_run(created.run_id)
             await anext(first)
             await first.aclose()
-            await coordinator.set_waterbody_participation(created.run_id, {"303": True})
+            await set_waterbody_participation(coordinator, created.run_id, {"303": True})
             reconnect = await coordinator.subscribe_run(created.run_id)
             latest = await anext(reconnect)
             await reconnect.aclose()
             assert [item.target_comid for item in latest.waterbodies] == ["303"]
             operation = app.openapi()["paths"][f"/api/analysis/runs/{{run_id}}/events"]["get"]
             assert all(item["name"] != "Last-Event-ID" for item in operation["parameters"])
+
+    run(exercise)
+
+
+@pytest.mark.parametrize("snapshot_changed", [False, True])
+def test_deleted_run_stops_a_waiting_stream_before_sending_a_new_snapshot(
+    snapshot_changed: bool,
+) -> None:
+    async def exercise() -> None:
+        async with run_runtime() as (_, coordinator, created, _, _, _):
+            stream = await coordinator.subscribe_run(created.run_id)
+            await anext(stream)
+            waiting = asyncio.create_task(anext(stream))
+            await asyncio.sleep(0)
+            assert not waiting.done()
+            runtime = coordinator._runs[created.run_id]
+            async with runtime.condition:
+                if snapshot_changed:
+                    runtime.waterbody_participation["303"] = True
+                runtime.history_deleted = True
+                runtime.condition.notify_all()
+            with pytest.raises(StopAsyncIteration):
+                await asyncio.wait_for(waiting, timeout=1)
 
     run(exercise)
 
@@ -381,6 +406,35 @@ def test_session_first_read_handoff_and_multiple_subscribers_have_no_gap() -> No
                     generation_status=GenerationStatus.INCOMPLETE,
                 ),
             )
+
+    run(exercise)
+
+
+def test_deleted_session_stops_replaying_a_paused_batch() -> None:
+    async def exercise() -> None:
+        async with run_runtime(message_registry=True) as (_, coordinator, created, _, _, _):
+            session = await coordinator.prepare_agent_session(
+                created.run_id, agent_role=AgentRole.QUERY_PARSER,
+            )
+            message = await coordinator.start_transcript_message(
+                created.run_id, session.session_id, "fixture_message", 1,
+            )
+            await coordinator.finalize_transcript_message(
+                created.run_id, message.item_id,
+                FixtureMessageV1(
+                    text="body that must not be replayed",
+                    generation_status=GenerationStatus.INCOMPLETE,
+                ),
+            )
+            stream = await coordinator.subscribe_session(created.run_id, session.session_id)
+            first = await anext(stream)
+            assert first is not None
+            runtime = coordinator._runs[created.run_id]
+            async with runtime.condition:
+                runtime.history_deleted = True
+                runtime.condition.notify_all()
+            with pytest.raises(StopAsyncIteration):
+                await anext(stream)
 
     run(exercise)
 

@@ -3,6 +3,7 @@ import hashlib
 import json
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from math import isfinite
@@ -1064,6 +1065,38 @@ class RunCoordinator:
         self._log_activity("live_state_cleaned", runtime)
         return True
 
+    @asynccontextmanager
+    async def history_cleanup_guard(
+        self, run_ids: tuple[str, ...],
+    ) -> AsyncGenerator[bool, None]:
+        runtimes: list[RunRuntime] = []
+        async with self._runs_lock:
+            async with AsyncExitStack() as stack:
+                for run_id in sorted({_UUID.validate_python(value) for value in run_ids}):
+                    runtime = self._runs.get(run_id)
+                    if runtime is not None:
+                        await stack.enter_async_context(runtime.condition)
+                        runtimes.append(runtime)
+                ready = all(self._cleanup_eligible_locked(runtime) for runtime in runtimes)
+                yield ready
+                if ready:
+                    for runtime in runtimes:
+                        runtime.history_deleted = True
+                        self._runs.pop(runtime.snapshot.run_id, None)
+                        runtime.writer_stop.set()
+                        runtime.writer_wakeup.set()
+                        if runtime.cleanup_task is not None:
+                            runtime.cleanup_task.cancel()
+                        runtime.condition.notify_all()
+        for runtime in runtimes:
+            if runtime.writer_task is not None and not runtime.writer_task.done():
+                await runtime.writer_task
+            try:
+                await self._cleanup_run_resources(runtime.snapshot.run_id)
+                self._cleaned_run_resources.discard(runtime.snapshot.run_id)
+            except Exception as error:
+                self._log_activity("live_state_cleanup_failed", runtime, exception=error)
+
     async def shutdown(self) -> None:
         async with self._shutdown_lock:
             async with self._runs_lock:
@@ -1372,6 +1405,8 @@ class RunCoordinator:
         except RunNotFoundError:
             return None
         async with runtime.condition:
+            if runtime.history_deleted:
+                return None
             safe_request = AnalysisRequestV1.model_validate_json(
                 runtime.transcript_buffer.items[0].content.safe_body
             )
@@ -2386,22 +2421,6 @@ class RunCoordinator:
             text=safe_text,
         ))
 
-    async def set_waterbody_participation(
-        self,
-        run_id: UUID | str,
-        participation: Mapping[str, bool],
-    ) -> None:
-        runtime = await self._lookup(run_id)
-        if any(type(value) is not bool for value in participation.values()):
-            raise TypeError("waterbody participation values must be booleans")
-        validated = {
-            _COMID.validate_python(comid): value
-            for comid, value in participation.items()
-        }
-        async with runtime.condition:
-            runtime.waterbody_participation = validated
-            runtime.condition.notify_all()
-
     async def mark_waterbody_ready(
         self,
         run_id: UUID | str,
@@ -2500,37 +2519,6 @@ class RunCoordinator:
                 raise CreationCommitUnconfirmedError(key) from None
             except (CreationRolledBackError, IdempotencyKeyConflictError):
                 return None
-
-    async def list_transcript_items(
-        self,
-        run_id: UUID | str,
-    ) -> tuple[TranscriptItemIdentity, ...]:
-        runtime = await self._lookup(run_id)
-        async with runtime.condition:
-            return tuple(runtime.transcript_items)
-
-    async def list_session_transcript_items(
-        self,
-        run_id: UUID | str,
-        session_id: UUID | str,
-    ) -> tuple[TranscriptItemIdentity, ...]:
-        runtime = await self._lookup(run_id)
-        key = _UUID.validate_python(session_id)
-        async with runtime.condition:
-            self._lookup_agent_session_locked(runtime, key)
-            return tuple(
-                item
-                for item in runtime.transcript_items
-                if item.session_id == key
-            )
-
-    async def list_state_mutations(
-        self,
-        run_id: UUID | str,
-    ) -> tuple[RunStateMutation | SessionStateMutation, ...]:
-        runtime = await self._lookup(run_id)
-        async with runtime.condition:
-            return tuple(runtime.state_mutations)
 
     async def mark_running(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         return await self._transition_run(run_id, RunStatus.RUNNING)
@@ -2657,6 +2645,8 @@ class RunCoordinator:
     ) -> AsyncGenerator[RunSnapshotEvent | None, None]:
         runtime = await self._lookup(run_id)
         async with runtime.condition:
+            if runtime.history_deleted:
+                raise RunNotFoundError(runtime.snapshot.run_id)
             initial = self._run_snapshot_locked(runtime)
         return self._run_snapshots(runtime, initial)
 
@@ -2671,6 +2661,8 @@ class RunCoordinator:
         runtime = await self._lookup(run_id)
         session_key = _UUID.validate_python(session_id)
         async with runtime.condition:
+            if runtime.history_deleted:
+                raise RunNotFoundError(runtime.snapshot.run_id)
             session_runtime = self._lookup_agent_session_locked(runtime, session_key)
             last_sequence = len(session_runtime.process_events)
             if isinstance(cursor, str):
@@ -2828,19 +2820,29 @@ class RunCoordinator:
         initial: RunSnapshotEvent,
     ) -> AsyncGenerator[RunSnapshotEvent | None, None]:
         current = initial
+        async with runtime.condition:
+            if runtime.history_deleted:
+                return
         yield current
         while True:
             async with runtime.condition:
-                if self._run_stream_closed_locked(runtime):
+                if runtime.history_deleted:
                     return
-                try:
-                    async with asyncio.timeout(self._keepalive_interval):
-                        await runtime.condition.wait_for(
-                            lambda: self._run_snapshot_locked(runtime) != current
-                            or self._run_stream_closed_locked(runtime)
-                        )
-                except TimeoutError:
-                    pass
+                if (
+                    self._run_snapshot_locked(runtime) == current
+                    and not self._run_stream_closed_locked(runtime)
+                ):
+                    try:
+                        async with asyncio.timeout(self._keepalive_interval):
+                            await runtime.condition.wait_for(
+                                lambda: runtime.history_deleted
+                                or self._run_snapshot_locked(runtime) != current
+                                or self._run_stream_closed_locked(runtime)
+                            )
+                    except TimeoutError:
+                        pass
+                if runtime.history_deleted:
+                    return
                 updated = self._run_snapshot_locked(runtime)
                 closed = self._run_stream_closed_locked(runtime)
             changed = updated != current
@@ -2860,6 +2862,8 @@ class RunCoordinator:
     ) -> AsyncGenerator[SessionProcessRecord | None, None]:
         while True:
             async with runtime.condition:
+                if runtime.history_deleted:
+                    return
                 session_runtime = self._lookup_agent_session_locked(runtime, session_id)
                 terminal = session_runtime.summary.status not in _SESSION_TRANSITIONS
                 message_active = any(
@@ -2871,7 +2875,8 @@ class RunCoordinator:
                 try:
                     async with asyncio.timeout(self._keepalive_interval):
                         await runtime.condition.wait_for(
-                            lambda: len(session_runtime.process_events) > cursor
+                            lambda: runtime.history_deleted
+                            or len(session_runtime.process_events) > cursor
                             or (
                                 session_runtime.summary.status not in _SESSION_TRANSITIONS
                                 and not any(
@@ -2882,6 +2887,8 @@ class RunCoordinator:
                         )
                 except TimeoutError:
                     pass
+                if runtime.history_deleted:
+                    return
                 batch = tuple(session_runtime.process_events[cursor:])
                 terminal = session_runtime.summary.status not in _SESSION_TRANSITIONS
                 message_active = any(
@@ -2889,11 +2896,17 @@ class RunCoordinator:
                     for item in runtime.streaming_messages.values()
                 )
             for event in batch:
+                async with runtime.condition:
+                    if runtime.history_deleted:
+                        return
                 cursor = event.sequence
                 yield event
             if terminal and not message_active and cursor == len(session_runtime.process_events):
                 return
             if not batch:
+                async with runtime.condition:
+                    if runtime.history_deleted:
+                        return
                 yield None
 
     async def _lookup(self, run_id: UUID | str) -> RunRuntime:

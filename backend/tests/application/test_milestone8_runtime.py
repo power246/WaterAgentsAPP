@@ -5,6 +5,8 @@ from uuid import UUID
 
 import pytest
 
+from tests.application.coordinator_inspection import list_transcript_items
+
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
 from app.application.analysis_runs.startup_repair import StartupRepairError
 from app.application.analysis_runs.models import AgentRole, AgentSessionStatus, RunStatus
@@ -131,7 +133,7 @@ def test_cancel_freezes_original_and_saves_only_late_tail_as_history_audit() -> 
                 1,
                 {"query": "suppressed late result"},
             ) is generic
-            assert generic not in await coordinator.list_transcript_items(
+            assert generic not in await list_transcript_items(coordinator,
                 created.run_id
             )
             assert await coordinator.append_transcript_message_delta(

@@ -1,11 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { api, ApiError, type RunDetail, type RunSnapshot, type SessionProcess, type TranscriptItem } from '../src/api/http'
+import { api, ApiError, type CleanupPreview, type RunDetail, type RunSnapshot, type SessionProcess, type TranscriptItem } from '../src/api/http'
 import { subscribe } from '../src/api/sse'
 import { App } from '../src/app/App'
 
 vi.mock('../src/api/sse', () => ({ subscribe: vi.fn() }))
-vi.mock('../src/features/analysis/TopologyMap', () => ({ TopologyMap: () => <div /> }))
+vi.mock('../src/features/analysis/TopologyMap', () => ({ TopologyMap: ({ onSelect }:
+  { onSelect: (comid: string, sessionId: string | null) => void }) =>
+  <button onClick={() => onSelect('999', null)}>Select excluded waterbody</button> }))
 vi.mock('../src/features/analysis/NewAnalysisForm', () => ({ NewAnalysisForm: ({ onCreated }:
   { onCreated: (id: string) => void }) => <button onClick={() => onCreated('00000000-0000-4000-8000-000000000004')}>
     Go to run B</button> }))
@@ -86,4 +88,74 @@ it('does not apply run A history fallback to a newly selected run B', async () =
   expect(window.location.pathname).toBe(`/runs/${runB}`)
   expect(bSignals[0]?.aborted).toBe(false)
   expect(history).toHaveBeenCalledTimes(1)
+})
+
+it('uses run history and historical transcript after a session stream returns 410', async () => {
+  window.history.replaceState({}, '', `/runs/${runId}/waterbodies/${sessionId}`)
+  vi.spyOn(api, 'settings').mockResolvedValue({} as never)
+  const historyAt = vi.spyOn(api, 'historyAt').mockResolvedValue({
+    run: { run_id: runId, status: 'completed', query: 'Saved session run', created_at: time,
+      updated_at: time, context_summary: null, result_ref: null, result_summary: null },
+    source: 'postgresql', sessions: [{ ...snapshot.sessions[0]!, status: 'completed' }],
+    items: [], referenced_items: [], issues: [], persistence: { state: 'up_to_date', warning: null },
+  } as RunDetail)
+  const transcript = vi.spyOn(api, 'transcript').mockResolvedValue({ items: [], referenced_items: [] } as never)
+  vi.mocked(subscribe).mockImplementation(async (kind, _id, _session, onEvent, signal) => {
+    if (kind === 'session') throw new ApiError(410, 'live_state_gone', null,
+      `/api/analysis/runs/${runId}/sessions/${sessionId}/transcript?view=history`)
+    onEvent({ name: 'run_snapshot', data: snapshot })
+    await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  render(<App />)
+  fireEvent.click(screen.getByRole('tab', { name: 'Agent' }))
+  await waitFor(() => expect(historyAt).toHaveBeenCalledWith(
+    `/api/analysis/runs/${runId}?view=history`, expect.any(AbortSignal)))
+  await waitFor(() => expect(transcript).toHaveBeenCalledWith(runId, sessionId, 'history', expect.any(AbortSignal)))
+  fireEvent.click(screen.getByRole('tab', { name: 'Overview' }))
+  expect(await screen.findByText('Saved session run')).toBeInTheDocument()
+})
+
+it('clears the previous session when selecting a waterbody without a session', async () => {
+  window.history.replaceState({}, '', `/runs/${runId}/waterbodies/${sessionId}`)
+  vi.spyOn(api, 'settings').mockResolvedValue({} as never)
+  vi.mocked(subscribe).mockImplementation(async (kind, _id, _session, onEvent, signal) => {
+    if (kind === 'run') onEvent({ name: 'run_snapshot', data: snapshot })
+    await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  render(<App />)
+  expect(screen.getByText('Saved time series')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Select excluded waterbody' }))
+  await waitFor(() => expect(window.location.pathname).toBe(`/runs/${runId}`))
+  expect(screen.queryByText('Saved time series')).not.toBeInTheDocument()
+  expect(screen.getByText(/COMID 999: session not started/)).toBeInTheDocument()
+})
+
+it('closes a run deletion dialog when History selects another run', async () => {
+  const runB = '00000000-0000-4000-8000-000000000008'
+  window.history.replaceState({}, '', `/history?run=${runId}`)
+  vi.spyOn(api, 'settings').mockResolvedValue({} as never)
+  vi.spyOn(api, 'history').mockResolvedValue({ items: [runId, runB].map((id) => ({
+    run_id: id, query: id === runId ? 'Saved A' : 'Saved B', status: 'completed',
+    created_at: time, updated_at: time, configuration: null, context_summary: null,
+    result_ref: null, result_summary: null, issues: [],
+  })), next_cursor: null })
+  vi.spyOn(api, 'run').mockImplementation(async (id) => ({
+    run: { run_id: id, status: 'completed', query: `Run ${id}`, created_at: time,
+      updated_at: time, context_summary: null, result_ref: null, result_summary: null },
+    source: 'postgresql', sessions: [], items: [], referenced_items: [], issues: [],
+    persistence: { state: 'up_to_date', warning: null },
+  } as RunDetail))
+  const preview: CleanupPreview = { requested_run_ids: [runId], delete_run_ids: [runId],
+    delete_order: [runId], dependencies: [], cascade_required: false, cascade_authorized: false,
+    estimated: { runs: 1, sessions: 1, transcript_items: 2, retained_idempotency_tombstones: 1 },
+    preserved: [], confirmation: { token: 'token-for-A', required_phrase: 'DELETE 1 RUN', expires_at: time } }
+  vi.spyOn(api, 'previewRunCleanup').mockResolvedValue(preview)
+  const execute = vi.spyOn(api, 'executeRunCleanup')
+  render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Delete this saved run' }))
+  await screen.findByRole('button', { name: 'Delete these runs' })
+  fireEvent.click(screen.getByText('Saved B'))
+  await waitFor(() => expect(window.location.search).toBe(`?run=${runB}`))
+  expect(screen.queryByRole('dialog', { name: 'Delete saved run' })).not.toBeInTheDocument()
+  expect(execute).not.toHaveBeenCalled()
 })

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api, ApiError, type KeyStatus, type Settings, type UnitPreview } from '../src/api/http'
 import { SettingsDrawer } from '../src/features/settings/SettingsDrawer'
@@ -40,6 +40,197 @@ function setup() {
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear() })
 
+it('preserves edits made before the initial settings refresh completes', async () => {
+  let resolve!: (value: Settings) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolve = done }))
+  setup()
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  await act(async () => { resolve({ ...settings, revision: 1 }) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+})
+
+it('does not replace edits made while a defaults save is pending', async () => {
+  vi.spyOn(api, 'settings').mockResolvedValue(settings)
+  let resolve!: (value: Settings) => void
+  vi.spyOn(api, 'replaceSettings').mockReturnValue(new Promise<Settings>((done) => { resolve = done }))
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+  await act(async () => { resolve({ ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+  expect(screen.getByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+})
+
+it('preserves edits when the initial GET sees a pending save before its response arrives', async () => {
+  let resolveGet!: (value: Settings) => void
+  let resolveSave!: (value: Settings) => void
+  const committed = { ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  const save = vi.spyOn(api, 'replaceSettings')
+    .mockReturnValueOnce(new Promise<Settings>((done) => { resolveSave = done }))
+    .mockResolvedValueOnce({ ...settings, revision: 2 })
+  setup()
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  expect(save).toHaveBeenCalledWith(0, expect.objectContaining({ analysis_timezone: 'America/Denver' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+
+  await act(async () => { resolveGet(committed) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+
+  await act(async () => { resolveSave(committed) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'UTC' })))
+})
+
+it.each([
+  ['network error', new Error('response lost')],
+  ['service unavailable', new ApiError(503, 'service_unavailable', 'request')],
+  ['invalid JSON', new ApiError(200, 'invalid_json', 'request')],
+  ['invalid response', new ApiError(200, 'invalid_response', 'request')],
+])('preserves edits after an uncertain save %s and a late GET', async (_name, failure) => {
+  let resolveGet!: (value: Settings) => void
+  let rejectSave!: (cause: unknown) => void
+  const committed = { ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  const save = vi.spyOn(api, 'replaceSettings')
+    .mockReturnValueOnce(new Promise<Settings>((_done, reject) => { rejectSave = reject }))
+    .mockResolvedValueOnce({ ...settings, revision: 2 })
+  setup()
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+  await act(async () => { rejectSave(failure) })
+  await act(async () => { resolveGet(committed) })
+
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+  expect(screen.getByRole('button', { name: /Reconfirm this draft against revision 1/ })).toBeInTheDocument()
+  expect(save).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 1/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'UTC' })))
+})
+
+it('asks before leaving when an unconfirmed save is followed by edits back to the old value', async () => {
+  let rejectSave!: (cause: unknown) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>(() => undefined))
+  vi.spyOn(api, 'replaceSettings').mockReturnValue(new Promise<Settings>((_done, reject) => { rejectSave = reject }))
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  const onClose = vi.fn()
+  render(<MemoryRouter><SettingsDrawer settings={settings} onSettings={() => undefined} onClose={onClose} /></MemoryRouter>)
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+  await act(async () => { rejectSave(new Error('response lost')) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(onClose).not.toHaveBeenCalled()
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(fireEvent.click(screen.getByRole('link', { name: 'Advanced / Admin' }))).toBe(false)
+  expect(confirm).toHaveBeenCalledTimes(2)
+})
+
+it('closes without a discard prompt after a confirmed save with no later edits', async () => {
+  const committed = { ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }
+  vi.spyOn(api, 'settings').mockResolvedValue(settings)
+  vi.spyOn(api, 'replaceSettings').mockResolvedValue(committed)
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  const confirm = vi.spyOn(window, 'confirm')
+  const onClose = vi.fn()
+  render(<MemoryRouter><SettingsDrawer settings={settings} onSettings={() => undefined} onClose={onClose} /></MemoryRouter>)
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await screen.findByText('Revision 1. Changes affect future runs.')
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(confirm).not.toHaveBeenCalled()
+  expect(onClose).toHaveBeenCalledOnce()
+})
+
+it('ignores an initial settings GET that arrives after a successful save', async () => {
+  let resolveGet!: (value: Settings) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  vi.spyOn(api, 'replaceSettings').mockResolvedValue({ ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } })
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  const onSettings = vi.fn()
+  render(<MemoryRouter><SettingsDrawer settings={settings} onSettings={onSettings}
+    onClose={() => undefined} /></MemoryRouter>)
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  expect(await screen.findByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+  await act(async () => { resolveGet(settings) })
+  expect(screen.getByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
+  expect(onSettings).toHaveBeenCalledTimes(1)
+  expect(onSettings).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }))
+})
+
+it('discards a unit preview response after the selection changes', async () => {
+  vi.spyOn(api, 'settings').mockResolvedValue(settings)
+  let resolve!: (value: UnitPreview) => void
+  vi.spyOn(api, 'previewUnitPolicy').mockReturnValue(new Promise<UnitPreview>((done) => { resolve = done }))
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  const unit = screen.getByLabelText(/Discharge \(usgs:00060\)/)
+  fireEvent.change(unit, { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  fireEvent.change(unit, { target: { value: 'ft3_s' } })
+  await act(async () => { resolve(unitPreview) })
+  expect(screen.queryByText('Server unit preview')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Confirm unit policy' })).not.toBeInTheDocument()
+})
+
+it('preserves an unsaved defaults draft after a unit policy refresh', async () => {
+  const refreshed = { ...settings,
+    revision: 1, unit_policy: { ...settings.unit_policy, version: 2,
+      entries: [{ parameter: { code_system: 'usgs', code: '00060' }, target_unit_id: 'm3_s' }] } }
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce(refreshed)
+  vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
+  vi.spyOn(api, 'confirmUnitPolicy').mockResolvedValue({ ...unitPreview.proposed, created_at: '2026-10-09T00:00:00Z' })
+  const save = vi.spyOn(api, 'replaceSettings').mockResolvedValue({ ...refreshed, revision: 2, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } })
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.change(screen.getByLabelText(/Discharge \(usgs:00060\)/), { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  await screen.findByRole('button', { name: 'Confirm unit policy' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Unit confirmation phrase' }),
+    { target: { value: 'APPLY UNIT POLICY 2' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
+  await screen.findByText('Unit policy saved for future runs.')
+  await screen.findByText('Revision 1. Changes affect future runs.')
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('America/Denver')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+  expect(save).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({
+    analysis_timezone: 'America/Denver',
+  })))
+})
+
 it('keeps a full draft through revision conflict and requires explicit reconfirmation', async () => {
   const current = { ...settings, revision: 1, updated_at: '2026-10-08T00:00:00Z' }
   vi.spyOn(api, 'settings').mockResolvedValue(settings)
@@ -58,6 +249,38 @@ it('keeps a full draft through revision conflict and requires explicit reconfirm
   fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
   await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'America/Denver' })))
   expect(await screen.findByText(/New runs use these values/)).toBeInTheDocument()
+})
+
+it('requires another review when a late settings GET follows reconfirmation', async () => {
+  let resolveGet!: (value: Settings) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  const first = { ...settings, revision: 1 }
+  const newer: Settings = { ...first, revision: 2, defaults: {
+    ...settings.defaults, memory_mode: 'memory_augmented',
+  }, catalog: { ...settings.catalog, memory_modes: ['stateless', 'memory_augmented'] } }
+  const save = vi.spyOn(api, 'replaceSettings')
+    .mockRejectedValueOnce(new ApiError(409, 'settings_revision_conflict', 'request', null, first))
+    .mockResolvedValueOnce({ ...newer, revision: 3, defaults: {
+      ...newer.defaults, analysis_timezone: 'America/Denver', memory_mode: 'stateless',
+    } })
+  setup()
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await screen.findByRole('button', { name: /Reconfirm this draft against revision 1/ })
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 1/ }))
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+
+  await act(async () => { resolveGet(newer) })
+  expect(await screen.findByRole('button', { name: /Reconfirm this draft against revision 2/ })).toBeInTheDocument()
+  expect(screen.getByText(/memory memory_augmented/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeDisabled()
+  expect(save).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 2/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(2, expect.objectContaining({
+    analysis_timezone: 'America/Denver', memory_mode: 'stateless',
+  })))
 })
 
 it('requires a server unit preview and phrase before confirming a version', async () => {
@@ -99,6 +322,79 @@ it('retries an uncertain unit confirmation with the same key and body', async ()
   await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
   expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0])
   expect(await screen.findByText('Unit policy saved for future runs.')).toBeInTheDocument()
+})
+
+it('keeps the unit retry available after a settings conflict invalidates its preview', async () => {
+  const committed = { ...settings, revision: 1, unit_policy: unitPreview.proposed }
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce(committed)
+  vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
+  const confirm = vi.spyOn(api, 'confirmUnitPolicy').mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({ ...unitPreview.proposed, created_at: '2026-10-08T00:01:00Z' })
+  vi.spyOn(api, 'replaceSettings').mockRejectedValueOnce(
+    new ApiError(409, 'settings_revision_conflict', 'request', null, committed))
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText(/Discharge \(usgs:00060\)/), { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  await screen.findByRole('button', { name: 'Confirm unit policy' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Unit confirmation phrase' }),
+    { target: { value: 'APPLY UNIT POLICY 2' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Response unknown')
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  expect(await screen.findByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
+  expect(screen.queryByText('Server unit preview')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Retry unit confirmation' })).toBeEnabled()
+  expect(screen.getByLabelText(/Discharge \(usgs:00060\)/)).toBeDisabled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry unit confirmation' }))
+  await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2))
+  expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0])
+  expect(await screen.findByText('Unit policy saved for future runs.')).toBeInTheDocument()
+  expect(screen.getByLabelText(/Discharge \(usgs:00060\)/)).toBeEnabled()
+})
+
+it('requires review of the latest revision after a unit retry refreshes settings', async () => {
+  const conflicted = { ...settings, revision: 1, unit_policy: unitPreview.proposed }
+  const latest = { ...conflicted, revision: 2, defaults: {
+    ...settings.defaults, memory_mode: 'memory_augmented' as const,
+  }, catalog: { ...settings.catalog, memory_modes: ['stateless', 'memory_augmented'] as Settings['catalog']['memory_modes'] } }
+  vi.spyOn(api, 'settings').mockResolvedValueOnce(settings).mockResolvedValueOnce(latest)
+  vi.spyOn(api, 'previewUnitPolicy').mockResolvedValue(unitPreview)
+  vi.spyOn(api, 'confirmUnitPolicy').mockRejectedValueOnce(new Error('response lost'))
+    .mockResolvedValueOnce({ ...unitPreview.proposed, created_at: '2026-10-08T00:01:00Z' })
+  const save = vi.spyOn(api, 'replaceSettings').mockRejectedValueOnce(
+    new ApiError(409, 'settings_revision_conflict', 'request', null, conflicted))
+    .mockResolvedValueOnce({ ...latest, revision: 3, defaults: {
+      ...settings.defaults, analysis_timezone: 'America/Denver',
+    } })
+  setup()
+  await screen.findByLabelText('OpenAI credential')
+  fireEvent.change(screen.getByLabelText(/Discharge \(usgs:00060\)/), { target: { value: 'm3_s' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview unit policy' }))
+  await screen.findByRole('button', { name: 'Confirm unit policy' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Unit confirmation phrase' }),
+    { target: { value: 'APPLY UNIT POLICY 2' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm unit policy' }))
+  await screen.findByRole('button', { name: 'Retry unit confirmation' })
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await screen.findByRole('button', { name: /Reconfirm this draft against revision 1/ })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry unit confirmation' }))
+  expect(await screen.findByRole('button', { name: /Reconfirm this draft against revision 2/ })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /Reconfirm this draft against revision 1/ })).not.toBeInTheDocument()
+  expect(screen.getByText(/memory memory_augmented/)).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeDisabled()
+  expect(save).toHaveBeenCalledTimes(1)
+
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 2/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(2, expect.objectContaining({
+    analysis_timezone: 'America/Denver', memory_mode: 'stateless',
+  })))
 })
 
 it('does not resubmit an accepted unit policy when refreshing settings fails', async () => {

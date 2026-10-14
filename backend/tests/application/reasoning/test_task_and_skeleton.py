@@ -19,15 +19,12 @@ from app.application.analysis_runs.models import (
 from app.application.evidence_tools import EvidenceAcquisitionCellGate
 from app.application.reasoning import (
     AllCellsBlockedError,
-    ReasoningCellClaim,
     ReasoningGateDecision,
     ResultSkeleton,
-    ResultSkeletonValidationError,
     WaterbodyAgentTask,
     WaterbodyTaskValidationError,
     build_result_skeleton,
     seal_evidence_input,
-    validate_agent_cell_claims,
     validate_result_skeleton,
     validate_waterbody_agent_task,
 )
@@ -540,7 +537,7 @@ async def test_partial_technical_block_preserves_explicit_fixed_blocker():
 
 
 @_async_test
-async def test_skeleton_rejects_identity_counts_refs_and_fixed_cell_claims():
+async def test_skeleton_rejects_tampered_identity_counts_refs_and_digest():
     validated, handoff, registry = await _validated_fixture(mode="full")
     sealed = seal_evidence_input(validated, handoff, registry)
     skeleton = build_result_skeleton(
@@ -550,75 +547,6 @@ async def test_skeleton_rejects_identity_counts_refs_and_fixed_cell_claims():
         result_id="result-guarded",
         generated_at=NOW,
     )
-    scope = skeleton.supported_scopes[0]
-    valid_claim = ReasoningCellClaim(
-        cell_id=scope.cell_id,
-        parameter=scope.parameter,
-        window_id=scope.window_id,
-        evidence_refs=(scope.allowed_evidence_refs[0],),
-    )
-    assert validate_agent_cell_claims(skeleton, (valid_claim,)) == (valid_claim,)
-
-    fixed_validated, fixed_handoff, fixed_registry = await _validated_fixture(mode="empty")
-    fixed_skeleton = build_result_skeleton(
-        fixed_validated,
-        seal_evidence_input(fixed_validated, fixed_handoff, fixed_registry),
-        fixed_registry,
-        result_id="result-fixed-guarded",
-        generated_at=NOW,
-    )
-    fixed = fixed_skeleton.fixed_cells[0]
-    with pytest.raises(ResultSkeletonValidationError) as raised:
-        validate_agent_cell_claims(
-            fixed_skeleton,
-            (
-                ReasoningCellClaim(
-                    cell_id=fixed.result.cell_id,
-                    parameter=fixed_skeleton.requested_parameters[0],
-                    window_id=fixed_skeleton.windows[0].window_id,
-                    evidence_refs=fixed.result.evidence_refs,
-                ),
-            ),
-        )
-    assert raised.value.code == "reasoning_cell_not_supported"
-
-    malicious = valid_claim.model_dump(mode="json") | {
-        "run_id": str(RUN_ID),
-        "planned_cell_count": 999,
-    }
-    with pytest.raises(ValidationError):
-        validate_agent_cell_claims(skeleton, (malicious,))
-    with pytest.raises(ResultSkeletonValidationError) as raised:
-        validate_agent_cell_claims(
-            skeleton,
-            (
-                valid_claim.model_copy(
-                    update={"evidence_refs": ("evidence:outside-allowlist",)}
-                ),
-            ),
-        )
-    assert raised.value.code == "reasoning_evidence_out_of_scope"
-    with pytest.raises(ResultSkeletonValidationError) as raised:
-        validate_agent_cell_claims(
-            skeleton,
-            (
-                valid_claim.model_copy(
-                    update={"cell_id": "cell:usgs:99999:window-999"}
-                ),
-            ),
-        )
-    assert raised.value.code == "reasoning_cell_not_supported"
-    with pytest.raises(ResultSkeletonValidationError) as raised:
-        validate_agent_cell_claims(
-            skeleton,
-            (
-                valid_claim.model_copy(
-                    update={"window_id": skeleton.windows[-1].window_id}
-                ),
-            ),
-        )
-    assert raised.value.code == "reasoning_cell_identity_mismatch"
-
     for field, value in (
         ("run_id", UUID("00000000-0000-0000-0000-000000000099")),
         ("planned_cell_count", 999),

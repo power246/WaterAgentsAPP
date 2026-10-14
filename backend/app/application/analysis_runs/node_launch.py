@@ -165,8 +165,7 @@ def build_node_launch_facts(
     discharge_cells = tuple(
         cell
         for cell in handoff.cells
-        if cell.role is EvidenceCellRole.REQUIRED_SUPPORT
-        and cell.parameter == _DISCHARGE
+        if cell.parameter == _DISCHARGE
     )
     return NodeLaunchFacts(
         run_id=task.task.run_id,

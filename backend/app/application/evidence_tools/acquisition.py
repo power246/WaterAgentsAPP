@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from uuid import NAMESPACE_URL, uuid5
 
-from app.application.evidence_tools.bundle_builder import EvidenceBundleBuilder
+from app.application.evidence_tools.bundle_builder import (
+    EvidenceBundleBuilder,
+    ValidatedBundleInputs,
+)
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
 from app.application.evidence_tools.executor import EvidenceToolExecutor
 from app.application.evidence_tools.models import (
@@ -85,6 +88,7 @@ class EvidenceAcquisitionHandoff:
     session_id: str
     bundle_ref: ItemReference
     bundle: EvidenceBundle
+    validated_inputs: ValidatedBundleInputs
     bundle_binding_digest: str
     rule_plan: EvidenceRulePlan
     rule_plan_digest: str
@@ -186,7 +190,7 @@ class EvidenceAcquisitionService:
         local_discharge = await self._has_usable_direct(
             scope,
             tuple(fragment_refs),
-            parameters=scope.supporting_parameters,
+            parameters=(_DISCHARGE,),
         )
         usable_upstream = await self._has_usable_upstream(
             scope,
@@ -401,17 +405,20 @@ class EvidenceAcquisitionService:
             )
         )
 
-        bundle, bundle_ref = await self._bundle_builder.build_and_write(
+        built = await self._bundle_builder.build_and_write(
             scope,
             fragment_refs=_unique_fragment_refs(mutable_fragments),
             tool_result_refs=_unique_item_refs(list(result_refs)),
             created_at=self._clock.now(),
         )
+        bundle = built.bundle
+        bundle_ref = built.reference
         return EvidenceAcquisitionHandoff(
             run_id=scope.run_id,
             session_id=scope.session_id,
             bundle_ref=bundle_ref,
             bundle=bundle,
+            validated_inputs=built.validated_inputs,
             bundle_binding_digest=_bundle_binding_digest(bundle_ref, bundle),
             rule_plan=scope.evidence_rule_plan,
             rule_plan_digest=scope.evidence_rule_plan.plan_digest,
@@ -835,16 +842,16 @@ def _cell_gates(
     by_identity = {
         (cell.parameter, cell.window_id, cell.role): cell for cell in cells
     }
+    discharge_cells = tuple(cell for cell in cells if cell.parameter == _DISCHARGE)
     discharge_by_window = {
         cell.window_id: cell
-        for cell in cells
-        if cell.role is EvidenceCellRole.REQUIRED_SUPPORT
-        and cell.parameter == _DISCHARGE
+        for cell in discharge_cells
     }
     target_cells = tuple(
         cell for cell in cells if cell.role is EvidenceCellRole.TARGET
     )
-    if len(discharge_by_window) != len({cell.window_id for cell in target_cells}):
+    if (len(discharge_by_window) != len(discharge_cells)
+        or len(discharge_by_window) != len({cell.window_id for cell in target_cells})):
         raise EvidenceScopeViolationError()
 
     gates = []
@@ -861,7 +868,7 @@ def _cell_gates(
         reasons = []
         if target.status is not EvidenceCellStatus.SUPPORTED:
             reasons.extend(f"target:{reason}" for reason in target.reasons)
-        if discharge.status is not EvidenceCellStatus.SUPPORTED:
+        if discharge is not target and discharge.status is not EvidenceCellStatus.SUPPORTED:
             reasons.extend(
                 f"required_discharge:{reason}" for reason in discharge.reasons
             )

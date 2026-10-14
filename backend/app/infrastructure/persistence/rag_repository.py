@@ -1070,6 +1070,24 @@ class PostgresRAGRepository:
         identifier = _uuid(generation_id, "generation_id")
         async with self._transaction() as connection:
             await self._require_writable_generation(connection, identifier)
+            await connection.execute(
+                update(rag_index_jobs)
+                .where(
+                    rag_index_jobs.c.generation_id == identifier,
+                    rag_index_jobs.c.status == RAGIndexJobStatus.LEASED.value,
+                    rag_index_jobs.c.attempts >= 5,
+                    rag_index_jobs.c.lease_until <= now,
+                )
+                .values(
+                    status=RAGIndexJobStatus.FAILED.value,
+                    lease_owner=None,
+                    lease_until=None,
+                    next_attempt_at=None,
+                    last_safe_error_code="lease_expired_attempts_exhausted",
+                    updated_at=now,
+                    completed_at=now,
+                )
+            )
             rows = tuple(
                 (
                     await connection.execute(

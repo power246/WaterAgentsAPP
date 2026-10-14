@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { api, ApiError, type AdminOperation, type AdminRag, type AdminStorage, type CleanupPreview, type RunHistory } from '../src/api/http'
 import { AdminPage } from '../src/features/admin/AdminPage'
@@ -42,6 +42,29 @@ function setup(list: AdminOperation[] = []) {
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+it('keeps a newly accepted operation when an older refresh finishes later', async () => {
+  setup()
+  await screen.findByText(/Saved river/)
+  let finishStorage!: (value: AdminStorage) => void
+  vi.mocked(api.adminStorage).mockReturnValueOnce(new Promise<AdminStorage>((resolve) => { finishStorage = resolve }))
+  vi.mocked(api.operations).mockResolvedValueOnce({ items: [], next_cursor: null })
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh facts' }))
+  vi.spyOn(api, 'previewHistoryCleanup').mockResolvedValue({ ...preview, cascade_authorized: true,
+    confirmation: { token: 'server-token', required_phrase: 'DELETE 2 RUNS', expires_at: time } })
+  vi.spyOn(api, 'executeAdmin').mockResolvedValue(operation)
+  vi.spyOn(api, 'operation').mockResolvedValue(operation)
+  fireEvent.click(screen.getByRole('checkbox', { name: /Saved river/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Preview history cleanup' }))
+  await screen.findByRole('textbox', { name: 'Admin confirmation phrase' })
+  fireEvent.change(screen.getByRole('textbox', { name: 'Admin confirmation phrase' }),
+    { target: { value: 'DELETE 2 RUNS' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Execute confirmed operation' }))
+  await screen.findByText(/accepted. You may leave this page/)
+  await act(async () => { finishStorage(storage) })
+  expect(screen.getByText(/history_cleanup · pending/)).toBeInTheDocument()
+  await waitFor(() => expect(api.operation).toHaveBeenCalledWith(operation.operation_id, expect.any(AbortSignal)))
+})
 
 it('requires second dependency preview and server phrase, then tracks accepted operation', async () => {
   const prepare = vi.spyOn(api, 'previewHistoryCleanup').mockResolvedValueOnce(preview)

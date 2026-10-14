@@ -7,6 +7,11 @@ from math import isfinite
 from typing import Callable, Protocol
 
 from app.application.evidence_tools.scope import EvidenceSessionScope
+from app.application.transcript_memory.case_policy import (
+    canonical_intent_tokens,
+    meteorological_season,
+    meteorological_season_year,
+)
 from app.application.transcript_memory.embedding_contract import (
     EmbeddingContractError,
     validated_embedding_batch,
@@ -38,7 +43,6 @@ from app.domain import (
     AuthorizedRAGComid,
     AuthorizedRAGSearchQuery,
     CanonicalCaseQueryV1,
-    CanonicalIntentToken,
     EmbeddingVector,
     EvidenceLocation,
     EvidenceQualityClass,
@@ -156,6 +160,13 @@ class RAGSearchSession:
         self._scope = scope
         self._embedding = embedding if embedding is not None else service._embedding
         self._embedding_cache: dict[tuple[str, str], EmbeddingVector] = {}
+
+    def rebind(self, scope: EvidenceSessionScope) -> RAGSearchSession:
+        updated = RAGSearchSession(
+            service=self._service, scope=scope, embedding=self._embedding
+        )
+        updated._embedding_cache = self._embedding_cache
+        return updated
 
     async def search(
         self,
@@ -505,7 +516,7 @@ def _prepare_query(
         window_descriptors=tuple(
             window.canonical_descriptor() for window in query_windows
         ),
-        normalized_intent_tokens=_intent_tokens(
+        normalized_intent_tokens=canonical_intent_tokens(
             scope.mode,
             scope.supporting_parameters,
         ),
@@ -558,11 +569,13 @@ def _query_window(scope, window, intent) -> RAGCaseWindowV1:
     months = tuple(sorted({value.month for value in touched}))
     seasons = tuple(
         sorted(
-            {_season(value.month) for value in touched},
+            {meteorological_season(value.month) for value in touched},
             key=lambda item: tuple(MeteorologicalSeason).index(item),
         )
     )
-    season_years = {_season_year(value.year, value.month) for value in touched}
+    season_years = {
+        meteorological_season_year(value.year, value.month) for value in touched
+    }
     if len(season_years) != 1:
         raise RAGSearchInvalidError("historical_query_season_invalid")
     duration = (window.time_range.end - window.time_range.start).total_seconds()
@@ -783,31 +796,3 @@ def _distance_for(query: AuthorizedRAGSearchQuery, comid: str) -> float | None:
     if scope.spatial_distance_km is not None:
         return scope.spatial_distance_km
     return scope.topology_path_distance_km
-
-
-def _intent_tokens(mode, supporting_parameters):
-    tokens = [CanonicalIntentToken.ANALYZE_CURRENT_STATE]
-    if mode in {InferenceMode.GAP_FILLING, InferenceMode.MIXED}:
-        tokens.append(CanonicalIntentToken.FILL_GAP)
-    if mode in {InferenceMode.PREDICTION, InferenceMode.MIXED}:
-        tokens.append(CanonicalIntentToken.PREDICT)
-    if any(
-        item.code_system == "usgs" and item.code == "00060"
-        for item in supporting_parameters
-    ):
-        tokens.append(CanonicalIntentToken.REQUIRES_DISCHARGE_SUPPORT)
-    return tuple(tokens)
-
-
-def _season(month: int) -> MeteorologicalSeason:
-    if month in {12, 1, 2}:
-        return MeteorologicalSeason.DJF
-    if month in {3, 4, 5}:
-        return MeteorologicalSeason.MAM
-    if month in {6, 7, 8}:
-        return MeteorologicalSeason.JJA
-    return MeteorologicalSeason.SON
-
-
-def _season_year(year: int, month: int) -> int:
-    return year + 1 if month == 12 else year

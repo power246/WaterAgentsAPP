@@ -350,6 +350,7 @@ def test_large_single_delta_scales_in_an_isolated_process() -> None:
     script = textwrap.dedent(
         """
         import json
+        import statistics
         import time
 
         from app.application.transcripts.streaming import StreamingCredentialFilter
@@ -371,14 +372,21 @@ def test_large_single_delta_scales_in_an_isolated_process() -> None:
                 "malformed": ("api_key" + "a" * (size * 1024), "[REDACTED]"),
             }
             for name, (text, expected) in payloads.items():
-                filter_ = StreamingCredentialFilter()
-                started = time.perf_counter()
-                streamed = filter_.feed(text)
-                buffered = filter_.buffered_characters
-                rendered = streamed + filter_.finish()
-                elapsed = time.perf_counter() - started
-                assert rendered == (text if expected is None else expected)
-                measurements.append((name, size, elapsed, buffered))
+                samples = []
+                maximum_buffered = 0
+                for _ in range(3):
+                    filter_ = StreamingCredentialFilter()
+                    started = time.process_time()
+                    streamed = filter_.feed(text)
+                    maximum_buffered = max(
+                        maximum_buffered, filter_.buffered_characters,
+                    )
+                    rendered = streamed + filter_.finish()
+                    samples.append(time.process_time() - started)
+                    assert rendered == (text if expected is None else expected)
+                measurements.append((
+                    name, size, statistics.median(samples), maximum_buffered,
+                ))
         print(json.dumps(measurements))
         """
     )
@@ -388,7 +396,7 @@ def test_large_single_delta_scales_in_an_isolated_process() -> None:
         check=True,
         capture_output=True,
         text=True,
-        timeout=8,
+        timeout=30,
     )
     measurements = json.loads(completed.stdout)
     elapsed = {
@@ -396,7 +404,13 @@ def test_large_single_delta_scales_in_an_isolated_process() -> None:
         for name, size, duration, _ in measurements
     }
 
-    for name in {name for name, _, _, _ in measurements}:
-        assert elapsed[name, 128] < 2.0
-        assert elapsed[name, 512] < elapsed[name, 128] * 6 + 0.1
+    for name in sorted({name for name, _, _, _ in measurements}):
+        limit = elapsed[name, 128] * 6 + 0.1
+        assert elapsed[name, 128] < 2.0, (
+            f"{name}: 128 KiB median CPU time was {elapsed[name, 128]:.3f}s"
+        )
+        assert elapsed[name, 512] < limit, (
+            f"{name}: 512 KiB median CPU time was {elapsed[name, 512]:.3f}s; "
+            f"128 KiB was {elapsed[name, 128]:.3f}s; limit was {limit:.3f}s"
+        )
     assert all(buffered <= 2048 for _, _, _, buffered in measurements)

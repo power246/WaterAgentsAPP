@@ -69,6 +69,7 @@ class RunRuntime:
     stop_requested: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     workflow_start: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     workflow_quiesced: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
+    history_deleted: bool = False
     workflow_commit_gate: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     workflow_task: asyncio.Task[None] | None = field(default=None, repr=False)
     last_error: PublicError | None = None

@@ -7,10 +7,14 @@ from collections.abc import Callable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
 from io import StringIO
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import ValidationError
 
+from app.infrastructure.adapters._evidence_collection import (
+    request_identity as shared_request_identity,
+    safe_error_code,
+)
 from app.domain import (
     CollectionCompletionContract,
     CollectionCompletionProof,
@@ -35,18 +39,7 @@ from app.infrastructure.adapters._parsing import (
     require_string,
 )
 from app.infrastructure.http import ProviderHttpClient
-from app.ports import (
-    InvalidPortResponseError,
-    PortAuthenticationError,
-    PortConfigurationError,
-    PortError,
-    PortHttpError,
-    PortRateLimitError,
-    PortResponseLimitError,
-    PortTimeoutError,
-    PortUnavailableError,
-    UnsupportedPortVersionError,
-)
+from app.ports import PortError, PortResponseLimitError, UnsupportedPortVersionError
 
 WDFN_PROVIDER = "usgs_waterdata"
 SAMPLES_PROVIDER = "usgs_samples"
@@ -174,7 +167,7 @@ class UsgsObservationAdapter:
         visited: set[str] = set()
         request_count = 0
         retrieved_at = self._retrieved_at()
-        request_identity = self._request_identity(collection_url, params)
+        request_identity = shared_request_identity(collection_url, params)
 
         def count_attempt() -> None:
             nonlocal request_count
@@ -182,7 +175,7 @@ class UsgsObservationAdapter:
 
         for page_number in range(self._max_pages):
             await asyncio.sleep(0)
-            page_identity = self._request_identity(url, page_params)
+            page_identity = shared_request_identity(url, page_params)
             if page_identity in visited:
                 error = invalid_response(WDFN_PROVIDER, operation)
                 return self._partial_or_raise(
@@ -245,7 +238,7 @@ class UsgsObservationAdapter:
                 )
             records.extend(accepted)
             next_identity = (
-                self._request_identity(next_url, None) if next_url else None
+                shared_request_identity(next_url, None) if next_url else None
             )
             pages.append(
                 CollectionPageManifest(
@@ -279,7 +272,7 @@ class UsgsObservationAdapter:
                     complete=False,
                     completed_ranges=(),
                     contract=CollectionCompletionContract.OFFICIAL_NEXT_CHAIN,
-                    incomplete_reason=self._error_code(error),
+                    incomplete_reason=safe_error_code(error),
                 )
             if page_number + 1 == self._max_pages:
                 return self._batch(
@@ -328,7 +321,7 @@ class UsgsObservationAdapter:
             deadline=deadline,
             on_attempt=count_attempt,
         )
-        page_identity = self._request_identity(url, params)
+        page_identity = shared_request_identity(url, params)
         request_identity = page_identity
         records = self._parse_samples_csv(
             content,
@@ -760,7 +753,7 @@ class UsgsObservationAdapter:
             complete=False,
             completed_ranges=(),
             contract=contract,
-            incomplete_reason=self._error_code(error),
+            incomplete_reason=safe_error_code(error),
         )
 
     @staticmethod
@@ -899,32 +892,6 @@ class UsgsObservationAdapter:
         return value.astimezone(timezone.utc)
 
     @staticmethod
-    def _request_identity(
-        url: str, params: Mapping[str, object] | None
-    ) -> str:
-        parsed = urlsplit(url)
-        pairs = list(parse_qsl(parsed.query, keep_blank_values=True))
-        if params:
-            for name, raw in params.items():
-                values = raw if isinstance(raw, tuple) else (raw,)
-                pairs.extend((name, str(value)) for value in values)
-        safe_pairs = [
-            (name, value)
-            for name, value in pairs
-            if name.casefold() not in {"api_key", "apikey", "key", "token"}
-        ]
-        canonical = urlunsplit(
-            (
-                parsed.scheme.casefold(),
-                parsed.netloc.casefold(),
-                parsed.path,
-                urlencode(sorted(safe_pairs)),
-                "",
-            )
-        )
-        return f"sha256:{sha256(canonical.encode('utf-8')).hexdigest()}"
-
-    @staticmethod
     def _utc_datetime(value: object, operation: str) -> datetime:
         text = require_string(value, provider=WDFN_PROVIDER, operation=operation)
         try:
@@ -1008,25 +975,6 @@ class UsgsObservationAdapter:
             if isinstance(provenance, dict):
                 provenance.pop("page_identity", None)
         return first_value == second_value
-
-    @staticmethod
-    def _error_code(error: PortError) -> str:
-        if isinstance(error, PortAuthenticationError):
-            return "evidence_provider_authentication_failed"
-        if isinstance(error, PortRateLimitError):
-            return "evidence_provider_rate_limited"
-        if isinstance(error, PortTimeoutError):
-            return "evidence_provider_timeout"
-        if isinstance(error, PortResponseLimitError):
-            return "evidence_provider_response_too_large"
-        if isinstance(error, (InvalidPortResponseError, UnsupportedPortVersionError)):
-            return "evidence_provider_response_invalid"
-        if isinstance(
-            error,
-            (PortUnavailableError, PortHttpError, PortConfigurationError),
-        ):
-            return "evidence_provider_unavailable"
-        return "evidence_provider_unavailable"
 
     @staticmethod
     def _require_https_base(value: str, field_name: str) -> None:

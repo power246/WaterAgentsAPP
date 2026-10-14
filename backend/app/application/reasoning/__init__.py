@@ -35,13 +35,11 @@ from app.application.reasoning.planning_loop import (
 from app.application.reasoning.result_models import (
     AgentReasoningCellScope,
     FixedSkeletonCell,
-    ReasoningCellClaim,
     ReasoningSkeletonProjection,
     ResultSkeleton,
     ResultSkeletonWindow,
     SupportedCellScope,
     build_result_skeleton,
-    validate_agent_cell_claims,
     validate_result_skeleton,
 )
 from app.application.reasoning.sufficiency import (
@@ -129,7 +127,6 @@ __all__ = [
     "PlanningConvergenceReason",
     "PlanningLoopError",
     "PlanningLoopLimits",
-    "ReasoningCellClaim",
     "ReasoningCellDraft",
     "ReasoningCellGate",
     "ReasoningGateDecision",
@@ -173,7 +170,6 @@ __all__ = [
     "seal_evidence_input",
     "overall_synthesis_response_schema",
     "reasoning_batch_response_schema",
-    "validate_agent_cell_claims",
     "validate_result_skeleton",
     "validate_sealed_evidence_input",
     "validate_waterbody_agent_task",

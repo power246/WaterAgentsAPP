@@ -17,6 +17,4 @@ from .retry_failed_jobs_result import RetryFailedJobsResult
 from .generation_deletion_result import GenerationDeletionResult
 from .admin_operation import AdminOperation
 from .admin_confirmation import AdminConfirmation
-from .admin_preview import AdminPreview
-from .confirmation_binding import ConfirmationBinding
 from .idempotency_tombstone import IdempotencyTombstone

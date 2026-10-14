@@ -11,9 +11,6 @@ export function TimeSeries({ result }: { result: InferenceResult | null }) {
         window: point.start_time,
         value: point.representative_value === null ? null : Number(point.representative_value),
         unit: point.unit_id,
-        quality: point.quality_flags.join(', ') || 'none',
-        availability: point.outcome_status,
-        end: point.end_time,
       }))
       return <div key={`${series.parameter.key.code_system}:${series.parameter.key.code}`}>
         <h4>{series.parameter.name}</h4>

@@ -1,12 +1,9 @@
-import json
-from datetime import datetime, timezone
-from enum import Enum
-from hashlib import sha256
 from typing import Self
 from uuid import UUID
 
 from pydantic import StrictInt, field_validator, model_validator
 
+from app.application.canonical_json import canonical_json_digest, canonical_json_text
 from app.application.reasoning.errors import (
     AllCellsBlockedError,
     ResultSkeletonValidationError,
@@ -144,18 +141,6 @@ class ReasoningSkeletonProjection(DomainModel):
         if self.scope_digest != expected:
             raise ValueError("reasoning projection digest does not match its cells")
         return self
-
-
-class ReasoningCellClaim(DomainModel):
-    cell_id: NonEmptyString
-    parameter: ParameterKey
-    window_id: NonEmptyString
-    evidence_refs: tuple[NonEmptyString, ...]
-
-    @field_validator("evidence_refs")
-    @classmethod
-    def validate_evidence_refs(cls, value: tuple[str, ...]) -> tuple[str, ...]:
-        return ensure_unique_tuple(value, field_name="claim evidence_refs")
 
 
 class ResultSkeleton(DomainModel):
@@ -481,25 +466,6 @@ def validate_result_skeleton(value: ResultSkeleton) -> ResultSkeleton:
     return ResultSkeleton.model_validate(value.model_dump(mode="python"))
 
 
-def validate_agent_cell_claims(
-    skeleton: ResultSkeleton,
-    claims: tuple[ReasoningCellClaim | dict, ...],
-) -> tuple[ReasoningCellClaim, ...]:
-    validated = tuple(ReasoningCellClaim.model_validate(claim) for claim in claims)
-    by_id = {scope.cell_id: scope for scope in skeleton.supported_scopes}
-    if len({claim.cell_id for claim in validated}) != len(validated):
-        raise ResultSkeletonValidationError("duplicate_reasoning_cell_claim")
-    for claim in validated:
-        scope = by_id.get(claim.cell_id)
-        if scope is None:
-            raise ResultSkeletonValidationError("reasoning_cell_not_supported")
-        if claim.parameter != scope.parameter or claim.window_id != scope.window_id:
-            raise ResultSkeletonValidationError("reasoning_cell_identity_mismatch")
-        if not set(claim.evidence_refs) <= set(scope.allowed_evidence_refs):
-            raise ResultSkeletonValidationError("reasoning_evidence_out_of_scope")
-    return validated
-
-
 def _fixed_cell(
     gate: ReasoningCellGate,
     window: ResultSkeletonWindow,
@@ -586,41 +552,12 @@ def _require(condition: bool, code: str) -> None:
 
 
 def _canonical_model_bytes(model: DomainModel) -> bytes:
-    return json.dumps(
-        model.model_dump(mode="json"),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
+    return canonical_json_text(model).encode("utf-8")
 
 
 def _digest_model(model: DomainModel, *, exclude: set[str]) -> str:
-    return _digest_values(model.model_dump(mode="json", exclude=exclude))
+    return canonical_json_digest(model.model_dump(mode="json", exclude=exclude))
 
 
 def _digest_values(values: object) -> str:
-    payload = json.dumps(
-        _json_value(values),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
-    return f"sha256:{sha256(payload).hexdigest()}"
-
-
-def _json_value(value):
-    if isinstance(value, DomainModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, UUID):
-        return str(value)
-    if isinstance(value, datetime):
-        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-    if isinstance(value, Enum):
-        return value.value
-    if isinstance(value, dict):
-        return {key: _json_value(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list)):
-        return [_json_value(item) for item in value]
-    return value
+    return canonical_json_digest(values)
