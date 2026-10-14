@@ -36,6 +36,7 @@ GAGE_HEIGHT = ParameterKey(code_system="usgs", code="00065")
 SECCHI = ParameterKey(code_system="usgs", code="00078")
 AMMONIA_FILTERED = ParameterKey(code_system="usgs", code="00608")
 OTHER_PARAMETER = ParameterKey(code_system="usgs", code="00010")
+PH = ParameterKey(code_system="usgs", code="00400")
 
 
 class FixedClock:
@@ -156,7 +157,7 @@ def parameter_metadata(key: ParameterKey) -> UsgsParameterMetadata:
     return UsgsParameterMetadata(
         key=key,
         name=capability.official_name,
-        unit=capability.canonical_unit,
+        unit=capability.official_unit,
         provider_identity=f"directory:{key.code}",
     )
 
@@ -179,6 +180,7 @@ def time_series(
     end: datetime,
     identity: str,
     kind: TimeSeriesKind = TimeSeriesKind.CONTINUOUS,
+    unit: str | None = None,
 ) -> TimeSeriesMetadata:
     capability = load_parameter_capability_registry().get(parameter)
     assert capability is not None
@@ -186,7 +188,7 @@ def time_series(
         series_id=identity,
         station_id=station_id,
         parameter=parameter,
-        unit=capability.canonical_unit,
+        unit=unit or capability.official_unit,
         begin=begin,
         end=end,
         kind=kind,
@@ -335,6 +337,45 @@ def test_historical_ts_and_samples_routes_preserve_partial_coverage() -> None:
     parameter_call = next(value for name, value in metadata.calls if name == "parameters")
     assert parameter_call == (DISCHARGE, GAGE_HEIGHT)
     assert [name for name, _ in metadata.calls].count("samples") == 1
+
+
+def test_ph_official_unit_qualifies_parameter_and_time_series_metadata() -> None:
+    associated = station()
+    metadata = FakeMetadata(
+        parameters=(parameter_metadata(DISCHARGE), parameter_metadata(PH)),
+        locations=(location(associated.station_id),),
+        series=(
+            time_series(
+                associated.station_id,
+                PH,
+                begin=datetime(2025, 12, 1, tzinfo=UTC),
+                end=datetime(2026, 2, 1, tzinfo=UTC),
+                identity="ph-series",
+                unit="pH Units",
+            ),
+            time_series(
+                associated.station_id,
+                DISCHARGE,
+                begin=datetime(2025, 12, 1, tzinfo=UTC),
+                end=datetime(2026, 2, 1, tzinfo=UTC),
+                identity="discharge-series",
+                unit="ft^3/s",
+            ),
+        ),
+    )
+
+    result = run(
+        service(FakeTopology((associated,)), metadata).check_availability(
+            request(PH)
+        )
+    )
+
+    assert len(result) == 1
+    assert {unit.parameter for unit in result[0].covered_units} == {PH, DISCHARGE}
+    assert {reference.series_identity for reference in result[0].series_refs} == {
+        "ph-series",
+        "discharge-series",
+    }
 
 
 def test_mixed_segments_apply_prediction_boundary_without_covering_older_data() -> None:

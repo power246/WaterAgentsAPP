@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from collections.abc import Mapping
 from datetime import date, datetime
 from io import StringIO
@@ -235,6 +236,16 @@ class UsgsWaterDataAdapter:
                     provider=SAMPLES_PROVIDER,
                     operation=operation,
                 )
+                characteristic_group = require_string(
+                    row.get("characteristicGroup"),
+                    provider=SAMPLES_PROVIDER,
+                    operation=operation,
+                )
+                characteristic_user_supplied = require_string(
+                    row.get("characteristicUserSupplied"),
+                    provider=SAMPLES_PROVIDER,
+                    operation=operation,
+                )
                 records.append(
                     SamplePeriodOfRecord(
                         station_id=station,
@@ -268,7 +279,17 @@ class UsgsWaterDataAdapter:
                             )
                         ),
                         provider_identity=(
-                            f"usgs-samples:v1:{station}:{characteristic}"
+                            "usgs-samples:v1:"
+                            + json.dumps(
+                                (
+                                    station,
+                                    characteristic_group,
+                                    characteristic,
+                                    characteristic_user_supplied,
+                                ),
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            )
                         ),
                     )
                 )

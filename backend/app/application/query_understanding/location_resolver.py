@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Self
 
 from pydantic import model_validator
@@ -19,6 +20,14 @@ from app.domain import (
     GeocodingCandidate,
 )
 from app.ports import ComidLookupPort, GeocodingPort, TopologyDataPort
+
+
+_COORDINATE_TEXT = re.compile(
+    r"\s*(?:coordinates?\s*:\s*)?\(?\s*"
+    r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*,\s*"
+    r"([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*\)?\s*",
+    re.IGNORECASE,
+)
 
 
 class LocationResolutionStatus(DomainEnum):
@@ -67,6 +76,21 @@ class LocationResolver:
         if frontend is not None and frontend.status is not LocationResolutionStatus.SUCCESS:
             return frontend
 
+        if (
+            frontend is not None
+            and frontend_target is not None
+            and frontend_target.coordinates is not None
+            and frontend_target.coordinates == parsed_intent.coordinate_mention
+            and (
+                parsed_intent.location_mention is None
+                or self._is_coordinate_echo(
+                    parsed_intent.location_mention,
+                    parsed_intent.coordinate_mention,
+                )
+            )
+        ):
+            return frontend
+
         query = await self._resolve_query(parsed_intent)
         if frontend is None:
             return query
@@ -110,7 +134,13 @@ class LocationResolver:
     ) -> LocationResolution:
         text_result: LocationResolution | None = None
         coordinate_result: LocationResolution | None = None
-        if parsed_intent.location_mention is not None:
+        if (
+            parsed_intent.location_mention is not None
+            and not self._is_coordinate_echo(
+                parsed_intent.location_mention,
+                parsed_intent.coordinate_mention,
+            )
+        ):
             text_result = await self._resolve_text(parsed_intent.location_mention)
         if parsed_intent.coordinate_mention is not None:
             coordinate_result = await self._resolve_point(
@@ -133,6 +163,19 @@ class LocationResolver:
         if text_result.target.comid != coordinate_result.target.comid:
             return self._failure(LocationResolutionStatus.LOCATION_CONFLICT)
         return coordinate_result
+
+    @staticmethod
+    def _is_coordinate_echo(location_text: str, point: GeoPoint | None) -> bool:
+        if point is None:
+            return False
+        match = _COORDINATE_TEXT.fullmatch(location_text)
+        if match is None:
+            return False
+        first, second = (float(value) for value in match.groups())
+        return (first, second) in (
+            (point.longitude, point.latitude),
+            (point.latitude, point.longitude),
+        )
 
     async def _resolve_text(self, location_text: str) -> LocationResolution:
         candidates = await self._geocoding.resolve_text(location_text)

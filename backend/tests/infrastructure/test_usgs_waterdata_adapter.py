@@ -175,6 +175,34 @@ def test_samples_csv_summary_parses_discrete_periods() -> None:
     assert "api_key" not in requests[0].url.params
 
 
+def test_samples_same_characteristic_keeps_distinct_provider_identities() -> None:
+    content = (
+        "monitoringLocationIdentifier,characteristicGroup,characteristic,"
+        "characteristicUserSupplied,resultCount,activityCount,firstActivity,"
+        "mostRecentActivity\n"
+        'USGS-04024000,Physical,pH,"pH, water, unfiltered, field",'
+        "496,496,1955-09-18,2026-09-21\n"
+        'USGS-04024000,Physical,pH,"pH, water, unfiltered, laboratory",'
+        "99,99,1980-11-03,2015-09-01\n"
+    ).encode()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=content, request=request)
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            periods = await UsgsWaterDataAdapter(
+                http,
+                ogc_base_url=OGC_BASE,
+                samples_base_url=SAMPLES_BASE,
+            ).get_sample_periods("USGS-04024000")
+        assert len(periods) == 2
+        assert [period.characteristic for period in periods] == ["pH", "pH"]
+        assert periods[0].provider_identity != periods[1].provider_identity
+
+    run(exercise())
+
+
 def test_successful_empty_metadata_is_not_an_error() -> None:
     empty_json = {"type": "FeatureCollection", "features": [], "links": []}
     empty_csv = (

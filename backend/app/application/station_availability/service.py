@@ -312,7 +312,7 @@ class StationAvailabilityService:
                 raise self._invalid_metadata("get_parameter_codes")
             if (
                 record.name != capability.official_name
-                or record.unit != capability.canonical_unit
+                or record.unit != capability.official_unit
             ):
                 raise self._invalid_metadata("get_parameter_codes")
             if record.key in by_key:
@@ -346,11 +346,13 @@ class StationAvailabilityService:
         references: list[SeriesRef] = []
         for record in records:
             capability = capabilities.get(record.parameter)
+            source_unit = self._registry.resolve_unit(record.unit)
             if (
                 record.station_id not in stations
                 or record.parameter not in parameters
                 or capability is None
-                or record.unit != capability.canonical_unit
+                or source_unit is None
+                or source_unit.unit_id not in capability.accepted_source_units
                 or record.series_id in seen_identities
             ):
                 raise self._invalid_metadata("get_time_series_metadata")
