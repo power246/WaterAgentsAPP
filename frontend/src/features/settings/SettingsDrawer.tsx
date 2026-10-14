@@ -66,6 +66,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const unitPolicyVersion = useRef(settings.unit_policy.version)
   const initialUnitEntries = useRef(settings.unit_policy.entries)
   const draftEditVersion = useRef(0)
+  const pendingSaveEditVersion = useRef<number | null>(null)
   const previewRequest = useRef(0)
   const previewInput = useRef<{ request: number; version: number; entries: string } | null>(null)
   const [draft, setDraft] = useState<Defaults>(settings.defaults)
@@ -89,6 +90,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     if (current.revision < serverRevision.current) return false
     const reviewed = reviewedSettings.current
     const draftDirty = JSON.stringify(draftRef.current) !== JSON.stringify(reviewed.defaults)
+      || (pendingSaveEditVersion.current !== null && draftEditVersion.current !== pendingSaveEditVersion.current)
     serverRevision.current = current.revision
     latestSettings.current = current
     if (current.unit_policy.version !== unitPolicyVersion.current) {
@@ -163,6 +165,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     }
     setBusy(true); setError(''); setNotice('')
     const submittedEditVersion = draftEditVersion.current
+    pendingSaveEditVersion.current = submittedEditVersion
     try {
       const current = await api.replaceSettings(reviewedSettings.current.revision, draftRef.current)
       if (acceptSettings(current, 'save')) {
@@ -180,7 +183,10 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
         acceptSettings(current, 'conflict')
         setError('Settings changed on the server. Review current values and explicitly reconfirm this full draft.')
       } else setError(safeError(cause))
-    } finally { setBusy(false) }
+    } finally {
+      pendingSaveEditVersion.current = null
+      setBusy(false)
+    }
   }
 
   async function previewUnits() {

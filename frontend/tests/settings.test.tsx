@@ -67,6 +67,33 @@ it('does not replace edits made while a defaults save is pending', async () => {
   expect(screen.getByText('Revision 1. Changes affect future runs.')).toBeInTheDocument()
 })
 
+it('preserves edits when the initial GET sees a pending save before its response arrives', async () => {
+  let resolveGet!: (value: Settings) => void
+  let resolveSave!: (value: Settings) => void
+  const committed = { ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  const save = vi.spyOn(api, 'replaceSettings')
+    .mockReturnValueOnce(new Promise<Settings>((done) => { resolveSave = done }))
+    .mockResolvedValueOnce({ ...settings, revision: 2 })
+  setup()
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  expect(save).toHaveBeenCalledWith(0, expect.objectContaining({ analysis_timezone: 'America/Denver' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+
+  await act(async () => { resolveGet(committed) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+
+  await act(async () => { resolveSave(committed) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+  expect(screen.getByRole('button', { name: 'Save full defaults' })).toBeEnabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'UTC' })))
+})
+
 it('ignores an initial settings GET that arrives after a successful save', async () => {
   let resolveGet!: (value: Settings) => void
   vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
