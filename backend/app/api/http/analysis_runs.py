@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated
 from uuid import UUID
 
@@ -38,6 +39,7 @@ from app.application.transcripts.reader import (
 )
 
 _UUID = TypeAdapter(UUID)
+_logger = logging.getLogger("wateragents.analysis_runs")
 _UUID_V4_PATTERN = (
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-"
     r"[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
@@ -326,6 +328,10 @@ async def subscribe_session_events(
 async def cancel_run(request: Request, run_id: UUID) -> RunStatusResponse:
     _reject_unknown_query_parameters(request, set())
     request.state.run_id = run_id
+    _logger.info(
+        "Cancellation request entered the API.",
+        extra={"event_name": "cancel_endpoint_entered", "run_id": run_id},
+    )
     coordinator = request.app.state.run_coordinator
     try:
         snapshot = await coordinator.cancel_run(run_id)

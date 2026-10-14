@@ -22,6 +22,7 @@ _FIELDS = (
     "strategy", "candidate_count", "result_count", "active_profile_digest",
     "provider", "provider_operation", "provider_status", "provider_error",
     "provider_attempts", "run_id", "session_id", "failure_code", "model_calls",
+    "tool_name", "plan_index", "plan_count", "page_number", "response_bytes",
 )
 _FORMAT_FAILURE = (
     '{"timestamp":null,"level":"ERROR","event_name":"log_format_failed",'

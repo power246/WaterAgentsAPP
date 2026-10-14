@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -99,6 +100,8 @@ from app.ports import (
     WaterObservationPort,
     WeatherEvidencePort,
 )
+
+logger = logging.getLogger("wateragents.evidence_tools")
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,10 +244,24 @@ class EvidenceToolExecutor:
             self._check_deadline(scope)
 
             async def work() -> _CompletedOperation:
+                started = asyncio.get_running_loop().time()
+                logger.info(
+                    "Evidence tool dispatch started.",
+                    extra={"event_name": "evidence_tool_dispatch_started",
+                           "run_id": scope.run_id, "session_id": scope.session_id,
+                           "operation": operation_id, "tool_name": request.tool_name},
+                )
                 value = await self._dispatch(
                     scope,
                     request,
                     operation_id=operation_id,
+                )
+                logger.info(
+                    "Evidence tool dispatch completed.",
+                    extra={"event_name": "evidence_tool_dispatch_completed",
+                           "run_id": scope.run_id, "session_id": scope.session_id,
+                           "operation": operation_id, "tool_name": request.tool_name,
+                           "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
                 )
                 try:
                     self._check_deadline(scope)
@@ -256,6 +273,13 @@ class EvidenceToolExecutor:
                     value=value,
                 )
                 result_ref = await self._writer.write_result(scope, result)
+                logger.info(
+                    "Evidence tool result saved.",
+                    extra={"event_name": "evidence_tool_result_saved",
+                           "run_id": scope.run_id, "session_id": scope.session_id,
+                           "operation": operation_id, "tool_name": request.tool_name,
+                           "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+                )
                 return _CompletedOperation(
                     result=result,
                     result_ref=result_ref,
@@ -547,19 +571,43 @@ class EvidenceToolExecutor:
             )
             batches = []
             collections = []
+            logger.info(
+                "Water observation plans prepared.",
+                extra={"event_name": "water_observation_plans_prepared",
+                       "run_id": scope.run_id, "session_id": scope.session_id,
+                       "operation": operation_id, "tool_name": request.tool_name,
+                       "plan_count": len(plans)},
+            )
             try:
-                for plan in plans:
+                for plan_index, plan in enumerate(plans, start=1):
                     scope.cancel_token.checkpoint()
                     if batches:
                         self._ensure_another_collection_request(tuple(batches))
                     if self._water_port is None:
                         raise EvidenceProducerUnavailableError()
+                    started = asyncio.get_running_loop().time()
+                    logger.info(
+                        "Water observation provider collection started.",
+                        extra={"event_name": "water_observation_provider_started",
+                               "run_id": scope.run_id, "session_id": scope.session_id,
+                               "operation": operation_id, "provider": plan.provider.value,
+                               "plan_index": plan_index, "plan_count": len(plans)},
+                    )
                     batch = await self._await_provider(
                         scope,
                         self._water_port.collect(
                             plan,
                             deadline=self._check_deadline(scope),
                         ),
+                    )
+                    logger.info(
+                        "Water observation provider collection completed.",
+                        extra={"event_name": "water_observation_provider_completed",
+                               "run_id": scope.run_id, "session_id": scope.session_id,
+                               "operation": operation_id, "provider": plan.provider.value,
+                               "plan_index": plan_index, "plan_count": len(plans),
+                               "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                               "result_count": batch.counts.records},
                     )
                     self._validate_collected_batches((*batches, batch))
                     batches.append(batch)
@@ -584,6 +632,12 @@ class EvidenceToolExecutor:
                     )
                     raise _PartialDispatchError(error, partial) from error
                 raise
+            logger.info(
+                "Water observation collection persistence started.",
+                extra={"event_name": "water_observation_persistence_started",
+                       "run_id": scope.run_id, "session_id": scope.session_id,
+                       "operation": operation_id, "plan_count": len(collections)},
+            )
             return await self._finish_collection(
                 scope,
                 operation_id,
@@ -896,6 +950,13 @@ class EvidenceToolExecutor:
             operation_id=operation_id,
             collections=collections,
         )
+        logger.info(
+            "Evidence collection persisted.",
+            extra={"event_name": "evidence_collection_persistence_completed",
+                   "run_id": scope.run_id, "session_id": scope.session_id,
+                   "operation": operation_id, "plan_count": len(collections),
+                   "result_count": records},
+        )
         complete = all(batch.completion_proof.complete for batch in batches)
         failure_code = _collection_failure_code(batches)
         status = (
@@ -1207,6 +1268,14 @@ class EvidenceToolExecutor:
             completed_at=self._clock.now(),
         )
         result_ref = await self._writer.write_result(scope, result)
+        logger.info(
+            "Evidence tool failure saved.",
+            extra={"event_name": "evidence_tool_failure_saved",
+                   "run_id": scope.run_id, "session_id": scope.session_id,
+                   "operation": operation_id, "tool_name": request.tool_name,
+                   "outcome": "cancelled" if cancelled else "failed",
+                   "failure_code": error.code},
+        )
         return EvidenceToolExecution(result=result, result_ref=result_ref)
 
 

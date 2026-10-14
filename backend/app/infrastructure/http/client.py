@@ -371,6 +371,12 @@ class ProviderHttpClient:
             self._remaining_timeout(deadline, provider, operation)
             if on_attempt is not None:
                 on_attempt()
+            logger.info(
+                "Provider GET attempt started.",
+                extra={"event_name": "provider_get_attempt_started",
+                       "provider": provider, "provider_operation": operation,
+                       "attempt": attempt + 1},
+            )
             try:
                 return await self._request_once(
                     client,
@@ -408,6 +414,7 @@ class ProviderHttpClient:
         deadline: float | None,
     ) -> bytes:
         timeout = self._remaining_timeout(deadline, provider, operation)
+        started = asyncio.get_running_loop().time()
         try:
             async with asyncio.timeout(timeout):
                 async with client.stream(
@@ -418,6 +425,13 @@ class ProviderHttpClient:
                     json=body,
                     timeout=timeout,
                 ) as response:
+                    logger.info(
+                        "Provider response headers received.",
+                        extra={"event_name": "provider_response_headers_received",
+                               "provider": provider, "provider_operation": operation,
+                               "method": method, "status_code": response.status_code,
+                               "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+                    )
                     self._raise_for_status(
                         response.status_code,
                         provider=provider,
@@ -432,6 +446,13 @@ class ProviderHttpClient:
                                 provider=provider,
                                 operation=operation,
                             )
+                    logger.info(
+                        "Provider response body received.",
+                        extra={"event_name": "provider_response_body_received",
+                               "provider": provider, "provider_operation": operation,
+                               "method": method, "response_bytes": len(content),
+                               "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+                    )
                     return bytes(content)
         except PortError:
             raise

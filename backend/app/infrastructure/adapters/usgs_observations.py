@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from hashlib import sha256
@@ -46,6 +47,7 @@ SAMPLES_PROVIDER = "usgs_samples"
 DEFAULT_OGC_BASE_URL = "https://api.waterdata.usgs.gov/ogcapi/v1"
 DEFAULT_SAMPLES_BASE_URL = "https://api.waterdata.usgs.gov/samples-data"
 DISCHARGE = ParameterKey(code_system="usgs", code="00060")
+logger = logging.getLogger("wateragents.usgs_observations")
 
 _SAMPLE_COLUMNS = {
     "Org_Identifier",
@@ -137,6 +139,12 @@ class UsgsObservationAdapter:
         deadline: float | None = None,
     ) -> ProviderCollectionBatch[ObservationRecord]:
         self._validate_request(request)
+        logger.info(
+            "USGS observation collection started.",
+            extra={"event_name": "usgs_observation_collection_started",
+                   "operation": request.operation_id,
+                   "provider": request.provider.value},
+        )
         if request.provider is ParameterProvider.USGS_SAMPLES:
             return await self._collect_samples(request, deadline=deadline)
         return await self._collect_ogc(request, deadline=deadline)
@@ -189,6 +197,13 @@ class UsgsObservationAdapter:
                     contract=CollectionCompletionContract.OFFICIAL_NEXT_CHAIN,
                 )
             visited.add(page_identity)
+            started = asyncio.get_running_loop().time()
+            logger.info(
+                "USGS observation page request started.",
+                extra={"event_name": "usgs_observation_page_started",
+                       "operation": operation, "provider": WDFN_PROVIDER,
+                       "page_number": page_number + 1},
+            )
             try:
                 content = await self._http.get_bytes(
                     url,
@@ -198,6 +213,14 @@ class UsgsObservationAdapter:
                     headers=self._headers("application/geo+json"),
                     deadline=deadline,
                     on_attempt=count_attempt,
+                )
+                logger.info(
+                    "USGS observation page downloaded.",
+                    extra={"event_name": "usgs_observation_page_downloaded",
+                           "operation": operation, "provider": WDFN_PROVIDER,
+                           "page_number": page_number + 1,
+                           "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                           "response_bytes": len(content)},
                 )
             except PortError as error:
                 return self._partial_or_raise(
@@ -224,6 +247,14 @@ class UsgsObservationAdapter:
                     by_id=by_id,
                     current_count=len(records),
                     operation=operation,
+                )
+                logger.info(
+                    "USGS observation page parsed.",
+                    extra={"event_name": "usgs_observation_page_parsed",
+                           "operation": operation, "provider": WDFN_PROVIDER,
+                           "page_number": page_number + 1,
+                           "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                           "result_count": len(accepted)},
                 )
             except PortError as error:
                 return self._partial_or_raise(
@@ -312,6 +343,12 @@ class UsgsObservationAdapter:
             nonlocal request_count
             request_count += 1
 
+        started = asyncio.get_running_loop().time()
+        logger.info(
+            "USGS samples request started.",
+            extra={"event_name": "usgs_samples_request_started",
+                   "operation": operation, "provider": SAMPLES_PROVIDER},
+        )
         content = await self._http.get_bytes(
             url,
             provider=SAMPLES_PROVIDER,
@@ -320,6 +357,13 @@ class UsgsObservationAdapter:
             headers=self._headers("text/csv"),
             deadline=deadline,
             on_attempt=count_attempt,
+        )
+        logger.info(
+            "USGS samples downloaded.",
+            extra={"event_name": "usgs_samples_downloaded",
+                   "operation": operation, "provider": SAMPLES_PROVIDER,
+                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                   "response_bytes": len(content)},
         )
         page_identity = shared_request_identity(url, params)
         request_identity = page_identity
@@ -330,6 +374,13 @@ class UsgsObservationAdapter:
             request_identity=request_identity,
             retrieved_at=self._retrieved_at(),
             source_uri=url,
+        )
+        logger.info(
+            "USGS samples parsed.",
+            extra={"event_name": "usgs_samples_parsed",
+                   "operation": operation, "provider": SAMPLES_PROVIDER,
+                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                   "result_count": len(records)},
         )
         return self._batch(
             request=request,
@@ -899,6 +950,17 @@ class UsgsObservationAdapter:
         except ValueError as error:
             raise invalid_response(WDFN_PROVIDER, operation) from error
         if parsed.tzinfo is None or parsed.utcoffset() is None:
+            logger.warning(
+                "USGS observation time has no timezone.",
+                extra={"event_name": "usgs_observation_time_without_timezone",
+                       "provider": WDFN_PROVIDER,
+                       "provider_operation": operation,
+                       "provider_error": (
+                           "date_only_time"
+                           if parsed.date().isoformat() == text
+                           else "missing_offset"
+                       )},
+            )
             raise invalid_response(WDFN_PROVIDER, operation)
         return parsed.astimezone(timezone.utc)
 

@@ -2625,7 +2625,9 @@ class RunCoordinator:
 
     async def cancel_run(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         runtime = await self._lookup(run_id)
+        self._log_activity("cancel_gate_wait_started", runtime)
         async with runtime.workflow_commit_gate:
+            self._log_activity("cancel_gate_acquired", runtime)
             runtime.cancel_requested.set()
             runtime.stop_requested.set()
         try:
