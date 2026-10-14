@@ -26,6 +26,9 @@ function Workspace({ mode }: { mode: Mode }) {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [settingsError, setSettingsError] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const acceptSettings = useCallback((incoming: Settings) => {
+    setSettings((current) => current && incoming.revision < current.revision ? current : incoming)
+  }, [])
   const [run, dispatchRun] = useReducer(runReducer, emptyRun)
   const [transcript, dispatchTranscript] = useReducer(transcriptReducer, emptyTranscript)
   const [referencedItems, setReferencedItems] = useState<TranscriptItem[]>([])
@@ -72,11 +75,13 @@ function Workspace({ mode }: { mode: Mode }) {
 
   useEffect(() => {
     const controller = new AbortController()
-    void api.settings(controller.signal).then(setSettings).catch((cause: unknown) => {
+    void api.settings(controller.signal).then((current) => {
+      if (!controller.signal.aborted) acceptSettings(current)
+    }).catch((cause: unknown) => {
       if (!controller.signal.aborted) setSettingsError(cause instanceof ApiError ? cause.code : 'Settings unavailable')
     })
     return () => controller.abort()
-  }, [])
+  }, [acceptSettings])
 
   const loadRun = useCallback(async (id: string, view: 'auto' | 'history', signal?: AbortSignal, historyUrl?: string) => {
     try {
@@ -264,7 +269,7 @@ function Workspace({ mode }: { mode: Mode }) {
       </div>
     </main>
     {settingsOpen && (settings
-      ? <SettingsDrawer settings={settings} onSettings={setSettings} onClose={() => setSettingsOpen(false)} />
+      ? <SettingsDrawer settings={settings} onSettings={acceptSettings} onClose={() => setSettingsOpen(false)} />
       : <div className="dialog-backdrop"><div className="dialog"><p>{settingsError || 'Loading settings…'}</p>
         <button type="button" onClick={() => setSettingsOpen(false)}>Close</button></div></div>)}
     {deleteForRunId === runId && runId && <DeleteRun key={runId} runId={runId} onClose={() => setDeleteForRunId(null)} onAccepted={() => {

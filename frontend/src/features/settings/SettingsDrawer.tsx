@@ -84,7 +84,6 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
   const [busy, setBusy] = useState(false)
   const defaultsDirty = JSON.stringify(draft) !== JSON.stringify(server.defaults)
   const unitsDirty = JSON.stringify(unitEntries) !== JSON.stringify(server.unit_policy.entries)
-  const dirty = defaultsDirty || unitsDirty
 
   const acceptSettings = useCallback((current: Settings, source: 'read' | 'conflict' | 'save' = 'read'): boolean => {
     if (current.revision < serverRevision.current) return false
@@ -136,8 +135,13 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
     return () => controller.abort()
   }, [acceptSettings])
 
+  function allowDiscard() {
+    const dirty = defaultsDirty || unitsDirty || draftEditVersion.current !== acceptedDraftEditVersion.current
+    return !dirty || window.confirm('Discard unsaved settings and unit changes?')
+  }
+
   function close() {
-    if (dirty && !window.confirm('Discard unsaved settings and unit changes?')) return
+    if (!allowDiscard()) return
     onClose()
   }
 
@@ -339,7 +343,7 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
       </section>
       {error && <p className="error" role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
-      <Link to="/admin" onClick={(event) => { if (dirty && !window.confirm('Discard unsaved settings and unit changes?')) event.preventDefault() }}>
+      <Link to="/admin" onClick={(event) => { if (!allowDiscard()) event.preventDefault() }}>
         Advanced / Admin
       </Link>
     </aside>

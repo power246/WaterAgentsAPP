@@ -125,6 +125,47 @@ it.each([
   await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'UTC' })))
 })
 
+it('asks before leaving when an unconfirmed save is followed by edits back to the old value', async () => {
+  let rejectSave!: (cause: unknown) => void
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>(() => undefined))
+  vi.spyOn(api, 'replaceSettings').mockReturnValue(new Promise<Settings>((_done, reject) => { rejectSave = reject }))
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+  const onClose = vi.fn()
+  render(<MemoryRouter><SettingsDrawer settings={settings} onSettings={() => undefined} onClose={onClose} /></MemoryRouter>)
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+  await act(async () => { rejectSave(new Error('response lost')) })
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(onClose).not.toHaveBeenCalled()
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(fireEvent.click(screen.getByRole('link', { name: 'Advanced / Admin' }))).toBe(false)
+  expect(confirm).toHaveBeenCalledTimes(2)
+})
+
+it('closes without a discard prompt after a confirmed save with no later edits', async () => {
+  const committed = { ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }
+  vi.spyOn(api, 'settings').mockResolvedValue(settings)
+  vi.spyOn(api, 'replaceSettings').mockResolvedValue(committed)
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  const confirm = vi.spyOn(window, 'confirm')
+  const onClose = vi.fn()
+  render(<MemoryRouter><SettingsDrawer settings={settings} onSettings={() => undefined} onClose={onClose} /></MemoryRouter>)
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await screen.findByText('Revision 1. Changes affect future runs.')
+  fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+  expect(confirm).not.toHaveBeenCalled()
+  expect(onClose).toHaveBeenCalledOnce()
+})
+
 it('ignores an initial settings GET that arrives after a successful save', async () => {
   let resolveGet!: (value: Settings) => void
   vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
