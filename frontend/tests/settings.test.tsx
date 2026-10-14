@@ -94,6 +94,37 @@ it('preserves edits when the initial GET sees a pending save before its response
   await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'UTC' })))
 })
 
+it.each([
+  ['network error', new Error('response lost')],
+  ['service unavailable', new ApiError(503, 'service_unavailable', 'request')],
+  ['invalid JSON', new ApiError(200, 'invalid_json', 'request')],
+  ['invalid response', new ApiError(200, 'invalid_response', 'request')],
+])('preserves edits after an uncertain save %s and a late GET', async (_name, failure) => {
+  let resolveGet!: (value: Settings) => void
+  let rejectSave!: (cause: unknown) => void
+  const committed = { ...settings, revision: 1, defaults: {
+    ...settings.defaults, analysis_timezone: 'America/Denver',
+  } }
+  vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
+  const save = vi.spyOn(api, 'replaceSettings')
+    .mockReturnValueOnce(new Promise<Settings>((_done, reject) => { rejectSave = reject }))
+    .mockResolvedValueOnce({ ...settings, revision: 2 })
+  setup()
+
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'America/Denver' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  fireEvent.change(screen.getByLabelText('Analysis timezone'), { target: { value: 'UTC' } })
+  await act(async () => { rejectSave(failure) })
+  await act(async () => { resolveGet(committed) })
+
+  expect(screen.getByLabelText('Analysis timezone')).toHaveValue('UTC')
+  expect(screen.getByRole('button', { name: /Reconfirm this draft against revision 1/ })).toBeInTheDocument()
+  expect(save).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: /Reconfirm this draft against revision 1/ }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save full defaults' }))
+  await waitFor(() => expect(save).toHaveBeenCalledWith(1, expect.objectContaining({ analysis_timezone: 'UTC' })))
+})
+
 it('ignores an initial settings GET that arrives after a successful save', async () => {
   let resolveGet!: (value: Settings) => void
   vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolveGet = done }))
