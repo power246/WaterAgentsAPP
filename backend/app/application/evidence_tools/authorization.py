@@ -126,6 +126,7 @@ def build_water_observation_plans(
                         series_refs=series_refs,
                         parameter_keys=(parameter,),
                         request_range=scope.query_envelope,
+                        analysis_timezone=scope.analysis_timezone,
                         affected_window_ids=affected_windows,
                     )
                 )
@@ -239,6 +240,8 @@ def _authorize_water_request(
     registry: ParameterCapabilityRegistry,
 ) -> None:
     _authorize_time_range(scope, request.request_range)
+    if request.analysis_timezone != scope.analysis_timezone:
+        raise EvidenceScopeViolationError()
     _authorize_windows(scope, request.affected_window_ids)
     _authorize_parameters(scope, request.parameter_keys)
     station = next(

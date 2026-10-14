@@ -187,6 +187,7 @@ def test_authorizer_and_plan_reject_cross_scope_station_channel_time_and_geometr
     assert plans
     assert len(plans) == 2
     assert {plan.request_range for plan in plans} == {evidence_scope.query_envelope}
+    assert {plan.analysis_timezone for plan in plans} == {evidence_scope.analysis_timezone}
     assert {plan.station_id for plan in plans} == {"USGS-123"}
     assert {
         (plan.parameter_keys[0].code, plan.channel, plan.series_refs)
@@ -209,6 +210,12 @@ def test_authorizer_and_plan_reject_cross_scope_station_channel_time_and_geometr
         authorize_provider_request(
             evidence_scope,
             plan.model_copy(update={"channel": "invented-channel"}),
+            registry=registry,
+        )
+    with pytest.raises(EvidenceScopeViolationError):
+        authorize_provider_request(
+            evidence_scope,
+            plan.model_copy(update={"analysis_timezone": "UTC"}),
             registry=registry,
         )
     with pytest.raises(EvidenceTimeOutOfRangeError):

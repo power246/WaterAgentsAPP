@@ -122,6 +122,7 @@ async def _run_provider(provider: str) -> dict[str, object]:
                     ),
                 ),
                 request_range=_time_range(),
+                analysis_timezone=settings.analysis_timezone,
                 affected_window_ids=("provider-smoke-window",),
             )
             api_key = (

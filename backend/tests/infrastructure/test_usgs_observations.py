@@ -66,6 +66,8 @@ def request(
     channel: str = "continuous",
     parameter: ParameterKey = WATER,
     series_ref: str = "series-continuous-00300",
+    analysis_timezone: str = "UTC",
+    request_range: TimeRange | None = None,
 ) -> WaterObservationRequest:
     return WaterObservationRequest(
         operation_id="m6-usgs-collection",
@@ -74,7 +76,8 @@ def request(
         station_id="USGS-01646500",
         series_refs=(series_ref,),
         parameter_keys=(parameter,),
-        request_range=TimeRange(start=START, end=END),
+        request_range=request_range or TimeRange(start=START, end=END),
+        analysis_timezone=analysis_timezone,
         affected_window_ids=("window-1",),
     )
 
@@ -186,6 +189,72 @@ def test_daily_discharge_preserves_provider_parameter_time_and_statistic() -> No
     assert record.value == "579.4"
     assert record.observed_time == START
     assert record.provider_quality.qualifiers == ("Working",)
+
+
+@pytest.mark.parametrize(
+    ("local_date", "expected_start", "expected_end"),
+    [
+        ("2024-03-10", "2024-03-10T06:00:00+00:00", "2024-03-11T05:00:00+00:00"),
+        ("2024-11-03", "2024-11-03T05:00:00+00:00", "2024-11-04T06:00:00+00:00"),
+    ],
+)
+def test_daily_date_covers_local_day_across_dst(
+    local_date: str, expected_start: str, expected_end: str
+) -> None:
+    payload = json_fixture("usgs_daily_discharge.json")
+    payload["features"][0]["properties"]["time"] = local_date
+    start = datetime.fromisoformat(expected_start)
+    end = datetime.fromisoformat(expected_end)
+
+    async def exercise():
+        async with provider_client(
+            lambda http_request: httpx.Response(200, json=payload, request=http_request)
+        ) as http:
+            return await adapter(http).collect(
+                request(
+                    channel="daily",
+                    parameter=DISCHARGE,
+                    series_ref="series-daily-00060",
+                    analysis_timezone="America/Chicago",
+                    request_range=TimeRange(start=start, end=end),
+                )
+            )
+
+    record = run(exercise()).records[0]
+    assert record.observed_time is None
+    assert record.valid_time_range == TimeRange(start=start, end=end)
+    assert record.provenance.source_timezone is None
+
+
+def test_daily_date_overlaps_window_only_when_its_local_day_intersects() -> None:
+    payload = json_fixture("usgs_daily_discharge.json")
+    payload["features"][0]["properties"]["time"] = "2026-10-11"
+
+    async def exercise(window: TimeRange):
+        async with provider_client(
+            lambda http_request: httpx.Response(200, json=payload, request=http_request)
+        ) as http:
+            return await adapter(http).collect(
+                request(
+                    channel="daily",
+                    parameter=DISCHARGE,
+                    series_ref="series-daily-00060",
+                    analysis_timezone="America/Chicago",
+                    request_range=window,
+                )
+            )
+
+    overlapping = TimeRange(
+        start=datetime(2026, 10, 12, 4, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 10, 12, 5, 0, tzinfo=timezone.utc),
+    )
+    assert len(run(exercise(overlapping)).records) == 1
+    outside = TimeRange(
+        start=datetime(2026, 10, 12, 5, 0, tzinfo=timezone.utc),
+        end=datetime(2026, 10, 12, 6, 0, tzinfo=timezone.utc),
+    )
+    with pytest.raises(InvalidPortResponseError):
+        run(exercise(outside))
 
 
 def test_registered_non_00060_discharge_is_not_renamed_or_estimated() -> None:

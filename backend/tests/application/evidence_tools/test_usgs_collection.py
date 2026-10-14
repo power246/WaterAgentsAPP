@@ -41,6 +41,7 @@ def request() -> WaterObservationRequest:
         series_refs=("series-continuous-00300",),
         parameter_keys=(ParameterKey(code_system="usgs", code="00300"),),
         request_range=TimeRange(start=START, end=END),
+        analysis_timezone="UTC",
         affected_window_ids=("window-1", "window-2"),
     )
 

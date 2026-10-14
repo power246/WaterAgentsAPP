@@ -40,6 +40,7 @@ from app.infrastructure.adapters._parsing import (
     require_string,
 )
 from app.infrastructure.http import ProviderHttpClient
+from app.domain.time.timezone import get_iana_timezone
 from app.ports import PortError, PortResponseLimitError, UnsupportedPortVersionError
 
 WDFN_PROVIDER = "usgs_waterdata"
@@ -479,8 +480,10 @@ class UsgsObservationAdapter:
             or parameter not in request.parameter_keys
         ):
             raise invalid_response(WDFN_PROVIDER, operation)
-        observed_time = self._utc_datetime(properties.get("time"), operation)
-        if not request.request_range.contains(observed_time):
+        observed_time, valid_range = self._ogc_time(
+            properties.get("time"), request
+        )
+        if not self._time_overlaps(observed_time, valid_range, request.request_range):
             raise invalid_response(WDFN_PROVIDER, operation)
         approval = self._optional_string(properties.get("approval_status"))
         qualifier = self._optional_string(properties.get("qualifier"))
@@ -496,6 +499,7 @@ class UsgsObservationAdapter:
                 source_uri=source_uri,
                 retrieved_at=retrieved_at,
                 observed_time=observed_time,
+                valid_time_range=valid_range,
                 location=EvidenceLocation(
                     point=self._optional_point(feature.get("geometry"), operation),
                     comid=None,
@@ -517,8 +521,8 @@ class UsgsObservationAdapter:
                     page_identity=page_identity,
                     provider_series_id=series,
                     provider_record_id=provider_record_id,
-                    source_timezone="UTC",
-                    source_utc_offset="+00:00",
+                    source_timezone="UTC" if observed_time is not None else None,
+                    source_utc_offset="+00:00" if observed_time is not None else None,
                 ),
                 parameter=parameter,
                 value=require_string(
@@ -963,6 +967,41 @@ class UsgsObservationAdapter:
             )
             raise invalid_response(WDFN_PROVIDER, operation)
         return parsed.astimezone(timezone.utc)
+
+    @staticmethod
+    def _ogc_time(
+        value: object, request: WaterObservationRequest
+    ) -> tuple[datetime | None, TimeRange | None]:
+        text = require_string(
+            value, provider=WDFN_PROVIDER, operation=request.operation_id
+        )
+        if request.channel == "daily" and len(text) == 10:
+            try:
+                local_date = date.fromisoformat(text)
+            except ValueError as error:
+                raise invalid_response(WDFN_PROVIDER, request.operation_id) from error
+            if local_date.isoformat() == text:
+                zone = get_iana_timezone(request.analysis_timezone)
+                # The OGC daily item has a local date but no station timezone.
+                # Use the analysis zone for its calendar-day window.
+                start = datetime.combine(local_date, time.min, zone)
+                end = datetime.combine(local_date + timedelta(days=1), time.min, zone)
+                return None, TimeRange(
+                    start=start.astimezone(timezone.utc),
+                    end=end.astimezone(timezone.utc),
+                )
+        return UsgsObservationAdapter._utc_datetime(text, request.operation_id), None
+
+    @staticmethod
+    def _time_overlaps(
+        observed_time: datetime | None,
+        valid_range: TimeRange | None,
+        request_range: TimeRange,
+    ) -> bool:
+        if observed_time is not None:
+            return request_range.contains(observed_time)
+        assert valid_range is not None
+        return request_range.overlaps(valid_range)
 
     @staticmethod
     def _optional_point(value: object, operation: str) -> GeoPoint | None:
