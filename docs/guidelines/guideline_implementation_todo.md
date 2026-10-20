@@ -349,7 +349,7 @@ git diff --check
 
 完成记录（2026-10-20）：`complete`。
 
-- 保持 `codex/guidelines-m0`，起点 `8821ac9f02622a1f309703862945304a57789e5f`；本阶段实现 commit 在提交后补记。没有新建 worktree 或阶段 Markdown。
+- 保持 `codex/guidelines-m0`，起点 `8821ac9f02622a1f309703862945304a57789e5f`；本阶段实现 commit：`9eff7d5315977713b4a8921bbaff7baae3d255c0`（`feat(guidelines): add milestone 5 embedding contracts and lifetimes`），随后仅补记此 hash。没有新建 worktree 或阶段 Markdown。
 - `OpenAIEmbeddingTransport` / `embedding_validation` 共用 HTTP、取消与输出校验；旧 adapter 保留 case canonical 门禁，新 adapter 重验 guideline schema/template/profile/角色和完整输入预算。provider input 为固定角色指令 + LF + canonical JSON；按 UTF-8 字节保守约束 catalog max-input，超限不截断、不派发。独立 profile 从既有 embedding role 派生，角色指令变化改变身份；未复用 M8 generation。
 - 新增 `GuidelinePolicy` 单点定义默认值/校验，通过 `WATERAGENTS_GUIDELINE_POLICY` JSON 覆盖；repository/operation 共用其固定 attempts/退避。生产 `GuidelineRuntime` 与 `RunProviderBundle` 共享现有 HTTP pool 和 run lease，独立 bind/release；`embedding_for_attempt()` 每次读取新 lease。在线/后台分别限 3/20 秒、单次 HTTP 无重试；安全错误/可重试性集中映射。memory-disabled/stateless 不关闭说明书，缺配置/凭据返回知识不可用；未修改分析 risk、数值或历史语义。
 - 新增 application **41 项**、adapter **36 项**、runtime **7 项**和隔离守卫 **1 项**；扩展既有 bundle 测试保留原竞态并增加实际说明书 dispatch，覆盖在途旧 key → 替换/删除 → 新 run/attempt key、旧调用完成、registry 释放、无秘密进入快照/日志。首次旧契约回归 **117 passed**；最终本节 Verify 后端范围 **428 passed**，27.66s，包含角色前缀后 query/document 的实际字节精确上限；配置/health **47 passed**。最终完整 `backend/tests` **3201 passed，0 failed/errors/skipped**，308.28s，仅有两条既有 Starlette/anyio 弃用 warning。
