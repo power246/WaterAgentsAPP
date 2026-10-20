@@ -512,7 +512,7 @@ git diff --check
 
 完成记录：**complete**（2026-10-21）。
 
-- 保持 `codex/guidelines-m0`，基线 `87c920b563323582b6e770292b334c38012e63b0`；本阶段实现 commit：`待本地提交后补记`。原设计 §6–9 与本清单就地更新，无新 worktree 或状态 Markdown。
+- 保持 `codex/guidelines-m0`，基线 `87c920b563323582b6e770292b334c38012e63b0`；本阶段实现 commit：`439d3bc38811257b37d31e23d45b60b16be7245c`（`feat(guidelines): persist milestone 9 knowledge provenance`），随后仅补记此 hash。原设计 §6–9 与本清单就地更新，无新 worktree 或状态 Markdown。
 - 五类 V1 知识记录接入同一 registry/buffer/workflow writer，默认不进入 RAG；run pin 仅保存目录/profile identity。实际模型端口保存 request/delivery，构造请求不算提交，供应商失败沿原 response 表达，明确引用才保存 usage。结果通过既有 transcript refs 关联独立 result usage，只映射采用的 numeric operation/task 依赖及合法 cell/window/零基 step/overall，拒绝跨 run/session、伪造版本、循环和错误目标。单条内容 API 有界加载引用链后再核对，原数值 payload、旧 schema/hash/资格与两层 SSE 保持原语义；拒写向上传播，不吞成普通数值任务失败。
 - 新增 **28 项**记录链测试，覆盖五种提交/采用状态、同任务同窗第二候选排除、修复来源、安全公开内容、取消/terminal、数值调度拒写、未知版本与悬空 delivery。真实本地 HTTP SSE、PostgreSQL 重启、history API 与原文/sources 读回通过；目录 publish/disable/restore/bundle-update 使用可控 fake，确认历史不读取当前目录。M8 source reader/projection 验证使用明确完成状态的 fixture，保留原 canonical/result projection 且不索引说明书正文。定向 **388 passed**，52.92s；最终内容读取及 M7 reader 复验 **35 passed**，27.52s；pin 保存顺序 **2 passed**，0.29s。
 - 最终完整后端 **3305 passed，0 failed/errors/skipped**，377.05s（两条既有弃用 warning）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--show-capture=no','--basetemp','.tmp/guidelines-m9-20261021/full-verified','--junitxml','.tmp/guidelines-m9-20261021/full-verified.xml'])`。`npm --prefix frontend run generate:api` / `check:api` 通过，公开 JsonValue 契约未变，生成文件无差异；测试库结构检查为 `20261020_02`，无新迁移，未改业务库或 `.env`，日志/XML 不提交。
