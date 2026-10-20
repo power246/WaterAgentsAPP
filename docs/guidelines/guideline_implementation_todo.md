@@ -176,7 +176,7 @@ git diff --check
 
 完成记录（2026-10-20）：`complete`。
 
-- 基线：继续使用 `codex/guidelines-m0`，起始 HEAD `afc432a4dd8b4d87f5af42faa303fe925a6c49f3`；tracked 工作树干净。阶段 commit 提交后原位补记；保留 `.serena/` 与已有临时产物。
+- 基线：继续使用 `codex/guidelines-m0`，起始 HEAD `afc432a4dd8b4d87f5af42faa303fe925a6c49f3`；tracked 工作树干净。本阶段实现 commit：`6f3a361477da095b685f03ae8df0174e12fcf573`（`feat(guidelines): add milestone 1 domain and ports`），随后仅补记此 hash；保留 `.serena/` 与已有临时产物。
 - 实现：`backend/app/domain/guidelines/` 定义三种 origin、两种来源、稳定 bundled family/本地 UUIDv4 身份、不完整草稿与来源、独立发布校验、不可变审核版本、operation/receipt/claim 与 catalog/generation/profile 快照、canonical document/query、delivery citation 和五类 usage targets。遵守每文件一个公开领域类及根包导出约定；`backend/app/ports/guidelines.py` 提供 typed repository、bundled source、embedding 协议，复用中性的 cancellation/vector 类型。
 - 不变量：正文按 UTF-8 限长；所有文本 NFC/LF、metadata 稳定去重排序，完整草稿与发布内容 digest 一致；发布入口要求显式传入参数 registry，检查 primary/related keys。model view 仅替换已登记 URL 并保留解释文字，未知/不安全/过长内容返回字段错误。review 绑定本篇 ID/digest，local override 不能复用 base review；保存 receipt 保留原 accepted revision/digest，变化的 worker 状态不改写 receipt。未实现 SQL 事务或发布 worker，未伪造实际审核。
 - 规格细化已同步主设计 §5/§7：source/review 字段上限、model-view 12,000 bytes、document input 24,000 bytes、query facts 上限与显式角色指令；超限拒绝，不截断。旧 summary、case embedding、数值与历史语义未改。
