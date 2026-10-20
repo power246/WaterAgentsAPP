@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成当前源码接缝盘点与既有测试基线，不代表 guideline 功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–1 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、测试基线和纯领域/ports 契约，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -145,25 +145,25 @@ git diff --check
 
 ### Work
 
-- [ ] 定义 guideline domain：origin、source_kind、family/version identity、draft/published 内容、source refs、review、operation、catalog/profile snapshots 和状态；pH 仅是内容实例。
-- [ ] 按主设计 §5 实现字段、集合和 UTF-8 上限；draft 允许暂缺必填字段，发布独立校验。来源为 `reference_derived` 必须有出处，`user_authored` 可无出处。
-- [ ] 实现统一 canonicalization：NFC、LF、稳定 JSON key order、metadata 去重/排序，保留正文语义/大小写；manifest 与数据库使用同一 digest 实现。
-- [ ] 定义确定性的 `GuidelineModelViewV1`：完整解释正文、来源性质、source IDs；保存原文与 source metadata，将正文 URL/链接安全转成可追溯 source refs，不能放宽旧 summary 校验。
-- [ ] 定义 repository、bundled source、guideline embedding ports 及必要 DTO；domain/ports 不导入 SQLAlchemy、HTTP、FastAPI 或 infrastructure。
-- [ ] 定义独立 document/query canonical inputs 与 `GuidelineEmbeddingProfileV1`，包含 provider/model/dimensions/metric、模板/契约版本及角色指令。
-- [ ] 定义 `GuidelineCitationV1` 与 operation/result usage target 类型；alias 不是持久身份，target 使用已有 task/cell/window、正式 step 零基 index 或固定 `overall`。
+- [x] 定义 guideline domain：origin、source_kind、family/version identity、draft/published 内容、source refs、review、operation、catalog/profile snapshots 和状态；pH 仅是内容实例。
+- [x] 按主设计 §5 实现字段、集合和 UTF-8 上限；draft 允许暂缺必填字段，发布独立校验。来源为 `reference_derived` 必须有出处，`user_authored` 可无出处。
+- [x] 实现统一 canonicalization：NFC、LF、稳定 JSON key order、metadata 去重/排序，保留正文语义/大小写；manifest 与数据库使用同一 digest 实现。
+- [x] 定义确定性的 `GuidelineModelViewV1`：完整解释正文、来源性质、source IDs；保存原文与 source metadata，将正文 URL/链接安全转成可追溯 source refs，不能放宽旧 summary 校验。
+- [x] 定义 repository、bundled source、guideline embedding ports 及必要 DTO；domain/ports 不导入 SQLAlchemy、HTTP、FastAPI 或 infrastructure。
+- [x] 定义独立 document/query canonical inputs 与 `GuidelineEmbeddingProfileV1`，包含 provider/model/dimensions/metric、模板/契约版本及角色指令。
+- [x] 定义 `GuidelineCitationV1` 与 operation/result usage target 类型；alias 不是持久身份，target 使用已有 task/cell/window、正式 step 零基 index 或固定 `overall`。
 
 ### Tests
 
-- [ ] 覆盖发布 6,000 bytes、草稿 24,000 bytes、中文多字节、字符上限、空字段、source refs/URL 长度与已登记 parameter keys 的边界。
-- [ ] 覆盖 metadata 重排去重、NFC 和 CRLF/LF digest 等价；正文内容变化必须改变 digest，不能以过度归一化抹掉条件或大小写含义。
-- [ ] 覆盖 URL/Markdown 转换后仍保留因果条件与例外；无法安全投影返回字段错误，不悄悄删正文；非 HTTP(S) source URL 拒绝。
-- [ ] 覆盖无出处自编合法、资料整理无出处拒绝、本地修改 provenance 不自动获得专业审核资格；测试中的批准明确标为 fixture。
-- [ ] 覆盖 port/layer purity；新 profile ID 不等于历史 case profile ID，旧 canonical 输入约束仍成立。
+- [x] 覆盖发布 6,000 bytes、草稿 24,000 bytes、中文多字节、字符上限、空字段、source refs/URL 长度与已登记 parameter keys 的边界。
+- [x] 覆盖 metadata 重排去重、NFC 和 CRLF/LF digest 等价；正文内容变化必须改变 digest，不能以过度归一化抹掉条件或大小写含义。
+- [x] 覆盖 URL/Markdown 转换后仍保留因果条件与例外；无法安全投影返回字段错误，不悄悄删正文；非 HTTP(S) source URL 拒绝。
+- [x] 覆盖无出处自编合法、资料整理无出处拒绝、本地修改 provenance 不自动获得专业审核资格；测试中的批准明确标为 fixture。
+- [x] 覆盖 port/layer purity；新 profile ID 不等于历史 case profile ID，旧 canonical 输入约束仍成立。
 
 ### Verify
 
-以下新测试路径是实施目标；由本阶段创建，不代表目前已有测试。
+以下测试路径已由本阶段创建；实际执行记录见本节完成记录。
 
 ```powershell
 Invoke-GuidelinePytest -Stage gk-m1 -Paths @('backend/tests/domain/test_guidelines.py', 'backend/tests/ports/test_guideline_ports.py', 'backend/tests/architecture/test_guideline_boundaries.py')
@@ -174,7 +174,22 @@ git diff --check
 
 提交边界：domain、ports、canonical/model-view 纯逻辑及针对性测试；不包含自动批准内容或新业务算法。
 
-完成记录：`pending`。
+完成记录（2026-10-20）：`complete`。
+
+- 基线：继续使用 `codex/guidelines-m0`，起始 HEAD `afc432a4dd8b4d87f5af42faa303fe925a6c49f3`；tracked 工作树干净。阶段 commit 提交后原位补记；保留 `.serena/` 与已有临时产物。
+- 实现：`backend/app/domain/guidelines/` 定义三种 origin、两种来源、稳定 bundled family/本地 UUIDv4 身份、不完整草稿与来源、独立发布校验、不可变审核版本、operation/receipt/claim 与 catalog/generation/profile 快照、canonical document/query、delivery citation 和五类 usage targets。遵守每文件一个公开领域类及根包导出约定；`backend/app/ports/guidelines.py` 提供 typed repository、bundled source、embedding 协议，复用中性的 cancellation/vector 类型。
+- 不变量：正文按 UTF-8 限长；所有文本 NFC/LF、metadata 稳定去重排序，完整草稿与发布内容 digest 一致；发布入口要求显式传入参数 registry，检查 primary/related keys。model view 仅替换已登记 URL 并保留解释文字，未知/不安全/过长内容返回字段错误。review 绑定本篇 ID/digest，local override 不能复用 base review；保存 receipt 保留原 accepted revision/digest，变化的 worker 状态不改写 receipt。未实现 SQL 事务或发布 worker，未伪造实际审核。
+- 规格细化已同步主设计 §5/§7：source/review 字段上限、model-view 12,000 bytes、document input 24,000 bytes、query facts 上限与显式角色指令；超限拒绝，不截断。旧 summary、case embedding、数值与历史语义未改。
+- 测试源码：`backend/tests/domain/test_guidelines.py`、`backend/tests/ports/test_guideline_ports.py`、`backend/tests/architecture/test_guideline_boundaries.py`，公共 synthetic fixture 在 `backend/tests/guideline_support.py`。覆盖 ASCII/中文/emoji 精确边界、空草稿/部分来源、NFC/换行/重排、不安全或未登记链接、中英文条件保留、审核/digest/覆盖身份、profile/模板/角色隔离、receipt/claim、citation/target 和旧 summary/case 校验。
+- 实际命令（仓库根目录，项目 venv）：`backend/.venv/Scripts/python.exe -m pytest <paths> -q -p no:cacheprovider --tb=short --basetemp .tmp/guidelines-m1-20261020/<stage> --junitxml .tmp/guidelines-m1-20261020/<stage>.xml`。使用 M0 已确认的获准权限处理 Windows 临时目录；结果仅留 task-owned 本地目录。
+
+| Paths / stage | 实际结果 |
+| --- | --- |
+| 本节 Verify 的三份新增测试；`delivery` | **99 passed**，0.37s；最终代码的完整 M1 针对性检查。 |
+| `backend/tests/domain`、`backend/tests/ports`、`backend/tests/architecture`、`backend/tests/infrastructure/embeddings`、`backend/tests/application/transcript_memory/test_source_closure.py`、`backend/tests/application/test_transcript_registry.py`、`backend/tests/application/reasoning/test_numeric_estimation.py`、`backend/tests/api/test_openapi_contract.py`、`backend/tests/api/test_m9_target_openapi.py`；`regression` | **814 passed**，39.50s；随后仅细化新模型的 URL/文本校验与 receipt digest，再以新增测试复核最终代码。 |
+
+- 验证等级：纯领域 / 测试 fake；无真实 embedding 或分析 provider dispatch。PostgreSQL、新 API/浏览器、hosted CI、专业资料批准及 pH 实测：**not run**（本阶段不涉及；数据库迁移/事务从 Milestone 2 开始）。
+- 阶段出口：三类内容身份、未完整草稿、不可变批准版本、独立向量契约与可追溯引用类型均可表达；现有全局层级守卫及新 guideline/case/observation 隔离守卫通过。Milestone 2–12 保持未完成。
 
 ## Milestone 2：数据库、事务与幂等基础
 
@@ -608,7 +623,7 @@ function Invoke-GuidelinePytest {
 
 若 dotenv runner 不在锁定环境中，按项目当前测试启动约定解决并记录；不能把 runner/Windows ACL 故障报成业务回归，也不能跳过 PostgreSQL 后勾选数据库验收。`--basetemp` 只指向本任务新建路径；禁止复用历史归档/用户临时目录。命令返回非零后先解决或记录原因，再继续依赖它的验证。
 
-本文列出的 `test_guidelines.py`、`tests/application/guidelines/`、`tests/ports/test_guideline_ports.py`、`test_guideline_boundaries.py`、`frontend/tests/guidelines.test.tsx`、`frontend/e2e/guidelines.spec.ts` 均为**计划新增路径**；实施者可按实际拆分调整，但须同步本文命令和证据，不能把尚不存在的测试写成已通过。
+本文列出的新路径由对应阶段创建；Milestone 1 的 domain/ports/architecture 测试已存在，application/persistence/frontend 的 guideline 测试仍待后续阶段实施。可按实际拆分调整，但须同步本文命令和证据，不能把尚不存在的测试写成已通过。
 
 浏览器验证分两类：
 
@@ -634,4 +649,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0 的实际命令与证据见其完成记录；Milestone 1–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–1 的实际命令与证据见对应完成记录；Milestone 2–12、内容审核、实测实验与最终功能验收仍待实施。

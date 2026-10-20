@@ -275,7 +275,24 @@ from app.domain.settings_admin import (
     UnitPolicyVersion,
 )
 
+from app.domain.guidelines import (
+    CanonicalGuidelineDocumentV1, CanonicalGuidelineQueryV1, GuidelineCatalogSnapshot,
+    GuidelineCitationV1, GuidelineContentV1, GuidelineDeliveryRef, GuidelineDocumentSnapshot,
+    GuidelineDraftV1, GuidelineDraftSourceRef, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
+    GuidelineIdentity, GuidelineIndexGeneration, GuidelineModelViewV1, GuidelineMutation,
+    GuidelineMutationReceipt, GuidelineOperation, GuidelineOperationKind, GuidelineOperationState,
+    GuidelineOrigin, GuidelineResultUsageBinding, GuidelineReview, GuidelineSourceKind,
+    GuidelineSourceRef, GuidelineUsageTarget, GuidelineValidationError, GuidelineVersionV1,
+)
+
 __all__ = [
+    "CanonicalGuidelineDocumentV1", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
+    "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",
+    "GuidelineDraftV1", "GuidelineDraftSourceRef", "GuidelineEmbeddingBatch", "GuidelineEmbeddingProfileV1",
+    "GuidelineIdentity", "GuidelineIndexGeneration", "GuidelineModelViewV1", "GuidelineMutation",
+    "GuidelineMutationReceipt", "GuidelineOperation", "GuidelineOperationKind", "GuidelineOperationState",
+    "GuidelineOrigin", "GuidelineResultUsageBinding", "GuidelineReview", "GuidelineSourceKind",
+    "GuidelineSourceRef", "GuidelineUsageTarget", "GuidelineValidationError", "GuidelineVersionV1",
     "AdminActionKind",
     "AdminCommand",
     "AdminConfirmation",

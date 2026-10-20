@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，本文给出可实施的工程规格。**应用功能尚未实现，本文不是运行验证或发布完成声明。** 下文新增类型、表、接口、配置和测试名均为待实现契约。决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–1 已完成基线盘点与纯领域/ports 契约。**管理、数据库、检索和模型接入尚未实现，本文不是功能发布完成声明。** 后续表、接口、配置和集成测试仍为待实现契约。决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -127,7 +127,11 @@ flowchart TD
 
 草稿使用允许字段暂缺/为空的独立 draft schema；上表非空、出处和发布长度要求在检查/发布时生效。不能因尚未补齐内容而阻止用户保存草稿。
 
+Milestone 1 的实现位于 `backend/app/domain/guidelines/`，ports 位于 `backend/app/ports/guidelines.py`。`GuidelineDraftV1` 与 `GuidelineDraftSourceRef` 允许未填写正文/标题或来源标题；`draft.publication_content(registry)` 独立执行完整字段、已登记 primary/related 参数与安全 projection 校验，返回 `GuidelineContentV1`，不会自动创建批准版本。`GuidelineVersionV1` 另要求显式 `GuidelineReview`，绑定当前 guideline ID 与 content digest；复制内置内容/来源不自动复制其审核资格。
+
 `GuidelineSourceRef` 包含稳定 `source_id`、title、可选 HTTP(S) URL、可选章节/页码 locator、可选发布/访问日期。origin 与 source_kind 是不同维度：本地用户也可以整理有出处的资料；编辑内置内容默认标为用户修改，保留 base provenance，不能自动继承“原文已获专业复核”的含义。
+
+工程字段上限：source ID 为 1–64 个 ASCII 字母/数字及 `._-`（首字符为字母/数字），source title/locator 最多 240 字符，URL 最多 2,048 字符且不允许 userinfo/凭据查询字段。相同 source ID 的相同 metadata 去重，冲突 metadata 拒绝；sources 按 ID 稳定排序。reviewer 标签最多 160 字符，非空检查说明最多 1,000 字符；审核信息必须明确提供，不由类型或 projection 自动生成。
 
 编辑模板建议包含：机制解释、成立条件、可观察线索、替代解释/反例、估值注意事项。正文必须解释原因，不能只是阈值清单。人工检查负责内容完整性与逻辑；服务端验证结构和来源关联，不假称能自动证明科学正确性。
 
@@ -138,6 +142,8 @@ flowchart TD
 保存原始 Markdown 与 source metadata；另生成确定性的 `GuidelineModelViewV1`：title、summary、来源性质、正文解释、source IDs。模型输入不含 source URL、credential、provider 路由或管理接口信息。
 
 正文中的链接/裸 URL 规范化为稳定的 source ID 占位；链接地址留在 source metadata，原文留在本地查看器。转换后进行独立长度和 safe-payload 校验；不截断正文、不删除机制文字来强行通过校验。正文含无法安全转换的内容时，发布检查返回具体字段错误。不得放宽所有历史 evidence summary 的 URL/secret 校验来迁就此功能。
+
+当前纯 projection 为 `project_model_view(content)`：只将正文中已登记的 HTTP(S) URL 替换为 `[source:<id>]`，保留其余解释文字、Markdown 标签和条件/例外；支持中英文标点、自动链接与引用式链接。未登记 URL 返回 `body_markdown` 字段错误，由作者补齐 sources；同 URL 对应多个 source ref 时使用排序后最小的 source ID，完整来源仍留在原文内容快照。model view 的完整 canonical JSON 上限为 12,000 UTF-8 bytes；转换后过长或含不安全标记时拒绝发布，不截断。该界限独立于旧 summary 的 2,048 字符门禁。
 
 模型只能据 guideline ID/alias 引用内容。点击出处由前端基于保存的 source metadata 构造 HTTP(S) 链接；不执行 Markdown HTML、脚本或任意 URL scheme。
 
@@ -211,6 +217,8 @@ document `revision` 用于编辑与管理 CAS；root `activation_epoch` 用于�
 默认使用当前 model catalog 的 embedding role 所指定的 provider/model、dimensions 与 max-input 设置作为期望配置，不在文档中写死型号。必须以中英文检索样例验证该配置满足需要。
 
 新增 `GuidelineEmbeddingProfileV1`，identity 包含 provider、model、dimensions、cosine metric、document/query template version、text-contract version 及明确的 query/document instructions。不得复用历史 case profile ID 代表说明书向量。
+
+Milestone 1 已定义独立 `CanonicalGuidelineDocumentV1` / `CanonicalGuidelineQueryV1` 与 `GuidelineEmbeddingBatch`。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。document 由已验证 content/model view 和参数名称构建，canonical JSON 最多 24,000 UTF-8 bytes；query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，超限在本阶段拒绝，后续检索 builder 按 §7.3 整字段缩减。这里仅有数据契约；实际传输复用与 provider adapter 在 Milestone 5 实施。
 
 提供 `GuidelineEmbeddingPort` 和 guideline 专用 canonical document/query inputs。将当前 adapter 的公共 HTTP 调用、输出 count/order/dimensions/finite/norm 校验抽为共享传输/校验基础；历史 `EmbeddingPort` 及 `CanonicalCaseQueryV1` 资格校验继续由其原调用路径负责。不要把说明书伪造成历史 case，也不要简单删除历史输入校验。
 
@@ -481,7 +489,7 @@ embedding 检索原理参考 [Sentence Transformers Semantic Search](https://www
 
 ## 16. 验证命令与交付证据
 
-逐阶段命令、浏览器服务前置条件与实际完成记录以 [Implementation TODO 的 Verify 和附录](guideline_implementation_todo.md)为准。以下为整体验证摘要，供实现完成后执行。新增测试文件在本次文档任务中不存在；不能把命令列出视为已运行。
+逐阶段命令、浏览器服务前置条件与实际完成记录以 [Implementation TODO 的 Verify 和附录](guideline_implementation_todo.md)为准。以下为整体验证摘要，供实现完成后执行；Milestone 1 的纯领域/ports 测试已经创建，后续应用/数据库/前端测试仍按阶段实施，不能把命令列出视为已运行。
 
 从仓库根目录，在测试进程设置独立数据库名并使用 dotenv runner，确保 Windows 临时目录位于当前 task 可写路径；不把 `WATERAGENTS_TEST_DB_NAME` 写入 `.env`：
 
@@ -504,4 +512,4 @@ git diff --check
 
 结束时报告 branch/HEAD、改动范围、实际命令与通过/失败计数、未运行项目、真实供应商和小样本核对证据，以及人工批准的具体内容版本。区分 fake-provider、真实 embedding、真实分析模型、数据库、浏览器和 hosted CI；未获得对应证据的检查标为 `not run`。
 
-本次设计任务仅进行了源码阅读、第一方资料调查、决策记录和文档检查；未执行本节的实现测试、模型调用、内容发布或实测对照。
+设计调查历史记录见讨论文档；实施阶段的实际验证统一见 TODO。Milestone 0–1 已运行基线及领域/ports 回归，尚未执行本节列出的完整功能集成、真实模型调用、内容发布或实测对照。

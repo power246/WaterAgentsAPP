@@ -47,7 +47,12 @@ from app.ports.upstream_results import UpstreamResultPort
 from app.ports.water_observations import WaterObservationPort
 from app.ports.weather_evidence import WeatherEvidencePort
 
+from app.ports.guidelines import BundledGuidelineSourcePort, GuidelineEmbeddingPort, GuidelineRepositoryPort
+
 __all__ = [
+    "BundledGuidelineSourcePort",
+    "GuidelineEmbeddingPort",
+    "GuidelineRepositoryPort",
     "CachePort",
     "ClockPort",
     "ComidLookupPort",
