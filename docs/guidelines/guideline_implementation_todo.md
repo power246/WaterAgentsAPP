@@ -625,7 +625,7 @@ git diff --check
 
 完成记录：**in progress**（2026-10-21；尚未达到阶段出口）。
 
-- 保持 `codex/guidelines-m0`，基线 `9a20a584d50bdef23fe04ac1e5d4f1479a83e95b`；本次准备工作提交后在此补记 hash。只更新原设计/本清单；待审正文为一个必要 JSON 输入，无额外阶段状态 Markdown。
+- 保持 `codex/guidelines-m0`，基线 `9a20a584d50bdef23fe04ac1e5d4f1479a83e95b`；准备工作 commit：`56b9716fe3f776fd5fdc133951e01471d21fff58`（`feat(guidelines): prepare milestone 11 review and holdout evaluation`），随后仅补记此 hash。只更新原设计/本清单；待审正文为一个必要 JSON 输入，无额外阶段状态 Markdown。
 - 四份 v1 草稿和来源已交用户确认，文件 SHA256 `c8105b605ca6e50b0410b2080c9123e1395eb3b067a7d6fea33d2ddebae662f2`，规范化 packet 为 `sha256:dd561e4a0421f3067889793249d68333e73a40699be86ab3e95ddf4fd00d94b3`。未收到明确批准；没有 reviewer/time 或批准文件，不生成生产资源，原生产 manifest 仍为空。首批内容/来源更新见主设计 §13。
 - 只读 USGS OGC/NLDI 调查并冻结 3 个历史 holdout 候选输入，窗口均为 UTC 12:00–18:00：Potomac 2024-07-01（23 个目标 pH、24 个上游 pH）、2024-07-02（24/24）；Delaware 2024-07-01（6/0，上游仅有本次采集的流量/温度）。保留公开原始 ID、时间、值、质量标记、来源 URL 和 topology digest；共享 series metadata 压缩为约 202 KB，无模型结果。均值复用原 aggregation policy，第一例有缺样；不宣称连续真值或三个独立流域。
 - 新增审核导出、真实 PostgreSQL 检索评估入口、冻结输入/衍生链泄漏拒绝、统计可比性及保存配对审计工具。控制臂禁止任何已批准正文/实际 advisory；知识臂须匹配批准版本与实际 payload/delivery；比较时科学上下文/模型/version/budget 必须一致，保留失败/不可比项。此处是程序能力，尚无实际合格配对；不声称审计器能自行运行完整科学 workflow 或证明任意自由文字均无泄漏。
