@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–9 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换、run pin 与 session 惰性检索、模型可选参考、typed 记录和结果/历史引用闭包，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–10 已完成，Milestone 11 进行中，Milestone 12 待实施**。本文是后续 coding agent 的唯一实施进度清单。管理/人工发布、模型参考、typed 记录及结果/历史快照查看已接通；M11 已准备待审内容、公开 holdout 输入和评估工具，仍待实际内容批准、可用 embedding 及真实配对结果，不代表真实效果或最终验收已完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -579,24 +579,24 @@ git diff --check
 
 ### Work
 
-- [ ] 从主设计 §13 第一方资料重新核实原文与适用边界，准备四个独立草稿：混合/传递限制、酸性输入/缓冲、光合作用/呼吸、原因比较；保留 URL、章节/locator、访问时间。
-- [ ] 每稿写清现象→可能机制→条件→观察线索→替代解释/反例→估值注意事项；区分本次事实与一般机制，不提供仅凭上游 pH/流量就保证精确的假公式。
+- [x] 从主设计 §13 第一方资料重新核实原文与适用边界，准备四个独立草稿：混合/传递限制、酸性输入/缓冲、光合作用/呼吸、原因比较；保留 URL、章节/locator、访问时间。
+- [x] 每稿写清现象→可能机制→条件→观察线索→替代解释/反例→估值注意事项；区分本次事实与一般机制，不提供仅凭上游 pH/流量就保证精确的假公式。
 - [ ] 将实际草稿与出处交用户/指定人员检查；记录真实批准的 digest/version/时间，未批准或修改后未重新批准的内容继续为草稿，不纳入生产 bundle。
 - [ ] 以真实配置 embedding 执行小型中英文标注检索集，报告期望命中、实际排名、无关误命中、未命中和 profile；依据结果调整初始 cutoff/模板并按需重建 generation。
-- [ ] 只读调查可获得的目标点/上游/时间配对观测，选择 3–5 个可比较 pH 案例，至少含上游信息较完整与部分信息缺失两类；不足时明确未达标，不能用预测代实测。
-- [ ] 建立 holdout 清单：隔离目标实测及 raw/aggregate/其他水体副本/历史 RAG/缓存/context/说明书例子的等价泄漏；保留符合原资格的上游同指标 anchors。
+- [x] 只读调查可获得的目标点/上游/时间配对观测，选择 3–5 个可比较 pH 案例，至少含上游信息较完整与部分信息缺失两类；不足时明确未达标，不能用预测代实测。
+- [x] 建立 holdout 清单：隔离目标实测及 raw/aggregate/其他水体副本/历史 RAG/缓存/context/说明书例子的等价泄漏；保留符合原资格的上游同指标 anchors。
 - [ ] 每例固定证据快照、provider/model/version、预算和时间语义，运行无 guideline/有 guideline 的成对比较；至少一完整配对，成本允许各重复 3 次。
 - [ ] 区分单点与时间窗统计的可比性，报告点误差的 pH 差、范围宽度/覆盖、解释质量、实际提供/采用版本和所有失败/不可比较/未运行项；不把单点实测说成整窗连续真值。
-- [ ] 保存可复现的公开输入 fixture/脱敏清单和必要评估脚本源码；大输出/截图留 task-local，报告中保留反例，不承诺普遍精度提升。
+- [x] 保存可复现的公开输入 fixture/脱敏清单和必要评估脚本源码；大输出/截图留 task-local，报告中保留反例，不承诺普遍精度提升。
 
 ### Tests
 
 - [ ] 生产 bundle 中的每项都能定位真实人工批准且 digest 一致；测试 fixture 审核信息不能混作真实批准。
-- [ ] 对评估脚本做必要的 holdout/leakage 检查，刻意注入重复目标 raw/aggregate/history/cached 值应被拒绝；避免只凭“输入没有 target 字段”断言隔离。
+- [x] 对评估脚本做必要的 holdout/leakage 检查，刻意注入重复目标 raw/aggregate/history/cached 值应被拒绝；避免只凭“输入没有 target 字段”断言隔离。
 - [ ] 证明 no-guide 对照真正未提供知识、with-guide 提供的是批准版本；两组证据/模型/预算差异明确，query 不含对照答案。
-- [ ] 用已知小数据核对评估指标、窗口匹配、无点估计/仅范围/失败等统计；合成数据只检验程序，不计入 3–5 个真实案例。
-- [ ] 缺合格同指标 anchors 的案例仍遵守原 range-only/来源规则；不能为了算点误差而放宽资格或强迫模型输出单点。
-- [ ] 真实 embedding、真实分析模型及实测核对分别记录，未配置、费用/服务限制或样本不足保留 `not run`，不能以 fake 通过代替。
+- [x] 用已知小数据核对评估指标、窗口匹配、无点估计/仅范围/失败等统计；合成数据只检验程序，不计入 3–5 个真实案例。
+- [x] 缺合格同指标 anchors 的案例仍遵守原 range-only/来源规则；不能为了算点误差而放宽资格或强迫模型输出单点。
+- [x] 真实 embedding、真实分析模型及实测核对分别记录，未配置、费用/服务限制或样本不足保留 `not run`，不能以 fake 通过代替。
 
 ### Verify
 
@@ -605,13 +605,34 @@ Invoke-GuidelinePytest -Stage gk-m11 -Paths @('backend/tests/application/guideli
 git diff --check
 ```
 
-检索/实测 runner 的具体 CLI 在实现后记录本节：输入 fixture、profile、运行次数、输出 task-local 路径和实际命令都要齐全；当前没有可执行 runner，不能把上述 pytest 视作已完成真实核对。
+已实现的独立工具如下（从 `backend/` 执行；输出只留 `.tmp`）。本次实际执行了 `drafts`、只读 `discover`、`audit` 和程序测试；`bundle/retrieval/score/verify-pairs` 对真实内容/运行尚未执行，后两项只审计已有结果，不自动产生模型运行。
+
+```powershell
+.venv/Scripts/python.exe -m scripts.guideline_evaluation drafts --drafts ../docs/guidelines/ph_guideline_drafts.json --output ../.tmp/guidelines-m11-20261021/review-packet.json
+.venv/Scripts/python.exe -m scripts.guideline_evaluation discover --plan tests/fixtures/guidelines/ph_survey_plan.json --output ../.tmp/guidelines-m11-20261021/public-cases-refetch.json
+.venv/Scripts/python.exe -m scripts.guideline_evaluation audit --dataset tests/fixtures/guidelines/ph_holdout_cases.json --output ../.tmp/guidelines-m11-20261021/frozen-inputs.json
+# 仅在批准内容已导出、服务配置可用，并按附录 A 设置进程级测试库后执行：
+.venv/Scripts/python.exe -m scripts.guideline_evaluation retrieval --bundle-root app/infrastructure/guidelines/bundled --cases tests/fixtures/guidelines/ph_retrieval_cases.json --output ../.tmp/guidelines-m11-20261021/real-retrieval.json
+.venv/Scripts/python.exe -m scripts.guideline_evaluation score --help
+.venv/Scripts/python.exe -m scripts.guideline_evaluation verify-pairs --help
+```
+
+批准记录须包含 `packet_digest`、逐 topic 的 `version/content_digest`、显式 `review_confirmed=true`、`reviewer/review_note/reviewed_at`；`bundle --drafts <packet> --approval <actual-human-record> --bundle-root <resources> --output <task-local-report>` 才能导出。评估 input/outputs 的类型和保存运行契约见 `guideline_holdout.py` / `guideline_pair_review.py`，不得用合成响应代替实际模型输出。尚无合格真实 paired-run 导出；完成它们后再运行评分与人工解释检查。
 
 阶段出口：真实批准内容可分发，真实 embedding 的相关性已核对，3–5 个真实 holdout 案例有完整成对结果和限制；未获得人工批准或样本证据时本阶段保持未完成。
 
 提交边界：实际批准的 bundle、必要公开输入 fixture/评估源码、文档证据摘要和针对性修正；不提交新运行结果归档、不虚构批准或选掉更差案例。
 
-完成记录：`pending`。
+完成记录：**in progress**（2026-10-21；尚未达到阶段出口）。
+
+- 保持 `codex/guidelines-m0`，基线 `9a20a584d50bdef23fe04ac1e5d4f1479a83e95b`；本次准备工作提交后在此补记 hash。只更新原设计/本清单；待审正文为一个必要 JSON 输入，无额外阶段状态 Markdown。
+- 四份 v1 草稿和来源已交用户确认，文件 SHA256 `c8105b605ca6e50b0410b2080c9123e1395eb3b067a7d6fea33d2ddebae662f2`，规范化 packet 为 `sha256:dd561e4a0421f3067889793249d68333e73a40699be86ab3e95ddf4fd00d94b3`。未收到明确批准；没有 reviewer/time 或批准文件，不生成生产资源，原生产 manifest 仍为空。首批内容/来源更新见主设计 §13。
+- 只读 USGS OGC/NLDI 调查并冻结 3 个历史 holdout 候选输入，窗口均为 UTC 12:00–18:00：Potomac 2024-07-01（23 个目标 pH、24 个上游 pH）、2024-07-02（24/24）；Delaware 2024-07-01（6/0，上游仅有本次采集的流量/温度）。保留公开原始 ID、时间、值、质量标记、来源 URL 和 topology digest；共享 series metadata 压缩为约 202 KB，无模型结果。均值复用原 aggregation policy，第一例有缺样；不宣称连续真值或三个独立流域。
+- 新增审核导出、真实 PostgreSQL 检索评估入口、冻结输入/衍生链泄漏拒绝、统计可比性及保存配对审计工具。控制臂禁止任何已批准正文/实际 advisory；知识臂须匹配批准版本与实际 payload/delivery；比较时科学上下文/模型/version/budget 必须一致，保留失败/不可比项。此处是程序能力，尚无实际合格配对；不声称审计器能自行运行完整科学 workflow 或证明任意自由文字均无泄漏。
+- 阶段回归 **344 passed**，96.76s，路径为 application/guidelines、persistence/test_guidelines.py、domain/test_guidelines.py、ports/test_guideline_ports.py、architecture/test_guideline_boundaries.py。最终新增/调整定向 **33 passed**，3.94s（`test_evaluation.py`）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`；`pytest.main` 使用 `-q -p no:cacheprovider --tb=short --show-capture=no`，task-local 前缀 `.tmp/guidelines-m11-20261021/{regression-final,targeted-verified}`（XML/log 同名）。临时审核/embedding 向量只作程序测试，不算实际批准或检索质量证据。
+- 实际配置预检：`text-embedding-3-small` 向已配置 `api.deepseek.com` 发出 1 次请求，HTTP **404**，安全码 `guideline_embedding_unavailable`；未擅自切供应商/密钥或改 `.env`。实际 `deepseek-flash` 经既有 `m6_provider_smoke._main()` 连通性预检 **1 request / 1 response**（76 input / 25 output tokens），仅证明响应契约，不是 pH 对照或固定权重版本证明。真实检索排名/cutoff 核对、no-guide/with-guide 成对结果、解释质量及 hosted CI：**not run**。
+- 后续仍须：用户明确批准具体内容；修正本地兼容 embedding 配置；生成真实、冻结证据/同配置的 3–5 例配对，至少一完整配对，再记录实际提供/采用、点/范围误差及人工解释评价。当前不将通用“完成 M11”当作对尚未见到的草稿的批准，M11 未完成项目与 M12 保持未勾选。
+
 
 ## Milestone 12：整体回归、契约审计与交付
 

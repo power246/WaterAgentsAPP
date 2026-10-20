@@ -482,7 +482,13 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 | 营养物质、光照、光合作用与呼吸 | [EPA CADDIS Nutrients](https://www.epa.gov/caddis/nutrients) | 不同条件和竞争过程可能导致不同 pH/溶解氧现象；一般机理不证明本地已经发生该过程。 |
 | 从现象提出和比较原因 | [EPA Conceptual Diagrams](https://www.epa.gov/caddis/about-conceptual-diagrams)、[Data Analysis](https://www.epa.gov/caddis/getting-started-data-analysis) | 用可能的因果路径组织证据与缺口；箭头表示可能关系，不是无条件因果保证。 |
 
-此处是撰写计划与资料依据，**没有实际发布、人工批准或验证这四份说明书**。用户自编内容可以没有这些外部来源。后续增加其他指标遵循同一内容/来源/版本契约。
+四份实际草稿位于 [ph_guideline_drafts.json](ph_guideline_drafts.json)，均包含现象、机制、条件、线索、替代解释和估值边界，已通过领域内容/来源/model-view 校验，**尚待用户明确批准，未纳入生产 bundle**。M11 于 2026-10-21 核对 USGS 两页及 EPA 概念图；EPA Nutrients 可读索引片段支持所用条件化表述，直接全文请求失败。当前 Data Analysis 页面也无法直接获取，草稿明确引用可读的 EPA 官方 2021 存档，不将其声称为最新政策。用户自编内容仍可无外部来源。
+
+`backend/scripts/guideline_evaluation.py` 的 `drafts/bundle` 将人工批准绑定规范化内容 packet、逐主题版本/digest 和 reviewer/time；JSON 缩进/Windows 换行不改变内容身份，正文或出处变化使旧批准失效。`retrieval` 仅接受非空已审核 bundle，在专用测试库临时 schema 使用现有 worker、generation 和 SQL 排序，记录 12 条中英文标注问题的 profile、top-3、漏检及负例误命中；文档/查询分别沿用 worker/online 超时，未获得真实结果前不调整 cutoff。
+
+公开调查计划和冻结输入为 `backend/tests/fixtures/guidelines/ph_{survey_plan,holdout_cases}.json`：Potomac 两个日期窗口（目标 USGS-01646500，上游 USGS-01638500）及 Delaware 一个缺上游 pH 的窗口（目标 USGS-01463500，上游 USGS-01457500），均以 NLDI UT 核对连接、以 USGS OGC 原始观测保留来源。目标分别有 23/24/6 个样本，比较统计只表示可用读数的均值，不代表整窗连续真值或多个独立流域的普遍效果。
+
+`guideline_holdout.py` 从模型可见快照排除目标 pH，检查 observation/derivation 引用、其他水体副本、RAG/cache/context/例子与目标均值泄漏，输出固定 input digest 与须封闭的外部渠道；真值计算复用既有 aggregation policy。`guideline_pair_review.py` 审计保存的 request/delivery/usage 与两臂科学输入、模型/version/budget 一致性，`score` 区分点误差、范围、失败和时间/统计不可比，保留拒绝项。它们是输入准备及已保存运行审计/评分工具，**不会自行调度完整水体 workflow 或证明实际 provider dispatch**；任意文字转述的来源仍需人工检查。真实配对和解释质量评价尚未运行，生产数值资格规则未修改。
 
 embedding 检索原理参考 [Sentence Transformers Semantic Search](https://www.sbert.net/examples/sentence_transformer/applications/semantic-search/README.html)：查询和文档使用兼容向量空间匹配相关内容。该引用不表示选定 Sentence Transformers 库或某个权重；当前工程优先复用已配置的 embedding 供应商能力。
 

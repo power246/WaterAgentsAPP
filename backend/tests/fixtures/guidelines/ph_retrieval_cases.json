@@ -1,0 +1,14 @@
+[
+  {"id":"mixing_zh","question":"上游两股水汇合后，只有 pH 和流量，能准确算出下游酸碱度吗？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.mixing-transport"]},
+  {"id":"mixing_en","question":"Can downstream pH be calculated by flow weighting upstream pH alone?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.mixing-transport"]},
+  {"id":"buffering_zh","question":"酸性输入后 pH 响应不明显，缺少碱度数据时怎样解释缓冲？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.acid-buffering"]},
+  {"id":"buffering_en","question":"What missing alkalinity data limits interpreting the response to acid input?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.acid-buffering"]},
+  {"id":"biology_zh","question":"晴天下午 pH 和溶解氧升高，可以用光合作用和呼吸解释吗？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.photosynthesis-respiration"]},
+  {"id":"biology_en","question":"Explain pH and oxygen diel changes involving light, photosynthesis and respiration.","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.photosynthesis-respiration"]},
+  {"id":"causes_zh","question":"如何比较 pH 变化的多个候选原因、反证和证据缺口？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.compare-causes"]},
+  {"id":"causes_en","question":"Compare alternative causes of pH changes and distinguish local observations from general mechanisms.","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.compare-causes"]},
+  {"id":"related_alkalinity","question":"How does acid-neutralizing capacity constrain interpretation?","parameter_keys":[{"code_system":"usgs","code":"00410"}],"expected":["ph.acid-buffering"]},
+  {"id":"irrelevant_office","question":"What time does the library office open on weekends?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":[]},
+  {"id":"irrelevant_instrument","question":"What exact screw driver and replacement battery does this pH meter require?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":[]},
+  {"id":"unrelated_precipitation","question":"How much precipitation fell in the basin?","parameter_keys":[{"code_system":"usgs","code":"00045"}],"expected":[]}
+]

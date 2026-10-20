@@ -1,0 +1,43 @@
+[
+  {
+    "case_id": "potomac-20240701-12-18",
+    "target_station": "USGS-01646500",
+    "upstream_stations": ["USGS-01638500"],
+    "topology_distance_km": 100,
+    "window": {"start":"2024-07-01T12:00:00Z","end":"2024-07-01T18:00:00Z"},
+    "expected_cadence_seconds": 900,
+    "limitations": [
+      "A six-hour mean of available instantaneous pH readings, not a continuous water-quality truth.",
+      "Upstream membership is NLDI-verified; transit time and intervening inputs remain unknown.",
+      "pH/flow/DO/temperature/conductivity are surveyed; alkalinity, light and nutrients are not available in this input snapshot.",
+      "A single watershed and small number of windows do not establish general predictive improvement."
+    ]
+  },
+  {
+    "case_id": "potomac-20240702-12-18",
+    "target_station": "USGS-01646500",
+    "upstream_stations": ["USGS-01638500"],
+    "topology_distance_km": 100,
+    "window": {"start":"2024-07-02T12:00:00Z","end":"2024-07-02T18:00:00Z"},
+    "expected_cadence_seconds": 900,
+    "limitations": [
+      "A separate day from the same station pair, not an independent watershed replication.",
+      "A six-hour mean of available instantaneous readings; propagation lag and alkalinity are unknown.",
+      "No target pH measurement or its aggregate may be sent to the model."
+    ]
+  },
+  {
+    "case_id": "delaware-20240701-12-18-missing-upstream-ph",
+    "target_station": "USGS-01463500",
+    "upstream_stations": ["USGS-01457500"],
+    "topology_distance_km": 100,
+    "window": {"start":"2024-07-01T12:00:00Z","end":"2024-07-01T18:00:00Z"},
+    "expected_cadence_seconds": 3600,
+    "limitations": [
+      "The surveyed upstream station has flow and temperature but no pH in this interval.",
+      "A missing upstream same-indicator anchor must retain the existing range-only/indeterminate rule.",
+      "Only six hourly target samples support the comparison statistic; no claim of continuous truth.",
+      "Target companion parameters may be used only if their numeric role remains explanatory; target pH and derived aliases are held out."
+    ]
+  }
+]
