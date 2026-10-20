@@ -309,7 +309,7 @@ git diff --check
 
 完成记录（2026-10-20）：`complete`。
 
-- 保持 `codex/guidelines-m0`，起点 `ef0b0b5a2fefdc5b1e5e99e0c92a237548acb1d0`；本阶段实现 commit 在提交后补记。没有新建 worktree 或阶段 Markdown。
+- 保持 `codex/guidelines-m0`，起点 `ef0b0b5a2fefdc5b1e5e99e0c92a237548acb1d0`；本阶段实现 commit：`2820387d0d489407547543795c29c56d5b733cf2`（`feat(guidelines): add milestone 4 authoring and management API`），随后仅补记此 hash。没有新建 worktree 或阶段 Markdown。
 - 已实现 `GuidelineAuthoringService`、PostgreSQL 管理快照/本地分页搜索及 10 条路径上的 11 个 HTTP 方法。发布只使用已保存 revision/digest 和显式 reviewer/note；先重放 receipt，再读草稿，事务内复核 CAS；原子返回版本/operation 的 202 回执。详情和轻量列表分开提供草稿修改标记、own active/pending 与 family effective 身份，后续草稿不改变已批准内容。
 - 新路由复用 Host/Origin/JSON guard、安全错误、request ID 和全响应 no-store；409 返回最新管理快照，失败任务可重试原版本。限制筛选/cursor/limit、UUIDv4 mutation key 及客户端 origin/version 权限；扩展全部既有 OpenAPI 守卫并保留禁止项。`frontend/src/api/generated.ts` 由现有脚本生成；具体请求/回执与状态语义已同步主设计 §10。
 - 新增 application/API **42 项**测试，管理写入/读取使用独立 PostgreSQL：覆盖所有 mutation 重放/不同 body 冲突、两连接并发发布、批准 A 后编辑 B/重建 repository/重放 A、任务失败/retry、内置只读/override、列表筛选、恶意请求和错误正文/日志脱敏。针对性 + architecture **210 passed**，M2–4/OpenAPI 回归 **134 passed**，M6/OpenAPI **59 passed**。最终完整 `backend/tests` **3116 passed，0 failed/errors/skipped**，365.42s；仅有两条既有 Starlette/anyio 弃用 warning。
