@@ -567,7 +567,7 @@ git diff --check
 
 完成记录：**complete**（2026-10-21）。
 
-- 保持 `codex/guidelines-m0`，基线 `f8fc3b546f9c5266bec6036db28e9a749661d6b7`；本阶段实现 commit 在本地提交后补记。只更新原设计/本清单，无新 worktree 或状态 Markdown。
+- 保持 `codex/guidelines-m0`，基线 `f8fc3b546f9c5266bec6036db28e9a749661d6b7`；本阶段实现 commit：`daa8962e6dc15b36f948c0587e78820fb72f3f14`（`feat(guidelines): add milestone 10 management and snapshot UI`），随后仅补记此 hash。只更新原设计/本清单，无新 worktree 或状态 Markdown。
 - `/guidelines` 双库、来源/有效状态、查询/分页、草稿和人工发布已接入；内置先 local-edit，恢复确认明确目标并保留本地记录。编辑序号与服务器修订分开，保存 ACK、409、原 key 对账、准备轮询及停用/恢复均保留后续编辑；SPA/整页离开有保护。人工确认绑定保存快照，不显示 profile/digest/vector 表单。
 - `DetailPanel` 将说明书与历史水体证据分开；共享 viewer 从 delivery 显示 provided，从所选 result 的合法 usage 闭包显示 used，保留目标和估值/解释 phase。history/content 只读保存版本，不用当前库替代；无引用不推定采用。Markdown 原文转义显示，出处限制为无凭据/敏感查询参数的 HTTP(S)，页面明确配置的模型可能处理文本。
 - `check:api`、lint、typecheck、build、`git diff --check` 通过，生成契约无差异；前端完整 **109 passed / 15 files**，最终定向 **34 passed / 2 files**。覆盖保存 A→输入 B→ACK A、创建/发布响应丢失或无效时原 key/body 对账、409、迟到 GET、准备中编辑、停用/恢复后的旧 operation、取消轮询、出处/安全正文与旧 detail panel。构建有既有大 chunk 提示，无构建失败。
