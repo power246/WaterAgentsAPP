@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from uuid import uuid4
@@ -11,6 +12,7 @@ from app.application.settings_admin.credential_service import CredentialService
 from app.application.settings_admin.errors import CredentialMissingError
 from app.application.transcripts.models import AnalysisRequestV1
 from app.domain import ModelSelection
+from app.domain.guidelines import GuidelinePolicy
 from app.domain.settings_admin import CredentialName
 from app.infrastructure.config import ModelCatalog, load_parameter_capability_registry
 from app.infrastructure.credentials.memory_key_store import (
@@ -20,10 +22,12 @@ from app.infrastructure.credentials.memory_key_store import (
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
+from app.infrastructure.runtime.guidelines import GuidelineRuntime
 from app.main import create_app
 from tests.infrastructure.embeddings.support import canonical_text
 from tests.infrastructure.test_m4_runtime import FixedClock, settings
 from tests.m4_support import FakeM8Runtime
+from tests.guideline_support import query as guideline_query
 
 OPENAI_OLD = "old-openai-private-0001"
 OPENAI_NEW = "new-openai-private-0002"
@@ -45,7 +49,8 @@ class _M8Bindings:
 
 def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
     async def exercise():
-        configured = settings(openai_api_key=None, google_geocoding_api_key=None)
+        configured = settings(openai_api_key=None, google_geocoding_api_key=None, memory_enabled=False,
+                              guideline_policy=GuidelinePolicy(document_instructions="passage: ", query_instructions="query: "))
         store = InMemoryKeyStore()
         credentials = CredentialService(
             store, {CredentialName.OPENAI: None, CredentialName.GOOGLE_GEOCODING: None},
@@ -63,6 +68,7 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             memory_mode="stateless",
         )
         started, release = asyncio.Event(), asyncio.Event()
+        guideline_started = asyncio.Event()
         seen = []
 
         async def handler(request):
@@ -70,6 +76,8 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             assert request.url.path == "/v1/embeddings"
             if request.headers["Authorization"] == f"Bearer {OPENAI_OLD}":
                 started.set()
+                if json.loads(request.content)["input"][0].startswith("query: "):
+                    guideline_started.set()
                 await release.wait()
             return httpx.Response(200, json={
                 "object": "list", "model": profile.model,
@@ -84,11 +92,16 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             transport=httpx.MockTransport(handler),
         ) as http:
             assert "Authorization" not in http._client.headers
+            guidelines = GuidelineRuntime(
+                settings=configured, catalog=ModelCatalog(configured.model_catalog).snapshot(),
+                credentials=credentials, http=http,
+            )
             factory = RunProviderBundleFactory(
                 settings=configured, credentials=credentials, http=http,
                 operations=object(), m5_runtime=SimpleNamespace(
                     acquisition=object(), transcript=object(),
                 ), m8_runtime=m8, upstream_results=object(),
+                guideline_runtime=guidelines,
                 result_reader=object(),
                 capability_registry=load_parameter_capability_registry(),
                 model_catalog=ModelCatalog(configured.model_catalog).snapshot(),
@@ -116,6 +129,11 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
                 profile, (canonical_text(),), None, None,
             ))
             await asyncio.wait_for(started.wait(), timeout=2)
+            guideline_profile = guidelines.desired_profile
+            pending_guideline = asyncio.create_task(guidelines.embedding_for_run(str(first_id)).embed(
+                guideline_profile, (guideline_query(guideline_profile),), None, None,
+            ))
+            await asyncio.wait_for(guideline_started.wait(), timeout=2)
             await credentials.save(CredentialName.OPENAI, SecretStr(OPENAI_NEW))
             await credentials.save(CredentialName.GOOGLE_GEOCODING, SecretStr(GOOGLE_NEW))
             second = await factory.build(request.to_configuration_snapshot("America/Chicago"))
@@ -128,18 +146,26 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             assert second_nldi is not first_nldi
             assert second_nldi._request_state is first_nldi._request_state
             await m8.ports[str(second_id)].embed(profile, (canonical_text(),), None, None)
+            await guidelines.embedding_for_run(str(second_id)).embed(
+                guideline_profile, (guideline_query(guideline_profile),), None, None,
+            )
             await credentials.delete(CredentialName.OPENAI)
             await credentials.delete(CredentialName.GOOGLE_GEOCODING)
             with pytest.raises(CredentialMissingError):
                 await factory.build(request.to_configuration_snapshot("America/Chicago"))
             release.set()
             await pending
+            await pending_guideline
             await m8.ports[str(first_id)].embed(profile, (canonical_text(),), None, None)
-            assert seen == [f"Bearer {OPENAI_OLD}", f"Bearer {OPENAI_NEW}", f"Bearer {OPENAI_OLD}"]
+            await guidelines.embedding_for_run(str(first_id)).embed(
+                guideline_profile, (guideline_query(guideline_profile),), None, None,
+            )
+            assert seen == [f"Bearer {key}" for key in (OPENAI_OLD, OPENAI_OLD, OPENAI_NEW, OPENAI_NEW, OPENAI_OLD, OPENAI_OLD)]
             await first.aclose()
             await first.aclose()
             await second.aclose()
             assert m8.ports == {}
+            assert guidelines.embedding_for_run(str(first_id)) is guidelines.embedding_for_run(str(second_id)) is None
             assert not http._client.is_closed
             assert OPENAI_OLD not in repr(first)
             assert GOOGLE_NEW not in repr(second)
@@ -184,6 +210,8 @@ def test_production_composition_opens_one_secret_free_pool_and_one_worker(monkey
             assert "Authorization" not in opened[0]._client.headers
             assert isinstance(app.state.provider_bundle_factory, RunProviderBundleFactory)
             assert app.state.provider_bundle_factory._http is opened[0]
+            assert app.state.guideline_runtime.desired_profile is not None
+            assert app.state.guideline_runtime._http is opened[0]
             assert app.state.m6_runtime is None
             assert m8.started and not m8.stopped
             credentials = app.state.credential_service
@@ -201,8 +229,10 @@ def test_production_composition_opens_one_secret_free_pool_and_one_worker(monkey
             run_id = uuid4()
             bundle.bind_run(run_id)
             assert str(run_id) in m8.ports
+            assert app.state.guideline_runtime.embedding_for_run(str(run_id)) is not None
             await bundle.aclose()
             assert m8.ports == {}
+            assert app.state.guideline_runtime.embedding_for_run(str(run_id)) is None
             assert len(opened) == 1
         assert m8.stopped
         assert opened[0]._client is None

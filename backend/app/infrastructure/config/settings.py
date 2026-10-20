@@ -13,6 +13,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.domain.model_catalog import ModelCapability
+from app.domain.guidelines.policy import GuidelinePolicy
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ENV_FILE = BACKEND_ROOT / ".env"
@@ -46,6 +47,7 @@ class AppSettings(BaseSettings):
     analysis_timezone: str = "America/Chicago"
     model_catalog: tuple[ModelCapability, ...] = ()
     memory_enabled: bool = True
+    guideline_policy: GuidelinePolicy = Field(default_factory=GuidelinePolicy)
     topology_max_distance_km: float = Field(
         default=500,
         gt=0,

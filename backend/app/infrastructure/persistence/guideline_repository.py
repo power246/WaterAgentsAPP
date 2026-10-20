@@ -17,6 +17,7 @@ from app.domain.guidelines import (
 from app.domain.guidelines.canonical import canonical_text
 from app.domain.guidelines.identity import bundled_guideline_version_id
 from app.domain.guidelines.mutation_bodies import action_body, create_body, publish_body, save_body
+from app.domain.guidelines.policy import DEFAULT_GUIDELINE_POLICY
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
 from app.domain.memory_rag.embedding_vector import EmbeddingVector
@@ -548,7 +549,7 @@ class PostgresGuidelineRepository:
                 if (root["activation_epoch"] != row["activation_epoch"]
                         or document["pending_version_id"] != row["version_id"]):
                     state, error = "superseded", None
-                elif row["attempts"] >= 3:
+                elif row["attempts"] >= DEFAULT_GUIDELINE_POLICY.max_attempts:
                     state, error = "failed", "guideline_attempts_exhausted"
                 else:
                     claimed = (await connection.execute(text(
@@ -584,13 +585,14 @@ class PostgresGuidelineRepository:
         GuidelineOperation(receipt=claim.receipt, state="failed", safe_error_code=safe_error_code)
         async with self._connection(write=True) as connection:
             row, _, _ = await self._fence(connection, claim, now)
-            retry = retryable and row["attempts"] < 3
+            retry = retryable and row["attempts"] < DEFAULT_GUIDELINE_POLICY.max_attempts
             await connection.execute(text(
                 "UPDATE guideline_operations SET state = :state, safe_error_code = :error, "
                 "lease_owner = NULL, lease_until = NULL, next_attempt_at = :next WHERE operation_id = :id"
             ), {"id": row["operation_id"], "state": "pending" if retry else "failed",
                 "error": None if retry else safe_error_code,
-                "next": self._now(now) + timedelta(seconds=2 if row["attempts"] == 1 else 10)})
+                "next": self._now(now) + timedelta(seconds=DEFAULT_GUIDELINE_POLICY.retry_backoff_seconds[
+                    min(row["attempts"], len(DEFAULT_GUIDELINE_POLICY.retry_backoff_seconds)) - 1])})
 
     async def retry_operation(self, operation_id: UUID, *, expected_revision: int, mutation: GuidelineMutation):
         mutation.require_request(GuidelineOperationKind.RETRY,

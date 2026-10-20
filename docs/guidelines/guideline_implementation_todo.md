@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–4 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–5 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -320,25 +320,26 @@ git diff --check
 
 ### Work
 
-- [ ] 从历史 adapter 抽出真正通用的 HTTP/输出校验基础；旧 `EmbeddingPort` 调用继续先验证 `CanonicalCaseQueryV1`，新 adapter 验证 guideline document/query。
-- [ ] guideline 使用既有 model catalog embedding role 的期望 provider/model/dimensions/max-input；独立 profile ID 覆盖模板/契约/角色指令，不写死供应商型号。
-- [ ] 保证 query/document 模板兼容、输入有界与稳定，模型要求的角色前缀在 profile 中固定；公共输出校验含 count/order/model/dimensions/finite/norm。
-- [ ] 在 runtime composition 注入 guideline adapter；run 查询复用 RunProviderBundle 的固定 lease，后台每次 attempt 自取 lease，不把密钥/路由写入版本或 transcript。
-- [ ] guideline generation namespace 与 M8 case generation 分离；memory disabled/stateless 不关闭本功能，仍按 guideline 库/readiness 判断。
-- [ ] 固定配置默认值：top-k 3、初始 cutoff 0.35、每请求 knowledge budget 3,072 tokens、query 8,192 UTF-8 bytes、在线 3 秒且无重试；阈值必须由 Milestone 11 的真实检索样例核对。
-- [ ] 固定后台默认值：并发 2、单 attempt provider timeout 20 秒、最多 3 attempts、退避 2/10 秒；配置校验和错误码有单一来源。
+- [x] 从历史 adapter 抽出真正通用的 HTTP/输出校验基础；旧 `EmbeddingPort` 调用继续先验证 `CanonicalCaseQueryV1`，新 adapter 验证 guideline document/query。
+- [x] guideline 使用既有 model catalog embedding role 的期望 provider/model/dimensions/max-input；独立 profile ID 覆盖模板/契约/角色指令，不写死供应商型号。
+- [x] 保证 query/document 模板兼容、输入有界与稳定，模型要求的角色前缀在 profile 中固定；公共输出校验含 count/order/model/dimensions/finite/norm。
+- [x] 在 runtime composition 注入 guideline adapter；run 查询复用 RunProviderBundle 的固定 lease，后台每次 attempt 自取 lease，不把密钥/路由写入版本或 transcript。
+- [x] guideline generation namespace 与 M8 case generation 分离；memory disabled/stateless 不关闭本功能，仍按 guideline 库/readiness 判断。
+- [x] 固定配置默认值：top-k 3、初始 cutoff 0.35、每请求 knowledge budget 3,072 tokens、query 8,192 UTF-8 bytes、在线 3 秒且无重试；阈值必须由 Milestone 11 的真实检索样例核对。
+- [x] 固定后台默认值：并发 2、单 attempt provider timeout 20 秒、最多 3 attempts、退避 2/10 秒；配置校验和错误码有单一来源。
 
 ### Tests
 
-- [ ] 旧 case adapter 拒绝 guideline/任意文本，新 adapter 拒绝错模板/错误 profile；公共传输抽取后旧 M8 测试仍过。
-- [ ] 覆盖乱序/少条/重复 index、维度不符、非有限值、零范数、超输入、超时/取消和安全 provider error。
-- [ ] 用记录 dispatch 的 adapter 验证 run lease 固定、后台新 attempt 取新 lease；密钥切换不混在一个 attempt 或泄露到持久化。
-- [ ] 验证 memory disabled/stateless 与 guideline 可用性独立；未配置/不兼容只使知识 unavailable，不改原分析 risk/availability。
+- [x] 旧 case adapter 拒绝 guideline/任意文本，新 adapter 拒绝错模板/错误 profile；公共传输抽取后旧 M8 测试仍过。
+- [x] 覆盖乱序/少条/重复 index、维度不符、非有限值、零范数、超输入、超时/取消和安全 provider error。
+- [x] 用记录 dispatch 的 adapter 验证 run lease 固定、后台新 attempt 取新 lease；密钥切换不混在一个 attempt 或泄露到持久化。
+- [x] 验证 memory disabled/stateless 与 guideline 可用性独立；未配置/不兼容只使知识 unavailable，不改原分析 risk/availability。
 
 ### Verify
 
 ```powershell
-Invoke-GuidelinePytest -Stage gk-m5 -Paths @('backend/tests/application/guidelines/test_embedding.py', 'backend/tests/domain/test_model_catalog.py', 'backend/tests/infrastructure/test_m8_runtime.py', 'backend/tests/architecture/test_m8_boundaries.py')
+Invoke-GuidelinePytest -Stage gk-m5 -Paths @('backend/tests/application/guidelines/test_embedding.py', 'backend/tests/infrastructure/embeddings', 'backend/tests/infrastructure/test_guideline_runtime.py', 'backend/tests/infrastructure/test_m9_provider_bundle.py', 'backend/tests/domain/test_model_catalog.py', 'backend/tests/infrastructure/test_m8_runtime.py', 'backend/tests/application/transcript_memory', 'backend/tests/architecture')
+npm --prefix frontend run check:api
 git diff --check
 ```
 
@@ -346,7 +347,14 @@ git diff --check
 
 提交边界：embedding DTO/adapter/shared transport、配置/runtime 注入与回归测试；不加外部向量服务、HNSW 或第二个 model catalog。
 
-完成记录：`pending`。
+完成记录（2026-10-20）：`complete`。
+
+- 保持 `codex/guidelines-m0`，起点 `8821ac9f02622a1f309703862945304a57789e5f`；本阶段实现 commit 在提交后补记。没有新建 worktree 或阶段 Markdown。
+- `OpenAIEmbeddingTransport` / `embedding_validation` 共用 HTTP、取消与输出校验；旧 adapter 保留 case canonical 门禁，新 adapter 重验 guideline schema/template/profile/角色和完整输入预算。provider input 为固定角色指令 + LF + canonical JSON；按 UTF-8 字节保守约束 catalog max-input，超限不截断、不派发。独立 profile 从既有 embedding role 派生，角色指令变化改变身份；未复用 M8 generation。
+- 新增 `GuidelinePolicy` 单点定义默认值/校验，通过 `WATERAGENTS_GUIDELINE_POLICY` JSON 覆盖；repository/operation 共用其固定 attempts/退避。生产 `GuidelineRuntime` 与 `RunProviderBundle` 共享现有 HTTP pool 和 run lease，独立 bind/release；`embedding_for_attempt()` 每次读取新 lease。在线/后台分别限 3/20 秒、单次 HTTP 无重试；安全错误/可重试性集中映射。memory-disabled/stateless 不关闭说明书，缺配置/凭据返回知识不可用；未修改分析 risk、数值或历史语义。
+- 新增 application **41 项**、adapter **36 项**、runtime **7 项**和隔离守卫 **1 项**；扩展既有 bundle 测试保留原竞态并增加实际说明书 dispatch，覆盖在途旧 key → 替换/删除 → 新 run/attempt key、旧调用完成、registry 释放、无秘密进入快照/日志。首次旧契约回归 **117 passed**；最终本节 Verify 后端范围 **428 passed**，27.66s，包含角色前缀后 query/document 的实际字节精确上限；配置/health **47 passed**。最终完整 `backend/tests` **3201 passed，0 failed/errors/skipped**，308.28s，仅有两条既有 Starlette/anyio 弃用 warning。
+- 完整 runner 沿 M2 的 DB-only 隔离，仅注入 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m5-20261020/full-final','--junitxml','.tmp/guidelines-m5-20261020/full-final.xml'])`；`npm --prefix frontend run check:api` 通过，生成契约无变化。测试库 `check --test-database` 为 `20261020_02`，无新增 DDL、未修改业务库或 `.env`。日志/XML 留在本机，Windows 临时目录使用已获准执行权限；主设计 §7/§12 已同步输入字节格式、配置、生命周期与阶段边界。52 个文档本地链接/代码围栏及暂存差异检查通过。
+- 验证等级：本地后端、离线 HTTP MockTransport、真实 PostgreSQL；真实 embedding/分析供应商、浏览器、hosted CI、专业批准与 pH 实测：**not run**。M6–12 保持未完成；M6 接 worker/generation 生命周期，M7 接 run pin/readiness/检索，实际检索质量仍由 M11 核对。
 
 ## Milestone 6：持久化准备、激活与索引切换
 
@@ -673,4 +681,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–4 的实际命令与证据见对应完成记录；Milestone 5–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–5 的实际命令与证据见对应完成记录；Milestone 6–12、内容审核、实测实验与最终功能验收仍待实施。

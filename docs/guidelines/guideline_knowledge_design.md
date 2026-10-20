@@ -228,9 +228,11 @@ document `revision` 用于编辑与管理 CAS；root `activation_epoch` 用于�
 
 新增 `GuidelineEmbeddingProfileV1`，identity 包含 provider、model、dimensions、cosine metric、document/query template version、text-contract version 及明确的 query/document instructions。不得复用历史 case profile ID 代表说明书向量。
 
-Milestone 1 已定义独立 `CanonicalGuidelineDocumentV1` / `CanonicalGuidelineQueryV1` 与 `GuidelineEmbeddingBatch`。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。document 由已验证 content/model view 和参数名称构建，canonical JSON 最多 24,000 UTF-8 bytes；query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，超限在本阶段拒绝，后续检索 builder 按 §7.3 整字段缩减。这里仅有数据契约；实际传输复用与 provider adapter 在 Milestone 5 实施。
+`CanonicalGuidelineDocumentV1` / `CanonicalGuidelineQueryV1` 与 `GuidelineEmbeddingBatch` 使用独立契约。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。document 由已验证 content/model view 和参数名称构建，canonical JSON 最多 24,000 UTF-8 bytes；query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，超限直接拒绝，后续检索 builder 按 §7.3 整字段缩减。
 
 提供 `GuidelineEmbeddingPort` 和 guideline 专用 canonical document/query inputs。将当前 adapter 的公共 HTTP 调用、输出 count/order/dimensions/finite/norm 校验抽为共享传输/校验基础；历史 `EmbeddingPort` 及 `CanonicalCaseQueryV1` 资格校验继续由其原调用路径负责。不要把说明书伪造成历史 case，也不要简单删除历史输入校验。
+
+M5 的 `OpenAIGuidelineEmbeddingAdapter` 只接受 typed document/query，重验 schema/template、canonical bytes、profile identity 与角色指令，再经共享 `OpenAIEmbeddingTransport` / `embedding_validation` 发送和校验；旧 `OpenAIEmbeddingAdapter` 继续先执行原 case canonical 校验。说明书实际 provider input 固定为 `instructions + LF + canonical_text`，因此 `query:` / `passage:` 等可配置角色前缀位于文本开头，且完整内容与指令均绑定 profile。包含角色前缀的实际 document/query 输入分别不超过 24,000/8,192 UTF-8 bytes；每条实际输入同时用 UTF-8 字节数作为保守 token 上界，与 catalog 的 `max_input_tokens` 比较。这不是供应商 tokenizer 的精确计数，可能拒绝仍能被供应商接受的较长内容，超限不会截断条件/例外或派发请求。实际 tokenizer/检索质量由 M11 核对。
 
 query/document 使用相同兼容 profile；若模型要求角色前缀，固定在 profile 模板中。更换 model、维度、模板或角色指令需重建相应 generation，不直接比较或混排不同 profile 的向量。
 
@@ -257,6 +259,8 @@ query/document 使用相同兼容 profile；若模型要求角色前缀，固定
 
 这些是实现起始默认值，必须在对应策略对象中单点定义。真实检索样例可促使调整并记录策略版本；下列数值不是已验证的最优参数。
 
+默认值与配置校验集中在 [GuidelinePolicy](../../backend/app/domain/guidelines/policy.py)，通过部署环境变量 `WATERAGENTS_GUIDELINE_POLICY` 的 JSON 对象覆盖，例如 `{"query_instructions":"query: ","document_instructions":"passage: ","worker_max_concurrency":1}`；未提供字段沿用默认值，不写入用户内容。top-k、知识 token budget 和在线 timeout 分别不超过 3、3,072、3 秒；自动 attempts 固定 3，退避固定 2/10 秒，在线只请求一次；repository 和 operation model 使用同一策略定义约束，M6 再消费并发/调度配置。
+
 | 参数 | 首版默认 |
 | --- | --- |
 | 每 session 基础检索次数 | 1；在首次实际需要模型时惰性执行，相关 phase 复用 |
@@ -267,7 +271,7 @@ query/document 使用相同兼容 profile；若模型要求角色前缀，固定
 | 单次在线 retrieval deadline | 最多 3 秒，并受现有 session 剩余 deadline 约束；默认不在线重试 |
 | worker 并发 | 2，单次 provider timeout 20 秒，attempt 上限 3；有限退避 2 秒、10 秒 |
 | 每文档 source refs | 最多 16；每 source URL 最多 2,048 字符 |
-| 管理列表 | 默认 20 条，最大 100 条，keyset cursor |
+| 管理列表 | 默认 20 条，最大 50 条，keyset cursor |
 
 所有实际请求使用现有 model size estimator 对最终序列化内容测量。超预算按相关性从低到高移除整份 guideline，不截断其前提/例外；若全部移除，记录 budget-limited，分析照常继续。不能用字节数上限替代模型 token fit。
 
@@ -424,6 +428,8 @@ viewer 优先复用安全的正文查看交互；若引入 Markdown renderer，�
 guideline 与 M8 historical memory 是不同功能。`stateless` 或 `WATERAGENTS_MEMORY_ENABLED=false` 不自动禁用已发布的专业/用户说明书；guideline 自身依当前本地库和 embedding readiness 决定可用性。
 
 后台 publication worker 在每次 attempt 开始获取自己的 credential lease；run 查询/分析复用 run-owned lease。替换密钥不把一个正在执行的 operation 改成混合凭据，也不把 lease 内容写入知识版本、manifest、transcript 或日志。
+
+M5 的 [GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 从既有 OpenAI lease 构造独立说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次获取一次新 lease，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M5 不启动任务或创建 guideline generation；worker 与 run pin/readiness 分别由 M6/M7 接入，未把 M8 generation 当作说明书索引。
 
 查询返回的知识须通过完整的版本/profile/source 校验；取消和 timeout 使用既有 clock/cancellation 基础。publication/index worker 是有界后台工作，不新增常驻模型会话或无界自动恢复链。
 

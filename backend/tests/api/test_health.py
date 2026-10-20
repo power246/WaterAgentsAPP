@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.infrastructure.config import AppSettings
+from app.domain.guidelines.policy import DEFAULT_GUIDELINE_POLICY
 from tests.m4_support import create_test_app as create_app
 
 
@@ -29,6 +30,7 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "analysis_timezone": "America/Chicago",
         "model_catalog": (),
         "memory_enabled": True,
+        "guideline_policy": DEFAULT_GUIDELINE_POLICY.model_dump(),
         "topology_max_distance_km": 500.0,
         "topology_max_hops": 48,
         "topology_max_nodes": 128,

@@ -8,6 +8,7 @@ from app.domain.domain_model import DomainModel
 from app.domain.guidelines.canonical import Revision
 from app.domain.guidelines.mutation_receipt import GuidelineMutationReceipt
 from app.domain.guidelines.operation_state import GuidelineOperationState
+from app.domain.guidelines.policy import DEFAULT_GUIDELINE_POLICY
 
 
 class GuidelineOperation(DomainModel):
@@ -15,7 +16,7 @@ class GuidelineOperation(DomainModel):
     state: GuidelineOperationState
     activation_epoch: Revision | None = None
     generation_id: UUID | None = None
-    attempts: Annotated[int, Field(strict=True, ge=0, le=3)] = 0
+    attempts: Annotated[int, Field(strict=True, ge=0, le=DEFAULT_GUIDELINE_POLICY.max_attempts)] = 0
     lease_owner: Annotated[str, Field(min_length=1, max_length=160)] | None = None
     lease_until: UtcDatetime | None = None
     safe_error_code: Annotated[str, Field(pattern=r"^guideline_[a-z_]{1,80}$")] | None = None

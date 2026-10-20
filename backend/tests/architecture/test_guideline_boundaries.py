@@ -10,7 +10,7 @@ from tests.guideline_support import content
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
 
 
-def _violations(paths):
+def _violations(paths, *, domain=True):
     violations = []
     forbidden_symbols = {
         "CanonicalCaseQueryV1", "EmbeddingProfile", "EmbeddingPort", "HistoricalInferencePayload",
@@ -28,10 +28,10 @@ def _violations(paths):
             else:
                 continue
             for module in modules:
-                if module.startswith(("app.application", "app.infrastructure", "app.api")) or (
+                if (domain and module.startswith(("app.application", "app.infrastructure", "app.api"))) or (
                     module.startswith("app.domain.memory_rag")
                     and module != "app.domain.memory_rag.embedding_vector"
-                ):
+                ) or module.startswith("app.application.transcript_memory"):
                     violations.append(f"{path.name}:{node.lineno}: forbidden owner {module}")
     return violations
 
@@ -39,6 +39,14 @@ def _violations(paths):
 def test_guideline_domain_and_ports_do_not_adopt_case_or_observation_semantics():
     paths = [*(APP_ROOT / "domain/guidelines").glob("*.py"), APP_ROOT / "ports/guidelines.py"]
     assert _violations(paths) == []
+
+
+def test_guideline_application_adapter_and_runtime_do_not_adopt_historical_case_contracts():
+    paths = [*(APP_ROOT / "application/guidelines").glob("*.py"),
+             APP_ROOT / "infrastructure/adapters/openai_guideline_embeddings.py",
+             APP_ROOT / "infrastructure/adapters/openai_embedding_transport.py",
+             APP_ROOT / "infrastructure/runtime/guidelines.py"]
+    assert _violations(paths, domain=False) == []
 
 
 @pytest.mark.parametrize("source", [

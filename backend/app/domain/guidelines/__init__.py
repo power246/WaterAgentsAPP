@@ -19,6 +19,7 @@ from app.domain.guidelines.mutation_receipt import GuidelineMutationReceipt
 from app.domain.guidelines.operation import GuidelineOperation
 from app.domain.guidelines.operation_kind import GuidelineOperationKind
 from app.domain.guidelines.operation_state import GuidelineOperationState
+from app.domain.guidelines.policy import GuidelinePolicy
 from app.domain.guidelines.origin import GuidelineOrigin
 from app.domain.guidelines.result_usage_binding import GuidelineResultUsageBinding
 from app.domain.guidelines.review import GuidelineReview
@@ -29,6 +30,7 @@ from app.domain.guidelines.validation_error import GuidelineValidationError
 from app.domain.guidelines.version import GuidelineVersionV1
 
 __all__ = [
+    "GuidelinePolicy",
     "GuidelineDocumentDetails", "GuidelineListItem",
     "CanonicalGuidelineDocumentV1", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
     "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",

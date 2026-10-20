@@ -80,6 +80,7 @@ from app.infrastructure.credentials.memory_key_store import (
 from app.infrastructure.credentials.tester import ProviderCredentialTester
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
+from app.infrastructure.runtime.guidelines import GuidelineRuntime
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.infrastructure.web.frontend import FrontendResponder
 from app.infrastructure.runtime import (
@@ -241,6 +242,7 @@ def create_app(
                             resolved_settings.reasoning_model_timeout_seconds,
                             resolved_settings.run_summary_timeout_seconds,
                             resolved_settings.rag_embedding_timeout_seconds,
+                            resolved_settings.guideline_policy.worker_timeout_seconds,
                         ),
                         max_response_bytes=resolved_settings.provider_http_max_response_bytes,
                         retry_delay_seconds=resolved_settings.provider_http_retry_delay_seconds,
@@ -248,6 +250,10 @@ def create_app(
                     )) if workflow is None else None
                 )
                 runtime = await stack.enter_async_context(_provided_runtime(workflow))
+                guideline_runtime = GuidelineRuntime(
+                    settings=resolved_settings, catalog=resolved_model_catalog.snapshot(),
+                    credentials=credential_service, http=provider_http,
+                )
                 provider_bundle_factory: RunProviderBundleFactory | None = None
 
                 async def build_run_bundle(configuration):
@@ -356,6 +362,7 @@ def create_app(
                             settings=resolved_settings, credentials=credential_service,
                             http=provider_http, operations=coordinator,
                             m5_runtime=m5_runtime, m8_runtime=m8_runtime,
+                            guideline_runtime=guideline_runtime,
                             upstream_results=upstream_results,
                             result_reader=result_reader,
                             capability_registry=resolved_parameter_capabilities,
@@ -436,6 +443,7 @@ def create_app(
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store
                     application.state.m8_runtime = m8_runtime
+                    application.state.guideline_runtime = guideline_runtime
                     application.state.admin_service = admin_service
                     application.state.admin_runner = admin_runner
                     application.state.m5_runtime = m5_runtime
