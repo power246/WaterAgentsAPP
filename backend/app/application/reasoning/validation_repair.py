@@ -8,6 +8,7 @@ from typing import Protocol, Self, TypeVar
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from pydantic import model_validator
+from app.domain.guidelines import GuidelineUsageTarget
 
 from app.application.reasoning.batch_planner import (
     ReasoningBatch,
@@ -200,11 +201,13 @@ class ValidationExchange:
         prompt_builder: PromptBuilder,
         validator: DraftValidator,
         decision_store: ValidationDecisionStore | None = None,
+        guidelines=None,
     ) -> None:
         self._model_port = model_port
         self._prompt_builder = prompt_builder
         self._validator = validator
         self._decision_store = decision_store
+        self._guidelines = guidelines
 
     async def run_batch(
         self,
@@ -217,9 +220,17 @@ class ValidationExchange:
             request,
             context=batch.context,
             cancellation=cancellation,
-            validate=lambda value: self._validator.validate_batch(batch, value),
+            validate=lambda value: self._validator.validate_batch(batch, value,
+                guideline_aliases=self._guidelines.aliases(request.operation_id) if self._guidelines is not None else frozenset()),
             batch=batch,
+            parameters=tuple(cell.parameter for cell in batch.cells),
+            targets=tuple(cell.cell_id for cell in batch.cells),
         )
+        if self._guidelines is not None:
+            scopes = {cell.cell_id: cell for cell in batch.cells}
+            for cell in validated.cells:
+                self._guidelines.accept(audit.accepted_operation_id,
+                    GuidelineUsageTarget(kind="cell", cell_id=cell.cell_id, window_id=scopes[cell.cell_id].window_id), cell.guideline_refs)
         return ValidatedBatchExchange(validated=validated, audit=audit)
 
     async def run_synthesis(
@@ -261,9 +272,20 @@ class ValidationExchange:
                 synthesis_plan,
                 reasoning,
                 value,
+                guideline_aliases=self._guidelines.aliases(request.operation_id) if self._guidelines is not None else frozenset(),
             ),
             synthesis_prompt=synthesis_prompt,
+            parameters=skeleton.requested_parameters,
+            targets=synthesis_plan.validated_cell_order,
+            versions=self._guidelines.synthesis_versions(reasoning) if self._guidelines is not None else None,
         )
+        if self._guidelines is not None:
+            operation = audit.accepted_operation_id
+            self._guidelines.accept(operation, GuidelineUsageTarget(kind="overall", key="overall"), validated.overall.guideline_refs)
+            for window in validated.window_assessments:
+                self._guidelines.accept(operation, GuidelineUsageTarget(kind="window", window_id=window.window_id), window.guideline_refs)
+            for index, step in enumerate(validated.analysis_detail.steps):
+                self._guidelines.accept(operation, GuidelineUsageTarget(kind="analysis_step", step_index=index), step.guideline_refs)
         return ValidatedSynthesisExchange(validated=validated, audit=audit)
 
     async def _run(
@@ -275,7 +297,11 @@ class ValidationExchange:
         validate: Callable[[str], ValidatedDraftT],
         batch: ReasoningBatch | None = None,
         synthesis_prompt: OverallSynthesisPromptInput | None = None,
+        parameters=(), targets=(), versions=None,
     ) -> tuple[ValidatedDraftT, ValidationExchangeAudit]:
+        if self._guidelines is not None:
+            request = await self._guidelines.prepare(request, cancellation=cancellation, parameters=parameters,
+                                                     targets=targets, versions=versions)
         initial_response = await consume_waterbody_model_stream(
             self._model_port,
             request,
@@ -334,6 +360,9 @@ class ValidationExchange:
             )
         )
         try:
+            if self._guidelines is not None:
+                repair_request = await self._guidelines.prepare(repair_request, cancellation=cancellation,
+                    targets=targets, repair_of=request.operation_id)
             repair_response = await consume_waterbody_model_stream(
                 self._model_port,
                 repair_request,

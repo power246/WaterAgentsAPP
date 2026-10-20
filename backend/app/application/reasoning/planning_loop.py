@@ -224,6 +224,7 @@ class EvidencePlanningLoop:
         clock: object | None = None,
         operation_id_factory: Callable[[], UUID] | None = None,
         transcript_store: "ReasoningTranscriptStore | None" = None,
+        guidelines=None,
     ) -> None:
         self._acquisition = acquisition
         self._capabilities = capability_registry
@@ -233,6 +234,7 @@ class EvidencePlanningLoop:
         self._clock = clock or _UtcClock()
         self._operation_id_factory = operation_id_factory or uuid4
         self._transcript_store = transcript_store
+        self._guidelines = guidelines
 
     async def run(
         self,
@@ -325,6 +327,9 @@ class EvidencePlanningLoop:
                     ),
                 )
             )
+            if self._guidelines is not None:
+                request = await self._guidelines.prepare(request, cancellation=scope.cancel_token,
+                    parameters=(*scope.requested_parameters, *scope.supporting_parameters, *scope.intermediate_parameters))
             response = await consume_waterbody_model_stream(
                 self._model_port,
                 request,
@@ -524,6 +529,7 @@ class EvidencePlanningLoop:
                 deadline=deadline,
                 clock=self._clock,
                 max_calls=self._limits.max_numeric_estimation_calls,
+                guidelines=self._guidelines,
                 operation_id_factory=self._operation_id_factory,
             )
             try:

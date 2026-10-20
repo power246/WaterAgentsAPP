@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，Milestone 0–7 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备及 run pin/session 检索。**模型请求触发/注入、知识记录持久化、前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–8 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索及模型可选参考与内部引用绑定。**知识 typed 记录持久化、结果/历史引用闭包、前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -47,7 +47,7 @@
 | [DetailPanel.tsx](../../frontend/src/features/analysis/DetailPanel.tsx) | `visibleRecords` 限定可见类型，支持读取保存正文。 | 新增 provided knowledge card 与结果引用查看，覆盖实时与 history。 |
 | [App.tsx](../../frontend/src/app/App.tsx) / [local_mutation.py](../../backend/app/api/http/local_mutation.py) | 现有应用为本地工作台，API mutation 受 Host/Origin/JSON 边界保护。 | 增加本地说明书页面和 CRUD/publish API，沿用该边界。 |
 
-当前 numeric request 自行构造，并有 192,000 bytes 输入上限；它不经过 `PromptBuilder`，该字节门禁也不是模型 token fit。第 8 节的统一 fit 是本功能实施要求，须同时覆盖 numeric、planning、batch、synthesis 与 repair。
+numeric request 自行构造，并保留 192,000 bytes 原输入上限；它不经过 `PromptBuilder`，该字节门禁也不是模型 token fit。M8 在实际调用前使用同一 `GuidelineModelContext` 检查最终序列化请求，覆盖 numeric、planning、batch、synthesis 与 repair。
 
 ## 3. 总体架构与责任
 
@@ -265,7 +265,7 @@ M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标�
 
 `build_guideline_query()` 只采用验证后的问题、canonical 指标、mode、agent/target COMID 和拓扑直接上游数；可选问题过长或包含不安全内容时整项省略，记录 `input_reduced`，结构化字段优先。包括角色前缀的实际输入仍受 8,192 bytes 与该 profile 的保守 max-input 约束，无法容纳必需字段则 unavailable。
 
-每个实际 Agent session 拥有独立 `GuidelineSessionKnowledge.get_or_load()`：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。`fit_guideline_selection()` 接受最终请求的 fit 判定，整份移除最低排名文档，全移除返回 budget-limited；M8 将传入既有实际模型 size estimator，M7 不把 bytes 当最终模型 token fit。M8 才在首次真实 planning/numeric 请求前调用惰性入口，M9 再持久化 retrieval/delivery/usage。
+每个实际 Agent session 拥有独立 `GuidelineSessionKnowledge.get_or_load()`：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。M8 的 `GuidelineModelContext` 在首次真实 planning/numeric 请求前加载，使用既有实际模型 size estimator 对最终请求整份裁剪，保留 evidence/output 预算；M9 再持久化 retrieval/delivery/usage。
 
 ### 7.4 初始工程参数
 
@@ -299,9 +299,15 @@ planning、numeric、batch reasoning 各自获得同一 session selection 的适
 
 知识放在独立 `advisory_knowledge` 输入块。system policy 只说明其来源角色、可选采用和引用规则，不把正文转换为必须遵循的 bracketed rules。正文中的建议不得修改工具 roster、scope、模型 role、输出 identity 或服务端数值规则。
 
+M8 的 [GuidelineModelContext](../../backend/app/application/guidelines/model_context.py) 由 `M6RunnerService.build_runner()` 按 session 创建，planning loop、既有 numeric estimator 与 validation exchange 共用同一实例。每个 operation 从固定 selection 按主/related 指标取适用完整 model view，以独立 user message 附加；系统规则不含知识正文。size estimator 接收实际 request 与 response shape 的 canonical bytes，检查知识增量、context/output tokens 和既有序列化上限；原请求已超限时不派发。初始请求空间不足时整份移除低排名文档，全移除为 budget-limited；repair 必须保留原 alias/正文子集，无法容纳时按原 repair failure 结束。
+
 ### 8.2 Model output 与独立 usage 记录
 
-为实际产生数值或解释的 response schema 增加可空数组 `guideline_refs`，值为本次请求提供的稳定 alias，例如 `G1`。模型没有采用资料时返回空数组合法；不要求逐一解释未采用项。
+为实际产生数值或解释的 response schema 增加可空数组 `guideline_refs`，值为本次请求提供的稳定 alias，M8 使用 `G<rank>_<operation UUID hex>`，避免另一 operation 的同排名 alias 被误认。repair 明确沿用原 alias/正文。模型没有采用资料时返回空数组合法；不要求逐一解释未采用项。
+
+M8 的 [citation_resolver.py](../../backend/app/application/guidelines/citation_resolver.py) 在原严格 JSON 解析后只清理非法 guideline refs，保留其他字段的严格校验；warning 仅包含固定安全事件/code。numeric response、cell、window、overall 和 analysis step 的 nullable refs 作为内部 metadata 保留，排除于科学模型的 dump/digest。有效引用解析成 operation-local 不可变版本绑定与独立 `GuidelineOperationUsage` sidecar；numeric 绑定 task/window，并沿 `NumericDerivedPayload.model_operation_id` 和 task ID 关联原估值，未给该 payload 添加字段。synthesis 只读取已验证 cell 引用及所选 evidence 的 numeric/转换依赖链，不取未选用候选，也不重新检索。
+
+当前 M8 sidecar 与 `GuidelineRequestSelection` 只表示内部引用及请求构造快照，不声称已保存 typed delivery，也不制造 transcript item IDs 或可点击 citation。既有 request/validation audit 记录实际附带 advisory 的请求；下述 `GuidelineCitationV1`、typed writer/registry、result usage 及 history closure 由 M9 完成，M8 单独提交尚不构成功能上线。
 
 server 把有效 alias 解析为 `GuidelineCitationV1`：delivery item ref、guideline/family identity、immutable version ID、origin、source_kind 和引用来源 operation/phase。模型不能自行构造版本、URL 或 transcript item identity。
 

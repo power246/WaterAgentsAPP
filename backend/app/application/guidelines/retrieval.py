@@ -123,6 +123,10 @@ class GuidelineSessionKnowledge:
         self._task: asyncio.Task | None = None
         self._closed = False
 
+    @property
+    def policy(self) -> GuidelinePolicy:
+        return self._policy
+
     async def get_or_load(self) -> GuidelineRetrievalResult:
         if self._closed:
             return self._result("unavailable", "guideline_session_closed")

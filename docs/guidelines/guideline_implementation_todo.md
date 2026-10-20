@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–7 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换、run pin 与 session 惰性检索，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–8 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换、run pin 与 session 惰性检索、模型可选参考和内部引用绑定，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -440,21 +440,21 @@ git diff --check
 
 ### Work
 
-- [ ] 在首次实际 planning 请求前加载；无 planning 但直接 numeric estimation 的路径，在首个 numeric 请求前加载。不要依据单一 handoff 标记跳过其他真实模型入口。
-- [ ] planning、numeric、batch 使用同一 session selection 的适用子集；synthesis 仅沿已有有效引用取相关快照，不重新全库检索；repair 保留原 scope/知识子集。
-- [ ] 添加独立 `advisory_knowledge`；system 只描述来源角色/可选采用/alias 规则，正文不得改变 tools、scope、role、identity 或既有校验。
-- [ ] 对最终序列化请求统一 model fit，计入 knowledge 且保留原 evidence/output 预算；低相关整份移除，不能从机制或例外中切 token，最终 alias 集合只反映实际输入。
-- [ ] 给数值/解释内部 response schema 与 draft metadata 增加可空 `guideline_refs`；server 从本 operation delivery 解析 citation，模型不能自造版本、URL 或 transcript IDs。
-- [ ] 用独立 usage sidecar 保留 numeric operation/task/window 引用；通过既有 `NumericDerivedPayload.model_operation_id` 关联，不复制/修改其科学事实字段。
-- [ ] 仅非法 guideline alias 时丢弃引用并安全告警；空引用合法，不强迫采用全部 provided；原 evidence/scope/数值错误照原 validator/repair 处理。
+- [x] 在首次实际 planning 请求前加载；无 planning 但直接 numeric estimation 的路径，在首个 numeric 请求前加载。不要依据单一 handoff 标记跳过其他真实模型入口。
+- [x] planning、numeric、batch 使用同一 session selection 的适用子集；synthesis 仅沿已有有效引用取相关快照，不重新全库检索；repair 保留原 scope/知识子集。
+- [x] 添加独立 `advisory_knowledge`；system 只描述来源角色/可选采用/alias 规则，正文不得改变 tools、scope、role、identity 或既有校验。
+- [x] 对最终序列化请求统一 model fit，计入 knowledge 且保留原 evidence/output 预算；低相关整份移除，不能从机制或例外中切 token，最终 alias 集合只反映实际输入。
+- [x] 给数值/解释内部 response schema 与 draft metadata 增加可空 `guideline_refs`；server 从本 operation delivery 解析 citation，模型不能自造版本、URL 或 transcript IDs。
+- [x] 用独立 usage sidecar 保留 numeric operation/task/window 引用；通过既有 `NumericDerivedPayload.model_operation_id` 关联，不复制/修改其科学事实字段。
+- [x] 仅非法 guideline alias 时丢弃引用并安全告警；空引用合法，不强迫采用全部 provided；原 evidence/scope/数值错误照原 validator/repair 处理。
 
 ### Tests
 
-- [ ] 覆盖完整 planning→numeric、无 planning→numeric、batch/synthesis/repair；在实际 model port 检查知识出现时间与 phase，不只断言 helper 被调用。
-- [ ] 覆盖原 zero-model、已取消、deadline 耗尽与已满足证据路径，分别断言 embedding 和 reasoning 实际 dispatch，知识不制造新的模型任务。
-- [ ] 用临界模型容量检验完整请求 fit：保留 evidence、整份移除、全移除状态、alias 与实际字节一致；正文无强制系统权威。
-- [ ] 覆盖模型忽略说明书、缺说明书要求数据仍推理、资料冲突可自主分析；不得新增 guideline sufficiency gate。
-- [ ] 覆盖未知/跨 operation alias、安全 warning、不改合法数值；现有 anchors、range-only、observed 资格、单位/窗口/scope 回归不弱化。
+- [x] 覆盖完整 planning→numeric、无 planning→numeric、batch/synthesis/repair；在实际 model port 检查知识出现时间与 phase，不只断言 helper 被调用。
+- [x] 覆盖原 zero-model、已取消、deadline 耗尽与已满足证据路径，分别断言 embedding 和 reasoning 实际 dispatch，知识不制造新的模型任务。
+- [x] 用临界模型容量检验完整请求 fit：保留 evidence、整份移除、全移除状态、alias 与实际字节一致；正文无强制系统权威。
+- [x] 覆盖模型忽略说明书、缺说明书要求数据仍推理、资料冲突可自主分析；不得新增 guideline sufficiency gate。
+- [x] 覆盖未知/跨 operation alias、安全 warning、不改合法数值；现有 anchors、range-only、observed 资格、单位/窗口/scope 回归不弱化。
 
 ### Verify
 
@@ -467,7 +467,13 @@ git diff --check
 
 提交边界：reasoning request builders/parser/draft/validator、上下文传参、citation resolver 和对应测试；不新建第二套估值器、科学求解器或观测权威。
 
-完成记录：`pending`。
+完成记录：**complete**（2026-10-21）。
+
+- 保持 `codex/guidelines-m0`，基线 `8ee9d1c163bdf7aec5cab3924170a2b20c0957df`；本阶段实现 commit：`待本地提交后补记`。只修改当前源码、测试与现有文档，无新 worktree 或状态 Markdown。
+- `GuidelineModelContext` 接入既有 planning/numeric/batch/synthesis/repair，共用 session selection，首次实际调用前加载；独立 user advisory block、最终请求 token/字节 fit 与整份裁剪，不占用原 evidence/output 预留。每 operation 使用独立 alias，repair 保持原子集；可空 refs 仅作内部 metadata，非法引用安全丢弃。独立 usage sidecar 绑定 numeric task/window 与既有 operation ID，synthesis 只沿已验证 cell/采用的 numeric evidence 依赖取版本，不改变科学 payload 或原校验。
+- 新增实际请求链测试 **27 项**，覆盖无 planning 仍估值、零调用/取消/deadline、空库/未命中/不可用、忽略/冲突资料、临界预算整份移除、安全 warning、修复与结果 lineage；生产 runtime/writer 完整流程通过。最终上下文/架构/固定摘要复验 **36 passed**，2.34s；新增 schema/policy 后固定计划摘要在 `PYTHONHASHSEED=0/1/41` 分别通过。
+- 完整后端 **3277 passed，0 failed/errors/skipped**，344.97s（两条既有弃用 warning）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，实际执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m8-20261021/full','--junitxml','.tmp/guidelines-m8-20261021/full.xml'])`；`npm --prefix frontend run check:api` 与测试库 `check --test-database` 均通过，schema `20261020_02`，无新迁移。日志/XML 不提交。
+- M8 保存内部 request selection/版本绑定与 usage sidecar；typed delivery/citation、result usage 和 history closure 仍由 M9 完成，不把构造请求当作已提交 delivery，不将本阶段单独视为可用功能。真实 embedding/分析供应商、浏览器、hosted CI、内容人工批准和 pH 实测均 **not run**；M9–12 与最终验收保持未勾选。
 
 ## Milestone 9：Transcript、结果引用与历史闭包
 
@@ -694,4 +700,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–7 的实际命令与证据见对应完成记录；Milestone 8–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–8 的实际命令与证据见对应完成记录；Milestone 9–12、内容审核、实测实验与最终功能验收仍待实施。

@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from app.application.guidelines.citation_resolver import GuidelineRefs
 from app.application.reasoning.model_models import (
     ModelItemName,
     NonBlankText,
@@ -41,6 +42,7 @@ class DraftValidationIssue(DomainModel):
 
 
 class ReasoningCellDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     cell_id: NonEmptyString
     outcome_status: OutcomeStatus
     representative_value: CanonicalDecimal | None
@@ -173,6 +175,7 @@ class SynthesisSeriesDraft(DomainModel):
 
 
 class SynthesisWindowDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     window_id: NonEmptyString
     risk_level: RiskLevel
     risk_rationale: NonBlankText
@@ -194,6 +197,7 @@ class SynthesisWindowDraft(DomainModel):
 
 
 class SynthesisOverallDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     risk_level: RiskLevel
     risk_rationale: NonBlankText
     confidence: Annotated[DomainFloat, Field(ge=0.0, le=1.0)]
@@ -222,6 +226,7 @@ class SynthesisOverallDraft(DomainModel):
 
 
 class AnalysisStepDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     type: ModelItemName
     title: NonBlankText
     content: NonBlankText

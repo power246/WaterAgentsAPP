@@ -113,6 +113,7 @@ class RunSingleWaterbodyAgent:
         error_id_factory: Callable[[], UUID] = uuid4,
         clock: object | None = None,
         transcript_store: "ReasoningTranscriptStore | None" = None,
+        guidelines=None,
     ) -> None:
         self._planning_loop = planning_loop
         self._capabilities = capability_registry
@@ -124,6 +125,7 @@ class RunSingleWaterbodyAgent:
         self._error_id_factory = error_id_factory
         self._clock = clock or _UtcClock()
         self._transcript_store = transcript_store
+        self._guidelines = guidelines
 
     async def run(
         self,
@@ -234,12 +236,15 @@ class RunSingleWaterbodyAgent:
                     planning.sealed_input,
                     fragments,
                 )
+                if self._guidelines is not None:
+                    self._guidelines.bind_evidence(fragments)
                 validator = DraftValidator(catalog)
                 exchange = ValidationExchange(
                     model_port=self._model_port,
                     prompt_builder=self._prompt_builder,
                     validator=validator,
                     decision_store=self._transcript_store,
+                    guidelines=self._guidelines,
                 )
                 validated_batches = []
                 stage = "reasoning_batch"

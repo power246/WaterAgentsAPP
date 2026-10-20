@@ -18,6 +18,7 @@ from pydantic import (
 from app.application.evidence_tools.measurement_provenance import (
     derive_measured_anchors,
 )
+from app.application.guidelines.citation_resolver import sanitize_guideline_refs
 from app.application.reasoning.batch_planner import (
     ReasoningBatch,
     ReasoningBatchPlan,
@@ -379,13 +380,14 @@ class DraftValidator:
         self,
         batch: ReasoningBatch,
         raw: object,
+        *, guideline_aliases=frozenset(),
     ) -> ValidatedReasoningBatch:
         self._validate_batch_identity(batch)
         normalized, filled_unit_paths = _fill_single_allowed_units(raw, batch)
         normalized, filled_range_paths = _fill_cited_numeric_ranges(
             normalized, batch, self._facts, self._cell_scopes
         )
-        draft = _parse_draft(normalized, ReasoningBatchDraft)
+        draft = _parse_draft(normalized, ReasoningBatchDraft, guideline_aliases=guideline_aliases)
         issues: list[DraftValidationIssue] = []
         if draft.batch_id != batch.batch_id:
             _issue(issues, "batch_identity_mismatch", "$.batch_id")
@@ -521,8 +523,9 @@ class DraftValidator:
         plan: SynthesisInputPlan,
         reasoning: ValidatedReasoningSet,
         raw: object,
+        *, guideline_aliases=frozenset(),
     ) -> ValidatedOverallSynthesis:
-        draft = _parse_draft(raw, OverallSynthesisDraft)
+        draft = _parse_draft(raw, OverallSynthesisDraft, guideline_aliases=guideline_aliases)
         issues: list[DraftValidationIssue] = []
         if (
             reasoning.batch_plan_digest != batch_plan.plan_digest
@@ -1591,9 +1594,10 @@ def _fill_cited_numeric_ranges(
     return {**raw, "cells": cells}, tuple(filled_paths)
 
 
-def _parse_draft(raw: object, model_type):
+def _parse_draft(raw: object, model_type, *, guideline_aliases=frozenset()):
     try:
         value = _strict_json_object(raw) if isinstance(raw, str) else raw
+        value = sanitize_guideline_refs(value, guideline_aliases)
         return model_type.model_validate(value)
     except ValidationError as error:
         issues = []

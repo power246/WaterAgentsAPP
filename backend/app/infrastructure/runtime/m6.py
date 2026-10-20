@@ -9,6 +9,7 @@ from math import ceil
 from uuid import UUID, uuid4
 
 from app.application.analysis_runs.workflow import WorkflowOperations
+from app.application.guidelines.model_context import GuidelineModelContext
 from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning import (
     EvidencePlanningLoop,
@@ -243,6 +244,8 @@ class M6RunnerService:
         task: ValidatedWaterbodyAgentTask,
     ) -> RunSingleWaterbodyAgent:
         model_fit = self._model_router.model_fit(task.task.waterbody_model)
+        guidelines = (GuidelineModelContext(task.task.guidelines, model_fit=model_fit,
+            size_estimator=self._model_router, clock=self._clock) if task.task.guidelines is not None else None)
         store = ReasoningTranscriptStore(
             operations=self._operations,
             run_id=task.task.run_id,
@@ -263,6 +266,7 @@ class M6RunnerService:
             clock=self._clock,
             operation_id_factory=self._operation_id_factory,
             transcript_store=store,
+            guidelines=guidelines,
         )
         return RunSingleWaterbodyAgent(
             planning_loop=planning_loop,
@@ -275,6 +279,7 @@ class M6RunnerService:
             error_id_factory=self._error_id_factory,
             clock=self._clock,
             transcript_store=store,
+            guidelines=guidelines,
         )
 
     async def run(
