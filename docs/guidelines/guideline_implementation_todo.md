@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–2 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、测试基线、领域/ports 契约与 PostgreSQL 事务基础，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–3 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖基础，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -236,20 +236,20 @@ git diff --check
 
 ### Work
 
-- [ ] 定义 bundled JSON manifest + Markdown package resources；校验 stable key/version、正文/canonical digest、metadata、来源和真实制作者检查记录。
-- [ ] 实现稳定 bundle identity → UUID 映射和幂等导入；同 key/version 同 digest 不重复导入，同版本不同 digest 拒绝并保留原库。
-- [ ] 实现 wheel/source 一致的资源读取与 package data 配置；未审核草稿不混入 approved production manifest。
-- [ ] 实现 family effective selection：停用排除；ready local override 优先其 family；否则 ready bundled；custom 选 ready published；draft/pending/failed 不替换旧有效版。
-- [ ] 实现 local-edit：建立独立 override draft、绑定所见 base version/digest；已有 override 返回其当前内容，不用新版内置覆盖。
-- [ ] 实现内置新版本导入与显式 restore：更新保留本地修改和历史，restore 绑定 root revision 与明确目标 builtin version，不静默合并正文。
-- [ ] 将 approved 内置导入接到持久化准备队列；未完成索引不显示 available，导入错误不清空整个资料库或阻断正常分析。
+- [x] 定义 bundled JSON manifest + Markdown package resources；校验 stable key/version、正文/canonical digest、metadata、来源和真实制作者检查记录。
+- [x] 实现稳定 bundle identity → UUID 映射和幂等导入；同 key/version 同 digest 不重复导入，同版本不同 digest 拒绝并保留原库。
+- [x] 实现 wheel/source 一致的资源读取与 package data 配置；未审核草稿不混入 approved production manifest。
+- [x] 实现 family effective selection：停用排除；ready local override 优先其 family；否则 ready bundled；custom 选 ready published；draft/pending/failed 不替换旧有效版。
+- [x] 实现 local-edit：建立独立 override draft、绑定所见 base version/digest；已有 override 返回其当前内容，不用新版内置覆盖。
+- [x] 实现内置新版本导入与显式 restore：更新保留本地修改和历史，restore 绑定 root revision 与明确目标 builtin version，不静默合并正文。
+- [x] 将 approved 内置导入接到持久化准备队列；未完成索引不显示 available，导入错误不清空整个资料库或阻断正常分析。
 
 ### Tests
 
-- [ ] 覆盖重复导入、坏 manifest/hash、同版冲突、缺资源、升级后本地稿/已发布 override/停用均保留。
-- [ ] 覆盖一个 family 仅一个有效版本，失败 override 保留原有效版，停用 root 不回退 bundled，显式恢复保留修改历史。
-- [ ] 构建并安装 wheel 到 task-owned 隔离目录，验证资源集合和 digests 与源码一致；不能只验证源码相对路径读取。
-- [ ] approved fixture 只用于测试；运行时不能把 fixture 或未审核草稿作为真实内置内容。
+- [x] 覆盖重复导入、坏 manifest/hash、同版冲突、缺资源、升级后本地稿/已发布 override/停用均保留。
+- [x] 覆盖一个 family 仅一个有效版本，失败 override 保留原有效版，停用 root 不回退 bundled，显式恢复保留修改历史。
+- [x] 构建并安装 wheel 到 task-owned 隔离目录，验证资源集合和 digests 与源码一致；不能只验证源码相对路径读取。
+- [x] approved fixture 只用于测试；运行时不能把 fixture 或未审核草稿作为真实内置内容。
 
 ### Verify
 
@@ -265,7 +265,15 @@ wheel 安装/读取验证使用不含业务凭据的隔离环境，记录实际�
 
 提交边界：bundle 格式、reader/importer、effective selection、package 配置和测试；首批真实内容发布依 Milestone 11 的实际批准。
 
-完成记录：`pending`。
+完成记录（2026-10-20）：
+
+- 保持 `codex/guidelines-m0`，起点 `3034eed9dc1367a48fa67396a97f8ef93952c3fd`；本阶段实现 commit：提交后补记。
+- 已实现 JSON manifest/Markdown reader、稳定 document/version UUID、digest/metadata/source/review 校验及逐 family safe-error importer；批准版本原子进入持久化 pending 队列，重复导入保留 receipt/重试状态，新内置版本不覆盖或取消本地稿/批准任务。effective selection、首次 local-edit CAS/克隆、已有稿返回与最新已完成版本的显式 restore 已实现；恢复清除 override 激活指针并保留全部修改历史。格式和事务说明见主设计 §4。
+- 本节 Verify 的两组测试加 guideline boundary：首轮 **70 passed**，30.21s。补齐重试去重、local-edit/replay、版本跳号/降级及 pending restore 回归后，最终完整 `backend/tests` **3074 passed，0 failed/errors/skipped**，341.97s；其中新增 M3 **36 项**，含 **10 项真实 PostgreSQL**（另保留 M2 的 31 项）。runner 沿用 M2 的 DB-only 环境隔离，仅注入 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，调用 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m3-20261020/full','--junitxml','.tmp/guidelines-m3-20261020/full.xml'])`；仅有两条既有弃用 warning。
+- 实际打包：`py -m uv build --project backend --out-dir .tmp/guidelines-m3-20261020/package` 成功生成 sdist/wheel；用 `py -m uv pip install --python backend/.venv/Scripts/python.exe --target .tmp/guidelines-m3-20261020/installed --no-deps <wheel>` 安装。另在任务目录复制源码并仅为临时样本包覆盖测试 manifest/Markdown，再 build/install 到独立目录。两个全新 `python -I` probe 均去除业务/provider 环境变量、确认 `app.__file__` 来自目标目录；源码/安装包的资源集合、资源 SHA-256 与全部批准版本快照一致：正式包 **1 个资源/0 个批准版本**，临时样本包 **2 个资源/1 个合成批准版本**。正式 wheel 未包含 tests、样本正文或 `.env`，项目 venv 未被安装修改。
+- 正式 manifest 保持空，合成批准内容仅在必要测试 fixture；真实制作者批准与首批资料仍属 M11。`wateragents-db check --test-database` 验证独立测试库 head 为 `20261020_02`，M3 无新增 DDL；未对业务库执行升级/测试。`git diff --cached --check`、50 个本地文档链接与代码围栏通过。构建缓存、wheel、安装目录、日志/XML 仅留本机，没有新增阶段状态 Markdown。
+- 验证等级：本地完整后端、真实 PostgreSQL、实际 wheel 安装/读取；真实供应商、浏览器、hosted CI、专业批准与 pH 实测：**not run**。M4–12 保持未完成；M6 接入导入入口及生产 worker 生命周期。
+
 
 ## Milestone 4：草稿、人工检查与本地管理 API
 
@@ -658,4 +666,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–2 的实际命令与证据见对应完成记录；Milestone 3–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–3 的实际命令与证据见对应完成记录；Milestone 4–12、内容审核、实测实验与最终功能验收仍待实施。

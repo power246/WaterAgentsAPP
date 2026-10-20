@@ -14,6 +14,10 @@ def bundled_guideline_id(bundle_key: str) -> UUID:
     return uuid5(NAMESPACE_URL, f"wateragents:guideline:bundle:{bundle_key}")
 
 
+def bundled_guideline_version_id(bundle_key: str, version_number: int) -> UUID:
+    return uuid5(NAMESPACE_URL, f"wateragents:guideline:bundle:{bundle_key}:version:{version_number}")
+
+
 class GuidelineIdentity(DomainModel):
     guideline_id: UUID
     family_root_id: UUID

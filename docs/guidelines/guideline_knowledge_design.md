@@ -93,6 +93,10 @@ flowchart TD
 
 内置包建议放在 `backend/app/infrastructure/guidelines/bundled/`，由 `manifest.json` 引用 `.md` 正文。manifest 固定 key、version、title、metadata、source refs、正文 SHA-256 和制作者检查记录。使用 JSON，首版不新增 YAML 依赖。打包时显式配置 package data；wheel 安装和源码运行都必须能读到相同资源。
 
+M3 的资源格式为 `{"schema_version": 1, "documents": [...]}`；每条包含 `bundle_key`、正整数 `version`、包内相对 `.md` 路径 `body_resource`、`body_digest`、`content_digest`、`model_view_digest`、`metadata` 与完整 `GuidelineReview`。`metadata` 沿用内容字段但不拥有正文；正文先 NFC/LF 规范化，再以 UTF-8 SHA-256 校验，随后校验完整内容、已登记参数、安全 model view 及其 canonical digest。review 必须显式绑定稳定 document UUID 与 content digest，不能从正文或元数据自动补造。reader 使用 `importlib.resources`；version UUID 使用 UUIDv5 名称 `wateragents:guideline:bundle:{key}:version:{number}`。重复 JSON 字段、重复 key/version、路径越界、缺文件或校验失败使该资源集读取失败。
+
+正式 `bundled/manifest.json` 当前为空；首批真实资料与制作者实际批准由 M11 完成。合成批准样本仅位于 `backend/tests/fixtures/guidelines/`。`BundledGuidelineImporter.import_all()` 将 reader 的批准版本交给 repository，原子保存不可变版本与 `import_bundled` pending operation，接入持久化准备队列；是否 available 仍以完成准备后的目录为准。资源错误作为 safe error report 返回，各 family 的数据库冲突分别报告，均不清空已有资料库。重复导入复用当前 receipt，不重置失败次数或替换手动 retry；新 base version 只 supersede 旧 base 准备任务，保留 local override 的 epoch/任务。新安装允许从发行版本号直接开始；旧包缺项不删除数据库内容，未曾导入的低版本不能逆转已有更高版本意图。M6 负责运行时 composition、调用导入入口和调度 worker。
+
 ### 4.2 有效版本选择
 
 每个 family root 在任一 catalog revision 下至多有一个有效版本：
@@ -107,6 +111,8 @@ flowchart TD
 停用作用于 family，不暗中退回被用户替换或停用的内置内容。“恢复程序自带版本”是单独的显式操作，采用最新可用 bundled 版；保留本地修改历史。再次编辑已有 override 时，从其当前本地内容继续。
 
 发行包新增版本不覆盖本地 override，也不自动合并正文。界面可显示“内置版本已更新”；用户可以查看、继续保留本地修改，或恢复默认。相同 bundle key/version 出现不同 digest 时报告资源版本冲突，不覆盖旧记录。
+
+M3 的首次 `local_edit` 在 root revision CAS 下核对明确的 base version/digest，复制为独立 override draft（默认 `user_authored`，保留 source refs/base provenance，不复制审核资格）；已有 override 时返回当前本地 document，不再用发行正文覆盖。两条并发请求共享唯一 override identity，receipt 重放继续先于 CAS。有效目录只选择已完成准备的 active pointer：ready override 优先，否则 ready bundled/custom；pending/failed 不替换旧有效版，停用 root 始终排除整个 family。显式 restore 还核对目标为当前 generation 中最新已完成准备的 bundled 版本；只有向量但 operation 尚未完成的版本不能作为目标。恢复时清除 override 当前 active pointer，保留其草稿与全部不可变历史，后续发行更新继续选择内置内容；重新编辑并人工发布本地稿后才能再次激活 override。
 
 ## 5. 内容契约、来源与人工发布
 

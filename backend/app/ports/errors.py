@@ -80,6 +80,14 @@ class GuidelineConflictError(PortError):
         self.code = code
 
 
+class GuidelineBundleError(InvalidPortResponseError):
+    """A packaged guideline resource failed validation; details remain private."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__("Bundled guideline resources are invalid or unavailable.")
+        self.code = code
+
+
 class WaterbodyModelPortError(PortError):
     """Base class for safe, provider-neutral waterbody model failures."""
 

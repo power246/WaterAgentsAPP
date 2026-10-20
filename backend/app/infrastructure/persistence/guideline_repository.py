@@ -14,6 +14,7 @@ from app.domain.guidelines import (
     GuidelineOperation, GuidelineOperationKind, GuidelineOrigin, GuidelineVersionV1,
 )
 from app.domain.guidelines.canonical import canonical_text
+from app.domain.guidelines.identity import bundled_guideline_version_id
 from app.domain.guidelines.mutation_bodies import action_body, create_body, publish_body, save_body
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.memory_rag.embedding_vector import EmbeddingVector
@@ -142,9 +143,9 @@ class PostgresGuidelineRepository:
             "draft_digest": None if draft is None else draft.content_digest})
 
     async def _accept(self, connection, mutation, *, document_id=None, version_id=None,
-                      revision=None, content_digest=None, pending=False, epoch=None):
+                      revision=None, content_digest=None, pending=False, epoch=None, status_code=None):
         receipt = GuidelineMutationReceipt(
-            mutation=mutation, status_code=202 if pending else (201 if mutation.kind is GuidelineOperationKind.CREATE else 200),
+            mutation=mutation, status_code=status_code or (202 if pending else (201 if mutation.kind is GuidelineOperationKind.CREATE else 200)),
             operation_id=uuid4(), document_id=document_id, version_id=version_id,
             accepted_revision=revision, content_digest=content_digest,
         )
@@ -185,6 +186,101 @@ class PostgresGuidelineRepository:
             ), {"id": identity.guideline_id})
             return await self._accept(connection, mutation, document_id=identity.guideline_id,
                                       revision=1, content_digest=draft.content_digest)
+
+    async def local_edit(self, document_id: UUID, base_version_id: UUID, base_content_digest: str, *,
+                         expected_revision: int, mutation: GuidelineMutation):
+        mutation.require_request(GuidelineOperationKind.LOCAL_EDIT, action_body(
+            document_id, expected_revision, base_version_id=str(base_version_id), base_content_digest=base_content_digest))
+        async with self._connection(write=True) as connection:
+            if receipt := await self._receipt(connection, mutation):
+                return receipt
+            root_id, family = await self._document_family(connection, document_id)
+            root = family[root_id]
+            if root_id != document_id or root["origin"] != "bundled":
+                raise GuidelineConflictError("guideline_base_missing")
+            existing = next((row for row in family.values() if row["origin"] == "local_override"), None)
+            if existing is not None:
+                return await self._accept(connection, mutation, document_id=existing["document_id"],
+                                          revision=existing["revision"], content_digest=existing["draft_digest"])
+            self._require_revision(root, expected_revision)
+            body = await connection.scalar(text(
+                "SELECT snapshot FROM guideline_versions WHERE document_id = :doc AND version_id = :version "
+                "AND content_digest = :digest"
+            ), {"doc": root_id, "version": base_version_id, "digest": base_content_digest})
+            if body is None:
+                raise GuidelineConflictError("guideline_base_changed")
+            base = GuidelineVersionV1.model_validate(body)
+            identity = GuidelineIdentity(
+                guideline_id=uuid4(), family_root_id=root_id, origin="local_override",
+                base_bundle_key=root["bundle_key"], based_on_version_id=base_version_id,
+                base_content_digest=base_content_digest,
+            )
+            draft = GuidelineDraftV1.model_validate({**base.content.model_dump(), "source_kind": "user_authored"})
+            await self._insert_document(connection, identity, draft)
+            await connection.execute(text(
+                "UPDATE guideline_documents SET revision = revision + 1 WHERE document_id IN (:root, :doc)"
+            ), {"root": root_id, "doc": identity.guideline_id})
+            return await self._accept(connection, mutation, document_id=identity.guideline_id, revision=1,
+                                      content_digest=draft.content_digest, status_code=201)
+
+    async def import_bundled_version(self, version: GuidelineVersionV1):
+        version = GuidelineVersionV1.model_validate(version.model_dump())
+        identity = version.identity
+        if (identity.origin is not GuidelineOrigin.BUNDLED
+                or version.version_id != bundled_guideline_version_id(identity.bundle_key, version.version_number)):
+            raise ValueError("bundled import requires a stable packaged version identity")
+        version.content.require_registered_parameters(self._registry)
+        async with self._connection(write=True) as connection:
+            family = await self._family(connection, identity.family_root_id)
+            if not family:
+                await self._insert_document(connection, identity)
+                family = await self._family(connection, identity.family_root_id)
+            root = family[identity.guideline_id]
+            existing = (await connection.execute(text(
+                "SELECT * FROM guideline_versions WHERE document_id = :doc AND version_number = :number"
+            ), {"doc": identity.guideline_id, "number": version.version_number})).mappings().one_or_none()
+            if existing is not None and existing["content_digest"] != version.content.content_digest:
+                raise GuidelineConflictError("guideline_bundle_version_conflict")
+            maximum = await connection.scalar(text(
+                "SELECT COALESCE(MAX(version_number), 0) FROM guideline_versions WHERE document_id = :doc"
+            ), {"doc": identity.guideline_id})
+            if existing is None and version.version_number < maximum:
+                raise GuidelineConflictError("guideline_bundle_older_version")
+            if existing is not None:
+                operation = (await connection.execute(text(
+                    "SELECT * FROM guideline_operations WHERE document_id = :doc AND version_id = :version "
+                    "ORDER BY CASE WHEN state IN ('pending', 'running', 'failed') AND activation_epoch = :epoch THEN 0 "
+                    "WHEN state = 'succeeded' THEN 1 ELSE 2 END, next_attempt_at DESC, operation_id DESC LIMIT 1"
+                ), {"doc": identity.guideline_id, "version": existing["version_id"],
+                    "epoch": root["activation_epoch"]})).mappings().one_or_none()
+                if operation is not None and (
+                    version.version_number < maximum or root["active_version_id"] == existing["version_id"]
+                    or (operation["state"] in {"pending", "running", "failed"}
+                        and operation["activation_epoch"] == root["activation_epoch"]
+                        and root["pending_version_id"] == existing["version_id"])
+                ):
+                    return GuidelineMutationReceipt.model_validate(operation["accepted_response"])
+            else:
+                await connection.execute(text(
+                    "INSERT INTO guideline_versions (version_id, document_id, family_root_id, version_number, "
+                    "content_digest, snapshot) VALUES (:id, :doc, :root, :number, :digest, CAST(:body AS jsonb))"
+                ), {"id": version.version_id, "doc": identity.guideline_id, "root": identity.family_root_id,
+                    "number": version.version_number, "digest": version.content.content_digest, "body": version.model_dump_json()})
+            version_id = version.version_id if existing is None else existing["version_id"]
+            await connection.execute(text(
+                "UPDATE guideline_operations SET state = 'superseded', lease_owner = NULL, lease_until = NULL, "
+                "safe_error_code = NULL WHERE document_id = :doc AND state IN ('pending', 'running', 'failed')"
+            ), {"doc": identity.guideline_id})
+            await connection.execute(text(
+                "UPDATE guideline_documents SET pending_version_id = :version, revision = revision + 1 WHERE document_id = :doc"
+            ), {"doc": identity.guideline_id, "version": version_id})
+            mutation = GuidelineMutation.for_request(uuid4(), GuidelineOperationKind.IMPORT_BUNDLED, {
+                "bundle_key": identity.bundle_key, "version_number": version.version_number,
+                "content_digest": version.content.content_digest,
+            })
+            return await self._accept(connection, mutation, document_id=identity.guideline_id, version_id=version_id,
+                                      revision=root["revision"] + 1, content_digest=version.content.content_digest,
+                                      pending=True, epoch=root["activation_epoch"])
 
     async def save_draft(self, document_id: UUID, draft: GuidelineDraftV1, *, expected_revision: int,
                          mutation: GuidelineMutation):
@@ -510,21 +606,33 @@ class PostgresGuidelineRepository:
         if not ready:
             raise GuidelineConflictError("guideline_embedding_not_ready")
 
+    async def _select_effective(self, connection, root_id):
+        return await connection.scalar(text(
+            "SELECT v.version_id FROM guideline_documents d JOIN guideline_documents r ON r.document_id = d.family_root_id "
+            "JOIN guideline_versions v ON v.version_id = d.active_version_id "
+            "JOIN guideline_catalog_state c ON c.singleton_id = 1 "
+            "JOIN guideline_embeddings b ON b.version_id = v.version_id AND b.generation_id = c.active_generation_id "
+            "WHERE d.family_root_id = :root AND NOT r.disabled "
+            "ORDER BY CASE WHEN d.origin = 'local_override' THEN 0 ELSE 1 END, v.version_number DESC LIMIT 1"
+        ), {"root": root_id})
+
+    async def _refresh_catalog(self, connection, root_id):
+        selected = await self._select_effective(connection, root_id)
+        current = await connection.scalar(text(
+            "SELECT version_id FROM guideline_catalog_entries WHERE family_root_id = :root AND valid_to_revision IS NULL"
+        ), {"root": root_id})
+        if current != selected:
+            await self._replace_catalog(connection, root_id, selected)
+        return selected
+
     async def activate_version(self, claim: GuidelineOperation, *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, root_id, family = await self._fence(connection, claim, now)
             await self._require_ready(connection, row["version_id"])
-            document, root = family[row["document_id"]], family[root_id]
             await connection.execute(text(
                 "UPDATE guideline_documents SET active_version_id = :version, pending_version_id = NULL WHERE document_id = :id"
             ), {"id": row["document_id"], "version": row["version_id"]})
-            current_origin = await connection.scalar(text(
-                "SELECT d.origin FROM guideline_catalog_entries e JOIN guideline_versions v ON v.version_id = e.version_id "
-                "JOIN guideline_documents d ON d.document_id = v.document_id "
-                "WHERE e.family_root_id = :root AND e.valid_to_revision IS NULL"
-            ), {"root": root_id})
-            if not root["disabled"] and not (document["origin"] == "bundled" and current_origin == "local_override"):
-                await self._replace_catalog(connection, root_id, row["version_id"])
+            await self._refresh_catalog(connection, root_id)
             await connection.execute(text(
                 "UPDATE guideline_operations SET state = 'succeeded', lease_owner = NULL, lease_until = NULL WHERE operation_id = :id"
             ), {"id": row["operation_id"]})
@@ -545,14 +653,14 @@ class PostgresGuidelineRepository:
                 "SELECT version_id FROM guideline_catalog_entries WHERE family_root_id = :root "
                 "ORDER BY valid_from_revision DESC LIMIT 1"
             ), {"root": root_id})
-            if enabled and previous is not None:
-                await self._require_ready(connection, previous)
             await self._supersede(connection, root_id)
             await connection.execute(text(
                 "UPDATE guideline_documents SET disabled = :disabled, activation_epoch = activation_epoch + 1, "
                 "revision = revision + 1 WHERE document_id = :id"
             ), {"id": root_id, "disabled": not enabled})
-            await self._replace_catalog(connection, root_id, previous if enabled else None)
+            selected = await self._refresh_catalog(connection, root_id)
+            if enabled and previous is not None and selected is None:
+                raise GuidelineConflictError("guideline_embedding_not_ready")
             return await self._accept(connection, mutation, document_id=root_id, revision=expected_revision + 1)
 
     async def restore_bundled(self, document_id: UUID, version_id: UUID, *, expected_revision: int, mutation: GuidelineMutation):
@@ -572,11 +680,23 @@ class PostgresGuidelineRepository:
             if digest is None:
                 raise GuidelineConflictError("guideline_version_conflict")
             await self._require_ready(connection, version_id)
+            latest = await connection.scalar(text(
+                "SELECT v.version_id FROM guideline_versions v JOIN guideline_embeddings b ON b.version_id = v.version_id "
+                "JOIN guideline_catalog_state c ON c.active_generation_id = b.generation_id AND c.singleton_id = 1 "
+                "WHERE v.document_id = :doc AND EXISTS (SELECT 1 FROM guideline_operations o "
+                "WHERE o.version_id = v.version_id AND o.state = 'succeeded') "
+                "ORDER BY v.version_number DESC LIMIT 1"
+            ), {"doc": root_id})
+            if latest != version_id:
+                raise GuidelineConflictError("guideline_bundle_target_changed")
             await self._supersede(connection, root_id)
             await connection.execute(text(
                 "UPDATE guideline_documents SET disabled = false, activation_epoch = activation_epoch + 1, "
-                "revision = revision + 1 WHERE document_id = :id"
-            ), {"id": root_id})
-            await self._replace_catalog(connection, root_id, version_id)
+                "revision = revision + 1, active_version_id = :version WHERE document_id = :id"
+            ), {"id": root_id, "version": version_id})
+            await connection.execute(text(
+                "UPDATE guideline_documents SET active_version_id = NULL WHERE family_root_id = :root AND origin = 'local_override'"
+            ), {"root": root_id})
+            await self._refresh_catalog(connection, root_id)
             return await self._accept(connection, mutation, document_id=root_id, version_id=version_id,
                                       revision=expected_revision + 1, content_digest=digest)

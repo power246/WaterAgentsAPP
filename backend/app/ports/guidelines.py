@@ -3,7 +3,7 @@ from datetime import datetime
 from uuid import UUID
 
 from app.domain.guidelines.catalog_snapshot import GuidelineCatalogSnapshot
-from app.domain.guidelines.canonical import Revision
+from app.domain.guidelines.canonical import Digest, Revision
 from app.domain.guidelines.canonical_document import CanonicalGuidelineDocumentV1
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
 from app.domain.guidelines.document_snapshot import GuidelineDocumentSnapshot
@@ -45,6 +45,13 @@ class GuidelineRepositoryPort(Protocol):
     async def publish_version(
         self, version: GuidelineVersionV1, *, expected_revision: Revision,
         mutation: GuidelineMutation,
+    ) -> GuidelineMutationReceipt: ...
+
+    async def import_bundled_version(self, version: GuidelineVersionV1) -> GuidelineMutationReceipt: ...
+
+    async def local_edit(
+        self, document_id: UUID, base_version_id: UUID, base_content_digest: Digest, *,
+        expected_revision: Revision, mutation: GuidelineMutation,
     ) -> GuidelineMutationReceipt: ...
 
     async def read_catalog(self) -> GuidelineCatalogSnapshot: ...

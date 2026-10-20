@@ -10,3 +10,4 @@ class GuidelineOperationKind(DomainEnum):
     RESTORE_BUNDLED = "restore_bundled"
     REBUILD_INDEX = "rebuild_index"
     RETRY = "retry"
+    IMPORT_BUNDLED = "import_bundled"
