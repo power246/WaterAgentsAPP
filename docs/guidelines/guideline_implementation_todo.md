@@ -223,7 +223,7 @@ git diff --check
 
 完成记录（2026-10-20）：
 
-- 分支保持 `codex/guidelines-m0`，起点 `a7f3abd7dc24fc99db7de6a9be4f445d24547491`；本阶段实现 commit：提交后补记。没有新建 worktree 或阶段 Markdown。
+- 分支保持 `codex/guidelines-m0`，起点 `a7f3abd7dc24fc99db7de6a9be4f445d24547491`；本阶段实现 commit：`cc54ca23e761cc1460fbd148248c77a0fa8214fa`（`feat(guidelines): add milestone 2 persistence primitives`）；随后仅补记此 hash。没有新建 worktree 或阶段 Markdown。
 - 新 head 为 `20261020_02`（接 `20261020_01`）。七表、部分唯一索引、复合 FK、GiST 区间排斥及不可变 trigger 已落地；schema check 核对表/列、约束、索引、trigger 与扩展。原业务/归档表结构未改，旧 head/表清单测试同步更新。
 - `PostgresGuidelineRepository` 提供草稿、批准版本、目录历史、generation/profile、向量和 operation 持久化。所有写事务先锁 catalog，再按 UUID 锁 family documents，最后处理 operation/version；receipt 先于 CAS。fingerprint 取规范化请求，重放保留原 ID/accepted response；保存草稿不改变 activation epoch。
 - claim 可跨 repository 重建恢复，最多三次自动尝试；重试原批准 version 时新建 operation，保留旧 receipt。attempt/owner/lease/epoch 共同隔离旧 worker，尤其在取得资源锁后检查 lease，防止等待锁期间过期的请求完成。停用/恢复/新本地发布使旧意图失效；失败保留旧有效版，内置更新保留 override 的批准意图与优先级。具体事务说明已补入主设计 §6.1。
