@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–8 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换、run pin 与 session 惰性检索、模型可选参考和内部引用绑定，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–9 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换、run pin 与 session 惰性检索、模型可选参考、typed 记录和结果/历史引用闭包，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -479,23 +479,23 @@ git diff --check
 
 ### Work
 
-- [ ] 注册 `guideline_run_context`、`guideline_retrieval`、`guideline_delivery`、`guideline_usage`、`result_guideline_usage`，默认 `rag_eligible=false`；补齐 schema、refs、public projection 与 readers。
-- [ ] 在真实 model port 提交处记录 delivery，关联 request/retrieval/run context、operation/phase、最终 alias/正文子集和预算状态；仅构建 request 不标为已提供。
-- [ ] 保存能重建实际知识输入的 model view、原文/sources/digests 或合法不可变引用；transport failure 只表示随请求提交/请求失败，不能标 used。
-- [ ] 保存 operation usage target；result assembler 只沿最终选用的 numeric lineage 与有效 drafts 生成 `result_guideline_usage`，排除未选候选及其他 cell 引用。
-- [ ] result usage 引用原 usages，由现有 `analysis_detail.transcript_item_refs` 接入结果；保存 result_id + 合法 target keys，不反指未来 result transcript item 形成循环。
-- [ ] 维持单一 registry/writer/reader 和两层 SSE；history snapshot viewer 不依赖管理库当前 active 内容，旧记录不合成不存在的引用。
-- [ ] 更新 M8 source closure/projection，识别新引用且不索引整份用户说明书、不增强 inference eligibility/confidence；真正改变旧 content schema 时保留旧 reader/digest，生产只写单一当前 schema。
-- [ ] writer 拒绝知识记录时，不注入无法建立合法引用的内容；沿原 persistence failure 契约处理，不掩盖分析本身的存储故障。
+- [x] 注册 `guideline_run_context`、`guideline_retrieval`、`guideline_delivery`、`guideline_usage`、`result_guideline_usage`，默认 `rag_eligible=false`；补齐 schema、refs、public projection 与 readers。
+- [x] 在真实 model port 提交处记录 delivery，关联 request/retrieval/run context、operation/phase、最终 alias/正文子集和预算状态；仅构建 request 不标为已提供。
+- [x] 保存能重建实际知识输入的 model view、原文/sources/digests 或合法不可变引用；transport failure 只表示随请求提交/请求失败，不能标 used。
+- [x] 保存 operation usage target；result assembler 只沿最终选用的 numeric lineage 与有效 drafts 生成 `result_guideline_usage`，排除未选候选及其他 cell 引用。
+- [x] result usage 引用原 usages，由现有 `analysis_detail.transcript_item_refs` 接入结果；保存 result_id + 合法 target keys，不反指未来 result transcript item 形成循环。
+- [x] 维持单一 registry/writer/reader 和两层 SSE；history snapshot viewer 不依赖管理库当前 active 内容，旧记录不合成不存在的引用。
+- [x] 更新 M8 source closure/projection，识别新引用且不索引整份用户说明书、不增强 inference eligibility/confidence；真正改变旧 content schema 时保留旧 reader/digest，生产只写单一当前 schema。
+- [x] writer 拒绝知识记录时，不注入无法建立合法引用的内容；沿原 persistence failure 契约处理，不掩盖分析本身的存储故障。
 
 ### Tests
 
-- [ ] 验证 request constructed/实际提交/transport failure/模型未引用/有效引用五种状态；前端可读的 provided 名单与实际 payload 完全一致。
-- [ ] numeric 先产生两个候选、最终只选一个时，结果仅包含被选 lineage 的引用；相同参数不同 cell/window 不能串用 usage。
-- [ ] 验证 step 零基 index、overall、task/cell/window 目标合法，未知 alias/跨 run 引用不生成可点击链接，引用图无循环/悬空。
-- [ ] live SSE、数据库持久化和 history API 读回一致；发布新版、停用、恢复、内置更新后仍打开运行当时原文/出处。
-- [ ] 验证新增引用不令 M8 index/source closure 失败，不把 guideline 作为 historical inference；旧历史 fixture/hash 与 stateless/memory-disabled 回归通过。
-- [ ] 验证取消/terminal 后无迟到模型任务或 delivery；安全公开投影不含 credential/raw provider envelope。
+- [x] 验证 request constructed/实际提交/transport failure/模型未引用/有效引用五种状态；前端可读的 provided 名单与实际 payload 完全一致。
+- [x] numeric 先产生两个候选、最终只选一个时，结果仅包含被选 lineage 的引用；相同参数不同 cell/window 不能串用 usage。
+- [x] 验证 step 零基 index、overall、task/cell/window 目标合法，未知 alias/跨 run 引用不生成可点击链接，引用图无循环/悬空。
+- [x] live SSE、数据库持久化和 history API 读回一致；发布新版、停用、恢复、内置更新后仍打开运行当时原文/出处。
+- [x] 验证新增引用不令 M8 index/source closure 失败，不把 guideline 作为 historical inference；旧历史 fixture/hash 与 stateless/memory-disabled 回归通过。
+- [x] 验证取消/terminal 后无迟到模型任务或 delivery；安全公开投影不含 credential/raw provider envelope。
 
 ### Verify
 
@@ -510,7 +510,13 @@ git diff --check
 
 提交边界：typed contents/registry、reference closure、assembler sidecars、public/history projections、generated types 与测试；不能散改所有数值 payload 加重复 citation 字段。
 
-完成记录：`pending`。
+完成记录：**complete**（2026-10-21）。
+
+- 保持 `codex/guidelines-m0`，基线 `87c920b563323582b6e770292b334c38012e63b0`；本阶段实现 commit：`待本地提交后补记`。原设计 §6–9 与本清单就地更新，无新 worktree 或状态 Markdown。
+- 五类 V1 知识记录接入同一 registry/buffer/workflow writer，默认不进入 RAG；run pin 仅保存目录/profile identity。实际模型端口保存 request/delivery，构造请求不算提交，供应商失败沿原 response 表达，明确引用才保存 usage。结果通过既有 transcript refs 关联独立 result usage，只映射采用的 numeric operation/task 依赖及合法 cell/window/零基 step/overall，拒绝跨 run/session、伪造版本、循环和错误目标。单条内容 API 有界加载引用链后再核对，原数值 payload、旧 schema/hash/资格与两层 SSE 保持原语义；拒写向上传播，不吞成普通数值任务失败。
+- 新增 **28 项**记录链测试，覆盖五种提交/采用状态、同任务同窗第二候选排除、修复来源、安全公开内容、取消/terminal、数值调度拒写、未知版本与悬空 delivery。真实本地 HTTP SSE、PostgreSQL 重启、history API 与原文/sources 读回通过；目录 publish/disable/restore/bundle-update 使用可控 fake，确认历史不读取当前目录。M8 source reader/projection 验证使用明确完成状态的 fixture，保留原 canonical/result projection 且不索引说明书正文。定向 **388 passed**，52.92s；最终内容读取及 M7 reader 复验 **35 passed**，27.52s；pin 保存顺序 **2 passed**，0.29s。
+- 最终完整后端 **3305 passed，0 failed/errors/skipped**，377.05s（两条既有弃用 warning）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--show-capture=no','--basetemp','.tmp/guidelines-m9-20261021/full-verified','--junitxml','.tmp/guidelines-m9-20261021/full-verified.xml'])`。`npm --prefix frontend run generate:api` / `check:api` 通过，公开 JsonValue 契约未变，生成文件无差异；测试库结构检查为 `20261020_02`，无新迁移，未改业务库或 `.env`，日志/XML 不提交。
+- 验证为本地确定性模型、真实 PostgreSQL 与 HTTP，真实 embedding/分析供应商、浏览器 UI、hosted CI、内容人工批准和 pH 实测均 **not run**。M10 前端与引用 viewer、M11 内容/实测及 M12 最终验收保持未勾选。
 
 ## Milestone 10：前端创建、发布与引用查看
 
@@ -700,4 +706,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–8 的实际命令与证据见对应完成记录；Milestone 9–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–9 的实际命令与证据见对应完成记录；Milestone 10–12、内容审核、实测实验与最终功能验收仍待实施。

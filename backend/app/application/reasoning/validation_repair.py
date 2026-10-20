@@ -229,7 +229,7 @@ class ValidationExchange:
         if self._guidelines is not None:
             scopes = {cell.cell_id: cell for cell in batch.cells}
             for cell in validated.cells:
-                self._guidelines.accept(audit.accepted_operation_id,
+                await self._guidelines.accept(audit.accepted_operation_id,
                     GuidelineUsageTarget(kind="cell", cell_id=cell.cell_id, window_id=scopes[cell.cell_id].window_id), cell.guideline_refs)
         return ValidatedBatchExchange(validated=validated, audit=audit)
 
@@ -281,11 +281,11 @@ class ValidationExchange:
         )
         if self._guidelines is not None:
             operation = audit.accepted_operation_id
-            self._guidelines.accept(operation, GuidelineUsageTarget(kind="overall", key="overall"), validated.overall.guideline_refs)
+            await self._guidelines.accept(operation, GuidelineUsageTarget(kind="overall", key="overall"), validated.overall.guideline_refs)
             for window in validated.window_assessments:
-                self._guidelines.accept(operation, GuidelineUsageTarget(kind="window", window_id=window.window_id), window.guideline_refs)
+                await self._guidelines.accept(operation, GuidelineUsageTarget(kind="window", window_id=window.window_id), window.guideline_refs)
             for index, step in enumerate(validated.analysis_detail.steps):
-                self._guidelines.accept(operation, GuidelineUsageTarget(kind="analysis_step", step_index=index), step.guideline_refs)
+                await self._guidelines.accept(operation, GuidelineUsageTarget(kind="analysis_step", step_index=index), step.guideline_refs)
         return ValidatedSynthesisExchange(validated=validated, audit=audit)
 
     async def _run(

@@ -72,6 +72,11 @@ def test_production_registry_has_only_real_writable_types() -> None:
     registry = create_production_registry()
 
     assert registry.writable_keys == (
+        ("guideline_run_context", 1),
+        ("guideline_retrieval", 1),
+        ("guideline_delivery", 1),
+        ("guideline_usage", 1),
+        ("result_guideline_usage", 1),
         ("analysis_request", 1),
         ("lifecycle_event", 2),
         ("error", 1),

@@ -252,6 +252,9 @@ class M6RunnerService:
             session_id=task.task.session_id,
             private_values=self._private_values,
         )
+        if guidelines is not None:
+            guidelines.bind_transcript(store)
+            store.guidelines = guidelines
         recording_port = store.recording_port(self._model_router)
         planning_loop = EvidencePlanningLoop(
             acquisition=self._m5_runtime.acquisition,

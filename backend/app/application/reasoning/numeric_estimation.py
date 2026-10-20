@@ -344,7 +344,7 @@ class ModelNumericEstimator:
                 )[:4000],
             )
         if self._guidelines is not None:
-            self._guidelines.accept(operation_id,
+            await self._guidelines.accept(operation_id,
                 GuidelineUsageTarget(kind="numeric_task", task_id=task.task_id, window_id=task.window_id), result.guideline_refs)
         return NumericEstimateResult(
             value=result.value,

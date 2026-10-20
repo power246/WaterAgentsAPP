@@ -152,6 +152,7 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
         if self._guideline_pinner is not None:
             guidelines = await self._guideline_pinner(context.run.run_id, context.cancellation)
             context.cancellation.checkpoint()
+            await guidelines.save(context.operations)
             context = replace(context, guidelines=guidelines)
         await self._execution_stage.execute(
             context,

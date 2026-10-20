@@ -66,6 +66,16 @@ class GuidelineRunContext:
         self._registry = registry
         self._policy = policy
         self._clock = clock
+        self._record_lock = asyncio.Lock()
+        self._record_ref = None
+
+    async def save(self, operations):
+        from app.application.guidelines.transcript import write_run_context
+
+        async with self._record_lock:
+            if self._record_ref is None:
+                self._record_ref = await write_run_context(operations, self.pin)
+            return self._record_ref
 
     @classmethod
     async def prepare(cls, run_id: UUID, *, repository: "GuidelineRepositoryPort | None",
@@ -101,8 +111,10 @@ class GuidelineRunContext:
                                              self.pin.catalog.profile, self._registry)
             except ValueError:
                 code = "guideline_embedding_configuration_invalid"
-        return GuidelineSessionKnowledge(self.pin, task.task.session_id, query, self._repository, self._embedding,
+        session = GuidelineSessionKnowledge(self.pin, task.task.session_id, query, self._repository, self._embedding,
             self._policy, self._clock, deadline, task.task.cancellation_token, code)
+        session.run_context = self
+        return session
 
 
 class GuidelineSessionKnowledge:

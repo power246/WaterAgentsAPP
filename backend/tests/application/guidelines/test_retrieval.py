@@ -231,7 +231,15 @@ def test_workflow_pins_once_after_saved_topology_and_unavailable_pin_preserves_e
                 return GRAPH
         class Operations:
             async def reserve_transcript_item(self, run_id): return SimpleNamespace(item_id=uuid4())
-            async def finalize_transcript_item(self, *args): events.append("topology_saved")
+            async def finalize_transcript_item(self, selected_run, item_id, content_type, schema_version, body):
+                assert selected_run == run_id and schema_version == 1
+                if content_type == "guideline_run_context":
+                    assert body.run_id == run_id and body.status == ("ready" if available else "unavailable")
+                    assert body.profile_id == PROFILE.profile_id
+                    events.append("guideline_run_context_saved")
+                else:
+                    assert content_type == "topology_ready"
+                    events.append("topology_saved")
         class Execution:
             async def execute(self, value, *args, **kwargs):
                 events.append("execution")
@@ -250,7 +258,7 @@ def test_workflow_pins_once_after_saved_topology_and_unavailable_pin_preserves_e
         original=WorkflowContext(run=SimpleNamespace(run_id=run_id),query="original",cancellation=CancellationToken(asyncio.Event()),
             request=SimpleNamespace(),operations=Operations())
         await workflow.run(original)
-        assert events==["query","topology","topology_saved","pin","execution"]
+        assert events==["query","topology","topology_saved","pin","guideline_run_context_saved","execution"]
         assert repository.reads==1 and not embedding.calls and original.guidelines is None
     asyncio.run(exercise())
 

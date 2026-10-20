@@ -47,6 +47,12 @@ class GuidelineModelContext:
         self.usages: list[GuidelineOperationUsage] = []
         self._selection: GuidelineRetrievalResult | None = None
         self._evidence: dict[str, object] = {}
+        self.transcript = None
+
+    def bind_transcript(self, store):
+        from app.application.guidelines.transcript import GuidelineTranscript
+
+        self.transcript = GuidelineTranscript(self, store)
 
     def _checkpoint(self, request, cancellation):
         error = (WaterbodyModelCancelledError if cancellation.is_requested() else
@@ -67,6 +73,9 @@ class GuidelineModelContext:
             if self._selection is None and versions is None:
                 self._selection = await self.session.get_or_load()
             self._checkpoint(request, cancellation)
+            if self.transcript is not None:
+                await self.transcript.retrieved(self._selection or GuidelineRetrievalResult(status="no_match"))
+                self._checkpoint(request, cancellation)
             keys = set(parameters)
             matches = tuple(match for match in (self._selection.matches if self._selection is not None else ())
                 if (not keys or keys.intersection((*match.version.content.parameter_keys, *match.version.content.related_parameter_keys)))
@@ -119,13 +128,16 @@ class GuidelineModelContext:
         operation = self.operations.get(operation_id)
         return frozenset(alias for alias, _ in operation.aliases) if operation is not None else frozenset()
 
-    def accept(self, operation_id, target, aliases):
+    async def accept(self, operation_id, target, aliases):
         operation = self.operations[operation_id]
         available = dict(operation.aliases)
         selected = tuple(alias for alias in dict.fromkeys(aliases or ()) if alias in available)
         if selected:
-            self.usages.append(GuidelineOperationUsage(self.session.pin.run_id, self.session.session_id,
-                operation_id, operation.phase, target, selected, tuple(available[alias] for alias in selected)))
+            usage = GuidelineOperationUsage(self.session.pin.run_id, self.session.session_id,
+                operation_id, operation.phase, target, selected, tuple(available[alias] for alias in selected))
+            if self.transcript is not None:
+                await self.transcript.used(usage)
+            self.usages.append(usage)
 
     def bind_evidence(self, fragments):
         self._evidence = {fragment.evidence_id: fragment for fragment in fragments}
@@ -135,8 +147,14 @@ class GuidelineModelContext:
         targets = {cell.cell_id for cell in cells}
         used = {version.version_id for usage in self.usages if usage.target.kind == "cell"
                 and usage.target.cell_id in targets for version in usage.versions}
-        pending = [ref for cell in cells for ref in cell.evidence_refs]
+        numeric = self._numeric_usages(ref for cell in cells for ref in cell.evidence_refs)
+        used.update(version.version_id for usage in numeric for version in usage.versions)
+        return used
+
+    def _numeric_usages(self, references):
+        pending = list(references)
         seen = set()
+        usages = []
         while pending:
             reference = pending.pop()
             if reference in seen:
@@ -149,9 +167,47 @@ class GuidelineModelContext:
             for usage in self.usages:
                 if (str(usage.operation_id) == operation_id and usage.target.kind == "numeric_task"
                     and usage.target.task_id == getattr(fragment.payload, "task_id", None)):
-                    used.update(version.version_id for version in usage.versions)
+                    if usage not in usages:
+                        usages.append(usage)
             pending.extend(ref.evidence_id for ref in getattr(fragment.payload, "input_evidence_refs", ()))
             converted_input = getattr(fragment.payload, "input_evidence_ref", None)
             if converted_input is not None:
                 pending.append(converted_input.evidence_id)
-        return used
+        return tuple(usages)
+
+    async def attach_result_usage(self, result, windows):
+        from app.domain.guidelines import GuidelineResultUsageBinding
+
+        if self.transcript is None:
+            return result
+        bindings = {}
+        points = {point.cell_id: point for series in result.series for point in series.points}
+        window_ids = {(window.start_time, window.end_time): window.window_id for window in windows}
+        by_usage = self.transcript.usage_refs
+
+        def bind(target, usage):
+            ref = next(ref for original, ref in by_usage if original is usage)
+            bindings.setdefault(target, []).append(ref.item_id)
+
+        for usage in self.usages:
+            target = usage.target
+            if target.kind == "cell":
+                point = points.get(target.cell_id)
+                if point is not None and target.window_id == window_ids[(point.start_time, point.end_time)]:
+                    bind(target, usage)
+            elif target.kind == "window" and target.window_id in set(window_ids.values()):
+                bind(target, usage)
+            elif target.kind == "overall" or (target.kind == "analysis_step" and target.step_index < len(result.analysis_detail.steps)):
+                bind(target, usage)
+        for point in points.values():
+            for usage in self._numeric_usages(point.evidence_refs):
+                bind(GuidelineUsageTarget(kind="cell", cell_id=point.cell_id,
+                    window_id=window_ids[(point.start_time, point.end_time)]), usage)
+        projected = tuple(GuidelineResultUsageBinding(result_id=result.result_id, target=target,
+            usage_item_ids=tuple(dict.fromkeys(item_ids))) for target, item_ids in bindings.items())
+        ref = await self.transcript.result_usage(result, projected)
+        if ref is None:
+            return result
+        detail = result.analysis_detail.model_copy(update={"transcript_item_refs": (
+            *result.analysis_detail.transcript_item_refs, str(ref.item_id))})
+        return result.model_copy(update={"analysis_detail": detail})

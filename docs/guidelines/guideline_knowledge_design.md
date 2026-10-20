@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，Milestone 0–8 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索及模型可选参考与内部引用绑定。**知识 typed 记录持久化、结果/历史引用闭包、前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–9 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索、模型可选参考、typed 知识记录与结果/历史引用闭包。**前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -222,7 +222,7 @@ document `revision` 用于编辑与管理 CAS；root `activation_epoch` 用于�
 
 目录不可用不阻止 run 的正常创建/分析；运行的 guideline context 记录 unavailable，并沿原分析契约继续。已有数据库/分析本身故障仍按原服务错误语义处理。
 
-M7 的 [GuidelineRunContext](../../backend/app/application/guidelines/retrieval.py) 在 `QueryTopologyWorkflow` 保存 topology 后、调用执行 stage 前取得一次 catalog，并以 `GuidelineRunPin` 固定 run ID、revision、generation/profile、策略版本及安全可用性状态；`WorkflowContext` 将它传到各 waterbody session。期望 profile 不兼容、缺配置或读取失败记录 unavailable，原执行 stage 继续。查询使用 pin 的 revision intervals 与 retained generation，不读取当前 disabled/active pointer；每轮发布、停用、恢复、切换只改变后续 run。当前 pin 是内存中的 typed context；`guideline_run_context` 的 registry/writer/history 记录由 M9 接入。
+M7 的 [GuidelineRunContext](../../backend/app/application/guidelines/retrieval.py) 在 `QueryTopologyWorkflow` 保存 topology 后、调用执行 stage 前取得一次 catalog，并以 `GuidelineRunPin` 固定 run ID、revision、generation/profile、策略版本及安全可用性状态；`WorkflowContext` 将它传到各 waterbody session。期望 profile 不兼容、缺配置或读取失败记录 unavailable，原执行 stage 继续。查询使用 pin 的 revision intervals 与 retained generation，不读取当前 disabled/active pointer；每轮发布、停用、恢复、切换只改变后续 run。M9 的 `save()` 在现有 workflow writer 保存一次 `guideline_run_context`，session 共用该引用；快照保留 revision、generation、profile ID/digest、策略版本和安全可用性，不序列化凭据或整库。
 
 ## 7. Embedding 与检索
 
@@ -265,7 +265,7 @@ M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标�
 
 `build_guideline_query()` 只采用验证后的问题、canonical 指标、mode、agent/target COMID 和拓扑直接上游数；可选问题过长或包含不安全内容时整项省略，记录 `input_reduced`，结构化字段优先。包括角色前缀的实际输入仍受 8,192 bytes 与该 profile 的保守 max-input 约束，无法容纳必需字段则 unavailable。
 
-每个实际 Agent session 拥有独立 `GuidelineSessionKnowledge.get_or_load()`：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。M8 的 `GuidelineModelContext` 在首次真实 planning/numeric 请求前加载，使用既有实际模型 size estimator 对最终请求整份裁剪，保留 evidence/output 预算；M9 再持久化 retrieval/delivery/usage。
+每个实际 Agent session 拥有独立 `GuidelineSessionKnowledge.get_or_load()`：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。M8 的 `GuidelineModelContext` 在首次真实 planning/numeric 请求前加载，使用既有实际模型 size estimator 对最终请求整份裁剪，保留 evidence/output 预算；M9 已通过既有 writer 持久化 retrieval/delivery/usage；仅实际进入模型端口才记录 delivery。
 
 ### 7.4 初始工程参数
 
@@ -307,7 +307,7 @@ M8 的 [GuidelineModelContext](../../backend/app/application/guidelines/model_co
 
 M8 的 [citation_resolver.py](../../backend/app/application/guidelines/citation_resolver.py) 在原严格 JSON 解析后只清理非法 guideline refs，保留其他字段的严格校验；warning 仅包含固定安全事件/code。numeric response、cell、window、overall 和 analysis step 的 nullable refs 作为内部 metadata 保留，排除于科学模型的 dump/digest。有效引用解析成 operation-local 不可变版本绑定与独立 `GuidelineOperationUsage` sidecar；numeric 绑定 task/window，并沿 `NumericDerivedPayload.model_operation_id` 和 task ID 关联原估值，未给该 payload 添加字段。synthesis 只读取已验证 cell 引用及所选 evidence 的 numeric/转换依赖链，不取未选用候选，也不重新检索。
 
-当前 M8 sidecar 与 `GuidelineRequestSelection` 只表示内部引用及请求构造快照，不声称已保存 typed delivery，也不制造 transcript item IDs 或可点击 citation。既有 request/validation audit 记录实际附带 advisory 的请求；下述 `GuidelineCitationV1`、typed writer/registry、result usage 及 history closure 由 M9 完成，M8 单独提交尚不构成功能上线。
+`GuidelineRequestSelection` 表示请求构造快照。M9 将已解析的 sidecar 绑定到实际保存的 typed delivery 和 model response，再生成 `GuidelineCitationV1` 与 result usage；仅构造 request 不生成 delivery，也不制造 transcript item IDs。既有 request/validation audit 保留实际附带 advisory 的请求。
 
 server 把有效 alias 解析为 `GuidelineCitationV1`：delivery item ref、guideline/family identity、immutable version ID、origin、source_kind 和引用来源 operation/phase。模型不能自行构造版本、URL 或 transcript item identity。
 
@@ -339,6 +339,14 @@ server 把有效 alias 解析为 `GuidelineCitationV1`：delivery item ref、gui
 | `guideline_delivery` | session scope；实际 model operation/phase、对应 retrieval ref、最终随请求提供的 alias/版本/正文子集、预算裁剪情况与提交状态。 |
 | `guideline_usage` | session scope；模型明确返回且通过校验的 citation，绑定 operation、delivery、numeric task/cell/解释 target。 |
 | `result_guideline_usage` | session scope；server 从正式结果采用的数值 lineage 和有效 drafts 构造的引用映射，引用原 usage records，并由结果的既有 transcript refs 关联。 |
+
+M9 的 [transcript_models.py](../../backend/app/application/guidelines/transcript_models.py) 定义上述五类 V1；[transcript.py](../../backend/app/application/guidelines/transcript.py) 经 `ReasoningTranscriptStore` / `WorkflowOperations` 调用同一 registry、buffer 和持久化 writer。`TranscriptRecordingWaterbodyModelPort` 在现有 cancellation commit section 内保存 request/delivery 后进入原模型 delegate，供应商异常仍由既有 response 状态表达，不自动生成 usage。run SSE 保留状态快照，session SSE 传递 typed transcript items，原内容 API 可读取完整快照；没有新增第三层 SSE。
+
+[transcript_validation.py](../../backend/app/application/guidelines/transcript_validation.py) 在写入和历史读取时核对 run/session/operation、实际 advisory 字节对应的 alias/model-view digest、检索版本与引用版本、response 完成状态和 target。知识边只引用更早的 typed items，拒绝循环、错误 owner/version/operation；非法知识记录不通过完整内容 API 展示。run context 保存 profile identity/digest，避免把无关配置或敏感字段带入公开记录。原文、sources 和 model view 保存在批准版本快照中，历史读取不依赖管理库当前 active 内容。
+
+既有 result assembler 完成科学结果后，`GuidelineModelContext.attach_result_usage()` 沿正式 point 的 evidence/数值输入/转换依赖投射 operation usages，数值引用同时匹配 operation 与 task；cell/window 必须一致，step 使用零基 index，overall 使用固定 key。result usage 先保存，再经已有 `analysis_detail.transcript_item_refs` 关联；不反向引用未来 result item。知识记录被 writer 拒绝时停止该路径，传播 `GuidelineTranscriptWriteError`，不把存储错误吞成 numeric task failure 或模型协议错误。
+
+`TranscriptRAGCaseSourceReader` 验证新引用闭包；既有 eligibility 与 projection 保持原科学字段及 canonical/hash 语义，guideline 记录不成为 historical case，不自动索引原文。M9 验证覆盖实际 HTTP SSE、PostgreSQL 快照重启和 history API；管理页与交互式引用 viewer 由 M10 完成。
 
 usage target keys 由 server 从已验证任务/结果建立：numeric task 使用既有 task ID，cell/window 使用既有 cell/window ID；analysis step 使用正式 steps 数组的零基 index，overall 使用固定 `overall`。operation-level binding 和 result-level mapping 分开，不能把一次未采用的候选估值仅凭同参数名称映射到结果。
 

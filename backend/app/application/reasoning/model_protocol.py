@@ -2,6 +2,8 @@ import asyncio
 from typing import Protocol
 
 from pydantic import ValidationError
+from app.application.guidelines.transcript import GuidelineTranscriptWriteError
+from app.application.analysis_runs.workflow import WorkflowStopped
 
 from app.application.reasoning.model_models import (
     RefusalCompleted,
@@ -85,6 +87,8 @@ async def consume_waterbody_model_stream(
                         raise _port_error(WaterbodyModelProtocolError, request)
                     refusal_seen = True
                 content_events.append(event)
+    except (GuidelineTranscriptWriteError, WorkflowStopped):
+        raise
     except WaterbodyModelPortError as error:
         if terminal is not None or not _error_matches_request(error, request):
             raise _port_error(WaterbodyModelProtocolError, request) from None

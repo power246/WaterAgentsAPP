@@ -415,6 +415,11 @@ class TranscriptReader:
         view: ReadView,
     ) -> TranscriptContentResponse:
         selected = await self._select_item(run_id, item_id, view)
+        from app.application.guidelines.transcript_models import GUIDELINE_RECORDS
+
+        root = next((item for item in selected.stored.items if item.item_id == item_id), None)
+        if root is not None and root.content_type in GUIDELINE_RECORDS:
+            selected = await self._hydrate_guideline_content(selected, run_id, root, view)
         parsed = self._parse_items(selected.stored)
         item = next(
             (candidate for candidate in parsed if candidate.item.item_id == item_id),
@@ -422,6 +427,15 @@ class TranscriptReader:
         )
         if item is None or not self._is_visible(item, view):
             raise TranscriptItemNotFoundError(run_id, item_id)
+        if item.item.content_type in GUIDELINE_RECORDS and item.parse_status is not ParseStatus.OK:
+            raise TranscriptContentUnreadableError(run_id, item_id)
+        if item.item.content_type in GUIDELINE_RECORDS:
+            from app.application.guidelines.transcript_validation import validate_guideline_links
+
+            try:
+                validate_guideline_links(item.body, item.item, {read.item.item_id: read for read in parsed}.get)
+            except (ValueError, TypeError, KeyError) as error:
+                raise TranscriptContentUnreadableError(run_id, item_id) from error
         stored_item = next(
             candidate
             for candidate in selected.stored.items
@@ -717,6 +731,23 @@ class TranscriptReader:
             ),
             item_ids,
         )
+
+    async def _hydrate_guideline_content(self, selected, run_id, root, view):
+        if selected.source is ReadSource.POSTGRESQL:
+            return await self._hydrate_session_transcript(selected, run_id, root.session_id, (root.item_id,), view, {})
+        live = await self._live.get_live_read(run_id)
+        if live is None:
+            raise TranscriptRunNotFoundError(run_id)
+        by_id = {item.item_id: item for item in live.items}
+        selected_ids, pending = set(), [root.item_id]
+        while pending:
+            item_id = pending.pop()
+            if item_id in selected_ids or item_id not in by_id:
+                continue
+            selected_ids.add(item_id)
+            pending.extend(by_id[item_id].content.references)
+        return _SelectedRun(stored=self._stored_live(live, item_ids=selected_ids), source=selected.source,
+                            persistence=selected.persistence)
 
     async def _hydrate_session_transcript(
         self,
@@ -1127,11 +1158,33 @@ class TranscriptReader:
                     "This transcript item contains invalid content.",
                 ),
             )
-        return self._registry.parse(
+        read = self._registry.parse(
             safe_item,
             safe_body,
             error_id_factory=self._error_id_factory,
         )
+        if read.body is not None and safe_item.content_type in {
+            "guideline_run_context", "guideline_retrieval", "guideline_delivery", "guideline_usage",
+            "result_guideline_usage", "inference_result",
+        }:
+            from app.application.guidelines.transcript_validation import validate_guideline_links
+
+            by_id = {candidate.item_id: candidate for candidate in stored.items}
+            decoded = {}
+
+            def lookup(item_id):
+                if item_id not in decoded and item_id in by_id:
+                    checked = self._checked_body(stored, by_id[item_id])
+                    if checked is not None and checked[2]:
+                        decoded[item_id] = self._registry.parse(checked[0], checked[1], error_id_factory=self._error_id_factory)
+                return decoded.get(item_id)
+
+            try:
+                validate_guideline_links(read.body, read.item, lookup, strict_missing=False)
+            except (ValueError, TypeError, KeyError):
+                return read.model_copy(update={"body": None, "parse_status": ParseStatus.CORRUPT,
+                    "parse_error": self._read_error("transcript_content_corrupt", "This reference record is invalid.")})
+        return read
 
     def _checked_body(
         self,

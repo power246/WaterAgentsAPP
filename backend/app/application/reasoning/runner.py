@@ -324,6 +324,8 @@ class RunSingleWaterbodyAgent:
                 model_execution_summary=execution,
                 evidence_catalog=catalog,
             )
+            if self._guidelines is not None:
+                result = await self._guidelines.attach_result_usage(result, skeleton.windows)
             self._checkpoint(task, deadline, stage=stage)
             return WaterbodyAgentRunOutcome(
                 status=WaterbodyAgentRunStatus.COMPLETED,
