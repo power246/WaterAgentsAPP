@@ -72,6 +72,14 @@ class EmbeddingCancelledError(PortError):
     """Raised when an embedding call is cancelled by its explicit token."""
 
 
+class GuidelineConflictError(PortError):
+    """A guideline mutation conflicts with durable state; code is safe to expose."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__("Guideline state changed; reload before retrying.")
+        self.code = code
+
+
 class WaterbodyModelPortError(PortError):
     """Base class for safe, provider-neutral waterbody model failures."""
 

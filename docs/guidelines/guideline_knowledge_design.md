@@ -198,6 +198,10 @@ stateDiagram-v2
 
 锁序固定为 catalog state → document → operation/version；worker 不持数据库锁等待远程调用。操作重试不能生成第二个人工批准版本。
 
+M2 持久化实现：迁移 `20261020_02` 显式创建七表及 `btree_gist` 扩展；GiST exclusion constraint 禁止同 family 的 revision 区间重叠。当前本地应用通过 catalog 单例行锁串行化 guideline 写事务，随后按 UUID 顺序锁定 family documents，再处理 operation/version；receipt 在 document CAS 之前重放。canonical fingerprint 包含操作种类、规范化请求正文和 expected revision，不包含服务端新分配的 operation/version ID 或审核时间；创建本地草稿也不绑定重试时重新分配的 document ID。数据库 trigger 禁止改写批准版本、向量和 accepted receipt，旧版本及 generation 不自动删除。
+
+每个 operation 最多自动尝试三次，lease 为 1–3600 秒，前两次失败可分别等待 2/10 秒后再 claim。激活、向量写入与失败回写都在取得资源锁后检查 attempt、owner、lease 截止时间和 root epoch；过期 lease 在下一次 claim 时回收，无需启动时重置 running 状态。显式重试为原批准 version 建立新 operation/receipt，旧 operation 标为 superseded，避免 attempt 重置造成旧 worker 再次获得完成资格。building generation 可回填经过完整 canonical/profile 验证的不可变向量，当前有效目录全部就绪后才可按 catalog revision CAS 切换；publication 激活另须当前 active generation 中的向量就绪。后台 worker 的调度和 rebuild operation 编排属于 M6。
+
 document `revision` 用于编辑与管理 CAS；root `activation_epoch` 用于批准后的激活意图。保存新草稿只改变 revision，不使已经批准的不可变版本失去发布资格。显式停用、恢复或新的本地发布改变 activation epoch，使旧任务不能逆转用户后来的选择。内置包后台更新不覆盖 local override，也不能仅因新增 base version 就取消用户已批准的本地发布。
 
 准备失败的 pending operation 可重试原版本；用户编辑并重新检查发布时，以新 activation epoch 将旧 operation 标为 superseded。无论哪种情况，都不能用后来修改的草稿内容替换原批准版本的正文。

@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–1 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、测试基线和纯领域/ports 契约，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–2 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、测试基线、领域/ports 契约与 PostgreSQL 事务基础，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -195,20 +195,20 @@ git diff --check
 
 ### Work
 
-- [ ] 增加 Alembic migration 和 schema check，创建主设计 §6 的七张 `guideline_*` 表；编号基于实际 Alembic head，不做应用启动 DDL。
-- [ ] 实现 document/draft、immutable versions、catalog intervals、generation/profile、embedding rows 和 operations repository；索引与版本内容权威分开。
-- [ ] 用数据库约束与锁保证 override/base 唯一、generation/version 唯一、每 root/revision 有效区间不重叠、guideline namespace 至多一 active/一 building generation。
-- [ ] 实现 mutation UUIDv4 key、canonical fingerprint、immutable accepted response receipt；receipt lookup 在 revision CAS 之前，同 key/body 返回原结果，同 key 不同 body 返回冲突。
-- [ ] 明确所有需要多资源锁的事务遵循 catalog → document → operation/version 顺序；不在数据库锁内等待供应商。
-- [ ] 分离 editing revision 与 root activation_epoch；编辑新草稿不改变批准版本，停用/恢复/新发布令过时激活意图失效。
-- [ ] 实现 operation claim lease、attempt、safe error、retry/superseded 和启动恢复所需持久状态；失败保留旧有效版，首版不自动清除旧版本/generation。
+- [x] 增加 Alembic migration 和 schema check，创建主设计 §6 的七张 `guideline_*` 表；编号基于实际 Alembic head，不做应用启动 DDL。
+- [x] 实现 document/draft、immutable versions、catalog intervals、generation/profile、embedding rows 和 operations repository；索引与版本内容权威分开。
+- [x] 用数据库约束与锁保证 override/base 唯一、generation/version 唯一、每 root/revision 有效区间不重叠、guideline namespace 至多一 active/一 building generation。
+- [x] 实现 mutation UUIDv4 key、canonical fingerprint、immutable accepted response receipt；receipt lookup 在 revision CAS 之前，同 key/body 返回原结果，同 key 不同 body 返回冲突。
+- [x] 明确所有需要多资源锁的事务遵循 catalog → document → operation/version 顺序；不在数据库锁内等待供应商。
+- [x] 分离 editing revision 与 root activation_epoch；编辑新草稿不改变批准版本，停用/恢复/新发布令过时激活意图失效。
+- [x] 实现 operation claim lease、attempt、safe error、retry/superseded 和启动恢复所需持久状态；失败保留旧有效版，首版不自动清除旧版本/generation。
 
 ### Tests
 
-- [ ] 在真实 PostgreSQL 验证迁移、schema check、唯一/FK/区间约束及事务 rollback；不以 SQLite/fake repository 代替这些结论。
-- [ ] 用两连接与确定性屏障重现并发创建 override、同 revision 保存、同 key 重放和 catalog 激活争用；断言只有一个合法结果。
-- [ ] 模拟事务已提交但响应丢失，重试旧 revision/同 key 仍返回原 accepted response；key/body 改变则冲突且不创建额外版本。
-- [ ] 模拟 claim 后重启、lease 过期与第二 worker claim，确保旧 attempt 不能重复完成或覆盖新状态。
+- [x] 在真实 PostgreSQL 验证迁移、schema check、唯一/FK/区间约束及事务 rollback；不以 SQLite/fake repository 代替这些结论。
+- [x] 用两连接与确定性屏障重现并发创建 override、同 revision 保存、同 key 重放和 catalog 激活争用；断言只有一个合法结果。
+- [x] 模拟事务已提交但响应丢失，重试旧 revision/同 key 仍返回原 accepted response；key/body 改变则冲突且不创建额外版本。
+- [x] 模拟 claim 后重启、lease 过期与第二 worker claim，确保旧 attempt 不能重复完成或覆盖新状态。
 
 ### Verify
 
@@ -221,7 +221,16 @@ git diff --check
 
 提交边界：migration/schema、SQL repository、事务 primitives 和 PostgreSQL 测试；不改写已有业务数据或运行归档。
 
-完成记录：`pending`。
+完成记录（2026-10-20）：
+
+- 分支保持 `codex/guidelines-m0`，起点 `a7f3abd7dc24fc99db7de6a9be4f445d24547491`；本阶段实现 commit：提交后补记。没有新建 worktree 或阶段 Markdown。
+- 新 head 为 `20261020_02`（接 `20261020_01`）。七表、部分唯一索引、复合 FK、GiST 区间排斥及不可变 trigger 已落地；schema check 核对表/列、约束、索引、trigger 与扩展。原业务/归档表结构未改，旧 head/表清单测试同步更新。
+- `PostgresGuidelineRepository` 提供草稿、批准版本、目录历史、generation/profile、向量和 operation 持久化。所有写事务先锁 catalog，再按 UUID 锁 family documents，最后处理 operation/version；receipt 先于 CAS。fingerprint 取规范化请求，重放保留原 ID/accepted response；保存草稿不改变 activation epoch。
+- claim 可跨 repository 重建恢复，最多三次自动尝试；重试原批准 version 时新建 operation，保留旧 receipt。attempt/owner/lease/epoch 共同隔离旧 worker，尤其在取得资源锁后检查 lease，防止等待锁期间过期的请求完成。停用/恢复/新本地发布使旧意图失效；失败保留旧有效版，内置更新保留 override 的批准意图与优先级。具体事务说明已补入主设计 §6.1。
+- 最终验证：完整 `backend/tests` **3038 passed，0 failed/errors/skipped**，311.58s；其中新增 `tests/persistence/test_guidelines.py` 的 **31 项真实 PostgreSQL** 用例覆盖 fresh/downgrade/upgrade、metadata 一致性、唯一/FK/区间约束、rollback、丢响应重放、两连接确定性锁屏障、lease 过期/重启/旧 attempt、generation 切换及 canonical/profile 绑定。全部 architecture/ports/domain/API 与既有 persistence 回归包含在该结果中。
+- 最终 runner：从根目录用现有 venv 的 `dotenv_values('backend/.env')` **仅将 `WATERAGENTS_DB_*` 注入测试进程**，设置 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，同进程执行 `pytest.main(['backend/tests', '-q', '-p', 'no:cacheprovider', '--tb=short', '--basetemp', '.tmp/guidelines-m2-20261020/full-isolated', '--junitxml', '.tmp/guidelines-m2-20261020/full-isolated.xml'])`。最初整份 dotenv 注入得到 3033 passed / 3 failed，均为离线缺配置/缺凭据断言受部署值干扰；隔离环境后全部通过，没有为这些失败修改产品代码。Windows basetemp ACL 问题通过获准权限与新 task-owned 目录处理；仅有两条既有 Starlette/anyio 弃用 warning。
+- `backend/` 下以现有 venv + dotenv runner 执行 `python -m app.infrastructure.persistence.cli upgrade --test-database` 和 `check --test-database`，独立测试库均为 `20261020_02`；测试只清理自有随机 schema，未对业务库执行升级/测试，未修改 `.env`。日志/XML 仅留本地；`git diff --cached --check` 通过，三份指南的 50 个本地链接与代码围栏检查通过。
+- 验证等级为本地完整后端 + 真实 PostgreSQL；真实 embedding/分析供应商、浏览器、hosted CI、专业内容实际批准与 pH 实测：**not run**。M3–12 保持未完成，生产资源导入、管理 API、后台 worker 调度与检索接入由后续阶段完成。
 
 ## Milestone 3：内置资源、有效目录与本地覆盖
 
@@ -649,4 +658,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–1 的实际命令与证据见对应完成记录；Milestone 2–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–2 的实际命令与证据见对应完成记录；Milestone 3–12、内容审核、实测实验与最终功能验收仍待实施。

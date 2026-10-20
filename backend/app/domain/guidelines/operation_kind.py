@@ -9,3 +9,4 @@ class GuidelineOperationKind(DomainEnum):
     SET_ENABLED = "set_enabled"
     RESTORE_BUNDLED = "restore_bundled"
     REBUILD_INDEX = "rebuild_index"
+    RETRY = "retry"

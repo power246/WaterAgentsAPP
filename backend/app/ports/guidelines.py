@@ -1,4 +1,5 @@
 from typing import Protocol
+from datetime import datetime
 from uuid import UUID
 
 from app.domain.guidelines.catalog_snapshot import GuidelineCatalogSnapshot
@@ -10,11 +11,13 @@ from app.domain.guidelines.draft import GuidelineDraftV1
 from app.domain.guidelines.embedding_batch import GuidelineEmbeddingBatch
 from app.domain.guidelines.embedding_profile import GuidelineEmbeddingProfileV1
 from app.domain.guidelines.identity import GuidelineIdentity
+from app.domain.guidelines.index_generation import GuidelineIndexGeneration
 from app.domain.guidelines.mutation import GuidelineMutation
 from app.domain.guidelines.mutation_receipt import GuidelineMutationReceipt
 from app.domain.guidelines.operation import GuidelineOperation
 from app.domain.guidelines.version import GuidelineVersionV1
 from app.domain.hydrology.parameter_key import ParameterKey
+from app.domain.memory_rag.embedding_vector import EmbeddingVector
 from app.ports.embedding import EmbeddingCancellationPort
 
 
@@ -31,6 +34,7 @@ class GuidelineRepositoryPort(Protocol):
 
     async def create_draft(
         self, identity: GuidelineIdentity, draft: GuidelineDraftV1, mutation: GuidelineMutation,
+        *, expected_base_revision: Revision | None = None,
     ) -> GuidelineMutationReceipt: ...
 
     async def save_draft(
@@ -48,6 +52,45 @@ class GuidelineRepositoryPort(Protocol):
     async def read_effective_versions(
         self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
     ) -> tuple[GuidelineVersionV1, ...]: ...
+
+    async def set_enabled(
+        self, document_id: UUID, enabled: bool, *, expected_revision: Revision, mutation: GuidelineMutation,
+    ) -> GuidelineMutationReceipt: ...
+
+    async def restore_bundled(
+        self, document_id: UUID, version_id: UUID, *, expected_revision: Revision, mutation: GuidelineMutation,
+    ) -> GuidelineMutationReceipt: ...
+
+    async def read_generation(self, generation_id: UUID) -> GuidelineIndexGeneration | None: ...
+
+    async def create_generation(self, profile: GuidelineEmbeddingProfileV1) -> GuidelineIndexGeneration: ...
+
+    async def activate_generation(self, generation_id: UUID, *, expected_catalog_revision: Revision) -> None: ...
+
+    async def claim_operation(
+        self, owner: str, *, now: datetime | None = None, lease_seconds: int = 60,
+    ) -> GuidelineOperation | None: ...
+
+    async def fail_attempt(
+        self, claim: GuidelineOperation, safe_error_code: str, *, retryable: bool, now: datetime | None = None,
+    ) -> None: ...
+
+    async def retry_operation(
+        self, operation_id: UUID, *, expected_revision: Revision, mutation: GuidelineMutation,
+    ) -> GuidelineMutationReceipt: ...
+
+    async def write_embedding(
+        self, claim: GuidelineOperation, generation_id: UUID,
+        canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+        *, now: datetime | None = None,
+    ) -> None: ...
+
+    async def activate_version(self, claim: GuidelineOperation, *, now: datetime | None = None) -> None: ...
+
+    async def write_building_embedding(
+        self, generation_id: UUID, version_id: UUID,
+        canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+    ) -> None: ...
 
 
 class BundledGuidelineSourcePort(Protocol):

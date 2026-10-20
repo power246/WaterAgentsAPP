@@ -474,8 +474,8 @@ def test_list_session_item_ids_selects_only_requested_type(
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
     postgres_settings: AppSettings,
 ) -> None:
-    assert asyncio.run(check_database_schema(postgres_settings)) == "20261020_01"
-    assert upgrade_database(postgres_settings) == "20261020_01"
+    assert asyncio.run(check_database_schema(postgres_settings)) == "20261020_02"
+    assert upgrade_database(postgres_settings) == "20261020_02"
 
     async def inspect_schema() -> tuple[set[str], set[str], list[object]]:
         engine = create_database_engine(postgres_settings)
@@ -543,6 +543,13 @@ def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
         "unit_policy_confirmations",
         "analysis_run_idempotency_tombstones",
         "admin_operations",
+        "guideline_documents",
+        "guideline_versions",
+        "guideline_catalog_state",
+        "guideline_catalog_entries",
+        "guideline_index_generations",
+        "guideline_embeddings",
+        "guideline_operations",
     }
     assert "ck_analysis_runs_terminal_item_matches_status" in constraints
     assert "ck_analysis_sessions_role_comid" in constraints
