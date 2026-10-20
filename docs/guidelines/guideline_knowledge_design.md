@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，Milestone 0–1 已完成基线盘点与纯领域/ports 契约。**管理、数据库、检索和模型接入尚未实现，本文不是功能发布完成声明。** 后续表、接口、配置和集成测试仍为待实现契约。决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–6 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding 与持久化准备生命周期。**Run 检索、模型/历史接入、前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -30,7 +30,7 @@
 
 调查基线：`codex/runtime-smoke-fixes-20261014`，HEAD `0f2bfd4d79b80d80dfcaaec03d8c8c6ea6879b41`。实施前重新核对 HEAD 和工作树差异。
 
-2026-10-20 的 Milestone 0 已在最新 `origin/main` / `6cedea4f1f21339dcd87ef5a3bbd2d49079ef799` 上复核，两者 tracked tree 一致；完整消费者与实际验证只维护在 [TODO 的 Milestone 0 完成记录](guideline_implementation_todo.md#milestone-0基线与完整接缝盘点)。当前 migration head 为 `20261020_01`；后续迁移仍须以实施时实际 head 为准。
+2026-10-20 的 Milestone 0 已在当时最新 `origin/main` / `6cedea4f1f21339dcd87ef5a3bbd2d49079ef799` 上复核，两者 tracked tree 一致；完整消费者与实际验证只维护在 [TODO 的 Milestone 0 完成记录](guideline_implementation_todo.md#milestone-0基线与完整接缝盘点)。M0 时 migration head 为 `20261020_01`，M2 增至 `20261020_02`，M6 无新增 DDL；后续迁移仍须以实施时实际 head 为准。
 
 | 当前路径 | 已核实事实 | 本功能的改动责任 |
 | --- | --- | --- |
@@ -95,7 +95,7 @@ flowchart TD
 
 M3 的资源格式为 `{"schema_version": 1, "documents": [...]}`；每条包含 `bundle_key`、正整数 `version`、包内相对 `.md` 路径 `body_resource`、`body_digest`、`content_digest`、`model_view_digest`、`metadata` 与完整 `GuidelineReview`。`metadata` 沿用内容字段但不拥有正文；正文先 NFC/LF 规范化，再以 UTF-8 SHA-256 校验，随后校验完整内容、已登记参数、安全 model view 及其 canonical digest。review 必须显式绑定稳定 document UUID 与 content digest，不能从正文或元数据自动补造。reader 使用 `importlib.resources`；version UUID 使用 UUIDv5 名称 `wateragents:guideline:bundle:{key}:version:{number}`。重复 JSON 字段、重复 key/version、路径越界、缺文件或校验失败使该资源集读取失败。
 
-正式 `bundled/manifest.json` 当前为空；首批真实资料与制作者实际批准由 M11 完成。合成批准样本仅位于 `backend/tests/fixtures/guidelines/`。`BundledGuidelineImporter.import_all()` 将 reader 的批准版本交给 repository，原子保存不可变版本与 `import_bundled` pending operation，接入持久化准备队列；是否 available 仍以完成准备后的目录为准。资源错误作为 safe error report 返回，各 family 的数据库冲突分别报告，均不清空已有资料库。重复导入复用当前 receipt，不重置失败次数或替换手动 retry；新 base version 只 supersede 旧 base 准备任务，保留 local override 的 epoch/任务。新安装允许从发行版本号直接开始；旧包缺项不删除数据库内容，未曾导入的低版本不能逆转已有更高版本意图。M6 负责运行时 composition、调用导入入口和调度 worker。
+正式 `bundled/manifest.json` 当前为空；首批真实资料与制作者实际批准由 M11 完成。合成批准样本仅位于 `backend/tests/fixtures/guidelines/`。`BundledGuidelineImporter.import_all()` 将 reader 的批准版本交给 repository，原子保存不可变版本与 `import_bundled` pending operation，接入持久化准备队列；是否 available 仍以完成准备后的目录为准。资源错误作为 safe error report 返回，各 family 的数据库冲突分别报告，均不清空已有资料库。重复导入复用当前 receipt，不重置失败次数或替换手动 retry；新 base version 只 supersede 旧 base 准备任务，保留 local override 的 epoch/任务。新安装允许从发行版本号直接开始；旧包缺项不删除数据库内容，未曾导入的低版本不能逆转已有更高版本意图。M6 已在 runtime startup 调用导入入口并启动持久化 worker。
 
 ### 4.2 有效版本选择
 
@@ -198,15 +198,17 @@ stateDiagram-v2
 1. 查找幂等 receipt；相同 key/fingerprint 重放原接受结果，不重新批准或创建版本。
 2. 锁定 document，验证 `expected_revision`、draft digest、review confirmation；已有 pending publication 时返回冲突。
 3. 原子保存不可变 approved version、publication operation、pending pointer 和新 document revision。返回 `202`，原有效版本不变。
-4. worker 在事务外调用 embedding，再在短事务中存向量。激活前确认 pending version、active generation/profile 与内容 digest 仍匹配。
-5. 激活事务锁定 catalog、关闭旧有效区间、写入新 catalog entry、增加 revision，并完成 operation/清除 pending pointer。
+4. worker 在事务外调用 embedding，再由 `complete_operation()` 在一个短事务内存向量并激活。取得锁后确认 attempt/owner/lease、pending version、activation epoch、active generation/profile 与批准内容 digest 仍匹配。
+5. 同一事务关闭旧有效区间、写入新 catalog entry、增加 revision，并完成 operation/清除 pending pointer；任一步失败连同本次向量一起 rollback。
 6. active generation 已变化时，为当前 generation 准备向量后再激活；旧任务不能将过期版本覆盖新的 pending/已激活版本。
 
 锁序固定为 catalog state → document → operation/version；worker 不持数据库锁等待远程调用。操作重试不能生成第二个人工批准版本。
 
 M2 持久化实现：迁移 `20261020_02` 显式创建七表及 `btree_gist` 扩展；GiST exclusion constraint 禁止同 family 的 revision 区间重叠。当前本地应用通过 catalog 单例行锁串行化 guideline 写事务，随后按 UUID 顺序锁定 family documents，再处理 operation/version；receipt 在 document CAS 之前重放。canonical fingerprint 包含操作种类、规范化请求正文和 expected revision，不包含服务端新分配的 operation/version ID 或审核时间；创建本地草稿也不绑定重试时重新分配的 document ID。数据库 trigger 禁止改写批准版本、向量和 accepted receipt，旧版本及 generation 不自动删除。
 
-每个 operation 最多自动尝试三次，lease 为 1–3600 秒，前两次失败可分别等待 2/10 秒后再 claim。激活、向量写入与失败回写都在取得资源锁后检查 attempt、owner、lease 截止时间和 root epoch；过期 lease 在下一次 claim 时回收，无需启动时重置 running 状态。显式重试为原批准 version 建立新 operation/receipt，旧 operation 标为 superseded，避免 attempt 重置造成旧 worker 再次获得完成资格。building generation 可回填经过完整 canonical/profile 验证的不可变向量，当前有效目录全部就绪后才可按 catalog revision CAS 切换；publication 激活另须当前 active generation 中的向量就绪。后台 worker 的调度和 rebuild operation 编排属于 M6。
+每个 operation 最多自动尝试三次，lease 为 1–3600 秒，前两次失败可分别等待 2/10 秒后再 claim。激活、向量写入与失败回写都在取得资源锁后读取当前 UTC clock，检查 attempt、owner、lease 截止时间和 root epoch；过期 lease 在下一次 claim 时回收，无需启动时重置 running 状态。显式重试为原批准 version 建立新 operation/receipt，旧 operation 标为 superseded，避免 attempt 重置造成旧 worker 再次获得完成资格。building generation 可回填经过完整 canonical/profile 验证的不可变向量，全部覆盖后才可按 catalog revision CAS 切换；publication 激活另须当前 active generation 中的向量就绪。
+
+M6 的 [GuidelinePreparationWorker](../../backend/app/application/guidelines/worker.py) 共用 publication/rebuild 队列。publication 带非空 activation epoch；rebuild 带 generation ID、空 epoch，只为 document 已有 active version 派生向量，不改变发布指针或重新审核。显式 retry 保留此区分。失败重建将 generation 标为 failed，并使其余在途任务失效；相同配置不会轮询创建无限新 generation，用户 retry 原失败 operation 才恢复同一 generation。失败任务通过现有 document `preparation` / `preparation_failed` 返回 operation ref，供已有 retry API 使用，旧有效版本仍保留。改用另一合法 profile 或恢复原 active profile 时，废弃任务标为 superseded，不再显示旧重建错误，迟到响应无法写入。
 
 document `revision` 用于编辑与管理 CAS；root `activation_epoch` 用于批准后的激活意图。保存新草稿只改变 revision，不使已经批准的不可变版本失去发布资格。显式停用、恢复或新的本地发布改变 activation epoch，使旧任务不能逆转用户后来的选择。内置包后台更新不覆盖 local override，也不能仅因新增 base version 就取消用户已批准的本地发布。
 
@@ -244,6 +246,8 @@ query/document 使用相同兼容 profile；若模型要求角色前缀，固定
 - 期望 embedding 配置变化时建立 building generation，覆盖当前有效 catalog 的全部版本。完成后在锁内核对 catalog revision；有变化先补齐/重试核对，再原子切换。切换前旧 active 继续服务。
 - 没有 active generation、配置不兼容或 provider 不可用时，知识功能记录不可用；不阻断已有分析，不扫描未批准草稿兜底。
 
+M6 的 `ensure_generation()` / `queue_generation()` 每轮检查期望 profile，分批补齐当前有效目录及各 document 保留的 active pointer，包括停用 family 和被 override 覆盖的 bundled base。后两者仍不进入检索；预备其向量使切换后的重新启用/恢复不会卡住。切换事务重新检查完整覆盖和 catalog revision，publication/disable/restore 期间的变化须先 reconcile。首次空库可先激活空 generation，再准备首个批准版本；迁移后已有 active pointer 的库先回填，未批准草稿不入队。publication 计算期间若 generation 改变，在同一 attempt deadline/credential lease 内最多重新计算一次，继续变化则按有限重试处理；旧 profile 结果不会提交到新 generation。
+
 ### 7.3 检索步骤
 
 1. 从 run pin 获得 generation/profile/catalog revision；排除 draft、未激活版本及该 revision 下停用的 root。
@@ -259,7 +263,7 @@ query/document 使用相同兼容 profile；若模型要求角色前缀，固定
 
 这些是实现起始默认值，必须在对应策略对象中单点定义。真实检索样例可促使调整并记录策略版本；下列数值不是已验证的最优参数。
 
-默认值与配置校验集中在 [GuidelinePolicy](../../backend/app/domain/guidelines/policy.py)，通过部署环境变量 `WATERAGENTS_GUIDELINE_POLICY` 的 JSON 对象覆盖，例如 `{"query_instructions":"query: ","document_instructions":"passage: ","worker_max_concurrency":1}`；未提供字段沿用默认值，不写入用户内容。top-k、知识 token budget 和在线 timeout 分别不超过 3、3,072、3 秒；自动 attempts 固定 3，退避固定 2/10 秒，在线只请求一次；repository 和 operation model 使用同一策略定义约束，M6 再消费并发/调度配置。
+默认值与配置校验集中在 [GuidelinePolicy](../../backend/app/domain/guidelines/policy.py)，通过部署环境变量 `WATERAGENTS_GUIDELINE_POLICY` 的 JSON 对象覆盖，例如 `{"query_instructions":"query: ","document_instructions":"passage: ","worker_max_concurrency":1}`；未提供字段沿用默认值，不写入用户内容。top-k、知识 token budget 和在线 timeout 分别不超过 3、3,072、3 秒；自动 attempts 固定 3，退避固定 2/10 秒，在线只请求一次；repository、operation model 与 M6 worker 使用同一策略定义约束。
 
 | 参数 | 首版默认 |
 | --- | --- |
@@ -368,7 +372,7 @@ M4 的 create body 直接使用 `GuidelineDraftV1`；save body 为 `{expected_re
 
 editor、publish、enable/restore 都使用相应 document/root `expected_revision`。冲突返回 `409 guideline_revision_conflict` 和可安全展示的最新 revision/snapshot，不能自动覆盖用户本地编辑。receipt lookup 必须早于 CAS 检查，避免成功提交的重试被误判为新冲突。
 
-M4 的 publish fingerprint 绑定 document ID、expected revision、已保存 content digest 和显式确认/reviewer/note，排除服务端分配的版本 ID/审核时间；先查 receipt，再读取当前草稿，因此后续编辑不会使已接受发布的重放变成另一份请求。服务端从已保存内容建立批准版本，并在 SQL 短事务中再次验证 revision/digest；客户端不能提交 origin、版本 ID 或完整审核记录来代替人工发布。409 error envelope 增加可选 `current_document`，携带安全的最新管理快照；accepted 后的准备失败通过 operation 报告，旧 receipt 仍重放原 202。M6 接入后台准备生命周期前，新发布保持 durable pending。
+M4 的 publish fingerprint 绑定 document ID、expected revision、已保存 content digest 和显式确认/reviewer/note，排除服务端分配的版本 ID/审核时间；先查 receipt，再读取当前草稿，因此后续编辑不会使已接受发布的重放变成另一份请求。服务端从已保存内容建立批准版本，并在 SQL 短事务中再次验证 revision/digest；客户端不能提交 origin、版本 ID 或完整审核记录来代替人工发布。409 error envelope 增加可选 `current_document`，携带安全的最新管理快照；accepted 后的准备失败通过 operation 报告，旧 receipt 仍重放原 202。M6 worker 消费 durable pending，准备成功后才成为有效内容。
 
 创建 override、异步发布、停用和恢复都改变 document/root 相关 revision 或 activation token。worker 在激活时校验 token；用户后来的停用、恢复或新发布会使旧任务 `superseded`，旧 worker 不得反向恢复已经被替换的内容。
 
@@ -429,7 +433,9 @@ guideline 与 M8 historical memory 是不同功能。`stateless` 或 `WATERAGENT
 
 后台 publication worker 在每次 attempt 开始获取自己的 credential lease；run 查询/分析复用 run-owned lease。替换密钥不把一个正在执行的 operation 改成混合凭据，也不把 lease 内容写入知识版本、manifest、transcript 或日志。
 
-M5 的 [GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 从既有 OpenAI lease 构造独立说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次获取一次新 lease，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M5 不启动任务或创建 guideline generation；worker 与 run pin/readiness 分别由 M6/M7 接入，未把 M8 generation 当作说明书索引。
+M5 的 [GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 从既有 OpenAI lease 构造独立说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次获取一次新 lease，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M6 接入 worker/generation，run pin/readiness 仍由 M7 实施，未把 M8 generation 当作说明书索引。
+
+M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并发 2，整个 attempt 有 20 秒上限，lease 至少 60 秒且大于 attempt 加两次 DB operation timeout。合法 profile 缺凭据时仍能初始化 generation，准备操作安全失败；补密钥、重启及显式 retry 继续原批准版本。配置无效时保留 durable pending，修正配置并重启后恢复。shutdown 先停止领取/派发，再按既有 `shutdown_save_grace_seconds` 有界等待，超时取消并回收全部子任务，然后应用才关闭共享 HTTP/engine。未完成 running 保留租约，重启后过期回收；不续派、不自动 purge 旧 generations/versions。
 
 查询返回的知识须通过完整的版本/profile/source 校验；取消和 timeout 使用既有 clock/cancellation 基础。publication/index worker 是有界后台工作，不新增常驻模型会话或无界自动恢复链。
 
@@ -534,4 +540,4 @@ git diff --check
 
 结束时报告 branch/HEAD、改动范围、实际命令与通过/失败计数、未运行项目、真实供应商和小样本核对证据，以及人工批准的具体内容版本。区分 fake-provider、真实 embedding、真实分析模型、数据库、浏览器和 hosted CI；未获得对应证据的检查标为 `not run`。
 
-设计调查历史记录见讨论文档；实施阶段的实际验证统一见 TODO。Milestone 0–1 已运行基线及领域/ports 回归，尚未执行本节列出的完整功能集成、真实模型调用、内容发布或实测对照。
+设计调查历史记录见讨论文档；实施阶段的实际验证统一见 TODO。Milestone 0–6 已运行本地后端、离线 HTTP 与真实 PostgreSQL 回归，尚未执行完整功能集成、真实模型调用、真实资料审核或实测对照。

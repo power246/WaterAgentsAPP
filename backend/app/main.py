@@ -192,7 +192,7 @@ def create_app(
             active_guideline_repository = guideline_repository
             if active_guideline_repository is None and engine is not None:
                 active_guideline_repository = PostgresGuidelineRepository(
-                    resolved_settings, engine=engine, registry=resolved_parameter_capabilities)
+                    resolved_settings, engine=engine, registry=resolved_parameter_capabilities, clock=resolved_clock)
             application.state.guideline_service = GuidelineAuthoringService(
                 active_guideline_repository, resolved_parameter_capabilities, resolved_clock, id_factory=id_factory)
             try:
@@ -404,6 +404,7 @@ def create_app(
                             )
                         )
                     await m8_runtime.start()
+                    await guideline_runtime.start(active_guideline_repository, resolved_parameter_capabilities)
                     admin_service = None
                     if engine is not None and isinstance(m8_runtime, M8Runtime):
                         profile_by_id = {
@@ -453,10 +454,13 @@ def create_app(
                     yield
                 finally:
                     try:
-                        if admin_runner is not None:
-                            await admin_service.drain_accepts()
-                            await admin_runner.shutdown()
-                        await m8_runtime.shutdown()
+                        try:
+                            await guideline_runtime.shutdown()
+                        finally:
+                            if admin_runner is not None:
+                                await admin_service.drain_accepts()
+                                await admin_runner.shutdown()
+                            await m8_runtime.shutdown()
                     finally:
                         try:
                             await coordinator.shutdown()

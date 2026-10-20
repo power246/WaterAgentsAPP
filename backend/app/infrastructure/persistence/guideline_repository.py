@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -25,6 +26,7 @@ from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import create_database_engine
 from app.ports.errors import GuidelineConflictError, PortUnavailableError
+from app.ports.clock import ClockPort
 
 _MANAGEMENT_QUERY = """
 SELECT d.*, r.activation_epoch AS root_epoch, r.disabled AS root_disabled,
@@ -55,8 +57,13 @@ LEFT JOIN guideline_embeddings ready ON ready.version_id = d.active_version_id A
 LEFT JOIN LATERAL (SELECT v.snapshot FROM guideline_versions v WHERE v.document_id = r.document_id
                   AND r.origin = 'bundled' ORDER BY v.version_number DESC LIMIT 1) base ON true
 LEFT JOIN LATERAL (SELECT to_jsonb(o) AS body, o.state FROM guideline_operations o
-                  WHERE o.document_id = d.document_id AND o.version_id = d.pending_version_id
-                  ORDER BY CASE WHEN o.state IN ('pending', 'running', 'failed') THEN 0 ELSE 1 END,
+                  LEFT JOIN guideline_index_generations g ON g.generation_id = o.generation_id
+                  WHERE o.document_id = d.document_id AND
+                    ((o.activation_epoch IS NOT NULL AND o.version_id = d.pending_version_id) OR
+                     (o.activation_epoch IS NULL AND o.version_id = d.active_version_id
+                      AND g.state IN ('building', 'failed') AND o.state IN ('pending', 'running', 'failed')))
+                  ORDER BY CASE WHEN o.activation_epoch IS NOT NULL THEN 0 ELSE 1 END,
+                  CASE WHEN o.state IN ('pending', 'running', 'failed') THEN 0 ELSE 1 END,
                   o.next_attempt_at DESC, o.operation_id DESC LIMIT 1) job ON true
 """
 
@@ -69,11 +76,12 @@ class PostgresGuidelineRepository:
     """
 
     def __init__(self, settings: AppSettings, *, engine: AsyncEngine | None = None,
-                 registry: ParameterCapabilityRegistry | None = None) -> None:
+                 registry: ParameterCapabilityRegistry | None = None, clock: ClockPort | None = None) -> None:
         self._engine = engine or create_database_engine(settings)
         self._owns_engine = engine is None
         self._timeout = settings.db_operation_timeout_seconds
         self._registry = registry or load_parameter_capability_registry()
+        self._clock = clock
 
     async def aclose(self) -> None:
         if self._owns_engine:
@@ -225,7 +233,8 @@ class PostgresGuidelineRepository:
             "draft_digest": None if draft is None else draft.content_digest})
 
     async def _accept(self, connection, mutation, *, document_id=None, version_id=None,
-                      revision=None, content_digest=None, pending=False, epoch=None, status_code=None):
+                      revision=None, content_digest=None, pending=False, epoch=None, status_code=None,
+                      generation_id=None):
         receipt = GuidelineMutationReceipt(
             mutation=mutation, status_code=status_code or (202 if pending else (201 if mutation.kind is GuidelineOperationKind.CREATE else 200)),
             operation_id=uuid4(), document_id=document_id, version_id=version_id,
@@ -233,12 +242,12 @@ class PostgresGuidelineRepository:
         )
         await connection.execute(text(
             "INSERT INTO guideline_operations (operation_id, idempotency_key, kind, request_fingerprint, "
-            "accepted_response, document_id, version_id, activation_epoch, state) "
-            "VALUES (:id, :key, :kind, :fingerprint, CAST(:body AS jsonb), :doc, :version, :epoch, :state)"
+            "accepted_response, document_id, version_id, activation_epoch, state, generation_id, next_attempt_at) "
+            "VALUES (:id, :key, :kind, :fingerprint, CAST(:body AS jsonb), :doc, :version, :epoch, :state, :generation, :next)"
         ), {"id": receipt.operation_id, "key": mutation.idempotency_key, "kind": mutation.kind.value,
             "fingerprint": mutation.request_fingerprint, "body": receipt.model_dump_json(),
             "doc": document_id, "version": version_id, "epoch": epoch,
-            "state": "pending" if pending else "succeeded"})
+            "state": "pending" if pending else "succeeded", "generation": generation_id, "next": self._now(None)})
         return receipt
 
     async def create_draft(self, identity: GuidelineIdentity, draft: GuidelineDraftV1,
@@ -495,14 +504,99 @@ class PostgresGuidelineRepository:
                 if building["profile_id"] == profile.profile_id:
                     return self._generation(building)
                 raise GuidelineConflictError("guideline_generation_building")
-            revision = await connection.scalar(text("SELECT revision FROM guideline_catalog_state WHERE singleton_id = 1"))
-            row = (await connection.execute(text(
-                "INSERT INTO guideline_index_generations "
-                "(generation_id, profile, profile_id, profile_digest, dimensions, state, catalog_revision) "
-                "VALUES (:id, CAST(:body AS jsonb), :profile, :digest, :dim, 'building', :revision) RETURNING *"
-            ), {"id": uuid4(), "body": profile.model_dump_json(), "profile": profile.profile_id,
-                "digest": profile.profile_digest, "dim": profile.output_dimensions, "revision": revision})).mappings().one()
-            return self._generation(row)
+            return await self._insert_generation(connection, profile)
+
+    async def _insert_generation(self, connection, profile):
+        revision = await connection.scalar(text("SELECT revision FROM guideline_catalog_state WHERE singleton_id = 1"))
+        row = (await connection.execute(text(
+            "INSERT INTO guideline_index_generations "
+            "(generation_id, profile, profile_id, profile_digest, dimensions, state, catalog_revision) "
+            "VALUES (:id, CAST(:body AS jsonb), :profile, :digest, :dim, 'building', :revision) RETURNING *"
+        ), {"id": uuid4(), "body": profile.model_dump_json(), "profile": profile.profile_id,
+            "digest": profile.profile_digest, "dim": profile.output_dimensions, "revision": revision})).mappings().one()
+        return self._generation(row)
+
+    async def ensure_generation(self, profile: GuidelineEmbeddingProfileV1) -> GuidelineIndexGeneration:
+        profile = GuidelineEmbeddingProfileV1.model_validate(profile.model_dump())
+        async with self._connection(write=True) as connection:
+            active = (await connection.execute(text(
+                "SELECT g.* FROM guideline_index_generations g JOIN guideline_catalog_state c "
+                "ON c.active_generation_id = g.generation_id WHERE c.singleton_id = 1"
+            ))).mappings().one_or_none()
+            building = (await connection.execute(text(
+                "SELECT * FROM guideline_index_generations WHERE state = 'building'"
+            ))).mappings().one_or_none()
+            await connection.execute(text(
+                "UPDATE guideline_operations o SET state = 'superseded', lease_owner = NULL, lease_until = NULL, "
+                "safe_error_code = NULL FROM guideline_index_generations g WHERE o.generation_id = g.generation_id "
+                "AND g.state = 'failed' AND o.activation_epoch IS NULL AND o.state IN ('pending','running','failed') "
+                "AND (g.profile_id <> :profile OR :active_matches)"
+            ), {"profile": profile.profile_id, "active_matches": active is not None and active["profile_id"] == profile.profile_id})
+            if building is not None and (building["profile_id"] != profile.profile_id
+                                          or (active is not None and active["profile_id"] == profile.profile_id)):
+                await self._fail_generation(connection, building["generation_id"])
+                building = None
+            if active is not None and active["profile_id"] == profile.profile_id:
+                return self._generation(active)
+            if building is not None:
+                return self._generation(building)
+            failed = (await connection.execute(text(
+                "SELECT g.* FROM guideline_index_generations g WHERE g.profile_id = :profile AND g.state = 'failed' "
+                "AND EXISTS (SELECT 1 FROM guideline_operations o WHERE o.generation_id = g.generation_id "
+                "AND o.activation_epoch IS NULL AND o.state = 'failed') ORDER BY g.catalog_revision DESC LIMIT 1"
+            ), {"profile": profile.profile_id})).mappings().one_or_none()
+            return self._generation(failed) if failed is not None else await self._insert_generation(connection, profile)
+
+    async def _fail_generation(self, connection, generation_id):
+        await connection.execute(text(
+            "UPDATE guideline_index_generations SET state = 'failed' WHERE generation_id = :id AND state = 'building'"
+        ), {"id": generation_id})
+        await connection.execute(text(
+            "UPDATE guideline_operations SET state = 'superseded', lease_owner = NULL, lease_until = NULL, "
+            "safe_error_code = NULL WHERE generation_id = :id AND activation_epoch IS NULL "
+            "AND state IN ('pending', 'running')"
+        ), {"id": generation_id})
+
+    async def queue_generation(self, generation_id: UUID, *, limit: int = 64):
+        if type(limit) is not int or not 1 <= limit <= 128:
+            raise ValueError("invalid guideline generation queue limit")
+        async with self._connection(write=True) as connection:
+            state = await connection.scalar(text("SELECT state FROM guideline_index_generations WHERE generation_id = :id"), {"id": generation_id})
+            if state != "building":
+                raise GuidelineConflictError("guideline_generation_conflict")
+            stale = (await connection.execute(text(
+                "SELECT o.operation_id, o.document_id FROM guideline_operations o JOIN guideline_documents d "
+                "ON d.document_id = o.document_id WHERE o.generation_id = :id AND o.activation_epoch IS NULL "
+                "AND o.state IN ('pending','running','failed') AND d.active_version_id IS DISTINCT FROM o.version_id "
+                "ORDER BY o.document_id"
+            ), {"id": generation_id})).mappings().all()
+            for job in stale:
+                await self._document_family(connection, job["document_id"])
+                await connection.execute(text(
+                    "UPDATE guideline_operations SET state = 'superseded', lease_owner = NULL, lease_until = NULL, "
+                    "safe_error_code = NULL WHERE operation_id = :id"
+                ), {"id": job["operation_id"]})
+            rows = (await connection.execute(text(
+                "SELECT d.document_id, d.revision, v.version_id, v.content_digest FROM guideline_documents d "
+                "JOIN guideline_versions v ON v.version_id = d.active_version_id "
+                "WHERE NOT EXISTS (SELECT 1 FROM guideline_embeddings b WHERE b.generation_id = :id AND b.version_id = v.version_id) "
+                "AND NOT EXISTS (SELECT 1 FROM guideline_operations o WHERE o.generation_id = :id "
+                "AND o.version_id = v.version_id AND o.activation_epoch IS NULL AND o.state IN ('pending','running','failed')) "
+                "ORDER BY d.document_id LIMIT :limit"
+            ), {"id": generation_id, "limit": limit})).mappings().all()
+            for row in rows:
+                await self._document_family(connection, row["document_id"])
+                mutation = GuidelineMutation.for_request(uuid4(), GuidelineOperationKind.REBUILD_INDEX,
+                    {"generation_id": str(generation_id), "version_id": str(row["version_id"])})
+                await self._accept(connection, mutation, document_id=row["document_id"], version_id=row["version_id"],
+                    revision=row["revision"], content_digest=row["content_digest"], pending=True, generation_id=generation_id)
+
+    async def read_embedding(self, generation_id: UUID, version_id: UUID) -> EmbeddingVector | None:
+        async with self._connection() as connection:
+            body = await connection.scalar(text(
+                "SELECT embedding::text FROM guideline_embeddings WHERE generation_id = :gen AND version_id = :version"
+            ), {"gen": generation_id, "version": version_id})
+            return None if body is None else EmbeddingVector(values=json.loads(body))
 
     async def activate_generation(self, generation_id: UUID, *, expected_catalog_revision: int):
         async with self._connection(write=True) as connection:
@@ -514,9 +608,11 @@ class PostgresGuidelineRepository:
             if row is None or row["state"] != "building":
                 raise GuidelineConflictError("guideline_generation_conflict")
             missing = await connection.scalar(text(
-                "SELECT EXISTS (SELECT 1 FROM guideline_catalog_entries e "
-                "WHERE e.valid_to_revision IS NULL AND NOT EXISTS (SELECT 1 FROM guideline_embeddings b "
-                "WHERE b.generation_id = :id AND b.version_id = e.version_id))"
+                "SELECT EXISTS (SELECT 1 FROM (SELECT active_version_id AS version_id FROM guideline_documents "
+                "WHERE active_version_id IS NOT NULL UNION SELECT version_id FROM guideline_catalog_entries "
+                "WHERE valid_to_revision IS NULL) required "
+                "WHERE NOT EXISTS (SELECT 1 FROM guideline_embeddings b "
+                "WHERE b.generation_id = :id AND b.version_id = required.version_id))"
             ), {"id": generation_id})
             if missing:
                 raise GuidelineConflictError("guideline_generation_incomplete")
@@ -526,28 +622,44 @@ class PostgresGuidelineRepository:
                 "UPDATE guideline_catalog_state SET active_generation_id = :id, revision = revision + 1 WHERE singleton_id = 1"
             ), {"id": generation_id})
 
-    @staticmethod
-    def _now(now: datetime | None) -> datetime:
-        now = now or datetime.now(timezone.utc)
+    def _now(self, now: datetime | None) -> datetime:
+        now = now or (self._clock.now() if self._clock is not None else datetime.now(timezone.utc))
         if now.tzinfo is None or now.utcoffset() != timedelta(0):
             raise ValueError("lease clock must be UTC")
         return now
 
-    async def claim_operation(self, owner: str, *, now: datetime | None = None, lease_seconds: int = 60):
+    async def claim_operation(self, owner: str, *, now: datetime | None = None, lease_seconds: int = 60,
+                              generation_id: UUID | None = None):
         if not owner.strip() or len(owner) > 160 or type(lease_seconds) is not int or not 1 <= lease_seconds <= 3600:
             raise ValueError("invalid guideline claim lease")
         async with self._connection(write=True) as connection:
             scan_time = self._now(now)
             candidates = (await connection.execute(text(
-                "SELECT * FROM guideline_operations WHERE (state = 'pending' AND next_attempt_at <= :now) "
-                "OR (state = 'running' AND lease_until <= :now) ORDER BY next_attempt_at, operation_id"
-            ), {"now": scan_time})).mappings().all()
+                "SELECT * FROM guideline_operations WHERE ((state = 'pending' AND next_attempt_at <= :now) "
+                "OR (state = 'running' AND lease_until <= :now)) "
+                "AND (CAST(:generation AS uuid) IS NULL OR generation_id = CAST(:generation AS uuid)) "
+                "ORDER BY next_attempt_at, operation_id LIMIT 128"
+            ), {"now": scan_time, "generation": generation_id})).mappings().all()
             for row in candidates:
                 root_id, family = await self._document_family(connection, row["document_id"])
                 root, document = family[root_id], family[row["document_id"]]
-                await connection.execute(text("SELECT operation_id FROM guideline_operations WHERE operation_id = :id FOR UPDATE"), {"id": row["operation_id"]})
-                if (root["activation_epoch"] != row["activation_epoch"]
-                        or document["pending_version_id"] != row["version_id"]):
+                row = (await connection.execute(text("SELECT * FROM guideline_operations WHERE operation_id = :id FOR UPDATE"),
+                    {"id": row["operation_id"]})).mappings().one()
+                current_time = self._now(now)
+                if not ((row["state"] == "pending" and row["next_attempt_at"] <= current_time)
+                        or (row["state"] == "running" and row["lease_until"] <= current_time)):
+                    continue
+                rebuild = row["activation_epoch"] is None
+                generation_state = None
+                if rebuild:
+                    generation_state = await connection.scalar(text(
+                        "SELECT state FROM guideline_index_generations WHERE generation_id = :id"
+                    ), {"id": row["generation_id"]})
+                    if generation_state == "failed":
+                        continue
+                if ((rebuild and (generation_state != "building" or document["active_version_id"] != row["version_id"]))
+                        or (not rebuild and (root["activation_epoch"] != row["activation_epoch"]
+                                             or document["pending_version_id"] != row["version_id"]))):
                     state, error = "superseded", None
                 elif row["attempts"] >= DEFAULT_GUIDELINE_POLICY.max_attempts:
                     state, error = "failed", "guideline_attempts_exhausted"
@@ -562,6 +674,8 @@ class PostgresGuidelineRepository:
                     "UPDATE guideline_operations SET state = :state, safe_error_code = :error, "
                     "lease_owner = NULL, lease_until = NULL WHERE operation_id = :id"
                 ), {"id": row["operation_id"], "state": state, "error": error})
+                if rebuild and state == "failed":
+                    await self._fail_generation(connection, row["generation_id"])
             return None
 
     async def _fence(self, connection, claim: GuidelineOperation, now: datetime | None):
@@ -574,8 +688,13 @@ class PostgresGuidelineRepository:
                 or row["attempts"] != claim.attempts or row["lease_owner"] != claim.lease_owner
                 or row["lease_until"] != claim.lease_until or row["lease_until"] <= now):
             raise GuidelineConflictError("guideline_stale_attempt")
-        if (row["activation_epoch"] != family[root_id]["activation_epoch"]
-                or row["version_id"] != family[row["document_id"]]["pending_version_id"]):
+        if row["activation_epoch"] is None:
+            state = await connection.scalar(text("SELECT state FROM guideline_index_generations WHERE generation_id = :id"),
+                                             {"id": row["generation_id"]})
+            if state != "building" or row["version_id"] != family[row["document_id"]]["active_version_id"]:
+                raise GuidelineConflictError("guideline_superseded")
+        elif (row["activation_epoch"] != family[root_id]["activation_epoch"]
+              or row["version_id"] != family[row["document_id"]]["pending_version_id"]):
             raise GuidelineConflictError("guideline_superseded")
         return row, root_id, family
 
@@ -593,6 +712,8 @@ class PostgresGuidelineRepository:
                 "error": None if retry else safe_error_code,
                 "next": self._now(now) + timedelta(seconds=DEFAULT_GUIDELINE_POLICY.retry_backoff_seconds[
                     min(row["attempts"], len(DEFAULT_GUIDELINE_POLICY.retry_backoff_seconds)) - 1])})
+            if not retry and row["activation_epoch"] is None:
+                await self._fail_generation(connection, row["generation_id"])
 
     async def retry_operation(self, operation_id: UUID, *, expected_revision: int, mutation: GuidelineMutation):
         mutation.require_request(GuidelineOperationKind.RETRY,
@@ -607,6 +728,21 @@ class PostgresGuidelineRepository:
             document, root = family[old["document_id"]], family[root_id]
             self._require_revision(document, expected_revision)
             await connection.execute(text("SELECT operation_id FROM guideline_operations WHERE operation_id = :id FOR UPDATE"), {"id": operation_id})
+            if old["activation_epoch"] is None:
+                generation = (await connection.execute(text("SELECT * FROM guideline_index_generations WHERE generation_id = :id"),
+                    {"id": old["generation_id"]})).mappings().one_or_none()
+                building = await connection.scalar(text("SELECT generation_id FROM guideline_index_generations WHERE state = 'building'"))
+                if (old["state"] != "failed" or generation is None or generation["state"] not in {"failed", "building"}
+                        or document["active_version_id"] != old["version_id"]
+                        or building not in {None, old["generation_id"]}):
+                    raise GuidelineConflictError("guideline_retry_conflict")
+                await connection.execute(text("UPDATE guideline_index_generations SET state = 'building' WHERE generation_id = :id"),
+                                         {"id": old["generation_id"]})
+                await connection.execute(text("UPDATE guideline_operations SET state = 'superseded', safe_error_code = NULL WHERE operation_id = :id"),
+                                         {"id": operation_id})
+                return await self._accept(connection, mutation, document_id=old["document_id"], version_id=old["version_id"],
+                    revision=expected_revision, content_digest=old["accepted_response"]["content_digest"],
+                    pending=True, generation_id=old["generation_id"])
             if (old["state"] != "failed" or root["disabled"] or old["activation_epoch"] != root["activation_epoch"]
                     or document["pending_version_id"] != old["version_id"]):
                 raise GuidelineConflictError("guideline_retry_conflict")
@@ -622,6 +758,8 @@ class PostgresGuidelineRepository:
                               *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, _, _ = await self._fence(connection, claim, now)
+            if row["activation_epoch"] is None:
+                raise GuidelineConflictError("guideline_rebuild_cannot_publish")
             await self._write_embedding_row(connection, generation_id, row["version_id"], canonical_document, vector,
                                             allowed_states={"building", "active"})
             await connection.execute(text("UPDATE guideline_operations SET generation_id = :gen WHERE operation_id = :id"),
@@ -711,14 +849,41 @@ class PostgresGuidelineRepository:
     async def activate_version(self, claim: GuidelineOperation, *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, root_id, family = await self._fence(connection, claim, now)
+            if row["activation_epoch"] is None:
+                raise GuidelineConflictError("guideline_rebuild_cannot_publish")
             await self._require_ready(connection, row["version_id"])
-            await connection.execute(text(
-                "UPDATE guideline_documents SET active_version_id = :version, pending_version_id = NULL WHERE document_id = :id"
-            ), {"id": row["document_id"], "version": row["version_id"]})
-            await self._refresh_catalog(connection, root_id)
-            await connection.execute(text(
-                "UPDATE guideline_operations SET state = 'succeeded', lease_owner = NULL, lease_until = NULL WHERE operation_id = :id"
-            ), {"id": row["operation_id"]})
+            await self._activate_publication(connection, row, root_id)
+
+    async def _activate_publication(self, connection, row, root_id):
+        await connection.execute(text(
+            "UPDATE guideline_documents SET active_version_id = :version, pending_version_id = NULL WHERE document_id = :id"
+        ), {"id": row["document_id"], "version": row["version_id"]})
+        await self._refresh_catalog(connection, root_id)
+        await connection.execute(text(
+            "UPDATE guideline_operations SET state = 'succeeded', lease_owner = NULL, lease_until = NULL WHERE operation_id = :id"
+        ), {"id": row["operation_id"]})
+
+    async def complete_operation(self, claim: GuidelineOperation, generation_id: UUID,
+                                 canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+                                 *, now: datetime | None = None):
+        async with self._connection(write=True) as connection:
+            row, root_id, _ = await self._fence(connection, claim, now)
+            rebuild = row["activation_epoch"] is None
+            if rebuild:
+                if row["generation_id"] != generation_id:
+                    raise GuidelineConflictError("guideline_generation_changed")
+            elif await connection.scalar(text("SELECT active_generation_id FROM guideline_catalog_state WHERE singleton_id = 1")) != generation_id:
+                raise GuidelineConflictError("guideline_generation_changed")
+            await self._write_embedding_row(connection, generation_id, row["version_id"], canonical_document, vector,
+                                            allowed_states={"building"} if rebuild else {"active"})
+            if rebuild:
+                await connection.execute(text(
+                    "UPDATE guideline_operations SET state = 'succeeded', lease_owner = NULL, lease_until = NULL WHERE operation_id = :id"
+                ), {"id": row["operation_id"]})
+            else:
+                await connection.execute(text("UPDATE guideline_operations SET generation_id = :gen WHERE operation_id = :id"),
+                                         {"gen": generation_id, "id": row["operation_id"]})
+                await self._activate_publication(connection, row, root_id)
 
     async def set_enabled(self, document_id: UUID, enabled: bool, *, expected_revision: int, mutation: GuidelineMutation):
         if type(enabled) is not bool:

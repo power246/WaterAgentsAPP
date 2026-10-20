@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–5 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–6 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -360,28 +360,28 @@ git diff --check
 
 ### Work
 
-- [ ] 实现 publication/index worker 的持久化 claim/lease/restart、有限 concurrency/attempt/退避；embedding 在事务外，完成前校验 attempt ownership。
-- [ ] 覆盖首次安装/空库无 active generation 的初始化：按当前合法 profile 创建首个 generation，并使首份批准内容可完成准备；缺凭据或准备失败留在明确状态，不能因等待“已有 active”永久卡住。
-- [ ] 批准版本准备向量后，在短事务中校验 pending version、digest、activation epoch、generation/profile，再写向量并原子更新 catalog intervals/revision 和 operation。
-- [ ] provider/索引失败保留批准版本与旧 effective content，显式 retry 使用同版本；新的实际审核发布可 supersede 失败旧任务。
-- [ ] 配置/model/模板变化建立候选 generation，覆盖有效 catalog；切换前锁内核对 revision，若 publication/disable/restore 改变目录先补齐/reconcile，再原子切换。
-- [ ] active generation 改变时，旧 publication 为当前 profile 重新准备后才可激活；旧 profile 的向量不能混入新 generation。
-- [ ] 新 builtin base 导入不覆盖/取消用户已批准的 local override；停用/恢复/新发布使旧激活 token 失效，不允许 worker 逆转用户后来的选择。
-- [ ] runtime startup/shutdown 接入 worker 生命周期，取消不续派新任务；保留旧 generations/versions，首版不新增自动 purge。
+- [x] 实现 publication/index worker 的持久化 claim/lease/restart、有限 concurrency/attempt/退避；embedding 在事务外，完成前校验 attempt ownership。
+- [x] 覆盖首次安装/空库无 active generation 的初始化：按当前合法 profile 创建首个 generation，并使首份批准内容可完成准备；缺凭据或准备失败留在明确状态，不能因等待“已有 active”永久卡住。
+- [x] 批准版本准备向量后，在短事务中校验 pending version、digest、activation epoch、generation/profile，再写向量并原子更新 catalog intervals/revision 和 operation。
+- [x] provider/索引失败保留批准版本与旧 effective content，显式 retry 使用同版本；新的实际审核发布可 supersede 失败旧任务。
+- [x] 配置/model/模板变化建立候选 generation，覆盖有效 catalog；切换前锁内核对 revision，若 publication/disable/restore 改变目录先补齐/reconcile，再原子切换。
+- [x] active generation 改变时，旧 publication 为当前 profile 重新准备后才可激活；旧 profile 的向量不能混入新 generation。
+- [x] 新 builtin base 导入不覆盖/取消用户已批准的 local override；停用/恢复/新发布使旧激活 token 失效，不允许 worker 逆转用户后来的选择。
+- [x] runtime startup/shutdown 接入 worker 生命周期，取消不续派新任务；保留旧 generations/versions，首版不新增自动 purge。
 
 ### Tests
 
-- [ ] 屏障重现“批准 A → 开始 embedding → 保存草稿 B → A 返回”：A 仍仅以批准 A 激活，B 留草稿，不误用新 revision 取消合法批准。
-- [ ] 屏障重现“批准 → embedding 未返回 → 停用/恢复/新审核发布 → 旧 worker 返回”：旧内容不重新激活，operation 状态准确。
-- [ ] 屏障重现“generation 重建读取 catalog → publication/disable/restore 改目录 → 尝试切换”：先补齐再切换，目录每一有效版都有同 profile 向量。
-- [ ] 覆盖 publication 计算期间 generation 切换、lease 回收、worker 崩溃/重启、最后 attempt 失败、用户 retry；不产生重复审核/版本。
-- [ ] 从新建数据库验证首个 generation/首份批准内容可用，及首次失败后补齐配置/重启/重试可恢复；旧库迁移后不丢原数据。
-- [ ] PostgreSQL 验证失败 rollback 后旧可用目录仍完整，at-most-one active/building 不变量与锁序无死锁；不只检查最终 UI 状态。
+- [x] 屏障重现“批准 A → 开始 embedding → 保存草稿 B → A 返回”：A 仍仅以批准 A 激活，B 留草稿，不误用新 revision 取消合法批准。
+- [x] 屏障重现“批准 → embedding 未返回 → 停用/恢复/新审核发布 → 旧 worker 返回”：旧内容不重新激活，operation 状态准确。
+- [x] 屏障重现“generation 重建读取 catalog → publication/disable/restore 改目录 → 尝试切换”：先补齐再切换，目录每一有效版都有同 profile 向量。
+- [x] 覆盖 publication 计算期间 generation 切换、lease 回收、worker 崩溃/重启、最后 attempt 失败、用户 retry；不产生重复审核/版本。
+- [x] 从新建数据库验证首个 generation/首份批准内容可用，及首次失败后补齐配置/重启/重试可恢复；旧库迁移后不丢原数据。
+- [x] PostgreSQL 验证失败 rollback 后旧可用目录仍完整，at-most-one active/building 不变量与锁序无死锁；不只检查最终 UI 状态。
 
 ### Verify
 
 ```powershell
-Invoke-GuidelinePytest -Stage gk-m6 -Paths @('backend/tests/application/guidelines/test_worker.py', 'backend/tests/persistence/test_guidelines.py', 'backend/tests/infrastructure/test_m8_runtime.py')
+Invoke-GuidelinePytest -Stage gk-m6 -Paths @('backend/tests/application/guidelines/test_worker.py', 'backend/tests/infrastructure/test_guideline_runtime.py', 'backend/tests/persistence/test_guidelines.py', 'backend/tests/api/test_guidelines.py', 'backend/tests/infrastructure/test_m8_runtime.py', 'backend/tests/architecture')
 git diff --check
 ```
 
@@ -389,7 +389,14 @@ git diff --check
 
 提交边界：worker、publication/generation coordinator、runtime 生命周期与真实并发测试；不含无限恢复任务或同步请求中长时间持锁。
 
-完成记录：`pending`。
+完成记录：**complete**（2026-10-21）。
+
+- 沿当前 `codex/guidelines-m0`，基线 `2190248e01f91da20cd2e7a46ec6edacaea09252`；本阶段实现 commit：`待本地提交后补记`。仅修改 worker/repository/ports/runtime、必要测试及本目录原有文档，无新 worktree 或状态 Markdown。
+- `GuidelinePreparationWorker` 接入启动导入及有界关闭，默认并发 2、attempt 20 秒、最多 3 次与 2/10 秒退避；租约在锁后读取 clock 校验。向量、active/pending pointer、catalog intervals/revision 与 operation 在 `complete_operation()` 同事务提交；失败保留旧有效版，retry 复用批准版本。
+- 空库先初始化首个 generation；配置变化按当前目录和保留 active pointers（含停用项/被覆盖 base）补齐后 CAS 切换。失败重建锁定为 failed，现有列表返回安全状态，详情提供 retry operation ref；变更配置将废弃任务 supersede。旧版本/generation 保留，主设计 §6/§7/§12 已同步。
+- 新增 worker **20 项**及 runtime **2 项**：真实 PostgreSQL 屏障覆盖 A 批准后保存草稿 B、停用/恢复/新审核/内置更新、重建期间改目录、profile 切换、锁等待后 lease 过期、重启、超时及 rollback。应用 lifespan 实际取消两条在途 MockTransport 请求后才关闭共享 pool，新 worker 回收原租约；缺 key 后补 key/重启/retry 实际只发一次请求且 version 不变。最终针对性 worker/runtime/persistence/API **95 passed**，61.93s。
+- 最终全套：**3223 passed，0 failed/errors/skipped**，331.86s（两条既有弃用 warning）。runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m6-20261020/full-verified','--junitxml','.tmp/guidelines-m6-20261020/full-verified.xml'])`。`npm --prefix frontend run check:api` 通过；测试库 `check --test-database` 为 `20261020_02`，无新增 DDL、未改业务库或 `.env`。日志/XML 留本机，不提交。
+- 验证等级：本地后端、离线 HTTP、真实 PostgreSQL；真实 embedding/分析供应商、浏览器、hosted CI、真实资料批准及 pH 实测均 **not run**。M7–12、run pin/自动检索和最终功能验收继续待实施。
 
 ## Milestone 7：Run pin 与有界自动检索
 
@@ -681,4 +688,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–5 的实际命令与证据见对应完成记录；Milestone 6–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–6 的实际命令与证据见对应完成记录；Milestone 7–12、内容审核、实测实验与最终功能验收仍待实施。

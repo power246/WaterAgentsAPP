@@ -1,5 +1,6 @@
 import asyncio
 from unittest.mock import patch
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -13,11 +14,25 @@ from app.domain.guidelines import GuidelinePolicy
 from app.infrastructure.config import AppSettings
 from app.infrastructure.credentials.memory_key_store import InMemoryKeyStore, OfflineCredentialTester
 from app.infrastructure.runtime.guidelines import GuidelineRuntime
+from app.infrastructure.http import ProviderHttpClient
+from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.ports import PortAuthenticationError, PortConfigurationError
 from tests.application.guidelines.test_embedding import catalog
 from tests.guideline_support import query
 from tests.infrastructure.embeddings.test_openai_embeddings import http_client, response_body
-from tests.infrastructure.test_m4_runtime import FixedClock
+from tests.infrastructure.test_m4_runtime import FixedClock, catalog as runtime_catalog, settings as runtime_settings
+from tests.m4_support import build_test_m8_runtime
+from scripts.test_database import temporary_migrated_schema
+from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
+from app.infrastructure.config import load_parameter_capability_registry
+from app.application.guidelines.authoring import GuidelineAuthoringService
+from tests.application.guidelines.test_worker import Clock, custom, Embedding, worker
+from tests.guideline_bundle_support import bundled_version
+
+
+@pytest.fixture
+def database_settings():
+    with temporary_migrated_schema() as selected: yield selected
 
 
 def credentials():
@@ -64,6 +79,65 @@ def test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_
             assert not http._client.is_closed and "Authorization" not in http._client.headers
             rendered = profile.model_dump_json() + query(profile).model_dump_json() + repr(runtime) + repr(first)
             assert "fixture-old-key" not in rendered and "fixture-new-key" not in rendered and "provider.test" not in rendered
+    asyncio.run(exercise())
+
+
+def test_application_starts_worker_and_cancels_inflight_http_before_closing_pool(database_settings, monkeypatch):
+    import app.main as main
+
+    async def exercise():
+        clock = Clock()
+        registry = load_parameter_capability_registry()
+        repository = PostgresGuidelineRepository(database_settings, clock=clock)
+        authoring = GuidelineAuthoringService(repository, registry, clock)
+        receipts = [await custom(authoring, f"Shutdown family {index}") for index in range(3)]
+        capabilities = list(runtime_catalog())
+        original = capabilities[-1].embedding_profile
+        updated = type(original).model_validate({**original.model_dump(exclude={"profile_id", "profile_digest"}), "max_input_tokens": 8192})
+        capabilities[-1] = capabilities[-1].model_copy(update={"embedding_profile": updated})
+        configured = runtime_settings(model_catalog=tuple(capabilities), memory_enabled=False, shutdown_save_grace_seconds=0.01)
+        entered = asyncio.Event()
+        calls, cancelled = [], []
+        pool = None
+
+        async def handler(request):
+            calls.append(request)
+            if len(calls) == 2:
+                entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                assert not pool.is_closed
+                cancelled.append(request)
+
+        class MockHttp(ProviderHttpClient):
+            def __init__(self, **kwargs):
+                super().__init__(**kwargs, transport=httpx.MockTransport(handler))
+
+        monkeypatch.setattr(main, "ProviderHttpClient", MockHttp)
+        application = main.create_app(configured, clock=clock, transcript_store=InMemoryTranscriptStore(),
+            guideline_repository=repository, m8_runtime_builder=build_test_m8_runtime)
+        try:
+            async with application.router.lifespan_context(application):
+                pool = application.state.provider_http._client
+                runtime = application.state.guideline_runtime
+                await asyncio.wait_for(entered.wait(), 4)
+                assert len(calls) == 2 and not pool.is_closed
+                assert runtime.worker.policy.worker_max_concurrency == 2
+            assert runtime._task.done() and pool.is_closed and len(cancelled) == 2
+            await runtime.shutdown()
+            states = [(await authoring.get_operation(receipt.operation_id)).state.value for receipt in receipts]
+            assert states.count("running") == 2 and states.count("pending") == 1
+            assert all([(await authoring.get(receipt.document_id)).active_version_id is None for receipt in receipts])
+            # A fresh worker after process loss reclaims durable leases, without another approval.
+            clock.advance(61)
+            recovered = worker(repository, Embedding(), runtime.desired_profile)
+            for _ in range(3):
+                await recovered.run_once()
+            assert all([(await authoring.get_operation(receipt.operation_id)).state.value == "succeeded" for receipt in receipts])
+            assert len(calls) == 2
+        finally:
+            await repository.aclose()
     asyncio.run(exercise())
 
 
@@ -118,4 +192,58 @@ def test_unavailable_configuration_never_dispatches_or_changes_analysis_configur
                 assert runtime.desired_profile is None
                 assert runtime.safe_error_code == "guideline_embedding_configuration_invalid"
             assert not calls and configured.model_dump() == original
+    asyncio.run(exercise())
+
+
+def test_first_missing_key_then_restart_and_manual_retry_activates_same_approved_version(database_settings):
+    async def exercise():
+        registry = load_parameter_capability_registry()
+        clock = Clock()
+        repository = PostgresGuidelineRepository(database_settings, clock=clock)
+        selected = catalog(max_input_tokens=8192)
+        service = credentials()
+        approved = bundled_version()
+        calls = []
+
+        class Source:
+            def read_versions(self): return (approved,)
+
+        def handler(request):
+            calls.append(request.headers["Authorization"])
+            return httpx.Response(200, json=response_body(selected.embedding_profile.model, [[1, 0, 0]]))
+
+        async def wait_for_state(state):
+            async with asyncio.timeout(4):
+                while True:
+                    operation = await repository.read_document_details(approved.identity.guideline_id)
+                    if state == "succeeded" and operation.active_version_id == approved.version_id:
+                        return operation
+                    if operation.preparation is not None and operation.preparation.state.value == state:
+                        return operation
+                    await asyncio.sleep(0.01)
+
+        async with http_client(handler) as http:
+            runtime = GuidelineRuntime(settings=AppSettings(_env_file=None, memory_enabled=False), catalog=selected, credentials=service, http=http)
+            try:
+                await runtime.start(repository, registry, source=Source())
+                failed = await wait_for_state("failed")
+                assert failed.active_version_id is None and (await repository.read_catalog()).generation_id is not None
+                assert not calls
+                await runtime.shutdown()
+                await runtime.shutdown()
+                await service.save(CredentialName.OPENAI, SecretStr("fixture-recovered-key"))
+                restarted = GuidelineRuntime(settings=AppSettings(_env_file=None, memory_enabled=False), catalog=selected, credentials=service, http=http)
+                await restarted.start(repository, registry, source=Source())
+                try:
+                    authoring = GuidelineAuthoringService(repository, registry, clock)
+                    retry = await authoring.retry(failed.preparation.receipt.operation_id, failed.revision, uuid4())
+                    result = await wait_for_state("succeeded")
+                    assert retry.version_id == result.active_version_id == approved.version_id
+                    assert (await authoring.get_operation(retry.operation_id)).state.value == "succeeded"
+                    assert len(calls) == 1 and calls[0] == "Bearer fixture-recovered-key"
+                    with pytest.raises(RuntimeError): await restarted.start(repository, registry)
+                finally: await restarted.shutdown()
+            finally:
+                await runtime.shutdown()
+                await repository.aclose()
     asyncio.run(exercise())

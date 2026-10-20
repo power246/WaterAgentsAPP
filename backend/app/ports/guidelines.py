@@ -80,10 +80,17 @@ class GuidelineRepositoryPort(Protocol):
 
     async def create_generation(self, profile: GuidelineEmbeddingProfileV1) -> GuidelineIndexGeneration: ...
 
+    async def ensure_generation(self, profile: GuidelineEmbeddingProfileV1) -> GuidelineIndexGeneration: ...
+
+    async def queue_generation(self, generation_id: UUID, *, limit: int = 64) -> None: ...
+
+    async def read_embedding(self, generation_id: UUID, version_id: UUID) -> EmbeddingVector | None: ...
+
     async def activate_generation(self, generation_id: UUID, *, expected_catalog_revision: Revision) -> None: ...
 
     async def claim_operation(
         self, owner: str, *, now: datetime | None = None, lease_seconds: int = 60,
+        generation_id: UUID | None = None,
     ) -> GuidelineOperation | None: ...
 
     async def fail_attempt(
@@ -101,6 +108,12 @@ class GuidelineRepositoryPort(Protocol):
     ) -> None: ...
 
     async def activate_version(self, claim: GuidelineOperation, *, now: datetime | None = None) -> None: ...
+
+    async def complete_operation(
+        self, claim: GuidelineOperation, generation_id: UUID,
+        canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+        *, now: datetime | None = None,
+    ) -> None: ...
 
     async def write_building_embedding(
         self, generation_id: UUID, version_id: UUID,
