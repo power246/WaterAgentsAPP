@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+import logging
+from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
@@ -9,17 +11,22 @@ from app.application.analysis_runs.topology_result_models import (
     DependencyStatus,
 )
 from app.application.canonical_json import canonical_json_digest
+from app.application.evidence_tools.measurement_provenance import (
+    derive_measured_anchors,
+    transfer_measured_anchors,
+)
 from app.application.transcripts.models import ReadTranscriptItem
-from app.application.transcripts.read_models import ReadView, RegisteredRunRead
-from app.domain.evidence.upstream_result_cell_projection import UpstreamResultCellProjection
+from app.application.transcripts.read_models import ReadView
 from app.domain import (
     CollectionCompletionContract,
     CollectionCompletionProof,
     CollectionCounts,
     CollectionPageManifest,
-    EvidenceLocation,
     EvidenceBundle,
     EvidenceFragment,
+    EvidenceLocation,
+    GeoPoint,
+    HydrologyGraph,
     InferenceResult,
     ItemReference,
     OutcomeStatus,
@@ -33,12 +40,21 @@ from app.domain import (
     UpstreamResultRequest,
     canonical_model_bytes,
 )
+from app.domain.evidence.measured_anchor import MeasuredAnchor
+from app.domain.evidence.upstream_result_cell_projection import (
+    UpstreamResultCellProjection,
+)
+
+logger = logging.getLogger("wateragents.evidence_tools")
 
 
 @dataclass(frozen=True, slots=True)
 class ResolvedInferenceResult:
     result: InferenceResult
     closure_refs: tuple[ItemReference, ...]
+    measured_anchors_by_cell: dict[str, tuple[MeasuredAnchor, ...]] = field(
+        default_factory=dict
+    )
 
 
 class UpstreamInferenceResultReader(Protocol):
@@ -49,18 +65,39 @@ class UpstreamInferenceResultReader(Protocol):
 
 
 class RegisteredTranscriptReader(Protocol):
-    async def read_registered_run(
+    async def read_registered_items_persisted(
         self,
         run_id: UUID,
+        item_ids: tuple[UUID, ...],
         view: ReadView,
-    ) -> RegisteredRunRead: ...
+    ) -> tuple[ReadTranscriptItem, ...]: ...
+
+    async def list_registered_session_item_ids(
+        self,
+        run_id: UUID,
+        session_id: UUID,
+        content_type: str,
+    ) -> tuple[UUID, ...]: ...
+
+
+class PersistedItemWaiter(Protocol):
+    async def wait_for_transcript_items_persisted(
+        self,
+        run_id: UUID,
+        item_ids: tuple[UUID, ...],
+    ) -> object | None: ...
 
 
 class TranscriptUpstreamInferenceResultReader:
     """Resolve a committed result and its registered same-session closure."""
 
-    def __init__(self, reader: RegisteredTranscriptReader) -> None:
+    def __init__(
+        self,
+        reader: RegisteredTranscriptReader,
+        waiter: PersistedItemWaiter,
+    ) -> None:
         self._reader = reader
+        self._waiter = waiter
 
     async def resolve(
         self,
@@ -68,40 +105,127 @@ class TranscriptUpstreamInferenceResultReader:
     ) -> ResolvedInferenceResult:
         if outcome.result_ref is None:
             raise ValueError("dependency outcome does not reference a result")
-        snapshot = await self._reader.read_registered_run(
-            outcome.run_id,
-            ReadView.AUTO,
+        started = asyncio.get_running_loop().time()
+        logger.info(
+            "Dependency result resolution started.",
+            extra={
+                "event_name": "dependency_result_resolution_started",
+                "run_id": str(outcome.run_id),
+                "session_id": str(outcome.session_id),
+            },
         )
-        if snapshot.run.run_id != outcome.run_id:
-            raise ValueError("dependency result run identity does not match")
-        items = tuple(
-            item for item in snapshot.items
-            if item.item.session_id == outcome.session_id and item.body is not None
+        result_items = await self._read_required(
+            outcome.run_id, (outcome.result_ref.item_id,)
         )
-        item = next(
-            (
-                candidate
-                for candidate in items
-                if candidate.item.item_id == outcome.result_ref.item_id
-            ),
-            None,
-        )
+        item = result_items[0]
         if (
-            item is None
+            item.item.session_id != outcome.session_id
             or item.item.content_type != "inference_result"
             or item.item.content_schema_version != 1
             or not isinstance(item.body, InferenceResult)
         ):
             raise ValueError("dependency result is not inference_result v1")
-        closure_ids = _session_result_closure_ids(item, items, snapshot.items)
+        bundle_ids = await self._reader.list_registered_session_item_ids(
+            outcome.run_id, outcome.session_id, "evidence_bundle"
+        )
+        bundle_items = await self._read_required(outcome.run_id, bundle_ids)
+        evidence_ids = {
+            reference.evidence_id for reference in item.body.evidence_chain.references
+        }
+        matching_bundles = tuple(
+            candidate for candidate in bundle_items
+            if candidate.item.session_id == outcome.session_id
+            and isinstance(candidate.body, EvidenceBundle)
+            and evidence_ids <= {
+                reference.evidence_id for reference in candidate.body.fragment_refs
+            }
+        )
+        if matching_bundles:
+            bundle = matching_bundles[-1].body
+            reference_ids = (
+                *(UUID(reference.item_id) for reference in bundle.fragment_refs),
+                *(UUID(item_id) for item_id in bundle.source_record_item_refs),
+                *(UUID(reference.item_id) for reference in bundle.closure_refs),
+                *(UUID(reference.item_id) for reference in bundle.tool_result_refs),
+            )
+        else:
+            reference_ids = tuple(
+                UUID(reference)
+                for reference in (
+                    *item.body.analysis_detail.transcript_item_refs,
+                    *(
+                        reference
+                        for step in item.body.analysis_detail.steps
+                        for reference in step.transcript_item_refs
+                    ),
+                )
+            )
+        referenced_items = await self._read_required(
+            outcome.run_id, tuple(dict.fromkeys(reference_ids))
+        )
+        all_items = (item, *bundle_items, *referenced_items)
+        session_items = tuple(
+            candidate for candidate in all_items
+            if candidate.item.session_id == outcome.session_id
+        )
+        closure_ids = _session_result_closure_ids(item, session_items, all_items)
         if not closure_ids or outcome.result_ref.item_id in closure_ids:
             raise ValueError("dependency result requires a distinct reference closure")
-        return ResolvedInferenceResult(
+        resolved = ResolvedInferenceResult(
             result=item.body,
             closure_refs=tuple(
                 ItemReference(item_id=str(item_id)) for item_id in closure_ids
             ),
+            measured_anchors_by_cell={
+                point.cell_id: derive_measured_anchors(
+                    parameter=series.parameter.key,
+                    target_comid=item.body.target_comid,
+                    evidence_ids=point.evidence_refs,
+                    fragments={
+                        candidate.body.evidence_id: candidate.body
+                        for candidate in session_items
+                        if isinstance(candidate.body, EvidenceFragment)
+                    },
+                )
+                for series in item.body.series
+                for point in series.points
+            },
         )
+        logger.info(
+            "Dependency result resolution completed.",
+            extra={
+                "event_name": "dependency_result_resolution_completed",
+                "run_id": str(outcome.run_id),
+                "session_id": str(outcome.session_id),
+                "result_count": len(closure_ids),
+                "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+            },
+        )
+        return resolved
+
+    async def _read_required(
+        self,
+        run_id: UUID,
+        item_ids: tuple[UUID, ...],
+    ) -> tuple[ReadTranscriptItem, ...]:
+        if not item_ids:
+            return ()
+        if await self._waiter.wait_for_transcript_items_persisted(
+            run_id, item_ids
+        ) is not None:
+            raise ValueError("dependency result references could not be persisted")
+        selected = await self._reader.read_registered_items_persisted(
+            run_id, item_ids, ReadView.AUTO
+        )
+        by_id = {item.item.item_id: item for item in selected}
+        if any(
+            item_id not in by_id
+            or by_id[item_id].item.run_id != run_id
+            or by_id[item_id].body is None
+            for item_id in item_ids
+        ):
+            raise ValueError("dependency result reference closure is incomplete")
+        return tuple(by_id[item_id] for item_id in item_ids)
 
 
 def validate_resolved_outcome(
@@ -137,7 +261,11 @@ def validate_resolved_outcome(
     eligible = {
         cell_id
         for cell_id, (_, point) in points.items()
-        if point.outcome_status in {OutcomeStatus.QUANTIFIED, OutcomeStatus.DIRECTIONAL}
+        if point.outcome_status in {
+            OutcomeStatus.QUANTIFIED,
+            OutcomeStatus.RANGE_ESTIMATE,
+            OutcomeStatus.DIRECTIONAL,
+        }
     }
     actual = {reference.cell_id for reference in outcome.usable_cell_refs}
     if outcome.status is DependencyStatus.USABLE:
@@ -158,6 +286,10 @@ def validate_resolved_outcome(
 def project_upstream_results(
     request: UpstreamResultRequest,
     dependencies: tuple[tuple[DependencyOutcome, ResolvedInferenceResult], ...],
+    *,
+    edge_distances: dict[tuple[str, str], float] | None = None,
+    topology: HydrologyGraph | None = None,
+    destination_point: GeoPoint | None = None,
 ) -> ProviderCollectionBatch[UpstreamResultRecord]:
     allowed_parameters = set(request.parameter_keys)
     allowed_windows = set(request.affected_window_ids)
@@ -179,6 +311,19 @@ def project_upstream_results(
             provider_record_id = (
                 f"upstream:{outcome.result_ref.item_id}:{point.cell_id}"
             )
+            distance = (edge_distances or {}).get(
+                (outcome.target_comid, request.agent_comid)
+            )
+            anchors = transfer_measured_anchors(
+                resolved.measured_anchors_by_cell.get(
+                    point.cell_id, point.measured_anchors
+                ),
+                upstream_comid=outcome.target_comid,
+                downstream_comid=request.agent_comid,
+                distance_km=distance,
+                topology=topology,
+                destination_point=destination_point,
+            )
             records.append(UpstreamResultRecord(
                 record_id=provider_record_id,
                 provider="analysis_run",
@@ -193,7 +338,7 @@ def project_upstream_results(
                     point=None,
                     comid=outcome.target_comid,
                     station_id=None,
-                    distance_to_target_km=None,
+                    distance_to_target_km=distance,
                 ),
                 provider_quality=ProviderQuality(),
                 provenance=Provenance(
@@ -214,11 +359,17 @@ def project_upstream_results(
                     time_range=TimeRange(start=point.start_time, end=point.end_time),
                     outcome_status=point.outcome_status,
                     representative_value=point.representative_value,
+                    value_lower=point.value_lower,
+                    value_upper=point.value_upper,
                     unit_id=point.unit_id,
                     trend=point.assessment.trend,
                     risk_level=point.assessment.risk_level,
                     source=point.source,
                     confidence=point.confidence,
+                    quality_flags=point.quality_flags,
+                    inference_method=point.inference_method,
+                    inference_basis=point.inference_basis,
+                    measured_anchors=anchors,
                 ),
             ))
     ordered = tuple(sorted(
@@ -288,6 +439,8 @@ def _session_result_closure_ids(
         bundle = selected.body
         if not isinstance(bundle, EvidenceBundle):
             raise ValueError("dependency result bundle is invalid")
+        if bundle.agent_comid != result.target_comid:
+            raise ValueError("dependency result bundle belongs to another waterbody")
         original = (
             selected.item.item_id,
             *(UUID(reference.item_id) for reference in bundle.fragment_refs),
@@ -299,8 +452,14 @@ def _session_result_closure_ids(
         upstream_owners: dict[UUID, UUID] = {}
         for reference in bundle.fragment_refs:
             fragment_item = by_id.get(UUID(reference.item_id))
-            if fragment_item is None or not isinstance(fragment_item.body, EvidenceFragment):
-                continue
+            if (
+                fragment_item is None
+                or fragment_item.item.session_id != result_item.item.session_id
+                or not isinstance(fragment_item.body, EvidenceFragment)
+                or fragment_item.body.evidence_id != reference.evidence_id
+                or fragment_item.body.target_comid != result.target_comid
+            ):
+                raise ValueError("dependency evidence belongs to another waterbody")
             payload = fragment_item.body.payload
             if not isinstance(payload, UpstreamResultPayload):
                 continue

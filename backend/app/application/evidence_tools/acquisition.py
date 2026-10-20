@@ -1,6 +1,8 @@
+import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import NAMESPACE_URL, uuid5
 
@@ -9,10 +11,13 @@ from app.application.evidence_tools.bundle_builder import (
     ValidatedBundleInputs,
 )
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
+from app.application.evidence_tools.evidence_sources import (
+    weather_capable_parameters,
+)
 from app.application.evidence_tools.executor import EvidenceToolExecutor
 from app.application.evidence_tools.models import (
-    EvidenceClock,
     EvidenceBudgetUsage,
+    EvidenceClock,
     EvidencePolicyClass,
     EvidenceProducerFact,
     EvidenceToolDescriptor,
@@ -20,16 +25,23 @@ from app.application.evidence_tools.models import (
     EvidenceToolReader,
     EvidenceToolWriter,
 )
-from app.application.evidence_tools.registry import EvidenceToolRegistry
-from app.application.evidence_tools.scope import (
-    EvidenceSessionScope,
-    with_evidence_rule_plan,
+from app.application.evidence_tools.numeric_dependency import (
+    NumericDependencyExecutor,
+    NumericDependencyPlanner,
+    prepare_numeric_scope,
 )
+from app.application.evidence_tools.numeric_estimation import NumericEstimator
+from app.application.evidence_tools.numeric_methods import (
+    NumericMethodRegistry,
+    create_production_numeric_method_registry,
+)
+from app.application.evidence_tools.registry import EvidenceToolRegistry
 from app.application.evidence_tools.relation_materializer import (
     EvidenceRelationMaterializer,
 )
-from app.application.evidence_tools.evidence_sources import (
-    weather_capable_parameters,
+from app.application.evidence_tools.scope import (
+    EvidenceSessionScope,
+    with_evidence_rule_plan,
 )
 from app.application.query_understanding import (
     EvidenceRule,
@@ -38,9 +50,13 @@ from app.application.query_understanding import (
     append_evidence_rules,
 )
 from app.domain import (
+    AggregatePayload,
     CollectionFactPayload,
     CollectionStatus,
     CoverageStatus,
+    DirectRecordPayload,
+    DischargeObservationRecord,
+    EvidenceAggregationMethod,
     EvidenceApplicability,
     EvidenceBundle,
     EvidenceCell,
@@ -48,28 +64,57 @@ from app.domain import (
     EvidenceCellStatus,
     EvidenceCoverage,
     EvidenceFragment,
+    EvidenceFragmentReference,
+    EvidenceLocation,
     EvidenceQualityClass,
     EvidenceResultEligibility,
     EvidenceToolExecutionStatus,
-    EvidenceToolRequest,
     EvidenceToolOptions,
-    EvidenceLocation,
-    EvidenceFragmentReference,
+    EvidenceToolRequest,
     InferenceMode,
     ItemReference,
-    ParameterKey,
+    NumericDerivedPayload,
     ParameterCapabilityRegistry,
+    ParameterKey,
+    ParameterProvider,
     Provenance,
+    TemporalEstimatePayload,
     UpstreamResultPayload,
+    WaterObservationRecord,
 )
 
-
 _DISCHARGE = ParameterKey(code_system="usgs", code="00060")
+_ESTIMATION_TOLERATED_FAILURES = frozenset({
+    "evidence_provider_unavailable",
+    "evidence_provider_timeout",
+    "evidence_provider_authentication_failed",
+    "evidence_provider_rate_limited",
+    "evidence_producer_unavailable",
+    "evidence_unit_unresolved",
+    "waterbody_geometry_unavailable",
+})
+_PREFLIGHT_SERIES = {
+    "usgs_waterdata": (
+        ParameterProvider.WDFN_TIME_SERIES,
+        "continuous",
+        EvidenceAggregationMethod.MEAN,
+    ),
+    ParameterProvider.WDFN_TIME_SERIES.value: (
+        ParameterProvider.WDFN_TIME_SERIES,
+        "continuous",
+        EvidenceAggregationMethod.MEAN,
+    ),
+    ParameterProvider.USGS_SAMPLES.value: (
+        ParameterProvider.USGS_SAMPLES,
+        "discrete_samples",
+        EvidenceAggregationMethod.LATEST,
+    ),
+}
 
 
 class _UtcClock:
     def now(self) -> datetime:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +153,7 @@ class EvidenceAcquisitionHandoff:
     stop_before_model: bool
     stop_facts: tuple[str, ...]
     block_facts: tuple[str, ...]
+    numeric_estimation_allowed: bool = False
 
     def has_valid_bundle_binding(self) -> bool:
         return self.bundle_binding_digest == _bundle_binding_digest(
@@ -127,6 +173,7 @@ class EvidenceAcquisitionService:
         reader: EvidenceToolReader,
         writer: EvidenceToolWriter,
         capability_registry: ParameterCapabilityRegistry,
+        numeric_registry: NumericMethodRegistry | None = None,
         clock: EvidenceClock | None = None,
     ) -> None:
         self._registry = registry
@@ -136,12 +183,36 @@ class EvidenceAcquisitionService:
         self._clock = clock or _UtcClock()
         self._capability_registry = capability_registry
         self._capability_registry_digest = capability_registry.manifest_digest
-        self._bundle_builder = EvidenceBundleBuilder(reader=reader, writer=writer)
+        self._numeric_registry = (
+            numeric_registry
+            if numeric_registry is not None
+            else create_production_numeric_method_registry(capability_registry)
+        )
+        self._numeric_limiter = asyncio.Semaphore(4)
+        self._numeric_planner = NumericDependencyPlanner(
+            registry=self._numeric_registry,
+            reader=reader,
+            capability_registry=capability_registry,
+        )
+        self._numeric_executor = NumericDependencyExecutor(
+            registry=self._numeric_registry,
+            reader=reader,
+            writer=writer,
+            limiter=self._numeric_limiter,
+            capability_registry=capability_registry,
+            total_deadline_seconds=executor.total_deadline_seconds,
+        )
+        self._bundle_builder = EvidenceBundleBuilder(
+            reader=reader, writer=writer, numeric_registry=self._numeric_registry
+        )
         self._relation_materializer = EvidenceRelationMaterializer(
             registry=capability_registry,
             reader=reader,
             writer=writer,
         )
+
+    def prepare_scope(self, scope: EvidenceSessionScope) -> EvidenceSessionScope:
+        return prepare_numeric_scope(scope, self._numeric_registry)
 
     async def start(
         self,
@@ -167,7 +238,19 @@ class EvidenceAcquisitionService:
                 local.result.execution_status
                 is EvidenceToolExecutionStatus.CANCELLED
             )
-
+            if (
+                not cancelled
+                and local.result.execution_status
+                is EvidenceToolExecutionStatus.COMPLETED
+            ):
+                cancelled = await self._preaggregate_observed_windows(
+                    scope,
+                    local.result.fragment_refs,
+                    local.result.collection_fact_refs,
+                    fragment_refs=fragment_refs,
+                    result_refs=result_refs,
+                    block_facts=block_facts,
+                )
         if scope.direct_upstream_comids and not cancelled:
             upstream = await self._execute(
                 scope,
@@ -182,12 +265,86 @@ class EvidenceAcquisitionService:
                 is EvidenceToolExecutionStatus.CANCELLED
             )
 
-        local_target = await self._has_usable_direct(
+        method_weather = weather_capable_parameters(scope.intermediate_parameters)
+        if method_weather and not cancelled:
+            weather = await self._execute(
+                scope,
+                EvidenceToolRequest(
+                    tool_call_id=f"m5:method-weather:{scope.session_id}",
+                    session_id=scope.session_id,
+                    tool_name="collect_weather_evidence",
+                    purpose="Collect weather inputs for a registered numeric method.",
+                    window_ids=tuple(item.window_id for item in scope.time_windows),
+                    parameter_keys=method_weather,
+                    options=EvidenceToolOptions(
+                        include_forecast=scope.mode is not InferenceMode.GAP_FILLING,
+                    ),
+                ),
+                fragment_refs=fragment_refs,
+                result_refs=result_refs,
+                block_facts=block_facts,
+                materialize_technical_facts=True,
+            )
+            cancelled = (
+                weather.result.execution_status
+                is EvidenceToolExecutionStatus.CANCELLED
+            )
+
+        if not cancelled:
+            plan = None
+            try:
+                async with asyncio.timeout(self._executor.total_deadline_seconds):
+                    plan = await self._numeric_planner.plan(
+                        scope, _unique_fragment_refs(fragment_refs)
+                    )
+                    numeric = await self._numeric_executor.run(scope, plan)
+            except TimeoutError:
+                block_facts.append("numeric_dependency_timeout")
+                affected = (
+                    ((task.output_parameter, task.window_id),
+                     "numeric_dependency_timeout")
+                    for task in plan.tasks
+                ) if plan is not None else (
+                    ((parameter, window.window_id),
+                     "numeric_dependency_timeout")
+                    for window in scope.time_windows
+                    for parameter in (
+                        *scope.requested_parameters, *scope.supporting_parameters
+                    )
+                )
+                fragment_refs.extend(await self._write_numeric_failure_facts(
+                    scope, tuple(affected), tuple(fragment_refs)
+                ))
+            else:
+                fragment_refs.extend(numeric.fragment_refs)
+                if numeric.failed_task_ids:
+                    block_facts.append("numeric_dependency_failed")
+                failed = set(numeric.failed_task_ids)
+                blocked = set(numeric.blocked_task_ids)
+                failure_codes = dict(numeric.failure_codes)
+                block_facts.extend(failure_codes.values())
+                affected = tuple(
+                    (
+                        (task.output_parameter, task.window_id),
+                        (
+                            failure_codes.get(task.task_id, "numeric_dependency_failed")
+                            if task.task_id in failed
+                            else "numeric_dependency_blocked"
+                        ),
+                    )
+                    for task in plan.tasks
+                    if task.task_id in failed | blocked
+                )
+                fragment_refs.extend(await self._write_numeric_failure_facts(
+                    scope, affected, tuple(fragment_refs)
+                ))
+
+        local_target = await self._has_usable_local_numeric(
             scope,
             tuple(fragment_refs),
             parameters=scope.requested_parameters,
         )
-        local_discharge = await self._has_usable_direct(
+        local_discharge = await self._has_usable_local_numeric(
             scope,
             tuple(fragment_refs),
             parameters=(_DISCHARGE,),
@@ -200,10 +357,10 @@ class EvidenceAcquisitionService:
             local_target
             or (usable_upstream and (not scope.station_refs or local_discharge))
         )
-        stop_before_model = (
-            not cancelled and not block_facts and not has_starting_evidence
+        numeric_estimation_allowed = (
+            not cancelled and _allows_numeric_estimation(scope, block_facts)
         )
-        run_optional = not cancelled and has_starting_evidence
+        run_optional = not cancelled and (has_starting_evidence or numeric_estimation_allowed)
 
         if run_optional:
             for request in self._required_rule_requests(scope):
@@ -226,16 +383,84 @@ class EvidenceAcquisitionService:
             fragment_refs=tuple(fragment_refs),
             result_refs=tuple(result_refs),
             block_facts=tuple(block_facts),
-            stop_before_model=stop_before_model,
-            stop_facts=(
-                (
-                    "upstream_dependencies_insufficient"
-                    if not scope.station_refs
-                    else "no_usable_local_or_upstream_evidence"
-                ),
+            stop_before_model=False,
+            stop_facts=(),
+        )
+
+    async def resolve_numeric(
+        self,
+        scope: EvidenceSessionScope,
+        prior: EvidenceAcquisitionHandoff,
+        *,
+        estimator: NumericEstimator,
+    ) -> EvidenceAcquisitionHandoff:
+        """Complete unresolved numeric tasks using the existing dependency scheduler."""
+
+        current_scope = self._scope_for_handoff(scope, prior)
+        if not prior.numeric_estimation_allowed:
+            return prior
+        fragment_refs = list(prior.fragment_allowlist)
+        block_facts = list(prior.block_facts)
+        affected: dict[tuple[ParameterKey, str], str] = {}
+        excluded: set[str] = set()
+        ran_tasks = False
+        for attempt in range(2):
+            plan = await self._numeric_planner.plan(
+                current_scope, tuple(fragment_refs), allow_estimation=True,
+                excluded_task_ids=tuple(sorted(excluded)),
             )
-            if stop_before_model
-            else (),
+            if not plan.tasks:
+                break
+            ran_tasks = True
+            try:
+                numeric = await self._numeric_executor.run(
+                    current_scope, plan, estimator=estimator
+                )
+            except TimeoutError:
+                block_facts.append("numeric_dependency_timeout")
+                affected.update({
+                    (task.output_parameter, task.window_id): "numeric_dependency_timeout"
+                    for task in plan.tasks
+                })
+                break
+            fragment_refs.extend(numeric.fragment_refs)
+            failed = set(numeric.failed_task_ids)
+            blocked = set(numeric.blocked_task_ids)
+            failure_codes = dict(numeric.failure_codes)
+            block_facts.extend(failure_codes.values())
+            affected.update({
+                (task.output_parameter, task.window_id): (
+                    failure_codes.get(task.task_id, "numeric_dependency_failed")
+                    if task.task_id in failed else "numeric_dependency_blocked"
+                )
+                for task in plan.tasks if task.task_id in failed | blocked
+            })
+            for fragment in await self._reader.read_fragments(current_scope, numeric.fragment_refs):
+                if fragment.collection_status not in {CollectionStatus.AVAILABLE, CollectionStatus.EMPTY}:
+                    continue
+                for window in current_scope.time_windows:
+                    if window.time_range == fragment.time_range:
+                        for parameter in fragment.parameter_refs:
+                            affected.pop((parameter, window.window_id), None)
+            if attempt or not blocked:
+                break
+            # One fallback pass can estimate a target whose explicit method could
+            # not consume a range-only predecessor. Completed model attempts,
+            # including abstentions, are never submitted again.
+            excluded.update(failed | blocked)
+            excluded.update(task.task_id for task in plan.tasks if task.method_kind == "model_estimate")
+        if not ran_tasks:
+            return prior
+        fragment_refs.extend(await self._write_numeric_failure_facts(
+            current_scope, tuple(affected.items()), tuple(fragment_refs)
+        ))
+        return await self._build_handoff(
+            current_scope,
+            fragment_refs=tuple(fragment_refs),
+            result_refs=prior.tool_result_refs,
+            block_facts=tuple(block_facts),
+            stop_before_model=False,
+            stop_facts=(),
         )
 
     async def execute_optional(
@@ -245,6 +470,7 @@ class EvidenceAcquisitionService:
         prior: EvidenceAcquisitionHandoff,
         *,
         max_calls: int = 4,
+        on_execution: Callable[[EvidenceToolExecution], None] | None = None,
     ) -> EvidenceAcquisitionHandoff:
         """Execute one bounded Agent-selected tool turn in provider order."""
 
@@ -269,6 +495,8 @@ class EvidenceAcquisitionService:
                 materialize_technical_facts=False,
                 agent_selected=True,
             )
+            if on_execution is not None:
+                on_execution(execution)
             if (
                 execution.result.execution_status
                 is EvidenceToolExecutionStatus.CANCELLED
@@ -294,9 +522,9 @@ class EvidenceAcquisitionService:
         current_scope = self._scope_for_handoff(scope, prior)
         if not rules:
             raise EvidenceScopeViolationError()
-        allowed_outputs = set(
-            (*scope.requested_parameters, *scope.supporting_parameters)
-        )
+        allowed_outputs = {
+            *scope.requested_parameters, *scope.supporting_parameters
+        }
         for rule in rules:
             if (
                 rule.origin is not EvidenceRuleOrigin.WATERBODY_AGENT
@@ -341,6 +569,17 @@ class EvidenceAcquisitionService:
     ) -> tuple[EvidenceToolDescriptor, ...]:
         current_scope = self._scope_for_handoff(scope, handoff)
         usage = self._executor.budget_usage(current_scope)
+        weather_parameters = weather_capable_parameters(
+            (
+                *current_scope.requested_parameters,
+                *current_scope.supporting_parameters,
+                *(
+                    parameter
+                    for rule in current_scope.evidence_rule_plan.effective_rules
+                    for parameter in rule.input_parameters
+                ),
+            )
+        )
         visible: list[EvidenceToolDescriptor] = []
         for descriptor in self._registry.roster(current_scope):
             agent_selectable_producer = (
@@ -365,6 +604,8 @@ class EvidenceAcquisitionService:
             ):
                 continue
             if descriptor.name == "collect_facility_evidence" and scope.geometry_ref is None:
+                continue
+            if descriptor.name == "collect_weather_evidence" and not weather_parameters:
                 continue
             if descriptor.name == "convert_evidence_unit" and not handoff.fragment_allowlist:
                 continue
@@ -461,6 +702,9 @@ class EvidenceAcquisitionService:
             stop_before_model=stop_before_model,
             stop_facts=tuple(dict.fromkeys(stop_facts)),
             block_facts=tuple(dict.fromkeys(block_facts)),
+            numeric_estimation_allowed=(
+                _allows_numeric_estimation(scope, block_facts)
+            ),
         )
 
     def _scope_for_handoff(
@@ -489,6 +733,8 @@ class EvidenceAcquisitionService:
             or handoff.bundle.topology_ref.item_id != scope.topology_ref.item_id
             or handoff.bundle.requested_parameters != scope.requested_parameters
             or handoff.bundle.supporting_parameters != scope.supporting_parameters
+            or handoff.bundle.intermediate_parameters
+            != scope.intermediate_parameters
             or handoff.bundle.window_refs
             != tuple(window.window_id for window in scope.time_windows)
         ):
@@ -500,12 +746,7 @@ class EvidenceAcquisitionService:
         scope: EvidenceSessionScope,
         existing_refs: tuple[EvidenceFragmentReference, ...],
     ) -> tuple[EvidenceFragmentReference, ...]:
-        fragments = tuple(
-            [
-                await self._reader.read_fragment(scope, reference)
-                for reference in existing_refs
-            ]
-        )
+        fragments = await self._reader.read_fragments(scope, existing_refs)
         references = []
         for window in scope.time_windows:
             seconds = int(
@@ -570,6 +811,90 @@ class EvidenceAcquisitionService:
                 )
         return tuple(references)
 
+    async def _write_numeric_failure_facts(
+        self,
+        scope: EvidenceSessionScope,
+        affected: tuple[tuple[tuple[ParameterKey, str], str], ...],
+        existing_refs: tuple[EvidenceFragmentReference, ...],
+    ) -> tuple[EvidenceFragmentReference, ...]:
+        if not affected:
+            return ()
+        saved = await self._reader.read_fragments(scope, existing_refs)
+        windows = {window.window_id: window for window in scope.time_windows}
+        reasons = dict(affected)
+        references = []
+        for (parameter, window_id), reason in sorted(
+            reasons.items(),
+            key=lambda item: (
+                item[0][1], item[0][0].code_system, item[0][0].code
+            ),
+        ):
+            window = windows[window_id]
+            if any(
+                fragment.parameter_refs == (parameter,)
+                and fragment.time_range == window.time_range
+                and isinstance(
+                    fragment.payload,
+                    (AggregatePayload, DirectRecordPayload,
+                     TemporalEstimatePayload, NumericDerivedPayload),
+                )
+                and fragment.collection_status is CollectionStatus.AVAILABLE
+                and fragment.quality_class in {
+                    EvidenceQualityClass.VALID,
+                    EvidenceQualityClass.SUSPICIOUS,
+                }
+                and fragment.result_eligibility
+                is not EvidenceResultEligibility.EXPLANATORY_ONLY
+                for fragment in saved
+            ):
+                continue
+            identity = (
+                f"{scope.run_id}:{scope.session_id}:{parameter.code_system}:"
+                f"{parameter.code}:{window_id}:{reason}"
+            )
+            operation_id = str(uuid5(NAMESPACE_URL, f"m5:numeric-fact:{identity}"))
+            seconds = int((
+                window.time_range.end - window.time_range.start
+            ).total_seconds())
+            fragment = EvidenceFragment(
+                evidence_id=f"evidence:sha256:{sha256(identity.encode()).hexdigest()}",
+                source="numeric_dependency",
+                collection_status=CollectionStatus.UNAVAILABLE,
+                target_comid=scope.agent_comid,
+                location=EvidenceLocation(
+                    point=scope.target_node.point,
+                    comid=scope.agent_comid,
+                    station_id=None,
+                    distance_to_target_km=0,
+                ),
+                time_range=window.time_range,
+                parameter_refs=(parameter,),
+                data_type="collection_fact",
+                applicability=EvidenceApplicability.CONTEXTUAL_ONLY,
+                series_identity=f"numeric:{parameter.code_system}:{parameter.code}",
+                quality_class=None,
+                coverage=EvidenceCoverage(
+                    status=CoverageStatus.UNKNOWN,
+                    observed_count=0,
+                    covered_duration_seconds=0,
+                    window_duration_seconds=seconds,
+                ),
+                payload=CollectionFactPayload(
+                    status=CollectionStatus.UNAVAILABLE,
+                    reason=reason,
+                    affected_window_ids=(window_id,),
+                ),
+                provenance=Provenance(operation_id=operation_id),
+                result_eligibility=EvidenceResultEligibility.EXPLANATORY_ONLY,
+            )
+            reference = await self._writer.write_fragment(
+                scope, operation_id=operation_id, fragment=fragment
+            )
+            if await self._reader.read_fragment(scope, reference) != fragment:
+                raise EvidenceScopeViolationError()
+            references.append(reference)
+        return tuple(references)
+
     async def _execute(
         self,
         scope: EvidenceSessionScope,
@@ -580,12 +905,16 @@ class EvidenceAcquisitionService:
         block_facts: list[str],
         materialize_technical_facts: bool,
         agent_selected: bool = False,
+        preflight_aggregation: bool = False,
     ) -> EvidenceToolExecution:
-        execution = await (
-            self._executor.execute_agent_tracked(scope, request)
-            if agent_selected
-            else self._executor.execute_tracked(scope, request)
-        )
+        if agent_selected:
+            execution = await self._executor.execute_agent_tracked(scope, request)
+        elif preflight_aggregation:
+            execution = await self._executor.execute_preflight_aggregation_tracked(
+                scope, request
+            )
+        else:
+            execution = await self._executor.execute_tracked(scope, request)
         result = execution.result
         result_refs.append(execution.result_ref)
         fragment_refs.extend(result.fragment_refs)
@@ -611,6 +940,202 @@ class EvidenceAcquisitionService:
                 )
         return execution
 
+    async def _preaggregate_observed_windows(
+        self,
+        scope: EvidenceSessionScope,
+        observation_refs: tuple[EvidenceFragmentReference, ...],
+        collection_fact_refs: tuple[EvidenceFragmentReference, ...],
+        *,
+        fragment_refs: list[EvidenceFragmentReference],
+        result_refs: list[ItemReference],
+        block_facts: list[str],
+    ) -> bool:
+        """Persist the registered summary for each observed local series/window."""
+        observations = await self._reader.read_fragments(scope, observation_refs)
+        facts = await self._reader.read_fragments(scope, collection_fact_refs)
+        windows = {item.time_range: item for item in scope.time_windows}
+        groups: dict[tuple[str, str, str, str, str, str], list[EvidenceFragment]] = {}
+        for fragment in observations:
+            if (
+                not isinstance(fragment.payload, DirectRecordPayload)
+                or fragment.source not in _PREFLIGHT_SERIES
+                or fragment.applicability
+                is not EvidenceApplicability.DIRECT_MEASUREMENT
+                or fragment.quality_class
+                not in {EvidenceQualityClass.VALID, EvidenceQualityClass.SUSPICIOUS}
+                or fragment.result_eligibility
+                is not EvidenceResultEligibility.OBSERVED_OR_INFERRED
+                or len(fragment.parameter_refs) != 1
+                or fragment.location.station_id is None
+                or fragment.series_identity is None
+                or fragment.time_range not in windows
+                or not any(
+                    station.station_id == fragment.location.station_id
+                    and station.provider is _PREFLIGHT_SERIES[fragment.source][0]
+                    for station in scope.station_refs
+                )
+            ):
+                continue
+            parameter = fragment.parameter_refs[0]
+            window = windows[fragment.time_range]
+            key = (
+                window.window_id,
+                parameter.code_system,
+                parameter.code,
+                fragment.location.station_id,
+                fragment.series_identity,
+                fragment.source,
+            )
+            groups.setdefault(key, []).append(fragment)
+        invalid_groups: dict[
+            tuple[str, str, str, str, str, str], list[EvidenceFragment]
+        ] = {}
+        for fragment in observations:
+            if (
+                fragment.quality_class is not EvidenceQualityClass.INVALID
+                or fragment.applicability is not EvidenceApplicability.CONTEXTUAL_ONLY
+                or len(fragment.parameter_refs) != 1
+                or len(fragment.source_record_refs) != 1
+                or fragment.location.station_id is None
+                or fragment.series_identity is None
+                or fragment.time_range not in windows
+            ):
+                continue
+            parameter = fragment.parameter_refs[0]
+            key = (
+                windows[fragment.time_range].window_id,
+                parameter.code_system,
+                parameter.code,
+                fragment.location.station_id,
+                fragment.series_identity,
+                fragment.source,
+            )
+            if key in groups:
+                invalid_groups.setdefault(key, []).append(fragment)
+        source_items = {
+            fragment.payload.record_ref.item_id
+            for items in groups.values()
+            for fragment in items
+        } | {
+            reference.item_id
+            for items in invalid_groups.values()
+            for fragment in items
+            for reference in fragment.source_record_refs
+        }
+        records_by_item = {
+            item_id: {
+                record.record_id: record
+                for record in await self._reader.read_source_records(scope, item_id)
+            }
+            for item_id in source_items
+        }
+        for key in sorted(groups):
+            window_id, code_system, code, station_id, _, source = key
+            raw = groups[key]
+            parameter = ParameterKey(code_system=code_system, code=code)
+            capability = self._capability_registry.get(parameter)
+            provider, channel, method = _PREFLIGHT_SERIES[source]
+            if capability is None or not any(
+                item.provider is provider
+                and item.channel == channel
+                and item.resolution == scope.time_resolution.value
+                and item.method is method
+                for item in capability.default_aggregation_by_resolution
+            ):
+                continue
+            window = next(
+                item for item in scope.time_windows
+                if item.window_id == window_id
+            )
+            source_refs = tuple(
+                sorted(
+                    (
+                        *(item.payload.record_ref for item in raw),
+                        *(
+                            reference
+                            for item in invalid_groups.get(key, ())
+                            for reference in item.source_record_refs
+                        ),
+                    ),
+                    key=lambda item: (item.item_id, item.record_id),
+                )
+            )
+            matching_facts = tuple(
+                fact for fact in facts
+                if isinstance(fact.payload, CollectionFactPayload)
+                and fact.parameter_refs == (parameter,)
+                and window_id in fact.payload.affected_window_ids
+                and fact.source == provider.value
+            )
+            available_refs = {
+                reference
+                for fact in matching_facts
+                if fact.collection_status is CollectionStatus.AVAILABLE
+                for reference in fact.payload.record_refs
+            }
+            if (
+                len(set(source_refs)) != len(source_refs)
+                or not set(source_refs) <= available_refs
+                or any(
+                    fact.collection_status is CollectionStatus.UNAVAILABLE
+                    or (
+                        fact.collection_status is CollectionStatus.INVALID
+                        and fact.payload.reason != "unit_unresolved"
+                    )
+                    for fact in matching_facts
+                )
+            ):
+                continue
+            records = tuple(
+                records_by_item[reference.item_id].get(reference.record_id)
+                for reference in source_refs
+            )
+            if any(
+                not isinstance(
+                    record, (WaterObservationRecord, DischargeObservationRecord)
+                )
+                or record.provider != raw[0].source
+                or record.channel != channel
+                or record.parameter != parameter
+                or record.location.station_id != station_id
+                or record.observed_time is None
+                or not window.time_range.contains(record.observed_time)
+                for record in records
+            ):
+                continue
+            identity = sha256("|".join(
+                (scope.session_id, window_id, code_system, code, station_id, key[4])
+            ).encode()).hexdigest()[:24]
+            execution = await self._execute(
+                scope,
+                EvidenceToolRequest(
+                    tool_call_id=f"m5:preflight-aggregate:{identity}",
+                    session_id=scope.session_id,
+                    tool_name="aggregate_evidence",
+                    purpose=(
+                        "Summarize a completed local observation series "
+                        "across its analysis window."
+                    ),
+                    window_ids=(window_id,),
+                    parameter_keys=(parameter,),
+                    options=EvidenceToolOptions(
+                        source_record_refs=source_refs,
+                        aggregation_method=method,
+                    ),
+                ),
+                fragment_refs=fragment_refs,
+                result_refs=result_refs,
+                block_facts=block_facts,
+                materialize_technical_facts=False,
+                preflight_aggregation=True,
+            )
+            if (
+                execution.result.execution_status
+                is EvidenceToolExecutionStatus.CANCELLED
+            ):
+                return True
+        return False
+
     async def _write_technical_facts(
         self,
         scope: EvidenceSessionScope,
@@ -620,8 +1145,7 @@ class EvidenceAcquisitionService:
         existing_refs: tuple[EvidenceFragmentReference, ...],
     ) -> tuple[EvidenceFragmentReference, ...]:
         covered = set()
-        for reference in existing_refs:
-            fragment = await self._reader.read_fragment(scope, reference)
+        for fragment in await self._reader.read_fragments(scope, existing_refs):
             for parameter in fragment.parameter_refs:
                 for window in scope.time_windows:
                     if fragment.time_range.overlaps(window.time_range):
@@ -678,18 +1202,27 @@ class EvidenceAcquisitionService:
                 )
         return tuple(references)
 
-    async def _has_usable_direct(
+    async def _has_usable_local_numeric(
         self,
         scope: EvidenceSessionScope,
         references: tuple[EvidenceFragmentReference, ...],
         *,
         parameters: tuple[ParameterKey, ...],
     ) -> bool:
-        for reference in references:
-            fragment = await self._reader.read_fragment(scope, reference)
+        for fragment in await self._reader.read_fragments(scope, references):
             if (
-                fragment.applicability is EvidenceApplicability.DIRECT_MEASUREMENT
+                (
+                    fragment.applicability
+                    is EvidenceApplicability.DIRECT_MEASUREMENT
+                    or isinstance(
+                        fragment.payload,
+                        (TemporalEstimatePayload, NumericDerivedPayload),
+                    )
+                )
                 and set(fragment.parameter_refs) & set(parameters)
+                and fragment.collection_status is CollectionStatus.AVAILABLE
+                and fragment.result_eligibility
+                is not EvidenceResultEligibility.EXPLANATORY_ONLY
                 and fragment.quality_class
                 in {EvidenceQualityClass.VALID, EvidenceQualityClass.SUSPICIOUS}
             ):
@@ -709,8 +1242,7 @@ class EvidenceAcquisitionService:
         references: tuple[EvidenceFragmentReference, ...],
     ) -> tuple[str, ...]:
         comids = set()
-        for reference in references:
-            fragment = await self._reader.read_fragment(scope, reference)
+        for fragment in await self._reader.read_fragments(scope, references):
             if (
                 isinstance(fragment.payload, UpstreamResultPayload)
                 and fragment.quality_class
@@ -757,6 +1289,21 @@ class EvidenceAcquisitionService:
         scope: EvidenceSessionScope,
         tool_name: str,
     ) -> EvidenceToolRequest:
+        water_intermediates = tuple(
+            parameter
+            for parameter in scope.intermediate_parameters
+            if (
+                (capability := self._capability_registry.get(parameter))
+                is not None
+                and any(
+                    provider in {
+                        ParameterProvider.WDFN_TIME_SERIES,
+                        ParameterProvider.USGS_SAMPLES,
+                    }
+                    for provider in capability.observation_providers
+                )
+            )
+        ) if tool_name == "collect_water_observations" else ()
         return EvidenceToolRequest(
             tool_call_id=f"m5:{tool_name}:{scope.session_id}",
             session_id=scope.session_id,
@@ -769,7 +1316,11 @@ class EvidenceAcquisitionService:
             window_ids=tuple(item.window_id for item in scope.time_windows),
             parameter_keys=tuple(
                 dict.fromkeys(
-                    (*scope.requested_parameters, *scope.supporting_parameters)
+                    (
+                        *scope.requested_parameters,
+                        *scope.supporting_parameters,
+                        *water_intermediates,
+                    )
                     + tuple(
                         key
                         for rule in scope.evidence_rule_plan.effective_rules
@@ -857,18 +1408,13 @@ def _cell_gates(
     gates = []
     for target in target_cells:
         discharge = discharge_by_window[target.window_id]
-        statuses = {target.status, discharge.status}
-        status = (
-            EvidenceCellStatus.BLOCKED
-            if EvidenceCellStatus.BLOCKED in statuses
-            else EvidenceCellStatus.SUPPORTED
-            if statuses == {EvidenceCellStatus.SUPPORTED}
-            else EvidenceCellStatus.UNSUPPORTED
-        )
+        status = target.status
         reasons = []
         if target.status is not EvidenceCellStatus.SUPPORTED:
             reasons.extend(f"target:{reason}" for reason in target.reasons)
-        if discharge is not target and discharge.status is not EvidenceCellStatus.SUPPORTED:
+        if (status is not EvidenceCellStatus.SUPPORTED
+                and discharge is not target
+                and discharge.status is not EvidenceCellStatus.SUPPORTED):
             reasons.extend(
                 f"required_discharge:{reason}" for reason in discharge.reasons
             )
@@ -885,6 +1431,12 @@ def _cell_gates(
     if len(by_identity) != len(cells):
         raise EvidenceScopeViolationError()
     return tuple(gates)
+
+
+def _allows_numeric_estimation(scope, block_facts) -> bool:
+    return not scope.cancel_token.is_requested() and all(
+        fact in _ESTIMATION_TOLERATED_FAILURES for fact in block_facts
+    )
 
 
 def _unique_fragment_refs(

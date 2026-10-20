@@ -17,17 +17,20 @@ from app.application.evidence_tools import (
     authorize_provider_request,
     build_water_observation_plans,
     canonical_request_key,
+    with_evidence_rule_plan,
+    with_intermediate_parameters,
 )
+from app.application.query_understanding import empty_evidence_rule_plan
 from app.domain import (
     EvidenceToolOptions,
     EvidenceToolRequest,
     FacilityEvidenceRequest,
     GeoPoint,
+    HydrologyGraph,
     ParameterKey,
     ReferenceScope,
     SourceRecordReference,
     TimeRange,
-    WaterObservationRequest,
     WeatherEvidenceRequest,
 )
 from app.infrastructure.config import AppSettings, load_parameter_capability_registry
@@ -49,6 +52,48 @@ def tool_request(evidence_scope, **changes) -> EvidenceToolRequest:
     }
     values.update(changes)
     return EvidenceToolRequest(**values)
+
+
+def scope_with_series_window_ids(
+    context,
+    scope_factory,
+    window_ids,
+    *,
+    extra_series_refs=(),
+):
+    base = scope_factory(context=context)
+    station = base.station_refs[0]
+    series_refs = tuple(
+        reference.model_copy(update={"covered_window_ids": window_ids})
+        for reference in station.series_refs
+    ) + extra_series_refs
+    restricted = station.model_copy(update={
+        "series_refs": tuple(sorted(
+            series_refs,
+            key=lambda reference: (
+                reference.parameter.code_system,
+                reference.parameter.code,
+                reference.channel,
+                reference.series_identity,
+            ),
+        )),
+    })
+    node = base.target_node.model_copy(update={"station_refs": (restricted,)})
+    topology = HydrologyGraph.model_validate(
+        base.topology.model_copy(update={"nodes": (node,)}).model_dump()
+    )
+    return assemble_evidence_session_scope(
+        run_id=base.run_id,
+        session_id=base.session_id,
+        session_fact=base.session_ref,
+        analysis_context_ref=base.analysis_context_ref,
+        topology_ref=base.topology_ref,
+        context=context,
+        topology=topology,
+        agent_comid=base.agent_comid,
+        registry=load_parameter_capability_registry(),
+        cancel_token=CancellationToken(asyncio.Event()),
+    )
 
 
 def test_scope_is_sealed_and_assembled_only_from_matching_saved_facts(
@@ -115,6 +160,62 @@ def test_scope_is_sealed_and_assembled_only_from_matching_saved_facts(
         assemble_evidence_session_scope(
             **(base_args | {"agent_comid": "999"})
         )
+
+
+def test_method_input_scope_is_distinct_and_authorized(evidence_scope) -> None:
+    parameter = ParameterKey(code_system="usgs", code="00010")
+    request = tool_request(evidence_scope, parameter_keys=(parameter,))
+    with pytest.raises(EvidenceScopeViolationError):
+        authorize_evidence_tool_request(evidence_scope, request)
+
+    scoped = with_intermediate_parameters(evidence_scope, (parameter,))
+    assert scoped.intermediate_parameters == (parameter,)
+    assert scoped.requested_parameters == evidence_scope.requested_parameters
+    assert scoped.supporting_parameters == evidence_scope.supporting_parameters
+    assert authorize_evidence_tool_request(scoped, request).parameters == (parameter,)
+    assert with_evidence_rule_plan(
+        scoped, empty_evidence_rule_plan()
+    ).intermediate_parameters == (parameter,)
+
+    with pytest.raises(ValueError, match="unique"):
+        with_intermediate_parameters(evidence_scope, (parameter, parameter))
+    with pytest.raises(ValueError, match="overlap"):
+        with_intermediate_parameters(evidence_scope, evidence_scope.requested_parameters)
+
+
+def test_planned_method_input_can_use_qualified_station_series(
+    scope_factory, context_factory
+) -> None:
+    context = context_factory()
+    base = scope_factory(context=context)
+    parameter = ParameterKey(code_system="usgs", code="00010")
+    target_series = next(
+        item
+        for item in base.station_refs[0].series_refs
+        if item.parameter == base.requested_parameters[0]
+    )
+    method_series = target_series.model_copy(update={
+        "parameter": parameter,
+        "series_identity": "series-123-00010",
+    })
+    scope = with_intermediate_parameters(
+        scope_with_series_window_ids(
+            context,
+            scope_factory,
+            tuple(window.window_id for window in base.time_windows),
+            extra_series_refs=(method_series,),
+        ),
+        (parameter,),
+    )
+    plans = build_water_observation_plans(
+        scope,
+        tool_request(scope, parameter_keys=(parameter,)),
+        operation_id="method-input-collection",
+        registry=load_parameter_capability_registry(),
+    )
+    assert len(plans) == 1
+    assert plans[0].parameter_keys == (parameter,)
+    assert plans[0].series_refs == ("series-123-00010",)
 
 
 @pytest.mark.parametrize(
@@ -186,7 +287,12 @@ def test_authorizer_and_plan_reject_cross_scope_station_channel_time_and_geometr
     )
     assert plans
     assert len(plans) == 2
-    assert {plan.request_range for plan in plans} == {evidence_scope.query_envelope}
+    assert {plan.request_range for plan in plans} == {
+        TimeRange(
+            start=evidence_scope.time_windows[0].time_range.start,
+            end=evidence_scope.time_windows[-1].time_range.end,
+        )
+    }
     assert {plan.analysis_timezone for plan in plans} == {evidence_scope.analysis_timezone}
     assert {plan.station_id for plan in plans} == {"USGS-123"}
     assert {
@@ -272,6 +378,182 @@ def test_authorizer_and_plan_reject_cross_scope_station_channel_time_and_geometr
     )
     with pytest.raises(EvidenceScopeViolationError):
         authorize_provider_request(evidence_scope, weather, registry=registry)
+
+
+def test_historical_series_with_one_observation_can_collect_its_whole_segment(
+    scope_factory,
+    context_factory,
+) -> None:
+    context = context_factory(
+        start_date=date(2026, 9, 29),
+        end_date=date(2026, 9, 30),
+        decision_instant=datetime(2026, 10, 1, 12, tzinfo=timezone.utc),
+    )
+    legacy_scope = scope_factory(context=context)
+    first, second = legacy_scope.time_windows[:2]
+    assert first.segment_index == second.segment_index
+
+    scope = scope_with_series_window_ids(
+        context,
+        scope_factory,
+        (first.window_id,),
+    )
+    registry = load_parameter_capability_registry()
+
+    all_plans = build_water_observation_plans(
+        scope,
+        tool_request(scope),
+        operation_id="operation-window-coverage",
+        registry=registry,
+    )
+    assert len(all_plans) == 2
+    segment_window_ids = tuple(
+        window.window_id
+        for window in scope.time_windows
+        if window.segment_index == first.segment_index
+    )
+    assert all(plan.affected_window_ids == segment_window_ids for plan in all_plans)
+
+    missing_plans = build_water_observation_plans(
+        scope,
+        tool_request(scope, window_ids=(second.window_id,)),
+        operation_id="operation-no-station-window",
+        registry=registry,
+    )
+    assert len(missing_plans) == 2
+    assert all(
+        plan.affected_window_ids == (second.window_id,)
+        for plan in missing_plans
+    )
+
+    plan = all_plans[0]
+    authorize_provider_request(
+        scope,
+        plan.model_copy(update={"affected_window_ids": (second.window_id,)}),
+        registry=registry,
+    )
+    with pytest.raises(EvidenceStationNotAuthorizedError):
+        authorize_provider_request(
+            scope,
+            plan.model_copy(update={"series_refs": ("invented-series",)}),
+            registry=registry,
+        )
+
+    legacy_plans = build_water_observation_plans(
+        legacy_scope,
+        tool_request(legacy_scope, window_ids=(second.window_id,)),
+        operation_id="operation-legacy-graph",
+        registry=registry,
+    )
+    assert len(legacy_plans) == 2
+    assert all(plan.affected_window_ids == (second.window_id,) for plan in legacy_plans)
+
+    strict_empty_scope = scope_with_series_window_ids(context, scope_factory, ())
+    assert build_water_observation_plans(
+        strict_empty_scope,
+        tool_request(strict_empty_scope),
+        operation_id="operation-new-graph-no-history",
+        registry=registry,
+    ) == ()
+
+    third = legacy_scope.time_windows[2]
+    gap_scope = scope_with_series_window_ids(
+        context,
+        scope_factory,
+        (first.window_id, third.window_id),
+    )
+    gap_plans = build_water_observation_plans(
+        gap_scope,
+        tool_request(
+            gap_scope,
+            window_ids=(first.window_id, second.window_id, third.window_id),
+        ),
+        operation_id="operation-disjoint-windows",
+        registry=registry,
+    )
+    assert all(
+        plan.affected_window_ids
+        == (first.window_id, second.window_id, third.window_id)
+        and plan.request_range == TimeRange(
+            start=first.time_range.start,
+            end=third.time_range.end,
+        )
+        for plan in gap_plans
+    )
+
+
+def test_prediction_series_uses_segment_coverage_without_history_window_ids(
+    scope_factory,
+    context_factory,
+) -> None:
+    context = context_factory(
+        start_date=date(2026, 10, 2),
+        end_date=date(2026, 10, 2),
+        decision_instant=datetime(2026, 10, 1, 12, tzinfo=timezone.utc),
+    )
+    scope = scope_with_series_window_ids(context, scope_factory, ())
+
+    plans = build_water_observation_plans(
+        scope,
+        tool_request(scope),
+        operation_id="operation-prediction-segment",
+        registry=load_parameter_capability_registry(),
+    )
+
+    assert len(plans) == 2
+    assert all(
+        plan.affected_window_ids
+        == tuple(window.window_id for window in scope.time_windows)
+        for plan in plans
+    )
+
+
+def test_series_qualified_in_separate_windows_share_segment_plan(scope_factory, context_factory):
+    context = context_factory(
+        start_date=date(2026, 9, 29),
+        end_date=date(2026, 9, 30),
+        decision_instant=datetime(2026, 10, 1, 12, tzinfo=timezone.utc),
+    )
+    base = scope_factory(context=context)
+    first, second = base.time_windows[:2]
+    target = next(
+        reference
+        for reference in base.station_refs[0].series_refs
+        if reference.parameter == base.requested_parameters[0]
+    )
+    second_series = target.model_copy(update={
+        "series_identity": "series-123-00300-second",
+        "covered_window_ids": (second.window_id,),
+    })
+    scope = scope_with_series_window_ids(
+        context,
+        scope_factory,
+        (first.window_id,),
+        extra_series_refs=(second_series,),
+    )
+    registry = load_parameter_capability_registry()
+    plans = build_water_observation_plans(
+        scope,
+        tool_request(
+            scope,
+            window_ids=(first.window_id, second.window_id),
+            parameter_keys=scope.requested_parameters,
+        ),
+        operation_id="operation-disjoint-series",
+        registry=registry,
+    )
+
+    assert tuple(
+        (plan.series_refs, plan.affected_window_ids) for plan in plans
+    ) == ((
+        (target.series_identity, second_series.series_identity),
+        (first.window_id, second.window_id),
+    ),)
+    assert tuple(plan.request_range for plan in plans) == (
+        TimeRange(start=first.time_range.start, end=second.time_range.end),
+    )
+    for plan in plans:
+        authorize_provider_request(scope, plan, registry=registry)
 
 
 def test_public_request_rejects_provider_url_station_geometry_and_server_limits(
@@ -377,7 +659,7 @@ def test_evidence_settings_defaults_tightening_and_deployment_caps() -> None:
         settings.evidence_provider_timeout_seconds,
         settings.evidence_provider_attempts,
         settings.evidence_total_deadline_seconds,
-    ) == (20, 2, 90)
+    ) == (20, 2, 180)
     assert (
         settings.evidence_max_collection_calls,
         settings.evidence_max_transform_calls,
@@ -415,7 +697,7 @@ def test_evidence_settings_defaults_tightening_and_deployment_caps() -> None:
     for field_name, value in (
         ("evidence_provider_timeout_seconds", 21),
         ("evidence_provider_attempts", 3),
-        ("evidence_total_deadline_seconds", 91),
+        ("evidence_total_deadline_seconds", 181),
         ("evidence_max_collection_calls", 13),
         ("evidence_max_transform_calls", 25),
         ("evidence_max_pages", 11),

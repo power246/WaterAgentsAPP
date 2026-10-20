@@ -7,6 +7,7 @@ from app.application.reasoning.draft_models import (
     ValidatedOverallSynthesis,
     ValidatedReasoningSet,
 )
+from app.application.reasoning.draft_validator import ReasoningEvidenceCatalog
 from app.application.reasoning.errors import InferenceAssemblyError
 from app.application.reasoning.result_models import ResultSkeleton
 from app.domain import (
@@ -16,6 +17,7 @@ from app.domain import (
     AttributionFactor,
     AttributionSummary,
     CompositeRiskAssessment,
+    DataQualityFlag,
     EvidenceChain,
     EvidenceReference,
     InferenceResult,
@@ -29,7 +31,6 @@ from app.domain import (
     TimeWindowResult,
     WaterQualityParameter,
 )
-
 
 _FIXED_RISK_RATIONALE = "No supported water-quality judgment is available."
 _FIXED_CONFIDENCE_RATIONALE = (
@@ -66,6 +67,7 @@ def assemble_inference_result(
     evidence_references: tuple[EvidenceReference, ...],
     transcript_item_refs: tuple[str, ...],
     model_execution_summary: ModelExecutionSummary,
+    evidence_catalog: ReasoningEvidenceCatalog | None = None,
 ) -> InferenceResult:
     """Merge only sealed facts and validated Agent output into the V1 result."""
 
@@ -78,6 +80,7 @@ def assemble_inference_result(
             evidence_references=evidence_references,
             transcript_item_refs=transcript_item_refs,
             model_execution_summary=model_execution_summary,
+            evidence_catalog=evidence_catalog,
         )
     except InferenceAssemblyError:
         raise
@@ -94,6 +97,7 @@ def _assemble(
     evidence_references: tuple[EvidenceReference, ...],
     transcript_item_refs: tuple[str, ...],
     model_execution_summary: ModelExecutionSummary,
+    evidence_catalog: ReasoningEvidenceCatalog | None,
 ) -> InferenceResult:
     supported_ids = tuple(scope.cell_id for scope in skeleton.supported_scopes)
     if bool(supported_ids) != (reasoning is not None and synthesis is not None):
@@ -107,6 +111,13 @@ def _assemble(
     reference_ids = tuple(item.evidence_id for item in evidence_references)
     if reference_ids != skeleton.evidence_allowlist:
         raise InferenceAssemblyError()
+    if evidence_catalog is not None and (
+        evidence_catalog.run_id != skeleton.run_id
+        or evidence_catalog.session_id != skeleton.session_id
+        or evidence_catalog.target_comid != skeleton.target_comid
+        or evidence_catalog.bundle_digest != skeleton.bundle_digest
+    ):
+        raise InferenceAssemblyError()
 
     drafts = (
         tuple(cell for batch in reasoning.batches for cell in batch.cells)
@@ -115,13 +126,20 @@ def _assemble(
     )
     if tuple(cell.cell_id for cell in drafts) != supported_ids:
         raise InferenceAssemblyError()
+    if evidence_catalog is None and any(
+        DataQualityFlag.TEMPORAL_ESTIMATE in draft.quality_flags
+        or draft.outcome_status is OutcomeStatus.RANGE_ESTIMATE
+        or draft.value_lower is not None
+        for draft in drafts
+    ):
+        raise InferenceAssemblyError()
     draft_by_id = {cell.cell_id: cell for cell in drafts}
     fixed_by_id = {
         cell.result.cell_id: cell for cell in skeleton.fixed_cells
     }
     points_by_id = {
         cell_id: (
-            _point_from_draft(draft_by_id[cell_id], skeleton)
+            _point_from_draft(draft_by_id[cell_id], skeleton, evidence_catalog)
             if cell_id in draft_by_id
             else fixed_by_id[cell_id].result
         )
@@ -286,7 +304,7 @@ def _applied_unit_decisions(
         if preferred_symbol is None:
             continue
         if any(
-            point.outcome_status is OutcomeStatus.QUANTIFIED
+            point.outcome_status in (OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE)
             and point.unit_id == preferred_symbol
             for item in series if item.parameter.key == preference.parameter
             for point in item.points
@@ -298,6 +316,7 @@ def _applied_unit_decisions(
 def _point_from_draft(
     draft: ReasoningCellDraft,
     skeleton: ResultSkeleton,
+    evidence_catalog: ReasoningEvidenceCatalog | None,
 ) -> TimeWindowResult:
     scope = next(
         item for item in skeleton.supported_scopes if item.cell_id == draft.cell_id
@@ -311,6 +330,8 @@ def _point_from_draft(
         end_time=window.end_time,
         outcome_status=draft.outcome_status,
         representative_value=draft.representative_value,
+        value_lower=draft.value_lower,
+        value_upper=draft.value_upper,
         unit_id=draft.target_unit_id,
         assessment=RiskOrTrendAssessment(
             summary=draft.explanation,
@@ -326,7 +347,101 @@ def _point_from_draft(
         aggregation_method=draft.aggregation_method,
         evidence_refs=draft.evidence_refs,
         quality_flags=draft.quality_flags,
+        temporal_estimate_method=_target_temporal_method(draft, evidence_catalog),
+        **_target_inference_metadata(draft, evidence_catalog),
     )
+
+
+def _target_inference_metadata(
+    draft: ReasoningCellDraft,
+    evidence_catalog: ReasoningEvidenceCatalog | None,
+) -> dict:
+    if evidence_catalog is None or draft.outcome_status not in (
+        OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE,
+    ):
+        return {}
+    scope = next(
+        item for item in evidence_catalog.cell_scopes if item.cell_id == draft.cell_id
+    )
+    facts = {fact.evidence_ref: fact for fact in evidence_catalog.facts}
+    cited = set(draft.evidence_refs)
+
+    def matches(fact):
+        return (
+            fact.value == draft.representative_value
+            and fact.unit_id == draft.target_unit_id
+            and fact.value_lower == draft.value_lower
+            and fact.value_upper == draft.value_upper
+        )
+
+    direct = [
+        facts[ref] for ref in scope.target_direct_refs
+        if ref in cited and matches(facts[ref])
+    ]
+    candidates = direct or [
+        facts[ref] for ref in scope.target_indirect_refs
+        if ref in cited
+        and facts[ref].payload_type in ("numeric_derived", "temporal_estimate")
+        and matches(facts[ref])
+    ]
+    if not candidates:
+        if draft.outcome_status is OutcomeStatus.RANGE_ESTIMATE or draft.value_lower is not None:
+            raise InferenceAssemblyError()
+        return {}
+    methods = {
+        fact.method_kind or (
+            "explicit_calculation" if fact.aggregation_method is not None
+            or fact.payload_type == "temporal_estimate" else None
+        )
+        for fact in candidates
+    }
+    if len(methods) != 1:
+        raise InferenceAssemblyError()
+    anchors_by_json = {
+        anchor.model_dump_json(): anchor
+        for fact in candidates for anchor in fact.measured_anchors
+    }
+    anchors = tuple(anchors_by_json[key] for key in sorted(anchors_by_json))
+    bases = {fact.inference_basis for fact in candidates if fact.inference_basis is not None}
+    if len(bases) > 1:
+        raise InferenceAssemblyError()
+    basis = next(iter(bases)) if bases else (
+        "same_parameter_measurement" if anchors else None
+    )
+    return {
+        "inference_method": next(iter(methods)),
+        "inference_basis": basis,
+        "measured_anchors": anchors,
+    }
+
+
+def _target_temporal_method(
+    draft: ReasoningCellDraft,
+    evidence_catalog: ReasoningEvidenceCatalog | None,
+) -> str | None:
+    if evidence_catalog is None or draft.outcome_status is not OutcomeStatus.QUANTIFIED:
+        return None
+    scope = next(
+        item for item in evidence_catalog.cell_scopes if item.cell_id == draft.cell_id
+    )
+    facts = {fact.evidence_ref: fact for fact in evidence_catalog.facts}
+    matching_direct = any(
+        facts[ref].value == draft.representative_value
+        and facts[ref].unit_id == draft.target_unit_id
+        for ref in set(scope.target_direct_refs) & set(draft.evidence_refs)
+    )
+    if matching_direct:
+        return None
+    methods = {
+        facts[ref].temporal_method
+        for ref in set(scope.target_indirect_refs) & set(draft.evidence_refs)
+        if facts[ref].payload_type == "temporal_estimate"
+        and facts[ref].value == draft.representative_value
+        and facts[ref].unit_id == draft.target_unit_id
+    }
+    if len(methods) > 1:
+        raise InferenceAssemblyError()
+    return next(iter(methods)) if methods else None
 
 
 def _series(

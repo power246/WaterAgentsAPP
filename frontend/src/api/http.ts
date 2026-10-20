@@ -7,6 +7,8 @@ export type RunDetail = Schema<'RunDetailResponse'>
 export type RunHistory = Schema<'RunHistoryResponse'>
 export type SessionTranscript = Schema<'SessionTranscriptResponse'>
 export type ContentResponse = Schema<'TranscriptContentResponse'>
+export type AnchorDistanceEstimate = Schema<'AnchorDistanceEstimate'>
+export type AnchorDistanceEstimatesResponse = Schema<'AnchorDistanceEstimatesResponse'>
 export type Settings = Schema<'SettingsResponse'>
 export type Defaults = Schema<'MutableDefaults'>
 export type UnitEntry = Schema<'UnitPolicyEntry'>
@@ -74,6 +76,14 @@ function sessionTranscript(value: unknown): value is SessionTranscript {
 function transcriptContent(value: unknown): value is ContentResponse {
   return record(value) && typeof value.run_id === 'string' && typeof value.item_id === 'string' &&
     typeof value.text === 'string'
+}
+
+function anchorDistanceEstimatesResponse(value: unknown): value is AnchorDistanceEstimatesResponse {
+  return record(value) && typeof value.result_item_id === 'string' && Array.isArray(value.estimates) &&
+    value.estimates.every((item: unknown) => record(item) && typeof item.cell_id === 'string' &&
+      typeof item.anchor_index === 'number' && Number.isSafeInteger(item.anchor_index) && item.anchor_index >= 0 &&
+      typeof item.distance_km === 'number' && Number.isFinite(item.distance_km) && item.distance_km >= 0 &&
+      item.distance_basis === 'mapped_channel_estimate')
 }
 
 function runStatus(value: unknown): value is Schema<'RunStatusResponse'> {
@@ -316,6 +326,11 @@ export class ApiClient {
 
   content(runId: string, itemId: string, view: 'auto' | 'history' = 'auto', signal?: AbortSignal): Promise<ContentResponse> {
     return this.send(`/api/analysis/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(itemId)}/content?view=${view}`, 'GET', transcriptContent, { signal })
+  }
+
+  anchorDistanceEstimates(runId: string, itemId: string, signal?: AbortSignal): Promise<AnchorDistanceEstimatesResponse> {
+    return this.send(`/api/analysis/runs/${encodeURIComponent(runId)}/transcript/${encodeURIComponent(itemId)}/anchor-distance-estimates?view=history`,
+      'GET', anchorDistanceEstimatesResponse, { signal })
   }
 
   cancel(runId: string): Promise<Schema<'RunStatusResponse'>> {

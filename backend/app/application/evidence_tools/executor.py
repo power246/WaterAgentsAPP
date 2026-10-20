@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from uuid import uuid4
 
-from app.application.analysis_runs.workflow import WorkflowStopped
+from app.application.analysis_runs.workflow import (
+    InvalidAgentSessionTransitionError,
+    InvalidRunTransitionError,
+    WorkflowStopped,
+)
 from app.application.evidence_policy import (
     EvidencePolicyError,
     aggregate_observations,
@@ -19,11 +23,11 @@ from app.application.evidence_tools.authorization import (
     canonical_request_key,
 )
 from app.application.evidence_tools.budget import EvidenceBudgetLedger
+from app.application.evidence_tools.collection_service import EvidenceCollectionService
 from app.application.evidence_tools.dedup import RunLocalSingleFlight
 from app.application.evidence_tools.errors import (
     EvidenceAggregationNotAllowedError,
     EvidenceCollectionIncompleteError,
-    FacilityRadiusTooSmallForBudgetError as EvidenceFacilityRadiusTooSmallError,
     EvidenceProducerUnavailableError,
     EvidenceScopeViolationError,
     EvidenceToolBudgetExceededError,
@@ -34,23 +38,31 @@ from app.application.evidence_tools.errors import (
     WaterbodyGeometryUnavailableError,
     map_evidence_error,
 )
+from app.application.evidence_tools.errors import (
+    FacilityRadiusTooSmallForBudgetError as EvidenceFacilityRadiusTooSmallError,
+)
+from app.application.evidence_tools.evidence_sources import (
+    weather_variables_for_parameters,
+)
 from app.application.evidence_tools.inspection_service import (
     EvidenceInspectionService,
 )
-from app.application.evidence_tools.collection_service import EvidenceCollectionService
+from app.application.evidence_tools.measurement_provenance import (
+    estimate_mapped_channel_distance_km,
+)
 from app.application.evidence_tools.models import (
-    EvidenceClock,
     EvidenceBudgetUsage,
+    EvidenceClock,
     EvidenceCollectionArtifacts,
     EvidenceCollectionInput,
     EvidenceInspectionPage,
     EvidenceOperationValue,
     EvidencePolicyClass,
     EvidenceProducerStatus,
+    EvidenceToolDescriptor,
+    EvidenceToolExecution,
     EvidenceToolLimits,
     EvidenceToolReader,
-    EvidenceToolExecution,
-    EvidenceToolDescriptor,
     EvidenceToolWriter,
 )
 from app.application.evidence_tools.provider_output_validator import (
@@ -58,12 +70,11 @@ from app.application.evidence_tools.provider_output_validator import (
 )
 from app.application.evidence_tools.registry import EvidenceToolRegistry
 from app.application.evidence_tools.scope import EvidenceSessionScope
-from app.application.evidence_tools.evidence_sources import (
-    weather_variables_for_parameters,
-)
 from app.application.hydrology_topology import build_facility_corridor_plan
 from app.application.hydrology_topology.corridor import (
     FacilityRadiusTooSmallForBudgetError,
+)
+from app.application.hydrology_topology.corridor import (
     WaterbodyGeometryUnavailableError as CorridorGeometryUnavailableError,
 )
 from app.domain import (
@@ -71,10 +82,10 @@ from app.domain import (
     CollectionStatus,
     ConversionPayload,
     DirectRecordPayload,
+    EvidenceAggregationMethod,
     EvidenceApplicability,
     EvidenceDerivation,
     EvidenceFragment,
-    EvidenceFragmentReference,
     EvidenceLocation,
     EvidenceQualityClass,
     EvidenceResultEligibility,
@@ -86,8 +97,8 @@ from app.domain import (
     HistoricalSearchIntentV1,
     ItemReference,
     ParameterCapabilityRegistry,
-    ProviderCollectionBatch,
     Provenance,
+    ProviderCollectionBatch,
     SafeEvidenceError,
     TranscriptEvidenceRequest,
     UpstreamResultRequest,
@@ -125,6 +136,10 @@ class _UtcClock:
 
 class EvidenceToolExecutor:
     """The sole application entry point for all eight evidence tools."""
+
+    @property
+    def total_deadline_seconds(self) -> float:
+        return self._limits.total_deadline_seconds
 
     def __init__(
         self,
@@ -212,6 +227,31 @@ class EvidenceToolExecutor:
         scope: EvidenceSessionScope,
         request: EvidenceToolRequest,
     ) -> EvidenceToolExecution:
+        return await self._execute_tracked(scope, request, charge_budget=True)
+
+    async def execute_preflight_aggregation_tracked(
+        self,
+        scope: EvidenceSessionScope,
+        request: EvidenceToolRequest,
+    ) -> EvidenceToolExecution:
+        if (
+            request.tool_name != "aggregate_evidence"
+            or not request.tool_call_id.startswith("m5:preflight-aggregate:")
+            or request.options.aggregation_method not in {
+                EvidenceAggregationMethod.MEAN,
+                EvidenceAggregationMethod.LATEST,
+            }
+        ):
+            raise EvidenceScopeViolationError()
+        return await self._execute_tracked(scope, request, charge_budget=False)
+
+    async def _execute_tracked(
+        self,
+        scope: EvidenceSessionScope,
+        request: EvidenceToolRequest,
+        *,
+        charge_budget: bool,
+    ) -> EvidenceToolExecution:
         descriptor = self._registry.get(request.tool_name)
         if descriptor is None:
             raise EvidenceScopeViolationError()
@@ -240,7 +280,8 @@ class EvidenceToolExecutor:
                 request,
                 policy_manifest_digest=self._capabilities.manifest_digest,
             )
-            self._reserve_budget(scope, descriptor, canonical_key)
+            if charge_budget:
+                self._reserve_budget(scope, descriptor, canonical_key)
             self._check_deadline(scope)
 
             async def work() -> _CompletedOperation:
@@ -312,6 +353,8 @@ class EvidenceToolExecutor:
                 completed=completed,
             )
         except _PartialDispatchError as interrupted:
+            if isinstance(interrupted.cause, asyncio.CancelledError):
+                raise interrupted.cause
             cancelled = isinstance(
                 interrupted.cause,
                 (WorkflowStopped, asyncio.CancelledError),
@@ -333,7 +376,9 @@ class EvidenceToolExecutor:
                 error=error,
                 value=interrupted.value,
             )
-        except (WorkflowStopped, asyncio.CancelledError):
+        except asyncio.CancelledError:
+            raise
+        except WorkflowStopped:
             return await self._write_failure_result(
                 scope,
                 request,
@@ -391,7 +436,9 @@ class EvidenceToolExecutor:
                 policy_manifest_digest=self._capabilities.manifest_digest,
             )
             self._reserve_budget(scope, descriptor, canonical_key)
-        except (WorkflowStopped, asyncio.CancelledError):
+        except asyncio.CancelledError:
+            raise
+        except WorkflowStopped:
             return await self._write_failure_result(
                 scope,
                 request,
@@ -578,6 +625,8 @@ class EvidenceToolExecutor:
                        "operation": operation_id, "tool_name": request.tool_name,
                        "plan_count": len(plans)},
             )
+            if not plans:
+                return EvidenceOperationValue()
             try:
                 for plan_index, plan in enumerate(plans, start=1):
                     scope.cancel_token.checkpoint()
@@ -663,10 +712,11 @@ class EvidenceToolExecutor:
                         request.parameter_keys,
                         kind,
                     )
-                    if not variables:
-                        if scope.evidence_rule_plan.effective_rules:
-                            raise EvidenceScopeViolationError()
-                        variables = ("temperature",)
+                    if not variables or any(
+                        not weather_variables_for_parameters((parameter,), kind)
+                        for parameter in request.parameter_keys
+                    ):
+                        raise EvidenceScopeViolationError()
                     plan = WeatherEvidenceRequest(
                         operation_id=f"{operation_id}-{index:03d}",
                         evidence_kind=kind,
@@ -1102,9 +1152,15 @@ class EvidenceToolExecutor:
 
     async def _aggregate(self, scope, request, operation_id) -> EvidenceOperationValue:
         self._check_deadline(scope)
+        window = next(
+            item.time_range
+            for item in scope.time_windows
+            if item.window_id == request.window_ids[0]
+        )
         stored = await self._reader.read_policy_observations(
             scope,
             request.options.source_record_refs,
+            window,
         )
         scope.cancel_token.checkpoint()
         if (
@@ -1120,14 +1176,11 @@ class EvidenceToolExecutor:
             for item in stored.observations
         ):
             raise EvidenceScopeViolationError()
+        if not stored.selection_complete:
+            raise EvidenceAggregationNotAllowedError()
         capability = self._capabilities.get(parameter)
         if capability is None:
             raise EvidenceScopeViolationError()
-        window = next(
-            item.time_range
-            for item in scope.time_windows
-            if item.window_id == request.window_ids[0]
-        )
         outcome = aggregate_observations(
             self._capabilities,
             capability,
@@ -1138,16 +1191,32 @@ class EvidenceToolExecutor:
             expected_cadence_seconds=stored.expected_cadence_seconds,
         )
         first = stored.observations[0]
+        station_point = stored.station_point
+        destination_point = (
+            scope.analysis_target_point
+            if scope.agent_comid == scope.topology.target_comid
+            else scope.target_node.point
+        )
+        mapped_distance = estimate_mapped_channel_distance_km(
+            scope.topology,
+            (scope.agent_comid,),
+            station_point,
+            destination_point,
+        )
         derived = EvidenceFragment(
             evidence_id=f"{operation_id}:aggregate",
             source="deterministic_aggregation",
             collection_status=CollectionStatus.AVAILABLE,
             target_comid=scope.agent_comid,
             location=EvidenceLocation(
-                point=None,
+                point=station_point,
                 comid=scope.agent_comid,
                 station_id=first.station_id,
-                distance_to_target_km=None,
+                distance_to_target_km=mapped_distance,
+                distance_basis=(
+                    "mapped_channel_estimate"
+                    if mapped_distance is not None else None
+                ),
             ),
             time_range=window,
             parameter_refs=(parameter,),
@@ -1244,6 +1313,11 @@ class EvidenceToolExecutor:
         value=None,
     ) -> EvidenceToolExecution:
         value = value or EvidenceOperationValue()
+        collection_status = (
+            CollectionStatus.INVALID
+            if not cancelled and value.collection_status is CollectionStatus.INVALID
+            else CollectionStatus.UNAVAILABLE
+        ) if value.manifest_refs else None
         result = EvidenceToolResult(
             tool_call_id=request.tool_call_id,
             operation_id=operation_id,
@@ -1253,7 +1327,7 @@ class EvidenceToolExecutor:
                 if cancelled
                 else EvidenceToolExecutionStatus.FAILED
             ),
-            collection_status=value.collection_status,
+            collection_status=collection_status,
             manifest_refs=value.manifest_refs,
             fragment_refs=value.fragment_refs,
             collection_fact_refs=value.collection_fact_refs,
@@ -1267,7 +1341,12 @@ class EvidenceToolExecutor:
             safe_error=error,
             completed_at=self._clock.now(),
         )
-        result_ref = await self._writer.write_result(scope, result)
+        try:
+            result_ref = await self._writer.write_result(scope, result)
+        except (InvalidRunTransitionError, InvalidAgentSessionTransitionError) as cause:
+            if cancelled and scope.cancel_token.is_requested():
+                raise asyncio.CancelledError() from cause
+            raise
         logger.info(
             "Evidence tool failure saved.",
             extra={"event_name": "evidence_tool_failure_saved",

@@ -41,6 +41,8 @@ from app.ports import PortConfigurationError, PortError, PortResponseLimitError
 PROVIDER = "epa_echo"
 DEFAULT_BASE_URL = "https://echodata.epa.gov/echo"
 KM_PER_MILE = Decimal("1.609344")
+# CWA metadata IDs for name, facility, registry, program, point, permit, and status.
+FACILITY_COLUMNS = "1,2,9,11,26,27,33,53"
 
 
 class EpaEchoFacilityAdapter:
@@ -137,8 +139,6 @@ class EpaEchoFacilityAdapter:
                 total = self._integer(
                     results.get("QueryRows"), request.operation_id
                 )
-                if self._integer(results.get("PageNo"), request.operation_id) != 1:
-                    raise invalid_response(PROVIDER, request.operation_id)
                 if total > self._max_records:
                     raise PortResponseLimitError(
                         "EPA ECHO query exceeded the configured record limit.",
@@ -146,27 +146,37 @@ class EpaEchoFacilityAdapter:
                         operation=request.operation_id,
                     )
                 expected_pages = max(1, ceil(total / self._response_set))
-                if len(pages) + expected_pages > self._max_pages:
+                embedded_page = "PageNo" in results or "Facilities" in results
+                if embedded_page and (
+                    "PageNo" not in results
+                    or "Facilities" not in results
+                    or self._integer(results["PageNo"], request.operation_id) != 1
+                ):
+                    raise invalid_response(PROVIDER, request.operation_id)
+                needed_pages = expected_pages + (not embedded_page and total > 0)
+                if len(pages) + needed_pages > self._max_pages:
                     raise PortResponseLimitError(
                         "EPA ECHO query exceeded the configured page limit.",
                         provider=PROVIDER,
                         operation=request.operation_id,
                     )
-                first = self._facility_records(
-                    results,
-                    request=request,
-                    center=center,
-                    page_identity=pending_identity,
-                    source_uri=self._canonical_uri(search_url, params),
-                    retrieved_at=retrieved_at,
-                )
-                raw_records.extend(first)
-                if len(raw_records) > self._max_records:
-                    raise PortResponseLimitError(
-                        "EPA ECHO collection exceeded the configured record limit.",
-                        provider=PROVIDER,
-                        operation=request.operation_id,
+                if embedded_page:
+                    raw_records.extend(
+                        self._facility_records(
+                            results,
+                            request=request,
+                            center=center,
+                            page_identity=pending_identity,
+                            source_uri=self._canonical_uri(search_url, params),
+                            retrieved_at=retrieved_at,
+                        )
                     )
+                    if len(raw_records) > self._max_records:
+                        raise PortResponseLimitError(
+                            "EPA ECHO collection exceeded the configured record limit.",
+                            provider=PROVIDER,
+                            operation=request.operation_id,
+                        )
                 pages.append(
                     CollectionPageManifest(
                         page_identity=pending_identity,
@@ -175,13 +185,17 @@ class EpaEchoFacilityAdapter:
                         page_complete=True,
                     )
                 )
-                for page_number in range(2, expected_pages + 1):
+                for page_number in range(
+                    2 if embedded_page else 1,
+                    expected_pages + 1 if total > 0 else 1,
+                ):
                     self._ensure_page_budget(len(pages), request.operation_id)
                     page_url = f"{self._base_url}/cwa_rest_services.get_qid"
                     page_params: Mapping[str, object] = {
                         "output": "JSON",
                         "qid": query_id,
                         "pageno": page_number,
+                        "qcolumns": FACILITY_COLUMNS,
                     }
                     pending_identity = request_identity(page_url, page_params)
                     self._link_next(pages, pending_identity)
@@ -193,11 +207,12 @@ class EpaEchoFacilityAdapter:
                         on_attempt=count_attempt,
                     )
                     page_results = self._results(
-                        page_root, request.operation_id
+                        page_root, request.operation_id, allow_working=True
                     )
                     self._validate_page(
                         page_results,
                         query_id=query_id,
+                        query_rows=total,
                         page_number=page_number,
                         operation=request.operation_id,
                     )
@@ -286,7 +301,7 @@ class EpaEchoFacilityAdapter:
         retrieved_at: datetime,
     ) -> tuple[FacilityRecord, ...]:
         facilities = require_list(
-            results.get("Facilities", []),
+            results.get("Facilities"),
             provider=PROVIDER,
             operation=request.operation_id,
         )
@@ -306,11 +321,10 @@ class EpaEchoFacilityAdapter:
                 operation=request.operation_id,
             )
             permit_id = self._optional_string(item.get("NPDESIDs")) or facility_id
-            status = require_string(
-                item.get("CWPPermitStatusDesc"),
-                provider=PROVIDER,
-                operation=request.operation_id,
-            )
+            try:
+                status = self._optional_string(item.get("CWPPermitStatusDesc"))
+            except ValueError as error:
+                raise invalid_response(PROVIDER, request.operation_id) from error
             statute = require_string(
                 item.get("Statute"),
                 provider=PROVIDER,
@@ -319,7 +333,10 @@ class EpaEchoFacilityAdapter:
             if statute != "CWA":
                 raise invalid_response(PROVIDER, request.operation_id)
             point = self._optional_point(item, request.operation_id)
-            qualifiers = ("missing_coordinates",) if point is None else ()
+            qualifiers = (
+                (("missing_permit_status",) if status is None else ())
+                + (("missing_coordinates",) if point is None else ())
+            )
             identity = self._provider_id(registry_id, facility_id, permit_id)
             try:
                 parsed.append(
@@ -362,7 +379,7 @@ class EpaEchoFacilityAdapter:
                         facility_id=facility_id,
                         permit_id=permit_id,
                         program="NPDES",
-                        status=status,
+                        status=status or "not_reported",
                         public_attributes=self._public_attributes(item),
                     )
                 )
@@ -491,14 +508,23 @@ class EpaEchoFacilityAdapter:
         )
 
     @staticmethod
-    def _results(root: Mapping[str, object], operation: str) -> Mapping[str, object]:
+    def _results(
+        root: Mapping[str, object],
+        operation: str,
+        *,
+        allow_working: bool = False,
+    ) -> Mapping[str, object]:
         results = require_mapping(
             root.get("Results"), provider=PROVIDER, operation=operation
         )
         message = require_string(
             results.get("Message"), provider=PROVIDER, operation=operation
         )
-        if not message.casefold().startswith("success"):
+        normalized = message.casefold()
+        if not (
+            normalized.startswith("success")
+            or (allow_working and normalized.startswith("working"))
+        ):
             raise invalid_response(PROVIDER, operation)
         return results
 
@@ -508,11 +534,16 @@ class EpaEchoFacilityAdapter:
         results: Mapping[str, object],
         *,
         query_id: str,
+        query_rows: int,
         page_number: int,
         operation: str,
     ) -> None:
-        returned_query = results.get("QueryID")
-        if returned_query is not None and str(returned_query) != query_id:
+        returned_query = require_string(
+            results.get("QueryID"), provider=PROVIDER, operation=operation
+        )
+        if returned_query != query_id:
+            raise invalid_response(PROVIDER, operation)
+        if cls._integer(results.get("QueryRows"), operation) != query_rows:
             raise invalid_response(PROVIDER, operation)
         if cls._integer(results.get("PageNo"), operation) != page_number:
             raise invalid_response(PROVIDER, operation)

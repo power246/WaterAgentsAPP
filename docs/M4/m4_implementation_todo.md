@@ -27,7 +27,7 @@
 | [Milestone 4：Query Parser session 与模型调用边界](#milestone-4query-parser-session-与模型调用边界) | [实施设计 §5](m4_query_understanding_topology_implementation_design.md#5-query-parser-输入与输出)；[API §4.3–4.5](m4_query_understanding_topology_api.md#43-query_parser_input-v1) | 无工具 parser、一次修复、真实 session 过程 |
 | [Milestone 5：Geocoding、NLDI 与 USGS metadata adapters](#milestone-5geocodingnldi-与-usgs-metadata-adapters) | [实施设计 §13](m4_query_understanding_topology_implementation_design.md#13-ports-与外部失败)；[设计 D23–D24](m4_query_understanding_topology_design.md#d23conus-校验使用行政区事实与-comid-覆盖双门禁) | 新系统独立 adapters、类型化失败、contract fixtures |
 | [Milestone 6：Station availability qualification](#milestone-6station-availability-qualification) | [实施设计 §9](m4_query_understanding_topology_implementation_design.md#9-availability-qualification) | 参数 × segment 覆盖单元、历史/预测候选资格 |
-| [Milestone 7：HydrologyGraph 与稳定有界 BFS](#milestone-7hydrologygraph-与稳定有界-bfs) | [实施设计 §10](m4_query_understanding_topology_implementation_design.md#10-hydrologygraph) | 可验证图模型、每支流最近充分搜索、稳定序列化 |
+| [Milestone 7：HydrologyGraph 与稳定有界 BFS](#milestone-7hydrologygraph-与稳定有界-bfs) | [实施设计 §10](m4_query_understanding_topology_implementation_design.md#10-hydrologygraph) | 可验证图模型、每支流有界候选搜索、稳定序列化 |
 | [Milestone 8：M3 workflow、typed content 与持久化接入](#milestone-8m3-workflowtyped-content-与持久化接入) | [实施设计 §2/§11](m4_query_understanding_topology_implementation_design.md#2-执行流程与状态边界) | 完整 M4 workflow、唯一 context/graph 原记录、取消收敛 |
 | [Milestone 9：HTTP、history、两层 SSE 与公开错误](#milestone-9httphistory两层-sse-与公开错误) | [实施设计 §12/§14](m4_query_understanding_topology_implementation_design.md#12-两层-sse)；[API §5–9](m4_query_understanding_topology_api.md#5-history-与-detail-投影) | 最终 OpenAPI、读模型、SSE reference、错误矩阵 |
 | [Milestone 10：集成验收、契约审计与 M5 接力](#milestone-10集成验收契约审计与-m5-接力) | [实施设计 §16–17](m4_query_understanding_topology_implementation_design.md#16-测试与验收设计) | fake 端到端、受控真实 smoke、契约矩阵、接力记录 |
@@ -61,9 +61,9 @@
 - [x] capability manifest 精确包含目录中的 154 个唯一 USGS key；代码、单位、aliases、provider route 和 evidence relation 可校验，discharge 是唯一 required support。
 - [x] `AnalysisContext` 对 target、当地日期、UTC `[start,end)`、segments、mode、resolution、最多 6 个目标、supporting discharge、双模型和 memory mode 执行完整 invariant。
 - [x] CONUS 48 州与 DC、AK/HI/领地/外国、point 无 COMID、COMID/point mismatch 各有独立结果；不得把 region bias 或附近吸附当地域/河段证明。
-- [x] WDFN v1 time-series metadata 与 Samples summary 能分别支持连续/每日和离散样品的 period-of-record qualification；旧 WaterServices 不进入 production path。
-- [x] availability 按 ParameterKey × time segment 判断，历史 envelope 和预测前 48 小时基线规则明确；empty/unavailable/invalid 不混淆。
-- [x] BFS 按每条支流最近充分规则运行，稳定处理汇流、重复和环；100 km/12 hop/128 unique nodes/8 concurrency 分别受控，技术失败不产生 partial success。
+- [x] WDFN v1 time-series metadata 与 Samples summary 发现连续/每日序列及离散样品；历史资格再由实际读数探测确认，旧 WaterServices 不进入 production path。
+- [x] availability 按历史 ParameterKey × 最终结果时间窗、预测 ParameterKey × time segment 判断；历史窗内有实际读数和预测前 48 小时基线规则明确，empty/unavailable/invalid 不混淆。
+- [x] BFS 为每条支流的历史 unit 最多保留两个候选，预测 unit 保留最近候选；稳定处理汇流、重复和环；100 km/12 hop/128 unique nodes/8 concurrency 分别受控，技术失败不产生 partial success。
 - [x] `HydrologyGraph` 保存 target、完整 explored scope、inlet、active path union、excluded facts、branch outcomes、coverage 和稳定 layers；topology 阶段不创建 waterbody session。
 - [x] `query_understood` 是 parser session 原 item，`topology_ready` 是 run 原 item；history/detail/SSE 只投影或引用，不复制第二份 context/graph。
 - [x] run/session 取消、provider timeout、schema repair、topology 失败、writer 补写、重启修复和 live cleanup 保持 M3 invariant；context 成功后 topology 失败时 context 仍可读。
@@ -298,10 +298,11 @@
 ### 工作
 
 - [x] 用 `StationInventoryPort.check_availability(request)` 替换无法表达时间覆盖的旧 `MonitoringStationPort.find_for_segment()` 生产入口；同步导出、fakes、architecture tests 并删除孤立主路径。
-- [x] 定义 `StationAvailabilityRequest/StationAvailability/SeriesRef` typed DTO；coverage unit 是 `(ParameterKey, segment_index)`，由目标参数与 supporting discharge 的去重并集生成。
+- [x] 定义 `StationAvailabilityRequest/StationAvailability/SeriesRef` typed DTO；历史 coverage unit 是 `(ParameterKey, segment_index, window_index)`，预测 unit 保留 `(ParameterKey, segment_index)`，由目标参数与 supporting discharge 的去重并集生成。
 - [x] 按 capability provider route 查询 WDFN metadata 和/或 Samples summary；TS+S 表示两种合法数据形态，不表示无条件 fallback 或两边必有数据。
-- [x] 历史 segment 需要 period envelope 覆盖或 capability 指定的段内 existence probe；预测 segment 需要相同参数在起点前 48 小时内有近期基线可能。
-- [x] 一站只覆盖部分 unit 时只标记这些 unit；其他参数/segment/discharge 保持未覆盖，供 BFS 继续该支流。
+- [x] 历史结果时间窗逐参数探测窗内至少一条实际读数，metadata 仅用于发现来源；预测 segment 需要相同参数在起点前 48 小时内有近期基线可能。
+- [x] 一站只覆盖部分 unit 时只标记这些 unit；其他参数/窗口/discharge 保持未覆盖，供 BFS 继续该支流。
+- [x] 历史 unit 在每条路径最多保留两个不同 COMID 的实际读数候选；备选搜索耗尽不降低已有候选的图覆盖状态，执行节点仍受拓扑节点上限约束。
 - [x] station 必须有 NLDI 或同等级水文关联事实；不得仅按坐标最近距离选站。
 - [x] qualification 保留 provider、station、series refs、checked_at 和覆盖来源；它不是实际观测或 evidence，不进入结果数值。
 - [x] provider 技术错误直接失败，不返回空 tuple；阶段 deadline 耗尽后停止新查询。
@@ -319,7 +320,7 @@
 - [x] `python -m pytest backend/tests/application backend/tests/architecture -q`（availability focused 集合）
 - [x] 端口签名、旧入口移除和调用方/fixture 全量搜索无残留。
 
-阶段出口：任意河段可得到按参数 × segment 的确定性候选覆盖或明确技术失败；尚未决定完整 graph。
+阶段出口：任意河段可得到历史按参数 × 最终窗口、预测按参数 × segment 的确定性候选覆盖或明确技术失败；尚未决定完整 graph。
 
 提交边界：availability DTO/port/service/fakes/tests；不得夹带 BFS、evidence 获取或模型推理。
 
@@ -334,7 +335,7 @@
 ### 工作
 
 - [x] 实现 `HydrologyGraph`、node、edge、coverage、branch outcome、exclusion reason 和 layer typed models；domain invariant 验证 target、引用闭包、边方向、acyclic active graph、稳定唯一身份。
-- [x] builder 从 target 开始逐层向上游，每条支流分别维护未覆盖 coverage units；找到最近合格 source 后只停止已覆盖 unit，未覆盖 unit 继续。
+- [x] builder 从 target 开始逐层向上游，每条支流分别维护未覆盖 coverage units；历史 unit 找到第一个候选后再寻找一个上游备选，预测 unit 找到首个候选即停止；未覆盖 unit 继续。
 - [x] 始终保留 target 供后续本地/非站点 evidence 检查；没有 qualifying inlet 时不得把 target 伪装成 inlet。
 - [x] 实现 100 km/路径、12 hop/路径、128 unique COMID/整图和 8 外部请求并发；限制来自 composition root，不由 request/前端覆盖。
 - [x] 以 `(depth, cumulative_distance, comid)` 等稳定业务键合并同层结果；并发完成顺序、set/dict 顺序不得改变 nodes/edges/layers/JSON。
@@ -516,6 +517,14 @@
 - 环境：复用仓库 `backend/.venv` 的 Python `3.13.2`；按照 `docs/docker_postgresql_quickstart.md` 启动本机 Docker PostgreSQL 17，仅通过进程环境设置 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，业务库 `wateragents` 未作为测试目标。Docker Desktop 的损坏 runtime 目录已保留为可回滚副本，未删除数据库 volume。
 - 验证：`backend/tests/architecture/test_cross_platform_ci.py` 为 `10 passed`；专用 PostgreSQL persistence 为 `57 passed`；包含 PostgreSQL 的完整 backend regression 为 `1197 passed`；`compileall`、M4 workflow smoke、standalone SSE、health smoke、history/独立进程重启/启动修复 smoke 与 `git diff --check` 均通过。
 - 未运行：OpenAI/Google/NLDI/WDFN/Samples 等需专用凭据或受控外部配置的真实 provider contract smoke 仍为 `not run`，最新提交的 Linux/macOS/Windows 三平台 CI 仍为 `partial`；因此不宣称 M4 最终整体验收全部完成。
+
+#### 真实运行修复记录（2026-10-16，未提交）
+
+- 实现：历史站点资格按参数和最终结果时间窗探测实际读数，metadata 只用于发现候选；逐窗至少一条读数即可取得候选资格，完整性、质量和覆盖程度仍由 M5 采集后判断。上游搜索为历史窗口保留有界备选候选，并修正 NLDI 查询范围及 USGS 时间边界，避免 metadata 滞后或局部缺测使搜索提前结束。
+- 运行补充：NLDI 真实拓扑查询曾在连续多轮测试后返回 429。生产 adapter 对本实例的 NLDI 请求按默认 1 秒间隔发起，并将拓扑默认阶段时限设为 300 秒；共享 GET 客户端读取有效 `Retry-After`，在可用时限内最多重试一次。超出时限即保留可重试技术失败，不将限流解释为没有站点。原有拓扑范围不缩减。
+- NLDI 节流补修：同一 adapter 的节流锁现覆盖完整 GET 调用，并从调用结束时计算下一次可请求时间；同一次 GET 的重试也遵守最小间隔。模拟传输复现了旧实现中配置 50 ms、实际发送仅隔 31 ms 的情况；调度延迟、503 重试、取消与截止时间邻近回归 `46 passed`。同一 adapter 的请求会串行，响应耗时计入下一次请求前的等待；不同运行仍各自节流。
+- 验证：M4 资格与拓扑 focused 回归通过；本轮 M4–M6 及相关 adapter 跨层回归为 `710 passed`，完整 backend 回归为 `2591 passed, 2 warnings`。保存的同一 `AnalysisContext` 经无模型真实 provider 检查，建出目标 COMID 1777642 的 39 节点、40 边拓扑；连续重跑仍可能触发 NLDI 429，最新完整前端分析尚未通过。三平台 CI 未运行。
+- 后续真实运行：run 4dbef96f-9826-4c7b-b8a9-2ecda9702fc6 已从前端完整完成；NLDI 请求 154/154 返回 200，目标 COMID 1777642 的拓扑覆盖仍为 partial。此前“最新完整前端分析尚未通过”仅描述较早运行，不再代表这次运行。此运行早于后续 M6 引用校验与历史按需读取补修；补修后的完整付费分析仍待重验。
 
 ## 契约覆盖矩阵（实施时填写）
 

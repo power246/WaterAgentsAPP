@@ -23,7 +23,24 @@ function nodePresentation(node: Graph['nodes'][number], snapshot: RunSnapshot | 
 function Viewport({ points }: { points: [number, number][] }) {
   const map = useMap()
   useEffect(() => {
-    if (points.length) map.fitBounds(points as LatLngBoundsExpression, { padding: [24, 24], maxZoom: 11 })
+    const container = map.getContainer()
+    let wasHidden = !container.clientWidth || !container.clientHeight
+    const fitPoints = () => {
+      if (points.length) map.fitBounds(points as LatLngBoundsExpression, { padding: [24, 24], maxZoom: 11 })
+    }
+    const resize = () => {
+      if (!container.clientWidth || !container.clientHeight) {
+        wasHidden = true
+        return
+      }
+      map.invalidateSize({ debounceMoveend: true })
+      if (wasHidden) fitPoints()
+      wasHidden = false
+    }
+    const observer = new ResizeObserver(resize)
+    observer.observe(container)
+    if (!wasHidden) fitPoints()
+    return () => observer.disconnect()
   }, [map, points])
   return null
 }

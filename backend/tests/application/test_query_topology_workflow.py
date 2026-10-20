@@ -1,11 +1,10 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -46,10 +45,9 @@ from app.domain import (
 from app.infrastructure.config import AppSettings, load_parameter_capability_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime import compose_m4_workflow
-from app.ports import InvalidPortResponseError, PortUnavailableError
+from app.ports import InvalidPortResponseError, PortError, PortUnavailableError
 from tests.m4_support import create_request_bytes, create_test_app
 
-UTC = timezone.utc
 NOW = datetime(2026, 9, 25, 8, 0, tzinfo=UTC)
 TARGET = "100"
 UPSTREAM = "200"
@@ -236,7 +234,6 @@ class RecordingTopology:
     async def get_segment(self, comid, *, deadline=None):
         del deadline
         self.segment_calls.append(comid)
-        return None
 
     async def get_direct_upstreams(
         self,
@@ -279,21 +276,32 @@ class RecordingInventory:
             await self.gate.wait()
         if request.comid != self.covered_comid:
             return ()
+        reference_groups = {}
+        for unit in request.coverage_units:
+            source = (
+                AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_OBSERVATION
+                if unit.window_index is not None
+                else AvailabilityCoverageSource.PREDICTION_TIME_SERIES_BASELINE
+            )
+            reference_groups.setdefault((unit.parameter, source), []).append(unit)
         references = tuple(
             SeriesRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id=f"USGS-{request.comid}",
-                parameter=unit.parameter,
+                parameter=parameter,
                 channel="continuous",
-                series_identity=(
-                    f"series-{request.comid}-{unit.parameter.code}-{unit.segment_index}"
-                ),
-                coverage_source=(
-                    AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_ENVELOPE
-                ),
-                covered_units=(unit,),
+                series_identity=f"series-{request.comid}-{parameter.code}",
+                coverage_source=source,
+                covered_units=tuple(units),
             )
-            for unit in request.coverage_units
+            for (parameter, source), units in sorted(
+                reference_groups.items(),
+                key=lambda item: (
+                    item[0][0].code_system,
+                    item[0][0].code,
+                    item[0][1].value,
+                ),
+            )
         )
         return (
             StationAvailability(
@@ -443,6 +451,10 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
 
             store.release_topology_write.set()
             await wait_quiesced(coordinator, created.run_id)
+            assert await coordinator.wait_for_transcript_items_persisted(
+                created.run_id,
+                (runtime.context_ref.item_id, runtime.topology_ref.item_id),
+            ) is None
             terminal = await coordinator.get_snapshot(created.run_id)
             sessions = await coordinator.list_sessions(created.run_id)
             live = await coordinator.get_live_read(created.run_id)
@@ -466,7 +478,7 @@ def test_full_workflow_commits_one_context_and_graph_with_atomic_progress() -> N
             }
             assert len(parser.calls) == len(resolver.calls) == 1
             assert inventory.calls == [TARGET, UPSTREAM]
-            assert topology.calls == [TARGET]
+            assert topology.calls == [TARGET, UPSTREAM]
 
             content_types = tuple(
                 item.content.content_type for item in live.items
@@ -547,13 +559,20 @@ def test_topology_failures_keep_context_and_map_safe_terminal(
     failure,
     code,
     retryable,
+    caplog,
 ) -> None:
+    caplog.set_level("WARNING", logger="wateragents.query_topology")
+
     async def exercise() -> None:
         builder = FailingTopologyBuilder(failure)
         async with workflow_runtime(builder) as (coordinator, _, _, store):
             created = await coordinator.create_run(create_request_bytes())
             await wait_quiesced(coordinator, created.run_id)
             runtime = coordinator._runs[created.run_id]
+            assert runtime.context_ref is not None
+            assert await coordinator.wait_for_transcript_items_persisted(
+                created.run_id, (runtime.context_ref.item_id,)
+            ) is None
             stored = await store.read_run(created.run_id)
             assert stored is not None
 
@@ -565,6 +584,16 @@ def test_topology_failures_keep_context_and_map_safe_terminal(
             assert runtime.last_error.code == code
             assert runtime.last_error.failed_stage == "topology_building"
             assert runtime.last_error.retryable is retryable
+            if isinstance(failure, PortError):
+                records = [
+                    record for record in caplog.records
+                    if getattr(record, "event_name", None) == "topology_dependency_failed"
+                ]
+                assert len(records) == 1
+                assert records[0].run_id == created.run_id
+                assert records[0].target_comid == TARGET
+                assert records[0].operation == failure.operation
+                assert records[0].provider_error == type(failure).__name__
             types = tuple(item.content_type for item in stored.items)
             assert "query_understood" in types
             assert "topology_ready" not in types
@@ -704,6 +733,6 @@ def test_same_idempotency_key_runs_parser_and_providers_once() -> None:
             assert replay.run_id == first.run_id
             assert len(parser.calls) == len(resolver.calls) == 1
             assert inventory.calls == [TARGET, UPSTREAM]
-            assert topology.calls == [TARGET]
+            assert topology.calls == [TARGET, UPSTREAM]
 
     run(exercise())

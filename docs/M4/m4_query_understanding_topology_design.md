@@ -88,17 +88,17 @@ LLM 不得直接创造或最终裁定 COMID、参数代码、UTC 边界、推理
 
 该策略用于避免无依据推理和无意义 token 消耗。部分继续时的 run 最终状态、结果 DTO 和前端措辞仍需在 M5/M6 设计中定型，不在 M4 草稿中提前发明第二套状态。
 
-### D07：上游 topology 使用“每条支流最近充分”BFS
+### D07：上游 topology 使用逐窗候选与有界备选 BFS
 
 拓扑从目标 COMID 开始，沿水流方向逐层向上游搜索：
 
 - 每条汇入支流分别搜索，不能因一条支流已有证据而忽略其他支流；
-- 某条支流找到足以支撑当前 coverage unit 的最近证据锚点后，不再为已经覆盖的目标/支持参数继续向更远上游扩张；
+- 历史 coverage unit 找到第一个实际读数候选后，再沿该路径寻找一个上游备选；预测 unit 找到首个候选即停止；
 - 尚未覆盖的目标或支持参数可以继续沿该支流搜索；
-- 目标水体自身已有充分证据时，不为扩大图规模而继续无条件向上游搜索；
+- 目标水体自身已有历史候选时，也只按同样的一个备选上限继续搜索；
 - 同时设置整图最多 128 个唯一节点、每条路径最多 12 hop 和累计 100 km 三重硬上限；外部查询并发最多 8，均由后端配置管理。
 
-“充分”在 topology 阶段表示找到了满足候选标准的 evidence source，不替代 M5 对真实时间覆盖、质量和可读性的最终检查。
+历史候选只证明该参数在该时间窗有实际读数，不代表整个窗口的证据充分；M5 仍检查质量、单位和时间覆盖。
 
 ### D08：保存完整 BFS 范围与排除原因，active graph 是有效路径并集
 
@@ -269,9 +269,9 @@ Query Parser 的候选通过 schema、parameter resolver 和全部输入门禁�
 
 ### D24：availability 使用现代 WDFN v1，旧 WaterServices 不进入新基线
 
-NLDI 只提供 NHDPlusV2 河网和 monitoring-site 关联；参数与时间覆盖资格由 USGS 现代化 Water Data OGC API v1 的 monitoring-location/time-series metadata 或能力注册表指定的同等级 metadata provider 判定。按 [USGS WDFN API v1 公告](https://waterdata.usgs.gov/blog/api-v1-release/)，现代化 API 已成为主接口且旧 `waterservices.usgs.gov` 将于 2027 年初退役，因此 M4 不新增对旧 WaterServices 的生产依赖。
+NLDI 只提供 NHDPlusV2 河网和 monitoring-site 关联；USGS Water Data OGC API v1 的 metadata 用于发现序列，历史参数与时间窗资格由实际观测存在性查询判定。按 [USGS WDFN API v1 公告](https://waterdata.usgs.gov/blog/api-v1-release/)，现代化 API 已成为主接口且旧 `waterservices.usgs.gov` 将于 2027 年初退役，因此 M4 不新增对旧 WaterServices 的生产依赖。
 
-adapter 必须把“成功但没有匹配记录”与超时、限流、协议损坏和服务不可用分开。对离散 sample 等没有足够 metadata 的来源，只能使用带严格 limit 的 existence probe，不能下载完整观测冒充 M5，也不能凭站点名称推断覆盖。
+adapter 必须把“成功但没有匹配记录”与超时、限流、协议损坏和服务不可用分开。历史连续序列与离散 sample 都需要有界的实际读数探测，不能凭 metadata 时间包络或站点名称推断覆盖。
 
 ### D25：topology 默认使用 100 km、12 跳、128 节点三重上限
 

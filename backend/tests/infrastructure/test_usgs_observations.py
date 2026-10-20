@@ -2,21 +2,22 @@ import asyncio
 import json
 import logging
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
 import pytest
-
 from app.domain import (
+    AvailabilityTimeRange,
     DischargeObservationRecord,
     ParameterKey,
     ParameterProvider,
+    SamplePeriodOfRecord,
     TimeRange,
     WaterObservationRecord,
     WaterObservationRequest,
 )
-from app.infrastructure.adapters import UsgsObservationAdapter
+from app.infrastructure.adapters import UsgsObservationAdapter, UsgsWaterDataAdapter
 from app.infrastructure.http import ProviderHttpClient
 from app.ports import (
     InvalidPortResponseError,
@@ -33,6 +34,14 @@ NOW = datetime(2024, 1, 4, tzinfo=timezone.utc)
 WATER = ParameterKey(code_system="usgs", code="00300")
 DISCHARGE = ParameterKey(code_system="usgs", code="00060")
 OTHER_DISCHARGE = ParameterKey(code_system="usgs", code="80155")
+SAMPLE_REF = (
+    'usgs-samples:v1:["USGS-01646500","Physical",'
+    '"Dissolved oxygen","Dissolved oxygen"]'
+)
+OTHER_SAMPLE_REF = (
+    'usgs-samples:v1:["USGS-01646500","Physical",'
+    '"Dissolved oxygen","DO field"]'
+)
 
 
 def run(coroutine):
@@ -45,6 +54,12 @@ def json_fixture(name: str) -> dict[str, object]:
 
 def bytes_fixture(name: str) -> bytes:
     return (FIXTURES / name).read_bytes()
+
+
+def sample_csv() -> bytes:
+    return bytes_fixture("usgs_samples_narrow.csv").replace(
+        b'"Oxygen, dissolved"', b'"Dissolved oxygen"'
+    )
 
 
 def provider_client(
@@ -66,6 +81,7 @@ def request(
     channel: str = "continuous",
     parameter: ParameterKey = WATER,
     series_ref: str = "series-continuous-00300",
+    series_refs: tuple[str, ...] | None = None,
     analysis_timezone: str = "UTC",
     request_range: TimeRange | None = None,
 ) -> WaterObservationRequest:
@@ -74,7 +90,7 @@ def request(
         provider=provider,
         channel=channel,
         station_id="USGS-01646500",
-        series_refs=(series_ref,),
+        series_refs=series_refs if series_refs is not None else (series_ref,),
         parameter_keys=(parameter,),
         request_range=request_range or TimeRange(start=START, end=END),
         analysis_timezone=analysis_timezone,
@@ -136,12 +152,49 @@ def test_continuous_follows_only_official_next_and_preserves_contract_fields() -
     assert requests[0].url.params["monitoring_location_id"] == "USGS-01646500"
     assert requests[0].url.params["time_series_id"] == "series-continuous-00300"
     assert requests[0].url.params["parameter_code"] == "00300"
-    assert requests[0].url.params["datetime"].endswith("2024-01-03T00:00:00Z")
+    assert requests[0].url.params["datetime"].endswith("2024-01-02T23:59:59.999999Z")
     assert list(requests[1].url.params.multi_items()) == [
         ("cursor", "official-page-2")
     ]
     assert all(item.headers["X-Api-Key"] == "m6-secret-key" for item in requests)
     assert all("m6-secret-key" not in str(item.url) for item in requests)
+
+
+def test_continuous_query_excludes_the_result_window_end() -> None:
+    window_end = datetime(2024, 1, 2, 6, tzinfo=UTC)
+    query_ends: list[datetime] = []
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        upper_text = http_request.url.params["datetime"].split("/", 1)[1]
+        query_end = datetime.fromisoformat(upper_text.replace("Z", "+00:00"))
+        query_ends.append(query_end)
+        payload = json_fixture("usgs_continuous_page_1.json")
+        inside = payload["features"][0]
+        inside["properties"]["time"] = "2024-01-02T00:30:00Z"
+        boundary = deepcopy(inside)
+        boundary["id"] = "continuous-obs-at-end"
+        boundary["properties"]["time"] = "2024-01-02T06:00:00Z"
+        payload["features"] = [inside]
+        if query_end >= window_end:
+            payload["features"].append(boundary)
+        payload["links"] = []
+        return httpx.Response(200, json=payload, request=http_request)
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            return await adapter(http).collect(
+                request(
+                    request_range=TimeRange(
+                        start=datetime(2024, 1, 2, tzinfo=UTC),
+                        end=window_end,
+                    )
+                )
+            )
+
+    batch = run(exercise())
+    assert query_ends == [window_end - timedelta(microseconds=1)]
+    assert len(batch.records) == 1
+    assert batch.records[0].observed_time == datetime(2024, 1, 2, 0, 30, tzinfo=UTC)
 
 
 def test_successful_empty_ogc_is_complete_empty_not_unavailable() -> None:
@@ -161,6 +214,140 @@ def test_successful_empty_ogc_is_complete_empty_not_unavailable() -> None:
     assert batch.counts.records == 0
     assert batch.completion_proof.complete is True
     assert batch.completed_ranges == (TimeRange(start=START, end=END),)
+
+
+def test_null_continuous_measurement_is_skipped_and_next_page_is_collected() -> None:
+    first = json_fixture("usgs_continuous_page_1.json")
+    first["features"][0]["properties"]["value"] = None
+    first["features"][0]["properties"]["qualifier"] = ["BACKWATER"]
+    second = json_fixture("usgs_continuous_page_2.json")
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        payload = second if http_request.url.params.get("cursor") else first
+        return httpx.Response(200, json=payload, request=http_request)
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            return await adapter(http).collect(request())
+
+    batch = run(exercise())
+    assert [record.value for record in batch.records] == ["8.1"]
+    assert [page.record_count for page in batch.page_or_chunk_manifests] == [0, 1]
+    assert batch.counts.requests == 2
+    assert batch.counts.records == 1
+    assert batch.completion_proof.complete is True
+    assert batch.completed_ranges == (TimeRange(start=START, end=END),)
+
+
+def test_all_null_daily_measurements_are_complete_empty() -> None:
+    payload = json_fixture("usgs_daily_discharge.json")
+    payload["features"][0]["properties"]["value"] = None
+    payload["features"][0]["properties"]["qualifier"] = ["BACKWATER"]
+
+    async def exercise():
+        async with provider_client(
+            lambda http_request: httpx.Response(200, json=payload, request=http_request)
+        ) as http:
+            return await adapter(http).collect(
+                request(
+                    channel="daily",
+                    parameter=DISCHARGE,
+                    series_ref="series-daily-00060",
+                )
+            )
+
+    batch = run(exercise())
+    assert batch.records == ()
+    assert batch.page_or_chunk_manifests[0].record_count == 0
+    assert batch.counts.records == 0
+    assert batch.completion_proof.complete is True
+    assert batch.completed_ranges == (TimeRange(start=START, end=END),)
+
+
+@pytest.mark.parametrize("bad_value", [42, [], {"reading": "8.2"}])
+def test_wrong_non_null_ogc_value_is_invalid(bad_value: object) -> None:
+    payload = json_fixture("usgs_continuous_page_1.json")
+    payload["features"][0]["properties"]["value"] = bad_value
+
+    async def exercise():
+        async with provider_client(
+            lambda http_request: httpx.Response(200, json=payload, request=http_request)
+        ) as http:
+            return await adapter(http).collect(request())
+
+    with pytest.raises(InvalidPortResponseError):
+        run(exercise())
+
+
+@pytest.mark.parametrize("mutation", ["missing_value", "wrong_station", "wrong_time"])
+def test_null_ogc_value_still_requires_value_key_and_matching_identity_time(
+    mutation: str,
+) -> None:
+    payload = json_fixture("usgs_continuous_page_1.json")
+    properties = payload["features"][0]["properties"]
+    properties["value"] = None
+    if mutation == "missing_value":
+        del properties["value"]
+    elif mutation == "wrong_station":
+        properties["monitoring_location_id"] = "USGS-other"
+    else:
+        properties["time"] = "2023-12-31T12:00:00Z"
+
+    async def exercise():
+        async with provider_client(
+            lambda http_request: httpx.Response(200, json=payload, request=http_request)
+        ) as http:
+            return await adapter(http).collect(request())
+
+    with pytest.raises(InvalidPortResponseError):
+        run(exercise())
+
+
+def test_null_ogc_features_count_toward_the_raw_record_limit() -> None:
+    first = json_fixture("usgs_continuous_page_1.json")
+    first["features"][0]["properties"]["value"] = None
+    second = json_fixture("usgs_continuous_page_2.json")
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        payload = second if http_request.url.params.get("cursor") else first
+        return httpx.Response(200, json=payload, request=http_request)
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            return await adapter(http, page_size=1, max_records=1).collect(request())
+
+    batch = run(exercise())
+    assert batch.records == ()
+    assert batch.counts.requests == 2
+    assert [page.page_complete for page in batch.page_or_chunk_manifests] == [
+        True,
+        False,
+    ]
+    assert batch.completed_ranges == ()
+    assert batch.completion_proof.complete is False
+    assert batch.incomplete_reason == "evidence_provider_response_too_large"
+
+
+@pytest.mark.parametrize("qualifier", [["Ice", "Backwater"], [], ["Ice", 5], [""]])
+def test_ogc_qualifier_arrays_are_normalized_or_rejected(
+    qualifier: list[object],
+) -> None:
+    payload = json_fixture("usgs_continuous_page_1.json")
+    payload["features"][0]["properties"]["qualifier"] = qualifier
+    payload["links"] = []
+
+    async def exercise():
+        async with provider_client(
+            lambda http_request: httpx.Response(200, json=payload, request=http_request)
+        ) as http:
+            return await adapter(http).collect(request())
+
+    if any(not isinstance(item, str) or not item.strip() for item in qualifier):
+        with pytest.raises(InvalidPortResponseError):
+            run(exercise())
+    else:
+        batch = run(exercise())
+        assert batch.records[0].provider_quality.qualifiers == tuple(qualifier)
 
 
 def test_daily_discharge_preserves_provider_parameter_time_and_statistic() -> None:
@@ -426,7 +613,7 @@ def test_samples_csv_preserves_quoted_row_unknown_column_and_detection_qualifier
         requests.append(http_request)
         return httpx.Response(
             200,
-            content=bytes_fixture("usgs_samples_narrow.csv"),
+            content=sample_csv(),
             headers={"Content-Type": "text/csv"},
             request=http_request,
         )
@@ -437,7 +624,7 @@ def test_samples_csv_preserves_quoted_row_unknown_column_and_detection_qualifier
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 
@@ -462,10 +649,235 @@ def test_samples_csv_preserves_quoted_row_unknown_column_and_detection_qualifier
     assert http_request.url.params["activityMediaName"] == "Water"
     assert http_request.url.params["monitoringLocationIdentifier"] == "USGS-01646500"
     assert http_request.url.params["usgsPCode"] == "00300"
-    assert http_request.url.params["activityStartDateLower"] == "2024-01-01"
-    assert http_request.url.params["activityStartDateUpper"] == "2024-01-02"
+    assert http_request.url.params["characteristicGroup"] == "Physical"
+    assert http_request.url.params["characteristic"] == "Dissolved oxygen"
+    assert http_request.url.params["characteristicUserSupplied"] == "Dissolved oxygen"
+    assert http_request.url.params["activityStartDateLower"] == "2023-12-31"
+    assert http_request.url.params["activityStartDateUpper"] == "2024-01-03"
     assert http_request.headers["X-Api-Key"] == "samples-secret"
     assert "samples-secret" not in str(http_request.url)
+
+
+def test_sample_qualified_by_local_date_is_collected_in_utc_window() -> None:
+    calls: list[httpx.Request] = []
+    header, original_row, _ = bytes_fixture("usgs_samples_narrow.csv").splitlines()
+    row = original_row.replace(b",08:30:00,EST,", b",19:30:00,EST,")
+    window = TimeRange(
+        start=datetime(2024, 1, 2, tzinfo=UTC),
+        end=datetime(2024, 1, 2, 6, tzinfo=UTC),
+    )
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        calls.append(http_request)
+        lower = date.fromisoformat(http_request.url.params["activityStartDateLower"])
+        upper = date.fromisoformat(http_request.url.params["activityStartDateUpper"])
+        content = header + b"\n"
+        if lower <= date(2024, 1, 1) <= upper:
+            content += row + b"\n"
+        return httpx.Response(200, content=content, request=http_request)
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            availability = UsgsWaterDataAdapter(http, samples_base_url=SAMPLES_BASE)
+            period = SamplePeriodOfRecord(
+                station_id="USGS-01646500",
+                characteristic="Dissolved oxygen",
+                first_activity=date(2024, 1, 1),
+                most_recent_activity=date(2024, 1, 1),
+                result_count=1,
+                activity_count=1,
+                provider_identity=(
+                    'usgs-samples:v1:["USGS-01646500","Physical",'
+                    '"Dissolved oxygen","Dissolved oxygen"]'
+                ),
+            )
+            found = await availability.get_sample_observation_windows(
+                period,
+                WATER,
+                (
+                    AvailabilityTimeRange(
+                        segment_index=0,
+                        window_index=0,
+                        start=window.start,
+                        end=window.end,
+                    ),
+                ),
+            )
+            batch = await adapter(http).collect(
+                request(
+                    provider=ParameterProvider.USGS_SAMPLES,
+                    channel="discrete_samples",
+                    series_ref=period.provider_identity,
+                    request_range=window,
+                )
+            )
+            return found, batch
+
+    found, batch = run(exercise())
+    assert found == (0,)
+    assert len(batch.records) == 1
+    assert batch.records[0].observed_time == datetime(2024, 1, 2, 0, 30, tzinfo=UTC)
+    assert len(calls) == 2
+    assert all(
+        call.url.params["activityStartDateLower"] == "2024-01-01"
+        and call.url.params["activityStartDateUpper"] == "2024-01-03"
+        and call.url.params["characteristicGroup"] == "Physical"
+        and call.url.params["characteristic"] == "Dissolved oxygen"
+        and call.url.params["characteristicUserSupplied"] == "Dissolved oxygen"
+        for call in calls
+    )
+
+
+@pytest.mark.parametrize("second_repeats_first", [False, True])
+def test_samples_collects_each_authorized_summary_identity_and_merges_complete_streams(
+    second_repeats_first: bool,
+) -> None:
+    calls: list[httpx.Request] = []
+    header, first, second = sample_csv().splitlines()
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        calls.append(http_request)
+        selected = (
+            first
+            if second_repeats_first
+            or http_request.url.params["characteristicUserSupplied"]
+            == "Dissolved oxygen"
+            else second
+        )
+        return httpx.Response(
+            200, content=header + b"\n" + selected + b"\n", request=http_request
+        )
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            return await adapter(http).collect(
+                request(
+                    provider=ParameterProvider.USGS_SAMPLES,
+                    channel="discrete_samples",
+                    series_refs=(SAMPLE_REF, OTHER_SAMPLE_REF),
+                )
+            )
+
+    batch = run(exercise())
+    assert batch.completion_proof.complete is True
+    assert batch.completed_ranges == (TimeRange(start=START, end=END),)
+    assert batch.counts.requests == 2
+    assert batch.counts.pages == 2
+    expected_count = 1 if second_repeats_first else 2
+    assert batch.counts.records == expected_count
+    assert [page.record_count for page in batch.page_or_chunk_manifests] == [
+        1,
+        0 if second_repeats_first else 1,
+    ]
+    assert len({record.record_id for record in batch.records}) == expected_count
+    assert [call.url.params["characteristicUserSupplied"] for call in calls] == [
+        "Dissolved oxygen",
+        "DO field",
+    ]
+    assert all(
+        call.url.params["characteristicGroup"] == "Physical"
+        and call.url.params["characteristic"] == "Dissolved oxygen"
+        for call in calls
+    )
+
+
+def test_samples_later_wrong_classification_keeps_only_partial_evidence() -> None:
+    header, first, second = bytes_fixture("usgs_samples_narrow.csv").splitlines()
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        selected = (
+            first
+            if http_request.url.params["characteristicUserSupplied"]
+            == "Dissolved oxygen"
+            else second
+        )
+        return httpx.Response(
+            200, content=header + b"\n" + selected + b"\n", request=http_request
+        )
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            return await adapter(http).collect(
+                request(
+                    provider=ParameterProvider.USGS_SAMPLES,
+                    channel="discrete_samples",
+                    series_refs=(SAMPLE_REF, OTHER_SAMPLE_REF),
+                )
+            )
+
+    batch = run(exercise())
+    assert len(batch.records) == 1
+    assert batch.counts.requests == 2
+    assert batch.completed_ranges == ()
+    assert batch.completion_proof.complete is False
+    assert batch.incomplete_reason == "evidence_provider_response_invalid"
+    assert [page.page_complete for page in batch.page_or_chunk_manifests] == [
+        True,
+        False,
+    ]
+
+
+def test_samples_wrong_classification_on_first_stream_is_invalid() -> None:
+    async def exercise():
+        async with provider_client(
+            lambda http_request: httpx.Response(
+                200, content=bytes_fixture("usgs_samples_narrow.csv"), request=http_request
+            )
+        ) as http:
+            return await adapter(http).collect(
+                request(
+                    provider=ParameterProvider.USGS_SAMPLES,
+                    channel="discrete_samples",
+                    series_ref=SAMPLE_REF,
+                )
+            )
+
+    with pytest.raises(InvalidPortResponseError):
+        run(exercise())
+
+
+def test_samples_identity_and_stream_limits_prevent_false_completion() -> None:
+    header, first, second = sample_csv().splitlines()
+    calls: list[httpx.Request] = []
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        calls.append(http_request)
+        selected = (
+            first
+            if http_request.url.params["characteristicUserSupplied"]
+            == "Dissolved oxygen"
+            else second
+        )
+        return httpx.Response(
+            200, content=header + b"\n" + selected + b"\n", request=http_request
+        )
+
+    async def exercise():
+        async with provider_client(handler) as http:
+            two_refs = request(
+                provider=ParameterProvider.USGS_SAMPLES,
+                channel="discrete_samples",
+                series_refs=(SAMPLE_REF, OTHER_SAMPLE_REF),
+            )
+            with pytest.raises(ValueError):
+                await adapter(http).collect(
+                    request(
+                        provider=ParameterProvider.USGS_SAMPLES,
+                        channel="discrete_samples",
+                        series_ref="samples-summary-00300",
+                    )
+                )
+            with pytest.raises(PortResponseLimitError):
+                await adapter(http, max_pages=1).collect(two_refs)
+            assert calls == []
+            return await adapter(http, page_size=1, max_records=1).collect(two_refs)
+
+    batch = run(exercise())
+    assert len(batch.records) == 1
+    assert batch.counts.requests == 2
+    assert batch.completed_ranges == ()
+    assert batch.completion_proof.complete is False
+    assert batch.incomplete_reason == "evidence_provider_response_too_large"
 
 
 def test_samples_successful_empty_csv_is_complete() -> None:
@@ -481,7 +893,7 @@ def test_samples_successful_empty_csv_is_complete() -> None:
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 
@@ -504,7 +916,7 @@ def test_samples_date_without_time_is_preserved_as_a_day_range() -> None:
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 
@@ -537,7 +949,7 @@ def test_samples_missing_required_column_or_invalid_row_is_invalid(
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 
@@ -546,7 +958,7 @@ def test_samples_missing_required_column_or_invalid_row_is_invalid(
 
 
 def test_samples_byte_and_record_limits_are_explicit() -> None:
-    content = bytes_fixture("usgs_samples_narrow.csv")
+    content = sample_csv()
 
     async def byte_limit():
         async with provider_client(
@@ -559,7 +971,7 @@ def test_samples_byte_and_record_limits_are_explicit() -> None:
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 
@@ -576,7 +988,7 @@ def test_samples_byte_and_record_limits_are_explicit() -> None:
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 
@@ -603,7 +1015,7 @@ def test_samples_stream_failure_retries_once_then_remains_technical_failure() ->
                 request(
                     provider=ParameterProvider.USGS_SAMPLES,
                     channel="discrete_samples",
-                    series_ref="samples-summary-00300",
+                    series_ref=SAMPLE_REF,
                 )
             )
 

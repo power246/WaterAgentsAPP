@@ -1,10 +1,10 @@
 # M5 Evidence Tools + EvidenceBundle 设计决策记录
 
-更新日期：2026-10-07
+更新日期：2026-10-17
 
 > 状态：设计方向与实施模式已完成对齐，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。本文记录已确认的业务与架构决策；精确类型、provider、policy、API、验收证据和未运行边界见同目录实施设计、Policy Catalog、API 文档与 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
-> M7 接力说明：本文 2026-10-03 同步的 dependency manifest、stationless 零模型截断及本地/上游组合规则已由M7 production workflow承接；它们仍不属于既有M5 Milestone 0–13的完成证据。
+> M7 接力说明：直接上游终态与结果注入由 M7 production workflow 承接。当前无站点路径允许模型范围估计；历史 Milestone 完成证据与本轮验证分别记录在 TODO。
 
 > M8 接力说明：M8 已冻结真实 transcript-RAG producer、query-to-query retrieval 与 historical DTO 设计，并建立全部待办的 [M8 Implementation TODO](../M8/m8_implementation_todo.md)；总体边界见 [M8 总体设计](../M8/m8_memory_rag_design.md) 和 [M8 API](../M8/m8_memory_rag_api.md)。这些目标尚不是 M5 实现完成证据。
 
@@ -27,7 +27,7 @@ M5 负责把外部和内部来源的原始记录转换为可追踪、可比较�
 
 M5 直接消费 M4 已保存的唯一 `AnalysisContext`、唯一 `HydrologyGraph`、station/series references 和唯一 parameter capability registry。M4 的 availability qualification 只是候选资格，不是 observation，也不能直接成为 `EvidenceFragment`。M5 必须重新读取并验证真实记录的时间覆盖、质量、单位和完整性。
 
-M5 不负责最终水质判断、模型 confidence、归因或多 Agent DAG 调度。M6 负责单水体 reasoning 和模型调用前的确定性 sufficiency gate；M7 负责按 active DAG 创建并调度水体 sessions；M8 才接入真实跨 run transcript RAG producer。
+M5 不负责最终水质判断、归因或多 Agent DAG 调度。水体内数值任务统一保存明确计算或模型估计的结果；模型调用由 M6 提供，M5 保存其数值、范围、依据和可信度说明，不将模型估计变成实测。M6 负责单水体 reasoning 和模型调用前的确定性 sufficiency gate；M7 负责按 active DAG 创建并调度水体 sessions。
 
 ## 2. 已确认决策
 
@@ -72,7 +72,7 @@ Evidence 的外部获取粒度与推理消费粒度分开：
 
 - direct evidence references；
 - capability registry 明确允许的 indirect evidence references 及 relation identity；
-- 同一窗口必需 discharge 的 direct/allowed-indirect evidence references；
+- 同一窗口 discharge 的尝试结果与 direct/allowed-indirect evidence references；模型估计将缺失流量作为不确定性，明确计算仍要求其声明的必需输入齐全；
 - `empty`、`unavailable`、`invalid` 和质量不足事实；
 - 从 raw source records 到 normalized/aggregated evidence 的 provenance。
 
@@ -89,7 +89,7 @@ Evidence 的外部获取粒度与推理消费粒度分开：
 | COMID、location、topology | M4 已保存的 `AnalysisContext` 与 `HydrologyGraph` 原事实 | mandatory；内部事实封装，不再次调用外部 topology provider。 |
 | 水文/水质连续与日值观测 | USGS Water Data OGC API v1 的 continuous/daily 数据 | 当前水体存在合格本地 station/series ref 时 conditional-mandatory；实际通道由 capability 和 M4 reference 决定。 |
 | 离散水质样品 | USGS Samples Data API | conditional-mandatory water observation 的离散样品通道；不得伪装成连续序列。 |
-| discharge/flow | USGS Water Data OGC API v1 与 capability 允许的 USGS observation 通道 | 每个水体/窗口都必须查询或推理的 required support；有本地站时先查询，无直接读数时只走登记的推理关系。 |
+| discharge/flow | USGS Water Data OGC API v1 与 capability 允许的 USGS observation 通道 | 每个水体/窗口优先查询或估计的 supporting parameter；无流量数值时保留原因，并允许目标模型估计继续。 |
 | 历史天气观测 | National Weather Service API | optional；由 Agent 根据任务、证据缺口和允许关系按需调用。 |
 | 未来天气 | National Weather Service API | optional；由 Agent 根据任务、证据缺口和允许关系按需调用。 |
 | 设施/排放相关事实 | EPA ECHO web services | optional facility evidence。 |
@@ -154,7 +154,7 @@ CollectionStatus
 
 conditional-mandatory preflight 或 discharge 必需取证路径的 `failed` 会阻断受影响的水体/参数/窗口推理，并保证该范围不调用水体模型。M5 输出明确 blocker 和安全错误；该 blocker 如何收敛为单 Agent session 或多 Agent run 的最终状态，由 M6/M7 在不弱化本规则的前提下定型。
 
-optional evidence tool 的 `failed` 仍保存为 `unavailable`，但只要 target + discharge gate 已由其他 direct/allowed-indirect evidence 满足，可以继续当前推理；最终 evidence chain 必须保留该补充来源不可用的事实。若该 optional tool 是某个 allowed-indirect relation 成立所必需的唯一来源，则对应窗口不能通过 gate，不能把调用失败解释成“没有侧面证据”。
+optional evidence tool 的 `failed` 仍保存为 `unavailable`；其他目标证据或已保存模型估计可用时继续推理，最终 evidence chain 保留来源不可用的事实。若该工具是明确计算的必需输入，其失败阻止该计算；模型估计可在说明资料未知或读取失败后给出有依据的单点或范围，不能把失败解释成查空。
 
 Port 层继续以类型化 exception 表达 timeout、rate limit、authentication、unavailable 和 invalid response；Evidence Tool 捕获预期 port failure，将其转换为统一、可序列化、可写 transcript 的 tool failure result。未分类异常在 application 边界转换为安全内部失败，原异常正文、provider body、URL secret 和 traceback 不进入公开 tool result。
 
@@ -207,6 +207,10 @@ AggregationPolicy
 - 先完成单位校验与标准化，再对同一窗口内的兼容记录聚合；不得混合不同量纲、介质、fraction 或不可比较 method；
 - raw observation fragment 原样保留；聚合产生新的 derived fragment，引用全部输入 evidence IDs，并记录 policy/method、覆盖情况和算法版本；
 - M5 aggregation 不执行插值、gap filling、预测或跨无数据窗口补值；这些不能伪装成普通聚合。
+
+观测按用户所选的最终窗口（6h、12h 或 24h）判断：采集完整且窗口内至少有一条质量可用的读数，就按 provider/channel 的登记方法形成原始窗口代表值。WDFN continuous 取窗口内可用读数的 `mean`；USGS Samples 的 `discrete_samples` 取 `latest`，保留样品的离散性质。单条可用读数也能形成代表值，不要求 provider 声明固定采样频率、读数覆盖窗口首尾或间隔均匀。coverage、provider 质量标记和原始读数仍如实保留；窗口代表值不等于整窗连续实测。
+
+整个窗口没有可用读数时，由独立的确定性时间补值步骤处理，不修改 M5 aggregation 的职责。站点资格记录实际有读数的窗口；某序列在所选历史范围内至少有一个这样的窗口后，M5 仍须采集该序列的完整所选范围，并逐窗记录查询完成或技术失败。站点资格本身不证明其余空窗已完整查询。补值步骤只在同一水体、参数、站点和序列的已完整查询历史范围内寻找原始窗口代表值：两侧都有锚点时按窗口中点做线性插值，只有一侧时保持最近原始代表值；距离远会降低置信度，但没有硬性距离截止。补出的窗口不得作为下一次补值的原始锚点，补值须保存算法、距离、输入证据引用和系统推测标记。完整查询得到的空窗可以补；若窗内只有 `unit_unresolved` 原始项且采集完整，也可用同序列其他窗口的原始锚点补该窗。分页不完整或 provider 技术失败的窗口不能作为自然空窗处理。整个所选范围没有该指标可用读数时，不生成数字。
 
 现有 M4 唯一 capability manifest 继续是参数执行权威；M5 在同一 manifest/model 上原子增加 measurement 与 aggregation fields，不建立第二份 `ParameterKey -> unit/method` 表。共享 unit/aggregation definitions 可以被 154 项 capability 重用，但 manifest 加载后必须逐项解析为完整、无悬空引用的可执行策略。
 
@@ -263,7 +267,7 @@ invalid
   -> 保留用于审计；不得参与 observed/quantified aggregation
 ```
 
-`suspicious` 与 `invalid` 不得合并。suspicious 输入参与聚合时：
+`suspicious` 可参与聚合；`invalid` 原始项只保留审计和引用，不参与数值计算。同一序列中，个别原始项 `unit_unresolved` 不应阻止其他单位可转换、质量可用的读数形成窗口代表值；采集完整性仍须独立证明。suspicious 输入参与聚合时：
 
 - 聚合结果必须引用全部 valid/suspicious 输入，不能静默删除可疑点；
 - derived fragment 继承适用的 `provider_flagged`、`anomalous`、`possible_freezing`、`estimated`、`stale` 或其他已登记质量标志；
@@ -273,16 +277,16 @@ invalid
 
 窗口覆盖规则：
 
-- continuous series 根据已知 cadence、窗口边界、有效/可疑点数、最大连续缺口和 policy 阈值判断 `complete / partial / insufficient / unknown`；
-- cadence 未知时不能假定完整覆盖，必须标记 `unknown` 或 `partial`；
+- `continuous_regular` 在采集完整且所选窗口内至少有一条可用读数时标记 `complete`，表示可形成该窗代表值，不宣称整窗连续实测；无可用读数为 `insufficient`，采集未完成为 `unknown`；
+- 已知 cadence、读数比率和最大缺口只记录为描述指标，不据此拒绝该类窗口的代表值；cadence 未知时不猜测预期读数数目；
 - discrete sample 默认只作为样品实际落入窗口的直接 evidence，不代表整个连续窗口均有观测；
-- 离散样品或相邻时间记录若要支持其他窗口，必须命中 capability 已登记的 `same_location_adjacent_time` 等 indirect relation，并保留 relation identity；
+- 离散样品落在当前窗口时可按该通道默认的 `latest` 形成原始窗口代表值。其他窗口可引用同序列原始代表值形成独立的 `temporal_estimate`，保留算法和原始引用；若直接把邻窗记录作为间接证据使用，仍须命中 capability 已登记的 `same_location_adjacent_time` 等 relation，并保留 relation identity；
 - daily statistic、interval total 和 cumulative counter 按各自 value semantics 分窗，不能按瞬时点规则处理；
 - 窗口边界继续使用 UTC instant 的半开区间，并保留 analysis timezone/DST 语义，不用固定毫秒数重建当地窗口。
 
-M5 不执行插值、缺口补全、异常值替换、winsorization、平滑或预测，也不因 provider flag 自动删除原记录。任何自动范围检查或异常检测必须来自已登记、可测试的 quality policy；未知规则只保留 provider 事实，不由 Agent 发明阈值。
+M5 的原始聚合不执行插值；独立的确定性时间补值步骤只处理已完整采集的历史空窗，并将输出标为推测。M5 不执行异常值替换、winsorization、平滑或未来预测，也不因 provider flag 自动删除原记录。任何自动范围检查或异常检测必须来自已登记、可测试的 quality policy；未知规则只保留 provider 事实，不由 Agent 发明阈值。
 
-quality assessment 与 `CollectionStatus` 分工不同：`available` collection 可以包含 valid 或 suspicious 记录；全部记录明确无效时保留 `invalid`；成功无记录仍是 `empty`；provider/协议失败仍是 `unavailable`。
+quality assessment 与 `CollectionStatus` 分工不同：`available` collection 可以包含 valid 或 suspicious 记录；其中的 `unit_unresolved` 原始项另保留 invalid 事实，不使同序列可转换读数失效。只有 `unit_unresolved` 且采集完整的窗口没有可用数值，但允许使用其他窗口的同序列原始锚点补值；其他明确无效的记录仍保留审计。成功无记录是 `empty`；provider/协议失败是 `unavailable`，不能用作补值的自然空窗。
 
 ### D09：M5 首版仅提供 run-local exact-request deduplication / single-flight
 
@@ -419,7 +423,7 @@ M5/backend 不实现跨 series 的“明显冲突”检测阈值，不自动产�
 
 `latest` 只有在结果原样采用其唯一对应的具体 direct record 时可以保持 observed；若 latest selection 还包含跨 series 选择、冲突裁决或其他推理则仍是 inferred。validator 只校验 observed 的一对一引用/转换闭包及 inferred 的完整引用，不尝试替 Agent 判定数值是否“冲突明显”。
 
-### D15：有站水体先验证真实观测，无站水体消费上游并按需取证；discharge 始终必需
+### D15：有站水体先验证真实观测，无站水体消费上游并按需取证；优先尝试 discharge
 
 M5/M6/M7 必须按当前 HydrologyNode 是否具有合格本地 station/series refs 区分 evidence acquisition 起点，不能为全部水体生成同一固定 mandatory tool list。
 
@@ -428,41 +432,41 @@ M5/M6/M7 必须按当前 HydrologyNode 是否具有合格本地 station/series r
 - 只查询当前节点关联的 station/series refs 和其 qualified coverage units；
 - 查询所有适用的用户目标 ParameterKey，并始终包含 required-support `usgs:00060` discharge 的本地可执行通道；
 - M4 metadata 只决定候选与 conditional-mandatory plan，M5 actual response 决定真实 evidence；
-- 本地 preflight 后仍须读取 M7 已收敛的直接上游 outcome；如果没有任何本地目标参数 direct evidence，且上游也没有与目标参数相关的 usable result，则即使本地只有 discharge 等 supporting evidence，也只生成逐 cell 的 empty/invalid/quality facts 并停止，不进入该水体的推理模型；
+- 本地 preflight 后仍须读取 M7 已收敛的直接上游 outcome；目标缺少实测时，相关其他指标读数、当地资料或模型常识可进入同一数值依赖流程的模型估计任务，不因目标原始读数为空而提前结束；
 - provider unavailable/timeout/invalid protocol 仍按 D05 作为技术失败处理，不得冒充“完全没有证据”后自然停止；
-- 只要至少一个目标参数存在 usable 本地 direct evidence，或 M7 注入至少一个与目标参数相关的 usable direct-upstream result，分支可以继续；本地 discharge 等 supporting evidence 可参与已登记关系，但不能单独充当目标参数起点。缺失参数/窗口保留 blocker，由后续允许的间接关系和逐 cell gate 处理，不要求整分支全有或全无。
+- 缺失参数/窗口的查询事实继续保留，由后续明确计算、模型估计和逐 cell gate 处理，不要求整分支全有或全无；相关其他指标可作为模型估计依据，但不能变成目标指标实测来源。
 
-对 stationless waterbody，不调用 `collect_water_observations` 制造注定为空的本地查询。其 mandatory evidence 起点来自同一 run 的直接上游 Agent results；至少一个直接上游具有 usable result 时，Agent 可根据任务和缺口按需调用天气、设施、inspection、aggregation 等 optional tools。全部直接上游均为 `indeterminate/insufficient_evidence` 或 invalid 时，M7 后端不启动 optional planning，而由 M6 确定性生成完整不足结果；contextual-only evidence 不能单独解锁水质判断。
+对 stationless waterbody，不调用 `collect_water_observations` 制造注定为空的本地查询。先读取同一 run 的直接上游结果，再按预算和允许工具补充依据。全部上游无可用值时仍可进入模型范围估计；原始 contextual-only 不能直接成为数值，估计须先保存为 `numeric_derived` 并通过引用与来源校验。
 
-discharge 是每个实际执行水体、每个最终时间窗口的 mandatory supporting parameter，不因为用户未显式请求或当前节点无监测站而省略：
+discharge 是每个实际执行水体、每个最终时间窗口优先尝试的 supporting parameter，不因为用户未显式请求或当前节点无监测站而省略尝试：
 
 - station-backed waterbody 必须先尝试取得本地 discharge direct records；
 - stationless 或本地 discharge 缺失时，必须读取直接上游传递的 discharge result/evidence；只有当前 plan 的 discharge 规则输入完整时才能形成方向性 allowed-indirect support；
 - 任一 discharge 聚合、传播、换算为估算流量或跨水体结果均标记 inferred，只有一对一采用当前水体具体 discharge direct record 才可 observed；
-- 每个目标 ParameterKey/window 的 gate 同时要求该目标与 discharge 各自具有 direct 或 allowed-indirect evidence；最终仍无法得到 discharge 的窗口必须是 `indeterminate/insufficient_evidence`，不得生成该窗口的 quantified/directional 目标水质判断。
+- 目标模型估计先等待流量任务结束；流量仍缺失或失败时，可继续给目标的低依据估计，并保留缺失或技术失败事实。明确计算仍要求方法声明的必需输入齐全，未知流量不得写成 0。
 
 天气 observation/forecast 不因 prediction mode 自动执行；是否调用由当前任务、上游结果、证据缺口和 `EvidenceRulePlan` 决定。若 parser 基线规则把天气输入标为 `required_collection_attempt`，确定性 acquisition 必须先尝试该有界调用；Agent 后加的可选规则可由 Agent 触发。无论哪种来源，所需前置证据未完成时 relation 都不成立。
 
 mandatory/conditional-mandatory/optional 仍由同一 registry、executor、transcript schema 和 error mapping 实现。确定性 tool policy 只负责 station-backed preflight 与直接上游结果注入；水体 Agent 负责 optional 调用。任何阶段都不得退化为 topology 完成后对整图预取。
 
-### D16：无实际观测导致的分支停止是可审计业务结果，不是技术失败或假推理
+### D16：没有可用预测时保留信息不足与技术失败各自的原因
 
-station-backed waterbody 在准备执行时创建真实 waterbody session，随后执行 D15 的 conditional-mandatory observation tools 并读取 M7 direct-upstream outcomes。若成功查询后全部适用窗口均无 usable local target direct evidence，且全部直接上游也无与目标参数相关的 usable result，session 不调用水体模型；本地仅有 discharge 等 supporting evidence 不改变该结论，但真实过程不得删除、跳过或伪造。
+station-backed waterbody 在准备执行时创建真实 waterbody session，随后执行 D15 的 observation tools 并读取 M7 direct-upstream outcomes。无目标实测时仍执行适用的数值任务；只有任务结束后仍没有可用明确计算或有参考意义的模型范围，才固定为信息不足。
 
 该路径必须完成：
 
 - 持久化实际 tool calls/results、source-record/fragment refs、empty/invalid/quality facts 和 reference-complete EvidenceBundle；
-- 由 M6 确定性生成覆盖全部目标 ParameterKey × TimeWindow 的 `indeterminate/insufficient_evidence` 结果，waterbody model call count 保持 0；
-- 使用当前 session/result 模型进入正常 completed 终态，并明确记录 inference model 未执行；
+- 由 M6 生成覆盖全部目标 ParameterKey × TimeWindow 的结果，保留实际已执行的模型估计与最终推理调用计数；
+- 使用当前 session/result 模型收敛，缺数和模型无法提出有用范围时可得到 completed 的不足结果，技术失败单独记录；
 - 不新增 `branch_stopped` run/session lifecycle 状态，不创建 fake model message、fake confidence 或 placeholder quantified value。
 
 M7 必须将每个直接上游节点的终态视为 DAG 依赖已收敛，包括正常有结果、正常全 indeterminate、failed 和 cancelled；汇流节点等待全部直接依赖收敛后再决定执行，不能因一条分支无 evidence 就忽略其存在或提前启动。
 
 `get_upstream_results` 对正常无 evidence 分支保留结构化 `insufficient` dependency fact，但不将其 result/bundle refs 作为下游 evidence 返回，也不满足任何 `upstream_to_downstream` 动态规则。若其他 usable 分支使下游继续，Agent/context 只知道该分支无 usable evidence；只允许其余 direct/allowed-indirect evidence 进入 gate，并在适用结果中保留 branch coverage 不完整事实。
 
-汇流处只要其他上游分支或本地/允许侧面 evidence 仍能支持部分 cell，就可以继续；缺失分支不使其他 cell 自动失败。单链或全部分支均无 usable evidence 时，下游无站节点不启动 optional planning，直接以 0 model calls 确定性收敛为完整 `indeterminate/insufficient_evidence`；后续有站节点仍须执行自己的本地 preflight。
+汇流处缺失分支不使其他 cell 自动失败。单链或全部分支均无 usable evidence 时，下游仍可按同一估计规则形成低依据范围；后续有站节点仍须执行自己的本地 preflight。模型若也无法给出有参考意义的范围，则保留信息不足结果。
 
-上游 result handoff 必须为 required-support discharge 保留每个窗口的 observed/inferred/indeterminate 状态及 evidence refs，即使 discharge 不是用户目标。下游不得因字段缺省猜测 discharge，也不得把 upstream indeterminate 当作流量为零或正常基线。
+上游结果和内部数值任务中的 discharge 来源、范围或不足状态保持真实。最终用户结果仍只包含用户请求指标；下游缺少 discharge 时可先尝试自己的流量任务，不得因上游字段缺省而假定流量为零或正常基线。
 
 provider timeout、rate limit、认证失败、协议损坏等仍是 D05 的 `failed + unavailable` 技术路径，不进入上述正常无 evidence 分支。M7 将 failed upstream 对继续执行的下游表示为 `invalid` 且不传 evidence；只要 target 仍能正常产出，非 target failure 形成 partial coverage 而不强制整个 run failed。cancelled outcome 不启动下游，且不得降级成 completed empty。
 
@@ -522,9 +526,23 @@ adapter/tool 必须为每个 provider batch 保存请求 UTC 范围、分页/分
 
 provider retry 由 tool executor 执行有界 attempt/backoff/deadline policy；Agent 不能提高上限或制造无限 retry loop。一次 retry 若补齐所有缺页，可由新的成功 operation/result 证明相应窗口完整；既有失败 call/result 保持不可变，bundle 引用后续成功事实并保留此前失败审计链。failed result 不进入 D09 的后续成功缓存。
 
-同一水体只要仍有至少一个满足 target + discharge gate 的窗口即可按 D15 继续，技术性不完整影响的窗口确定性输出 indeterminate。所有窗口均受 blocker 时不调用最终水体推理；不得为了生成说明文字额外消耗模型调用。
+同一水体只要仍有可用目标证据或通过校验的模型估计，即可按 D15 继续。技术性不完整影响的原始查询事实不被改成 empty；若该窗口有有效模型估计，可在保留失败原因的同时输出预测。任务结束后没有可用结果的窗口仍保留不足或技术原因，不为重复说明追加模型调用。
 
 用户取消继续遵守 D05：取消胜出后停止新分页、retry、aggregation 和 downstream work，并使用 `cancelled` 而不是上述 `failed`；晚到响应不能补入 bundle 或触发模型。
+
+### D20：按数值依赖生成证据，内部指标不变成用户目标
+
+每个水体、时间窗和指标可以形成一个数值任务。M5 在封存 evidence bundle 前，依据已登记的确定性方法从用户目标及必需支持指标倒推输入，固定 `NumericDependencyPlan` 的任务、方法版本和摘要；多个输出共用的中间任务只执行一次。方法输入与方向性 `EvidenceRulePlan` 分开：后者只说明证据关系，不提供数值公式。解析器仍只产生用户目标和方向性规则；`supporting_params` 仍精确等于注册表要求的支持指标。方法额外需要的指标由计划列入 `intermediate_parameters`，仅用于当前水体会话的授权采集与计算。M4 可发现这些指标的候选站点和序列，但只用原有目标、支持指标及规则输入判断拓扑覆盖；仅供方法使用的站点不会伪装成直接目标观测。
+
+就绪任务必须通过指标、单位、水体、时间窗、方法和输入引用检查，计算结果及输入引用写入 transcript 后，再由 reader 按数据库引用读回并确认，才能解锁下游。自然缺数、技术失败和取消分别收敛；未用的替代方法不增加必需输入。证据包为每个内部指标与窗口建立 `method_input` cell，保存其片段引用与状态；目标和必需支持 cell 的含义不变。没有证据的内部 cell 不得伪装成可用数字，也不进入用户结果序列。
+
+生产流程优先采用适用且输入齐全的明确计算：原始窗口聚合沿用 capability 的 `mean` 或 `latest`；双侧原始聚合锚点按窗口中点线性插值，单侧使用最近原始聚合锚点，补值不成为新的实测。缺少适用明确计算方法时，同一依赖计划安排 `model_estimate` 任务；其结果同样写入数据库并读回后才供下游引用。模型估计不得声称存在“仅由流量计算 pH”的已验证公式。
+
+`NumericDerivedPayload.method_kind` 区分 `explicit_calculation` 和 `model_estimate`。模型估计保存可能范围、依据、模型名称、调用标识和提示摘要；有可追溯的同指标原始实测时可给单点加范围，无该指标实测时只给范围。依据可包括其他指标读数、具体侧面资料或一般规律；仅一般规律时标明 `general_knowledge`。只能提供几乎无参考意义的全范围时不作为预测结果。
+
+`MeasuredAnchor` 保存原始参数、水体、测站、原始记录引用、证据时间窗、传递路径与累计河道距离。服务端从保存的证据和计算输入追溯实测来源；上游结果只传递已有来源，模型估值本身不生成实测。跨越更多水体不重新计为实测，也不逐跳机械扣减模型可信度。流量模型任务作为目标估计的选填前置项，失败事实与目标结果可同时保留；低可信度没有自动取消预测的阈值。
+
+河道距离以原始记录中的测站坐标为起点，沿本次保存的完整河段几何和已参与的连通边计算；目标水体以用户查询坐标为终点，其余水体以该水体已保存的代表点为终点。原始记录已有 COMID 时必须与来源水体一致；没有 COMID 时须由保存的拓扑测站关联证明归属。同一测站存在多条有效路径时，各路径分别保留距离。数值标为 `mapped_channel_estimate`，只表示沿已保存河道线的近似长度，不当作测量精度或水流旅行距离。测站坐标不一致、离河道过远、几何缺失或连接不可靠时，距离保持未知，不用整段拓扑累计长度代替。旧运行可按需从已保存的原始记录、拓扑和查询坐标只读计算展示值，不改写原结果或正文。
 
 ## 3. 已冻结的阶段责任
 

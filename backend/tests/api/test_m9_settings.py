@@ -23,10 +23,11 @@ SECRET = "private-deployment-key-do-not-echo"
 
 @asynccontextmanager
 async def _client(*, settings_store=None, client_address=("127.0.0.1", 12345),
-                  model_catalog=None, clock=None):
+                  model_catalog=None, clock=None, memory_enabled=True):
     app = create_test_app(
         AppSettings(_env_file=None, analysis_timezone="UTC",
-                    openai_api_key=SecretStr(SECRET)),
+                    openai_api_key=SecretStr(SECRET),
+                    memory_enabled=memory_enabled),
         transcript_store=InMemoryTranscriptStore(),
         settings_store=settings_store,
         model_catalog=model_catalog or ModelCatalog(MODEL_CAPABILITIES),
@@ -89,6 +90,34 @@ def test_settings_get_put_conflict_and_safe_catalog(caplog) -> None:
             assert SECRET not in stale.text
             assert (await client.get("/api/settings")).json()["revision"] == 1
             assert SECRET not in caplog.text
+
+    asyncio.run(exercise())
+
+
+def test_disabled_memory_is_unavailable_to_settings_and_new_runs() -> None:
+    async def exercise():
+        async with _client(memory_enabled=False) as (app, client):
+            snapshot = (await client.get("/api/settings")).json()
+            assert snapshot["defaults"]["memory_mode"] == "stateless"
+            assert snapshot["catalog"]["memory_modes"] == ["stateless"]
+            assert all(
+                not option["available"]
+                for option in snapshot["catalog"]["embedding_profiles"]
+            )
+
+            augmented = {**snapshot["defaults"], "memory_mode": "memory_augmented"}
+            saved = await client.put(
+                "/api/settings",
+                json={"expected_revision": 0, "defaults": augmented},
+            )
+            assert saved.status_code == 422
+            created = await client.post(
+                "/api/analysis/runs",
+                json=create_request(memory_mode="memory_augmented"),
+            )
+            assert created.status_code == 422
+            assert created.json()["error"]["code"] == "settings_invalid_defaults"
+            assert app.state.run_coordinator._runs == {}
 
     asyncio.run(exercise())
 

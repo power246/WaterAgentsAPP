@@ -10,7 +10,10 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from app.application.transcripts.redaction import (
-    REDACTED, redact, redact_text, registered_private_values,
+    REDACTED,
+    redact,
+    redact_text,
+    registered_private_values,
 )
 
 _FIELDS = (
@@ -21,7 +24,19 @@ _FIELDS = (
     "job_failed", "job_lag_seconds", "embedding_stage", "error_code",
     "strategy", "candidate_count", "result_count", "active_profile_digest",
     "provider", "provider_operation", "provider_status", "provider_error",
-    "provider_attempts", "run_id", "session_id", "failure_code", "model_calls",
+    "provider_attempts", "provider_retry_after_seconds",
+    "provider_rate_limit_limit", "provider_rate_limit_remaining",
+    "provider_rate_limit_reset", "run_id", "session_id",
+    "target_comid", "comid", "station_id", "series_id", "sample_identity",
+    "parameter_code", "record_index", "validation_step",
+    "failure_code", "model_calls",
+    "stream_event_type", "stream_item_type", "stream_response_status",
+    "stream_payload_keys", "stream_failure_rule", "stream_error_type",
+    "stream_error_code",
+    "schema_name", "schema_path", "schema_rule",
+    "phase", "batch_id", "initial_operation_id", "repair_operation_id",
+    "initial_issue_count", "repair_issue_count", "initial_issues", "repair_issues",
+    "initial_output_chars", "repair_output_chars",
     "tool_name", "plan_index", "plan_count", "page_number", "response_bytes",
 )
 _FORMAT_FAILURE = (

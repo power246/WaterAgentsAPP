@@ -1,12 +1,13 @@
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-
 from app.application.analysis_runs.models import SessionResultReference
 from app.application.analysis_runs.node_launch import (
     NodeLaunchAction,
     NodeLaunchFacts,
     NodeLaunchPolicy,
+    build_node_launch_facts,
 )
 from app.application.analysis_runs.topology_result_models import (
     DependencyStatus,
@@ -16,7 +17,13 @@ from app.application.analysis_runs.topology_result_models import (
 )
 from app.application.canonical_json import canonical_json_digest
 from app.application.transcripts.models import TranscriptContentRef
-
+from app.domain import (
+    EvidenceCellRole,
+    EvidenceFragmentReference,
+    ItemReference,
+    NumericDerivedPayload,
+    ParameterKey,
+)
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
 SESSION_ID = UUID("20000000-0000-0000-0000-000000000001")
@@ -187,6 +194,72 @@ def test_stationless_all_unusable_is_deterministic_insufficient() -> None:
     assert decision.reason_codes == ("upstream_dependencies_insufficient",)
 
 
+def test_saved_numeric_target_can_launch_without_station_or_upstream() -> None:
+    target = ParameterKey(code_system="usgs", code="00011")
+    numeric = NumericDerivedPayload(
+        value="8.2",
+        unit="standard units",
+        method_id="registered_numeric_method",
+        method_version=1,
+        task_id="numeric-task",
+        plan_digest="plan-digest",
+        plan_item_ref=ItemReference(item_id="plan-item"),
+        method_registry_digest="registry-digest",
+        input_evidence_refs=(
+            EvidenceFragmentReference(item_id="input-item", evidence_id="input"),
+        ),
+        input_window_ids=("window-000",),
+        confidence_cap=0.5,
+    )
+    cell = SimpleNamespace(
+        role=EvidenceCellRole.TARGET,
+        parameter=target,
+        direct_fragment_refs=(),
+        allowed_indirect_fragment_refs=("numeric",),
+    )
+    task = SimpleNamespace(
+        task=SimpleNamespace(
+            run_id=RUN_ID,
+            session_id=SESSION_ID,
+            target_comid="300",
+            topology_ref=ItemReference(item_id=str(TOPOLOGY_ITEM_ID)),
+            evidence_scope=SimpleNamespace(station_refs=(), direct_upstream_comids=()),
+            cancellation_token=SimpleNamespace(is_requested=lambda: False),
+        )
+    )
+
+    def handoff(payload):
+        return SimpleNamespace(
+            run_id=str(RUN_ID),
+            session_id=str(SESSION_ID),
+            has_valid_bundle_binding=lambda: True,
+            cells=(cell,),
+            validated_inputs=SimpleNamespace(
+                fragments=(
+                    (
+                        None,
+                        SimpleNamespace(
+                            evidence_id="numeric",
+                            payload=payload,
+                        ),
+                    ),
+                )
+            ),
+            usable_upstream_comids=(),
+            block_facts=(),
+            stop_before_model=False,
+            numeric_estimation_allowed=False,
+        )
+
+    numeric_facts = build_node_launch_facts(task, handoff(numeric))
+    assert numeric_facts.local_target_usable
+    assert NodeLaunchPolicy().decide(numeric_facts, manifest()).action is (
+        NodeLaunchAction.RUN_AGENT
+    )
+    directional_facts = build_node_launch_facts(task, handoff(object()))
+    assert not directional_facts.local_target_usable
+
+
 def test_cancel_and_technical_preflight_win_without_starting_agent() -> None:
     current = manifest(dependency("200", DependencyStatus.INVALID))
 
@@ -243,3 +316,17 @@ def test_manifest_scope_and_acquisition_gate_mismatches_are_invalid() -> None:
     assert wrong_gate.action is NodeLaunchAction.INVALID
     assert missing_collection.action is NodeLaunchAction.INVALID
     assert missing_collection.reason_codes == ("upstream_collection_mismatch",)
+
+
+@pytest.mark.parametrize("station_backed", [False, True])
+def test_numeric_estimation_can_launch_without_measurements(station_backed):
+    current = facts(station_backed=station_backed).model_copy(update={
+        "numeric_estimation_allowed": True,
+    })
+    decision = NodeLaunchPolicy().decide(current, manifest())
+    assert decision.action is NodeLaunchAction.RUN_AGENT
+    assert decision.reason_codes == ("numeric_estimation_available",)
+    failed_provider = current.model_copy(update={"preflight_blocked": True})
+    assert NodeLaunchPolicy().decide(failed_provider, manifest()).action is NodeLaunchAction.RUN_AGENT
+    blocked = current.model_copy(update={"preflight_blocked": True, "numeric_estimation_allowed": False})
+    assert NodeLaunchPolicy().decide(blocked, manifest()).action is NodeLaunchAction.INVALID

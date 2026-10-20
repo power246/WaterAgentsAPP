@@ -5,7 +5,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from app.domain import (
     AggregatePayload,
-    EvidenceAggregationMethod,
+    AssessmentAvailability,
     CollectionCompletionProof,
     CollectionCounts,
     CollectionFactPayload,
@@ -19,6 +19,7 @@ from app.domain import (
     DataQualityFlag,
     DirectRecordPayload,
     DischargeObservationRecord,
+    EvidenceAggregationMethod,
     EvidenceApplicability,
     EvidenceBundle,
     EvidenceCell,
@@ -31,8 +32,8 @@ from app.domain import (
     EvidenceFragmentReference,
     EvidenceLocation,
     EvidenceQualityClass,
-    EvidenceResultEligibility,
     EvidenceReference,
+    EvidenceResultEligibility,
     EvidenceToolCounts,
     EvidenceToolExecutionStatus,
     EvidenceToolOptions,
@@ -40,7 +41,6 @@ from app.domain import (
     EvidenceToolResult,
     FacilityRecord,
     GeoPoint,
-    AssessmentAvailability,
     HistoricalCaseRef,
     HistoricalInferencePayload,
     HistoricalMatchReason,
@@ -51,23 +51,24 @@ from app.domain import (
     HistoricalTranscriptRecord,
     InferenceMode,
     ItemReference,
+    OutcomeStatus,
     ParameterKey,
     Provenance,
     ProviderQuality,
     QualitySummary,
+    RAGScoreComponentsV1,
     ReferenceScope,
     RelationSupportPayload,
     ResultSource,
     RiskLevel,
-    RAGScoreComponentsV1,
     SafeEvidenceError,
     SourceRecord,
     SourceRecordReference,
+    TemporalEstimatePayload,
     TimeRange,
     TimeResolution,
     TimeResolutionSource,
     TrendDirection,
-    OutcomeStatus,
     UpstreamResultPayload,
     UpstreamResultRecord,
     WaterObservationRecord,
@@ -664,6 +665,49 @@ def test_relation_support_payload_is_typed_and_reference_closed() -> None:
     assert relation.referenced_item_ids() == ("item-direct-fragment",)
 
 
+def test_temporal_estimate_is_typed_and_closes_anchor_references() -> None:
+    anchor = EvidenceFragmentReference(item_id="anchor-item", evidence_id="anchor-ev")
+    estimate = EvidenceFragment(
+        evidence_id="estimate-ev",
+        source="m5_temporal_gap_fill",
+        collection_status=CollectionStatus.AVAILABLE,
+        target_comid="12345678",
+        location=station_location(),
+        time_range=WINDOW,
+        parameter_refs=(TARGET,),
+        data_type="temporal_estimate",
+        applicability=EvidenceApplicability.ALLOWED_INDIRECT,
+        relation_id="temporal_gap_fill_v1",
+        series_identity="sha256:series",
+        quality_class=EvidenceQualityClass.SUSPICIOUS,
+        quality_flags=(DataQualityFlag.TEMPORAL_ESTIMATE,),
+        coverage=EvidenceCoverage(
+            status=CoverageStatus.INSUFFICIENT,
+            observed_count=0,
+            covered_duration_seconds=0,
+            window_duration_seconds=21600,
+        ),
+        payload=TemporalEstimatePayload(
+            value="8.2",
+            unit="mg/L",
+            method="nearest_hold",
+            input_evidence_refs=(anchor,),
+            anchor_window_ids=("w-anchor",),
+            anchor_distance_seconds=(21600,),
+        ),
+        derivation=derivation(),
+        provenance=Provenance(operation_id="gap-fill"),
+        result_eligibility=EvidenceResultEligibility.INFERRED_ONLY,
+    )
+
+    assert EvidenceFragment.model_validate_json(estimate.model_dump_json()) == estimate
+    assert estimate.referenced_item_ids() == ("anchor-item",)
+    values = estimate.model_dump(mode="python")
+    values["quality_flags"] = ()
+    with pytest.raises(ValidationError):
+        EvidenceFragment.model_validate(values)
+
+
 @pytest.mark.parametrize(
     ("fragment_index", "updates"),
     [
@@ -781,6 +825,41 @@ def test_reference_only_bundle_has_exact_cell_and_reference_closure() -> None:
         "item-source",
         "item-tool-result",
     )
+
+
+def test_bundle_requires_one_method_input_cell_per_intermediate_window() -> None:
+    base = valid_bundle()
+    intermediate = ParameterKey(code_system="usgs", code="00010")
+    internal_cells = tuple(
+        EvidenceCell(
+            parameter=intermediate,
+            window_id=window_id,
+            role=EvidenceCellRole.METHOD_INPUT,
+            direct_fragment_refs=("ev-intermediate",),
+            status=EvidenceCellStatus.SUPPORTED,
+        )
+        for window_id in base.window_refs
+    )
+    values = base.model_dump(mode="python") | {
+        "intermediate_parameters": (intermediate,),
+        "cells": (*base.cells, *internal_cells),
+        "fragment_refs": (
+            *base.fragment_refs,
+            EvidenceFragmentReference(
+                item_id="item-intermediate-fragment",
+                evidence_id="ev-intermediate",
+            ),
+        ),
+    }
+    bundle = EvidenceBundle.model_validate(values)
+    assert EvidenceBundle.model_validate_json(bundle.model_dump_json()) == bundle
+
+    with pytest.raises(ValidationError, match="cells must contain exactly"):
+        EvidenceBundle.model_validate(values | {"cells": (*base.cells, internal_cells[0])})
+    with pytest.raises(ValidationError, match="must be disjoint"):
+        EvidenceBundle.model_validate(values | {
+            "intermediate_parameters": (base.requested_parameters[0],),
+        })
 
 
 def test_discharge_target_bundle_allows_an_empty_support_group() -> None:

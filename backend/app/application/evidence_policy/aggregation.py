@@ -1,5 +1,5 @@
 from datetime import datetime
-from decimal import Decimal, ROUND_CEILING, ROUND_HALF_EVEN, localcontext
+from decimal import ROUND_CEILING, ROUND_HALF_EVEN, Decimal, localcontext
 
 from app.application.evidence_policy.coverage import calculate_coverage
 from app.application.evidence_policy.errors import EvidencePolicyError
@@ -207,12 +207,43 @@ def aggregate_observations(
             "aggregation requires completed collection evidence",
         )
 
+    converted = {}
+    effective_observations = []
+    unit_unresolved = False
+    for observation in observations:
+        if observation.quality.quality_class is EvidenceQualityClass.INVALID:
+            effective_observations.append(observation)
+            continue
+        try:
+            converted[observation.record_ref] = convert_value(
+                registry,
+                capability,
+                observation.value,
+                observation.unit,
+            )
+        except EvidencePolicyError as error:
+            if error.code != "evidence_unit_unresolved":
+                raise
+            unit_unresolved = True
+            effective_observations.append(observation.model_copy(update={
+                "quality": observation.quality.model_copy(update={
+                    "quality_class": EvidenceQualityClass.INVALID,
+                    "flags": tuple(sorted({
+                        *observation.quality.flags,
+                        DataQualityFlag.UNIT_UNRESOLVED,
+                    }, key=lambda flag: flag.value)),
+                }),
+            }))
+        else:
+            effective_observations.append(observation)
+    effective = tuple(effective_observations)
+
     coverage = calculate_coverage(
         registry,
         capability,
         reference.provider,
         reference.channel,
-        observations,
+        effective,
         window,
         collection_complete=collection_complete,
         expected_cadence_seconds=expected_cadence_seconds,
@@ -230,19 +261,19 @@ def aggregate_observations(
 
     valid_count = sum(
         observation.quality.quality_class is EvidenceQualityClass.VALID
-        for observation in observations
+        for observation in effective
     )
     suspicious_count = sum(
         observation.quality.quality_class is EvidenceQualityClass.SUSPICIOUS
-        for observation in observations
+        for observation in effective
     )
     invalid_count = sum(
         observation.quality.quality_class is EvidenceQualityClass.INVALID
-        for observation in observations
+        for observation in effective
     )
     usable = tuple(
         observation
-        for observation in observations
+        for observation in effective
         if observation.quality.quality_class is not EvidenceQualityClass.INVALID
     )
     if not usable:
@@ -252,15 +283,6 @@ def aggregate_observations(
     ):
         _reject_overlapping_intervals(usable, window)
 
-    converted = {
-        observation.record_ref: convert_value(
-            registry,
-            capability,
-            observation.value,
-            observation.unit,
-        )
-        for observation in usable
-    }
     ordered = tuple(
         sorted(
             [
@@ -289,6 +311,8 @@ def aggregate_observations(
         for observation in usable
         for flag in observation.quality.flags
     }
+    if unit_unresolved:
+        flags.add(DataQualityFlag.UNIT_UNRESOLVED)
     if coverage.status is CoverageStatus.PARTIAL:
         flags.add(DataQualityFlag.PARTIAL_COVERAGE)
     if counter_reset:

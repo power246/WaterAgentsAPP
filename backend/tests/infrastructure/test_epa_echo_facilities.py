@@ -6,7 +6,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from app.domain import FacilityEvidenceRequest, GeoPoint, WaterbodyGeometry
 from app.infrastructure.adapters import EpaEchoFacilityAdapter
 from app.infrastructure.http import ProviderHttpClient
@@ -123,6 +122,136 @@ def test_multicenter_pagination_dedup_exact_filter_and_missing_coordinates() -> 
     assert requests[1].url.params["qid"] == "qid-101"
     assert requests[1].url.params["pageno"] == "2"
     assert all(request.url.host == "echodata.epa.gov" for request in requests)
+
+
+def test_summary_only_query_fetches_qid_first_page_and_preserves_missing_status() -> None:
+    requests: list[httpx.Request] = []
+    query_number = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal query_number
+        requests.append(request)
+        if request.url.path.endswith("get_facilities"):
+            query_number += 1
+            payload = fixture(
+                "epa_facilities_page_1.json"
+                if query_number == 1
+                else "epa_facilities_duplicate.json"
+            )
+            payload["Results"].pop("PageNo")
+            payload["Results"].pop("Facilities")
+        elif request.url.params["qid"] == "qid-101":
+            payload = fixture(
+                "epa_facilities_page_1.json"
+                if request.url.params["pageno"] == "1"
+                else "epa_facilities_page_2.json"
+            )
+            if request.url.params["pageno"] == "1":
+                payload["Results"]["Facilities"][1].pop("CWPPermitStatusDesc")
+            payload["Results"]["Message"] = "Working"
+        else:
+            payload = fixture("epa_facilities_duplicate.json")
+            payload["Results"]["Message"] = "Working"
+        return httpx.Response(200, json=payload, request=request)
+
+    current_geometry = geometry()
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await EpaEchoFacilityAdapter(
+                http,
+                geometry_resolver=lambda value: current_geometry,
+                response_set=2,
+                clock=lambda: NOW,
+            ).collect(facility_request())
+        assert batch.completion_proof.complete is True
+        assert batch.counts.requests == 5
+        assert batch.counts.pages == 5
+        assert [record.facility_id for record in batch.records] == [
+            "MD0000001",
+            "MD0000002",
+        ]
+        missing = batch.records[1]
+        assert missing.status == "not_reported"
+        assert missing.provider_quality.qualifiers == (
+            "missing_permit_status",
+            "missing_coordinates",
+        )
+        assert batch.page_or_chunk_manifests[0].record_count == 0
+        assert batch.page_or_chunk_manifests[0].next_page_identity == (
+            batch.page_or_chunk_manifests[1].page_identity
+        )
+
+    run(exercise())
+    assert [request.url.path.rsplit(".", 1)[-1] for request in requests] == [
+        "get_facilities",
+        "get_qid",
+        "get_qid",
+        "get_facilities",
+        "get_qid",
+    ]
+    assert requests[1].url.params["pageno"] == "1"
+    assert requests[1].url.params["qcolumns"] == "1,2,9,11,26,27,33,53"
+
+
+def test_summary_only_query_reserves_budget_before_fetching_qid() -> None:
+    requests: list[httpx.Request] = []
+    summary = fixture("epa_facilities_duplicate.json")
+    summary["Results"].pop("PageNo")
+    summary["Results"].pop("Facilities")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=summary, request=request)
+
+    current_geometry = geometry()
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            adapter = EpaEchoFacilityAdapter(
+                http,
+                geometry_resolver=lambda value: current_geometry,
+                max_pages=1,
+                clock=lambda: NOW,
+            )
+            with pytest.raises(PortResponseLimitError):
+                await adapter.collect(facility_request())
+
+    run(exercise())
+    assert len(requests) == 1
+    assert requests[0].url.path.endswith("get_facilities")
+
+
+def test_summary_only_query_rejects_mismatched_qid_row_count() -> None:
+    requests: list[httpx.Request] = []
+    summary = fixture("epa_facilities_duplicate.json")
+    summary["Results"].pop("PageNo")
+    summary["Results"].pop("Facilities")
+    page = fixture("epa_facilities_duplicate.json")
+    page["Results"]["QueryRows"] = "2"
+    page["Results"]["Message"] = "Working"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        payload = page if request.url.path.endswith("get_qid") else summary
+        return httpx.Response(200, json=payload, request=request)
+
+    current_geometry = geometry()
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await EpaEchoFacilityAdapter(
+                http,
+                geometry_resolver=lambda value: current_geometry,
+                clock=lambda: NOW,
+            ).collect(facility_request())
+        assert batch.completion_proof.complete is False
+        assert batch.incomplete_reason == "evidence_provider_response_invalid"
+        assert batch.counts.records == 0
+        assert batch.page_or_chunk_manifests[-1].page_complete is False
+
+    run(exercise())
+    assert len(requests) == 2
 
 
 def test_provider_failure_after_confirmed_pages_returns_typed_partial_batch(

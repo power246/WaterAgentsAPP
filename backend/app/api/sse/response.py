@@ -13,12 +13,7 @@ from app.application.analysis_runs.coordinator import (
     RunNotFoundError,
 )
 from app.application.analysis_runs.models import SessionSummary
-from app.application.transcripts.read_models import ReadView
-from app.application.transcripts.reader import (
-    TranscriptReader,
-    TranscriptRunNotFoundError,
-    TranscriptSessionNotFoundError,
-)
+from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.stream_models import (
     MessageDeltaPayload,
     MessageDeltaProcessRecord,
@@ -173,10 +168,8 @@ def _session_payload(
 
 
 async def _classify_released_run(reader: TranscriptReader, run_id: UUID) -> None:
-    try:
-        await reader.get_run(run_id, ReadView.HISTORY)
-    except TranscriptRunNotFoundError as error:
-        raise RunNotFoundError(run_id) from error
+    if not await reader.persisted_run_exists(run_id):
+        raise RunNotFoundError(run_id)
     raise LiveStreamReleasedError(
         run_id,
         f"/api/analysis/runs/{run_id}?view=history",
@@ -188,12 +181,10 @@ async def _classify_released_session(
     run_id: UUID,
     session_id: UUID,
 ) -> None:
-    try:
-        await reader.get_session(run_id, session_id, ReadView.HISTORY)
-    except TranscriptRunNotFoundError as error:
-        raise RunNotFoundError(run_id) from error
-    except TranscriptSessionNotFoundError as error:
-        raise AgentSessionNotFoundError(run_id, session_id) from error
+    if not await reader.persisted_run_exists(run_id):
+        raise RunNotFoundError(run_id)
+    if not await reader.persisted_session_exists(run_id, session_id):
+        raise AgentSessionNotFoundError(run_id, session_id)
     raise LiveStreamReleasedError(
         run_id,
         (

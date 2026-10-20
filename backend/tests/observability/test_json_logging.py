@@ -9,7 +9,11 @@ import pytest
 
 from app.application.analysis_runs.models import CorrelationContext
 from app.infrastructure.observability import json_logging
-from app.infrastructure.observability.json_logging import JsonFormatter, JsonLogHandler, configure_logging
+from app.infrastructure.observability.json_logging import (
+    JsonFormatter,
+    JsonLogHandler,
+    configure_logging,
+)
 from app.infrastructure.observability.redaction import REDACTED, redact, redact_text
 
 
@@ -109,6 +113,75 @@ def test_provider_and_summary_failures_keep_safe_diagnostic_fields():
     assert summary_json["session_id"] == str(UUID(int=2))
     assert summary_json["failure_code"] == "waterbody_model_timeout"
     assert summary_json["model_calls"] == 2
+
+
+def test_provider_retry_after_seconds_is_written_without_raw_header():
+    record = logging.makeLogRecord({
+        "msg": "provider_request_failed", "provider": "usgs_nldi",
+        "provider_status": 429, "provider_retry_after_seconds": 153.0,
+        "headers": {"Retry-After": "hidden-raw-header"},
+    })
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["provider_retry_after_seconds"] == 153.0
+    assert "headers" not in payload
+    assert "hidden-raw-header" not in json.dumps(payload)
+
+
+def test_provider_validation_context_is_written_without_response_content():
+    record = logging.makeLogRecord({
+        "msg": "provider_observation_invalid", "provider": "usgs",
+        "comid": "1777616", "station_id": "USGS-123", "series_id": "series-123",
+        "sample_identity": "sample-123", "parameter_code": "00011",
+        "page_number": 2, "record_index": 17, "validation_step": "value",
+        "response_body": "hidden-response",
+    })
+    payload = json.loads(JsonFormatter().format(record))
+    for field in (
+        "comid", "station_id", "series_id", "sample_identity",
+        "parameter_code", "page_number", "record_index", "validation_step",
+    ):
+        assert payload[field] == getattr(record, field)
+    assert "response_body" not in payload
+    assert "hidden-response" not in json.dumps(payload)
+
+
+def test_reasoning_repair_failure_keeps_issue_summary_without_model_content():
+    record = logging.makeLogRecord({
+        "msg": "reasoning_validation_repair_failed",
+        "run_id": str(UUID(int=1)), "session_id": str(UUID(int=2)),
+        "target_comid": "1777622", "phase": "reasoning_batch",
+        "batch_id": "batch-1", "initial_operation_id": str(UUID(int=3)),
+        "repair_operation_id": str(UUID(int=4)),
+        "initial_issue_count": 2, "repair_issue_count": 1,
+        "initial_issues": [{"code": "invalid_value", "path": "$.cells[0]"}],
+        "repair_issues": [{"code": "missing_field", "path": "$.cells[0].source"}],
+        "initial_output_chars": 120, "repair_output_chars": 80,
+        "response_body": "hidden-model-output",
+    })
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["phase"] == "reasoning_batch"
+    assert payload["initial_issue_count"] == 2
+    assert payload["repair_issues"] == [
+        {"code": "missing_field", "path": "$.cells[0].source"}
+    ]
+    assert payload["repair_output_chars"] == 80
+    assert "hidden-model-output" not in json.dumps(payload)
+
+
+def test_stream_protocol_diagnostics_are_serialized_without_response_content():
+    record = logging.makeLogRecord({
+        "msg": "provider_stream_protocol_invalid",
+        "provider": "openai",
+        "stream_event_type": "response.completed",
+        "stream_payload_keys": ["response", "type"],
+        "stream_failure_rule": "_terminal_events:1000",
+        "response_content": "hidden-response",
+    })
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["stream_event_type"] == "response.completed"
+    assert payload["stream_payload_keys"] == ["response", "type"]
+    assert payload["stream_failure_rule"] == "_terminal_events:1000"
+    assert "hidden-response" not in json.dumps(payload)
 
 
 @pytest.mark.parametrize("chain", ["cause", "context", "group"])

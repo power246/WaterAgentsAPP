@@ -38,6 +38,45 @@ class FixedClock:
         return datetime.now(UTC)
 
 
+def test_disabled_memory_does_not_start_index_reconciliation() -> None:
+    class Repository:
+        async def list_generations(self):
+            return ()
+
+    class Runner:
+        async def run(self, callback):
+            raise AssertionError("disabled memory started reconciliation")
+
+    async def exercise() -> None:
+        profile = MODEL_CATALOG.snapshot().embedding_profile
+        runtime = M8Runtime(
+            producer=FakeM8Runtime().producer,
+            worker=object(),  # type: ignore[arg-type]
+            backfill=object(),  # type: ignore[arg-type]
+            discovery=object(),  # type: ignore[arg-type]
+            repository=Repository(),  # type: ignore[arg-type]
+            operations=object(),  # type: ignore[arg-type]
+            signal=RAGReconciliationSignal(),
+            runner=Runner(),  # type: ignore[arg-type]
+            metrics=RAGRuntimeMetrics(),
+            startup_state=GenerationStartupState(
+                readiness=GenerationStartupReadiness.INDEX_BUILDING,
+                active_generation=None,
+                building_generation=None,
+            ),
+            desired_profile=profile,
+            clock=FixedClock(),
+            shutdown_grace_seconds=1,
+            memory_enabled=False,
+        )
+        await runtime.start()
+        assert runtime._task is None
+        with pytest.raises(RuntimeError, match="historical memory is disabled"):
+            await runtime.apply_profile_handoff(profile)
+
+    asyncio.run(exercise())
+
+
 def test_m8_builder_rejects_a_missing_desired_embedding_profile() -> None:
     async def exercise() -> None:
         with pytest.raises(SettingsConfigurationError, match="embedding profile"):

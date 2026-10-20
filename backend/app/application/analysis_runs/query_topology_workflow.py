@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Protocol
 from uuid import UUID
 
 from app.application.analysis_runs.cancellation import await_with_cancellation
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
-    CancellationToken,
     WorkflowContext,
     WorkflowFailed,
     WorkflowStopped,
@@ -16,6 +16,8 @@ from app.application.hydrology_topology import TopologyInvariantError
 from app.application.query_understanding import AnalysisContext
 from app.domain import HydrologyGraph
 from app.ports import PortError
+
+logger = logging.getLogger("wateragents.query_topology")
 
 
 class QueryUnderstandingStage(Protocol):
@@ -78,6 +80,23 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
             ) from error
         except PortError as error:
             availability = error.operation == "check_availability"
+            logger.warning(
+                "Topology dependency failed for run %s: %s",
+                context.run.run_id,
+                error,
+                extra={
+                    "event_name": "topology_dependency_failed",
+                    "run_id": context.run.run_id,
+                    "target_comid": analysis_context.target.comid,
+                    "operation": error.operation,
+                    "provider": error.provider,
+                    "provider_error": type(error).__name__,
+                    "provider_status": error.status_code,
+                    "provider_retry_after_seconds": getattr(
+                        error, "retry_after_seconds", None
+                    ),
+                },
+            )
             raise WorkflowFailed(
                 "A hydrology topology dependency was unavailable.",
                 code=(

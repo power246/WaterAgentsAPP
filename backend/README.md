@@ -1,6 +1,16 @@
 # WaterAgents backend
 
-This directory contains the new WaterAgents backend. It requires Python 3.11 or newer and uses the same source and project configuration on macOS, Windows, and Linux.
+The backend accepts waterbody analysis requests, resolves connected waterways, collects monitoring evidence, schedules Agent reasoning, and persists results and transcripts. It also serves the React frontend, HTTP API, and live event streams from one local process. See the [project README](../README.md) for a complete Windows quick start.
+
+| Path | Purpose |
+| --- | --- |
+| `app/api/` | HTTP routes, event streams, and API contracts. |
+| `app/application/` | Query parsing, topology, evidence acquisition, reasoning, and run orchestration. |
+| `app/domain/` and `app/ports/` | Waterbody/evidence rules and external dependency interfaces. |
+| `app/infrastructure/` | Provider adapters, configuration, PostgreSQL, and frontend hosting. |
+| `tests/` and `scripts/` | Backend tests, diagnostics, and smoke checks. |
+
+It requires Python 3.11 or newer and uses the same source and project configuration on macOS, Windows, and Linux.
 
 ## Create the local environment
 
@@ -52,7 +62,7 @@ Python 3.12 or newer may be selected instead of 3.11. After activation, keep the
 
 ## Run
 
-Configure PostgreSQL and run the explicit schema commands first; the following sections show both local Compose and existing-database setups. The formal entry point rejects a missing `WATERAGENTS_DB_PASSWORD`:
+Configure PostgreSQL, run the explicit schema commands, and build the frontend first; the following sections show both local Compose and existing-database setups. The formal entry point rejects a missing `WATERAGENTS_DB_PASSWORD`:
 
 ```text
 python -m app
@@ -68,7 +78,7 @@ npm --prefix frontend run check:api
 npm --prefix frontend run build
 ```
 
-Then start one backend process with `python -m app` from `backend/`. The UI is at `http://127.0.0.1:8000/`; `/api` and both SSE streams stay on the same origin. If the frontend build is missing, the API remains available and `/health` reports `X-Frontend-Available: false`. Settings and Admin state use PostgreSQL; OpenAI/Google user overrides use the OS user credential store. Saving a key never tests a provider connection. The first version supports one local process and one worker.
+Then start one backend process with `python -m app` from `backend/`. The UI is at `http://127.0.0.1:8000/`; `/api` and both SSE streams stay on the same origin. If the frontend build is missing, the API remains available and `/health` reports `X-Frontend-Available: false`. Settings and Admin state use PostgreSQL; OpenAI/Google user overrides use the OS user credential store. Saving a key never tests a provider connection. The local demo supports one process and one worker.
 
 Check the service from another terminal:
 
@@ -163,10 +173,12 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
 | `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with `provider`, `model`, and `roles`; configured catalogs require exactly one exclusive `embedding` capability with a cosine `embedding_profile` including dimensions, input-token limit, threshold, and schema versions, while every `waterbody` model requires its exact token limits |
-| `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `100` |
-| `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `12` |
+| `WATERAGENTS_MEMORY_ENABLED` | `true`; set `false` to offer only stateless analysis and stop background embedding/index reconciliation. The embedding catalog entry remains required by the current settings schema but is not called while memory is disabled. |
+| `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `500` |
+| `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `48` |
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
 | `WATERAGENTS_TOPOLOGY_MAX_CONCURRENCY` | `8` |
+| `WATERAGENTS_NLDI_REQUEST_INTERVAL_SECONDS` | `1.5`; minimum time between NLDI request attempts, valid range `0..10` |
 | `WATERAGENTS_WATERBODY_WORKFLOW_MAX_CONCURRENCY` | `4`; shared waterbody-session limit, valid range `1..32` |
 | `WATERAGENTS_RUN_SUMMARY_TIMEOUT_SECONDS` | `120`; one run-summary request deadline, valid range `(0, 300]` |
 | `WATERAGENTS_PREDICTION_BASELINE_HOURS` | `48` |
@@ -183,7 +195,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_USGS_API_KEY` | unset; backend-only optional rate-limit secret |
 | `WATERAGENTS_OPENAI_API_KEY` | unset; required backend-only parser secret |
 | `WATERAGENTS_OPENAI_BASE_URL` | `https://api.openai.com/v1` |
-| `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `120` |
+| `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `1200`; total topology-building deadline, valid range `(0, 3600]` |
 | `WATERAGENTS_DB_HOST` | `127.0.0.1` |
 | `WATERAGENTS_DB_PORT` | `5432` |
 | `WATERAGENTS_DB_NAME` | `wateragents` |
@@ -208,7 +220,7 @@ Production startup validates the complete topology workflow and requires at leas
 
 ### Local PostgreSQL with Compose
 
-Copy `.env.example` to `.env`, replace the sample password, and leave that file uncommitted. Then run:
+Copy `.env.example` to `.env`, replace the sample password, and leave that file uncommitted. Replace the placeholder model catalog and provider settings before running real analyses. Then run:
 
 ```text
 docker compose --env-file .env -f compose.yaml up -d --wait

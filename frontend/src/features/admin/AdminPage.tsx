@@ -145,7 +145,9 @@ export function AdminPage() {
   }
 
   return <main className="admin-page">
-    <header className="admin-header"><Link to="/">Water Agents</Link><h1>Advanced / Admin</h1>
+    <header className="admin-header"><Link to="/" className="brand" aria-label="Water Agents, University of Minnesota home">
+      <img src="/M_maroon.svg" alt="" /><span className="brand-text">Water Agents</span>
+    </Link><h1>Advanced / Admin</h1>
       <button type="button" onClick={() => void load()}>Refresh facts</button></header>
     {error && <p className="error" role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
@@ -165,10 +167,12 @@ export function AdminPage() {
             event.target.checked ? [...current, run.run_id] : current.filter((id) => id !== run.run_id))} />
           {run.query} · {run.run_id}
         </label>)}</div>}
-        {!allHistory && historyCursor && <button type="button" disabled={busy} onClick={() => void moreHistory()}>Load more saved runs</button>}
-        <button type="button" disabled={busy || Boolean(attempt) || (!allHistory && !selected.length)} onClick={() => void prepare(async () => ({
-          kind: 'history_cleanup', data: await api.previewHistoryCleanup(historySelection(), false),
-        }))}>Preview history cleanup</button>
+        <div className="admin-run-actions">
+          {!allHistory && historyCursor && <button type="button" disabled={busy} onClick={() => void moreHistory()}>Load more saved runs</button>}
+          <button type="button" disabled={busy || Boolean(attempt) || (!allHistory && !selected.length)} onClick={() => void prepare(async () => ({
+            kind: 'history_cleanup', data: await api.previewHistoryCleanup(historySelection(), false),
+          }))}>Preview history cleanup</button>
+        </div>
       </section>
       <section className="admin-card"><h2>RAG profile handoff</h2>
         {rag ? <><p>Desired profile: {rag.handoff.desired_profile_digest}</p>
@@ -199,8 +203,8 @@ export function AdminPage() {
       </section>
       {preview && <section className="admin-card admin-preview"><h2>Server preview: {preview.kind}</h2>
         {preview.kind === 'history_cleanup' && <>
-          <p>{preview.data.estimated.runs} runs, {preview.data.estimated.sessions} sessions,
-            {preview.data.estimated.transcript_items} transcript items; {preview.data.estimated.retained_idempotency_tombstones} tombstones retained.</p>
+          <p>{preview.data.estimated.runs} {preview.data.estimated.runs === 1 ? 'run' : 'runs'}, {preview.data.estimated.sessions} sessions,{' '}
+            {preview.data.estimated.transcript_items} transcript items; {preview.data.estimated.retained_idempotency_tombstones} {preview.data.estimated.retained_idempotency_tombstones === 1 ? 'tombstone' : 'tombstones'} retained.</p>
           <p>Dependent links: {preview.data.dependencies.length}; cascade required: {String(preview.data.cascade_required)}</p>
           <p>Delete order: {preview.data.delete_order.join(', ') || 'none'}</p>
           <p>Preserved: {preview.data.preserved.join(', ')}</p>

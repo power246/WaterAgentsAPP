@@ -45,15 +45,22 @@ class AppSettings(BaseSettings):
     port: int = Field(default=8000, ge=1, le=65535)
     analysis_timezone: str = "America/Chicago"
     model_catalog: tuple[ModelCapability, ...] = ()
+    memory_enabled: bool = True
     topology_max_distance_km: float = Field(
-        default=100,
+        default=500,
         gt=0,
         le=1000,
         allow_inf_nan=False,
     )
-    topology_max_hops: int = Field(default=12, ge=1, le=100)
+    topology_max_hops: int = Field(default=48, ge=1, le=100)
     topology_max_nodes: int = Field(default=128, ge=1, le=10000)
     topology_max_concurrency: int = Field(default=8, ge=1, le=64)
+    nldi_request_interval_seconds: float = Field(
+        default=1.5,
+        ge=0,
+        le=10,
+        allow_inf_nan=False,
+    )
     waterbody_workflow_max_concurrency: int = Field(default=4, ge=1, le=32)
     prediction_baseline_hours: int = Field(default=48, ge=1, le=168)
     max_target_parameters: int = Field(default=6, ge=1, le=6)
@@ -97,9 +104,9 @@ class AppSettings(BaseSettings):
     )
     evidence_provider_attempts: int = Field(default=2, ge=1, le=2)
     evidence_total_deadline_seconds: float = Field(
-        default=90,
+        default=180,
         gt=0,
-        le=90,
+        le=180,
         allow_inf_nan=False,
     )
     evidence_max_collection_calls: int = Field(default=12, ge=1, le=12)
@@ -151,9 +158,9 @@ class AppSettings(BaseSettings):
         min_length=1,
     )
     topology_stage_timeout_seconds: float = Field(
-        default=120,
+        default=1200,
         gt=0,
-        le=900,
+        le=3600,
         allow_inf_nan=False,
     )
     db_host: str = Field(default="127.0.0.1", min_length=1)
@@ -297,6 +304,7 @@ class AppSettings(BaseSettings):
 
     @field_validator(
         "topology_max_distance_km",
+        "nldi_request_interval_seconds",
         "query_parser_timeout_seconds",
         "geocoding_timeout_seconds",
         "metadata_timeout_seconds",

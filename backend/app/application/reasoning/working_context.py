@@ -157,8 +157,8 @@ class WaterbodyDependencyPromptBlock(DomainModel):
     upstream_role: Literal["cross_waterbody_inferred_evidence"] = (
         "cross_waterbody_inferred_evidence"
     )
-    quantified_value_policy: Literal["registered_deterministic_tool_only"] = (
-        "registered_deterministic_tool_only"
+    quantified_value_policy: Literal["explicit_calculation_then_saved_model_estimate"] = (
+        "explicit_calculation_then_saved_model_estimate"
     )
 
     @field_validator("windows")

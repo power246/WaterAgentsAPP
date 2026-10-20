@@ -51,10 +51,11 @@ class M6RuntimeLimits:
     model_timeout_seconds: float
     session_deadline_seconds: float
     repairs_per_exchange: int = 1
+    numeric_estimation_calls: int = 64
 
     @property
     def maximum_model_calls(self) -> int:
-        return self.planning_turns + 2 * self.batches + 2
+        return self.planning_turns + self.numeric_estimation_calls + 2 * self.batches + 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,12 +63,17 @@ class WaterbodyAdapterRegistration:
     provider: str
     port: WaterbodyModelPort
     size_estimator: ModelSizeEstimator
+    max_output_tokens: int | None = None
 
     def __post_init__(self) -> None:
         if not self.provider.strip():
             raise ValueError("waterbody adapter provider must not be empty")
         if not callable(getattr(self.size_estimator, "estimate", None)):
             raise ValueError("waterbody adapter requires a size estimator")
+        if self.max_output_tokens is not None and (
+            type(self.max_output_tokens) is not int or self.max_output_tokens <= 0
+        ):
+            raise ValueError("waterbody adapter output token limit must be positive")
 
 
 class OpenAIResponsesSizeEstimator:
@@ -150,7 +156,7 @@ class WaterbodyModelRouter:
         return registration
 
     def model_fit(self, selection: ModelSelection) -> ModelFitCapability:
-        self.require(selection)
+        registration = self.require(selection)
         capability = self._catalog.capability_for(selection, ModelRole.WATERBODY)
         if capability is None:
             raise SettingsConfigurationError(
@@ -168,7 +174,10 @@ class WaterbodyModelRouter:
         return ModelFitCapability(
             model=selection,
             context_window_tokens=capability.context_window_tokens,
-            max_output_tokens=capability.max_output_tokens,
+            max_output_tokens=min(
+                capability.max_output_tokens,
+                registration.max_output_tokens or capability.max_output_tokens,
+            ),
         )
 
     def estimate(
@@ -249,6 +258,7 @@ class M6RunnerService:
             limits=PlanningLoopLimits(
                 max_turns=self._limits.planning_turns,
                 max_tool_calls_per_turn=self._limits.tool_calls_per_turn,
+                max_numeric_estimation_calls=self._limits.numeric_estimation_calls,
             ),
             clock=self._clock,
             operation_id_factory=self._operation_id_factory,
@@ -422,6 +432,7 @@ async def build_m6_runtime(
                     provider="openai",
                     port=adapter,
                     size_estimator=OpenAIResponsesSizeEstimator(),
+                    max_output_tokens=adapter.max_output_tokens,
                 ),
             ),
             clock=clock,
@@ -466,6 +477,7 @@ def _build_safe_m6_metadata(
             "session_deadline_seconds": limits.session_deadline_seconds,
             "repairs_per_exchange": limits.repairs_per_exchange,
             "maximum_model_calls": limits.maximum_model_calls,
+            "numeric_estimation_calls": limits.numeric_estimation_calls,
         },
         "adapter_providers": providers,
     }

@@ -19,8 +19,10 @@ from app.domain import (
     EvidenceFragmentReference,
     ItemReference,
     NonEmptyString,
+    NumericDerivedPayload,
     ParameterCapabilityRegistry,
     ParameterKey,
+    TemporalEstimatePayload,
     TimeRange,
     ensure_unique_tuple,
 )
@@ -122,12 +124,11 @@ class ReasoningCellGate(DomainModel):
             set(self.contextual_refs) | set(self.collection_fact_refs)
         ):
             raise ValueError("usable and explanatory gate refs must be disjoint")
-        statuses = {self.target_status, self.discharge_status}
         expected = (
             ReasoningGateDecision.BLOCKED
-            if EvidenceCellStatus.BLOCKED in statuses
+            if self.target_status is EvidenceCellStatus.BLOCKED
             else ReasoningGateDecision.SUPPORTED
-            if statuses == {EvidenceCellStatus.SUPPORTED}
+            if self.target_status is EvidenceCellStatus.SUPPORTED
             else ReasoningGateDecision.UNSUPPORTED
         )
         if self.decision is not expected:
@@ -155,12 +156,14 @@ class SealedEvidenceInput(DomainModel):
     capability_registry_digest: NonEmptyString
     requested_parameters: tuple[ParameterKey, ...]
     supporting_parameters: tuple[ParameterKey, ...]
+    intermediate_parameters: tuple[ParameterKey, ...] = ()
     windows: tuple[SealedEvidenceWindow, ...]
     cells: tuple[EvidenceCell, ...]
     gates: tuple[ReasoningCellGate, ...]
     collection_fact_refs: tuple[EvidenceFragmentReference, ...]
     fragment_allowlist: tuple[EvidenceFragmentReference, ...]
     source_record_allowlist: tuple[NonEmptyString, ...]
+    numeric_plan_item_refs: tuple[NonEmptyString, ...]
     tool_result_refs: tuple[ItemReference, ...]
     budget_usage: SealedBudgetUsage
     producer_facts: tuple[SealedProducerFact, ...]
@@ -179,6 +182,16 @@ class SealedEvidenceInput(DomainModel):
         ensure_unique_tuple(self.requested_parameters, field_name="requested_parameters")
         ensure_unique_tuple(self.supporting_parameters, field_name="supporting_parameters")
         ensure_unique_tuple(
+            self.intermediate_parameters, field_name="intermediate_parameters"
+        )
+        all_parameters = (
+            *self.requested_parameters,
+            *self.supporting_parameters,
+            *self.intermediate_parameters,
+        )
+        if len(set(all_parameters)) != len(all_parameters):
+            raise ValueError("sealed parameter roles must be disjoint")
+        ensure_unique_tuple(
             tuple(window.window_id for window in self.windows),
             field_name="sealed windows",
         )
@@ -193,6 +206,9 @@ class SealedEvidenceInput(DomainModel):
         ensure_unique_tuple(
             self.source_record_allowlist,
             field_name="source record allowlist",
+        )
+        ensure_unique_tuple(
+            self.numeric_plan_item_refs, field_name="numeric plan item refs"
         )
         ensure_unique_tuple(
             tuple(reference.item_id for reference in self.tool_result_refs),
@@ -218,6 +234,8 @@ class SealedEvidenceInput(DomainModel):
             raise ValueError("fragment allowlist must use canonical order")
         if self.source_record_allowlist != tuple(sorted(self.source_record_allowlist)):
             raise ValueError("source record allowlist must use canonical order")
+        if self.numeric_plan_item_refs != tuple(sorted(self.numeric_plan_item_refs)):
+            raise ValueError("numeric plan item refs must use canonical order")
         if self.tool_result_refs != tuple(
             sorted(self.tool_result_refs, key=lambda item: item.item_id)
         ):
@@ -236,6 +254,7 @@ class SealedEvidenceInput(DomainModel):
             self.cells,
             requested_parameters=self.requested_parameters,
             supporting_parameters=self.supporting_parameters,
+            intermediate_parameters=self.intermediate_parameters,
             window_ids=tuple(window.window_id for window in self.windows),
         )
         if self.cells != expected_cells:
@@ -284,6 +303,7 @@ def sealed_transcript_item_refs(
             {
                 *(reference.item_id for reference in sealed_input.fragment_allowlist),
                 *sealed_input.source_record_allowlist,
+                *sealed_input.numeric_plan_item_refs,
             }
         )
     )
@@ -301,6 +321,10 @@ def seal_evidence_input(
     _require(bundle.cells == handoff.cells, "handoff_cells_mismatch")
     _require(bundle.requested_parameters == scope.requested_parameters, "bundle_targets_mismatch")
     _require(bundle.supporting_parameters == scope.supporting_parameters, "bundle_support_mismatch")
+    _require(
+        bundle.intermediate_parameters == scope.intermediate_parameters,
+        "bundle_intermediate_mismatch",
+    )
     _require(bundle.context_ref == task.analysis_context_ref, "bundle_context_mismatch")
     _require(bundle.topology_ref == task.topology_ref, "bundle_topology_mismatch")
     _require(bundle.agent_comid == task.target_comid, "bundle_comid_mismatch")
@@ -358,6 +382,7 @@ def seal_evidence_input(
         handoff.cells,
         requested_parameters=scope.requested_parameters,
         supporting_parameters=scope.supporting_parameters,
+        intermediate_parameters=scope.intermediate_parameters,
         window_ids=tuple(window.window_id for window in windows),
     )
     gates = _build_gates(
@@ -393,6 +418,20 @@ def seal_evidence_input(
         "handoff_gate_mismatch",
     )
 
+    numeric_plan_item_refs = tuple(sorted({
+        fragment.payload.plan_item_ref.item_id
+        for _reference, fragment in handoff.validated_inputs.fragments
+        if isinstance(
+            fragment.payload,
+            (NumericDerivedPayload, TemporalEstimatePayload),
+        )
+        and fragment.payload.plan_item_ref is not None
+    }))
+    _require(
+        set(numeric_plan_item_refs)
+        <= {reference.item_id for reference in bundle.closure_refs},
+        "numeric_plan_closure_mismatch",
+    )
     values = {
         "schema_version": 1,
         "run_id": task.run_id,
@@ -406,6 +445,7 @@ def seal_evidence_input(
         "capability_registry_digest": handoff.capability_registry_digest,
         "requested_parameters": scope.requested_parameters,
         "supporting_parameters": scope.supporting_parameters,
+        "intermediate_parameters": scope.intermediate_parameters,
         "windows": windows,
         "cells": cells,
         "gates": gates,
@@ -422,6 +462,7 @@ def seal_evidence_input(
             )
         ),
         "source_record_allowlist": tuple(sorted(handoff.source_record_allowlist)),
+        "numeric_plan_item_refs": numeric_plan_item_refs,
         "tool_result_refs": tuple(
             sorted(handoff.tool_result_refs, key=lambda item: item.item_id)
         ),
@@ -461,6 +502,7 @@ def _ordered_cells(
     *,
     requested_parameters: tuple[ParameterKey, ...],
     supporting_parameters: tuple[ParameterKey, ...],
+    intermediate_parameters: tuple[ParameterKey, ...],
     window_ids: tuple[str, ...],
 ) -> tuple[EvidenceCell, ...]:
     by_identity = {
@@ -473,6 +515,7 @@ def _ordered_cells(
         for role, parameters in (
             (EvidenceCellRole.TARGET, requested_parameters),
             (EvidenceCellRole.REQUIRED_SUPPORT, supporting_parameters),
+            (EvidenceCellRole.METHOD_INPUT, intermediate_parameters),
         )
         for parameter in parameters
         for window_id in window_ids
@@ -503,18 +546,18 @@ def _build_gates(
             support = by_identity[
                 (discharge, window_id, discharge_role)
             ]
-            statuses = {target.status, support.status}
             decision = (
                 ReasoningGateDecision.BLOCKED
-                if EvidenceCellStatus.BLOCKED in statuses
+                if target.status is EvidenceCellStatus.BLOCKED
                 else ReasoningGateDecision.SUPPORTED
-                if statuses == {EvidenceCellStatus.SUPPORTED}
+                if target.status is EvidenceCellStatus.SUPPORTED
                 else ReasoningGateDecision.UNSUPPORTED
             )
             reasons = []
             if target.status is not EvidenceCellStatus.SUPPORTED:
                 reasons.extend(f"target:{reason}" for reason in target.reasons)
-            if support is not target and support.status is not EvidenceCellStatus.SUPPORTED:
+            if (decision is not ReasoningGateDecision.SUPPORTED
+                    and support is not target and support.status is not EvidenceCellStatus.SUPPORTED):
                 reasons.extend(
                     f"required_discharge:{reason}" for reason in support.reasons
                 )

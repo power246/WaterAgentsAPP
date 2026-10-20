@@ -23,7 +23,6 @@ from app.domain.hydrology import (
 from app.domain.time import TimeRange
 from app.infrastructure.config import load_parameter_capability_registry
 
-
 REGISTRY = load_parameter_capability_registry()
 START = datetime(2026, 9, 29, tzinfo=timezone.utc)
 
@@ -107,7 +106,7 @@ def point_series(
     )
 
 
-def test_continuous_coverage_uses_declared_cadence_ratio_and_gap() -> None:
+def test_continuous_coverage_keeps_cadence_metrics_without_downgrading_readings() -> None:
     window = TimeRange(start=START, end=START + timedelta(hours=6))
     complete = calculate_coverage(
         REGISTRY,
@@ -119,7 +118,7 @@ def test_continuous_coverage_uses_declared_cadence_ratio_and_gap() -> None:
         collection_complete=True,
         expected_cadence_seconds=3600,
     )
-    partial = calculate_coverage(
+    sparse = calculate_coverage(
         REGISTRY,
         capability("00060"),
         ParameterProvider.WDFN_TIME_SERIES,
@@ -134,8 +133,26 @@ def test_continuous_coverage_uses_declared_cadence_ratio_and_gap() -> None:
     assert complete.expected_count == 6
     assert complete.ratio == "0.8333333333333333333333333333"
     assert complete.largest_gap_seconds == 7200
-    assert partial.status is CoverageStatus.PARTIAL
-    assert partial.ratio == "0.5"
+    assert sparse.status is CoverageStatus.COMPLETE
+    assert sparse.ratio == "0.5"
+    assert sparse.largest_gap_seconds == 14400
+
+
+@pytest.mark.parametrize("cadence_seconds", (None, 3600))
+def test_completed_continuous_empty_window_is_insufficient(cadence_seconds) -> None:
+    window = TimeRange(start=START, end=START + timedelta(hours=6))
+    result = calculate_coverage(
+        REGISTRY,
+        capability("00060"),
+        ParameterProvider.WDFN_TIME_SERIES,
+        "continuous",
+        (),
+        window,
+        collection_complete=True,
+        expected_cadence_seconds=cadence_seconds,
+    )
+    assert result.status is CoverageStatus.INSUFFICIENT
+    assert result.observed_count == 0
 
 
 def test_collection_failure_is_unknown_not_partial_coverage() -> None:
@@ -152,6 +169,51 @@ def test_collection_failure_is_unknown_not_partial_coverage() -> None:
     )
 
     assert result.status is CoverageStatus.UNKNOWN
+
+
+def test_unknown_cadence_mean_is_complete_for_nonempty_completed_window() -> None:
+    window = TimeRange(start=START, end=START + timedelta(hours=24))
+    across_day = tuple(
+        observation(
+            "00400",
+            index,
+            "7.5",
+            observed_time=START + timedelta(minutes=15 * index),
+        )
+        for index in range(96)
+    )
+    result = aggregate_observations(
+        REGISTRY,
+        capability("00400"),
+        across_day,
+        window,
+        EvidenceAggregationMethod.MEAN,
+        collection_complete=True,
+    )
+    assert result.payload.value == "7.5"
+    assert len(result.payload.input_record_refs) == 96
+    assert result.coverage.status is CoverageStatus.COMPLETE
+    assert result.coverage.expected_count is None
+    assert result.coverage.ratio is None
+    assert result.quality_class is EvidenceQualityClass.VALID
+    assert DataQualityFlag.PARTIAL_COVERAGE not in result.quality_flags
+
+    short_burst = tuple(
+        item.model_copy(update={"observed_time": START + timedelta(minutes=index)})
+        for index, item in enumerate(across_day)
+    )
+    burst_result = aggregate_observations(
+        REGISTRY,
+        capability("00400"),
+        short_burst,
+        window,
+        EvidenceAggregationMethod.MEAN,
+        collection_complete=True,
+    )
+    assert burst_result.payload.value == "7.5"
+    assert burst_result.coverage.status is CoverageStatus.COMPLETE
+    assert burst_result.coverage.covered_duration_seconds == 0
+    assert burst_result.coverage.largest_gap_seconds is not None
 
 
 def test_discrete_and_interval_profiles_do_not_invent_cadence() -> None:
@@ -232,7 +294,7 @@ def test_stable_decimal_algorithms(method, expected: str) -> None:
     assert result.quality_class is EvidenceQualityClass.VALID
 
 
-def test_suspicious_inputs_and_partial_coverage_propagate_without_invalid_values() -> None:
+def test_suspicious_inputs_propagate_without_invalid_values() -> None:
     window = TimeRange(start=START, end=START + timedelta(hours=3))
     observations = (
         observation("00060", 0, "1", observed_time=START),
@@ -271,11 +333,39 @@ def test_suspicious_inputs_and_partial_coverage_propagate_without_invalid_values
     assert result.payload.valid_input_count == 1
     assert result.payload.suspicious_input_count == 1
     assert result.payload.invalid_input_count == 1
+    assert result.coverage.status is CoverageStatus.COMPLETE
     assert result.quality_class is EvidenceQualityClass.SUSPICIOUS
     assert set(result.quality_flags) == {
         DataQualityFlag.ESTIMATED,
-        DataQualityFlag.PARTIAL_COVERAGE,
     }
+
+
+def test_unresolved_unit_is_counted_but_excluded_from_observed_window_mean() -> None:
+    window = TimeRange(start=START, end=START + timedelta(hours=6))
+    usable = observation("00400", 0, "7", observed_time=START)
+    unresolved = observation(
+        "00400", 1, "14", observed_time=START + timedelta(hours=1)
+    ).model_copy(update={"unit": "unknown-unit"})
+
+    result = aggregate_observations(
+        REGISTRY,
+        capability("00400"),
+        (usable, unresolved),
+        window,
+        EvidenceAggregationMethod.MEAN,
+        collection_complete=True,
+    )
+
+    assert result.payload.value == "7"
+    assert result.payload.valid_input_count == 1
+    assert result.payload.invalid_input_count == 1
+    assert result.payload.input_record_refs == (
+        usable.record_ref, unresolved.record_ref,
+    )
+    assert result.coverage.observed_count == 1
+    assert result.coverage.status is CoverageStatus.COMPLETE
+    assert DataQualityFlag.UNIT_UNRESOLVED in result.quality_flags
+    assert DataQualityFlag.PARTIAL_COVERAGE not in result.quality_flags
 
 
 def test_counter_delta_sum_is_ordered_and_marks_resets() -> None:
@@ -425,7 +515,7 @@ def test_cross_series_aggregation_is_rejected(field: str, value: str) -> None:
     assert error.value.code == "evidence_aggregation_blocked"
 
 
-def test_latest_tie_incomplete_collection_and_insufficient_coverage_are_blocked() -> None:
+def test_latest_tie_and_incomplete_collection_are_blocked() -> None:
     one_hour = TimeRange(start=START, end=START + timedelta(hours=1))
     first = observation("00060", 0, "1", observed_time=START)
     second = observation("00060", 1, "2", observed_time=START)
@@ -453,17 +543,18 @@ def test_latest_tie_incomplete_collection_and_insufficient_coverage_are_blocked(
     assert incomplete.value.code == "evidence_collection_incomplete"
 
     six_hours = TimeRange(start=START, end=START + timedelta(hours=6))
-    with pytest.raises(EvidencePolicyError) as insufficient:
-        aggregate_observations(
-            REGISTRY,
-            capability("00060"),
-            (first,),
-            six_hours,
-            EvidenceAggregationMethod.MEAN,
-            collection_complete=True,
-            expected_cadence_seconds=3600,
-        )
-    assert insufficient.value.code == "evidence_coverage_insufficient"
+    single = aggregate_observations(
+        REGISTRY,
+        capability("00060"),
+        (first,),
+        six_hours,
+        EvidenceAggregationMethod.MEAN,
+        collection_complete=True,
+        expected_cadence_seconds=3600,
+    )
+    assert single.payload.value == "1"
+    assert single.coverage.status is CoverageStatus.COMPLETE
+    assert DataQualityFlag.PARTIAL_COVERAGE not in single.quality_flags
 
 
 def test_input_order_does_not_change_aggregate_bytes() -> None:

@@ -1,9 +1,32 @@
 import type { components } from '../../api/generated'
-import type { RunDetail } from '../../api/http'
+import type { AnchorDistanceEstimate, RunDetail } from '../../api/http'
 
 export type Graph = components['schemas']['HydrologyGraph']
 export type InferenceResult = components['schemas']['InferenceResult']
 export type RunSummaryResult = components['schemas']['RunSummaryResult']
+
+export function hasMissingAnchorDistances(result: InferenceResult): boolean {
+  return result.series.some((series) => series.points.some((point) =>
+    (point.measured_anchors ?? []).some((anchor) => anchor.distance_km === null)))
+}
+
+export function withAnchorDistanceEstimates(result: InferenceResult, estimates: AnchorDistanceEstimate[]): InferenceResult {
+  const byCell = new Map<string, Map<number, AnchorDistanceEstimate>>()
+  for (const estimate of estimates) {
+    const anchors = byCell.get(estimate.cell_id) ?? new Map<number, AnchorDistanceEstimate>()
+    anchors.set(estimate.anchor_index, estimate)
+    byCell.set(estimate.cell_id, anchors)
+  }
+  return { ...result, series: result.series.map((series) => ({ ...series, points: series.points.map((point) => ({
+    ...point,
+    measured_anchors: (point.measured_anchors ?? []).map((anchor, index) => {
+      const estimate = byCell.get(point.cell_id)?.get(index)
+      return anchor.distance_km === null && estimate
+        ? { ...anchor, distance_km: estimate.distance_km, distance_basis: estimate.distance_basis }
+        : anchor
+    }),
+  })) })) }
+}
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

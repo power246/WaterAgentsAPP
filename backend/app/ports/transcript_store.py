@@ -49,6 +49,31 @@ class TranscriptReadStorePort(Protocol[ReadRunT, ReadHistoryPageT]):
 
     async def read_run(self, run_id: UUID) -> ReadRunT | None: ...
 
+    async def read_run_detail_roots(self, run_id: UUID) -> ReadRunT | None: ...
+
+    async def run_exists(self, run_id: UUID) -> bool: ...
+
+    async def session_exists(self, run_id: UUID, session_id: UUID) -> bool: ...
+
+    async def read_run_items(
+        self,
+        run_id: UUID,
+        item_ids: tuple[UUID, ...],
+    ) -> ReadRunT | None: ...
+
+    async def list_session_item_ids(
+        self,
+        run_id: UUID,
+        session_id: UUID,
+        content_type: str | None,
+    ) -> tuple[UUID, ...]: ...
+
+    async def list_run_item_ids(
+        self,
+        run_id: UUID,
+        content_type: str,
+    ) -> tuple[UUID, ...]: ...
+
 
 class StartupRepairStorePort(Protocol[ReadRunT, WriteBatchT]):
     """Persistence boundary used before the application accepts traffic."""

@@ -1,0 +1,25 @@
+{
+  "format": "wateragents-source-compatibility-v1",
+  "base_commit": "39b56d5ffde54e15b418c3abf9fe64671ba00f1d",
+  "branch": "codex/runtime-smoke-fixes-20261014",
+  "base_bundle_sha256": "8928c3e105c560daca9b9f1a352d3c6a2e9359f035b2a5d69f0f875fafe932f1",
+  "tracked_patch_sha256": "519d1c75a18e6a188ba7167665f8a590ad50f798a0e40a17ccdd5e12640d8e8e",
+  "new_file_sha256": {
+    "backend/app/application/evidence_tools/anchor_distance_view.py": "ebbf638d692df6ba4f66edeb4ea17b851ff49f797a9ab081ef1871cc42f9bfee",
+    "backend/app/application/evidence_tools/measurement_provenance.py": "5a5b59d0bd9ae4c83d1f2efdf6de255978165faf1b0cfbef15a572a3765ae6f9",
+    "backend/app/application/evidence_tools/numeric_dependency.py": "cd9c27e3d5d3f186b32de01365364b39bba9150687d9a12c951384385e840b6d",
+    "backend/app/application/evidence_tools/numeric_estimation.py": "a3d6f657963e5f228fb0d921c4be2cd2d5ac09236f67672644e4f3b06ea856f0",
+    "backend/app/application/evidence_tools/numeric_methods.py": "94d20e26bc56e7128764ba88f1acd635d4fb5db25dc119c28d0e0b7f3fa6190b",
+    "backend/app/application/evidence_tools/temporal_candidate.py": "b66a745cc6b63efefa2ab22ce40e8fa2fbeff0b3274d9b255922683a85893cbf",
+    "backend/app/application/reasoning/numeric_estimation.py": "65f2cd830e07d213c37e586f86f5cb95a951cfb29e1377c4b6e6b468b2e1612b",
+    "backend/app/application/reasoning/topology_coverage.py": "121fc342ee9dce909ba482510a681a564fd847dce2c8641bcbaf73b51c243ed6",
+    "backend/app/domain/evidence/measured_anchor.py": "d08a36819ec327526e5a21230e08f672088bd25aa2c2d9c99661643fdb07ea37",
+    "backend/app/domain/evidence/numeric_dependency_plan.py": "7cd230cff01972c3b63db2b5b0b2919836e8cd6d99db1f008cddcb33b49756c8",
+    "backend/app/domain/evidence/numeric_derived_payload.py": "ffae3f8ca1736e686757275ab70f2a070bb811e1d317206ecb862ba8f90cb892",
+    "backend/app/domain/evidence/numeric_plan_input.py": "0107347bc29f170f75b1d12e4bb8b3c28e1ea00cab807e25d0532537b85dfd0c",
+    "backend/app/domain/evidence/numeric_plan_task.py": "556ba71dd72e1d4079ff76c4dcdcab46a634b094ebe1791ec1c2a26b2895b535",
+    "backend/app/domain/evidence/temporal_estimate_payload.py": "c54310b1a34f746a7eaa1f1a050854fe1d4f70bff718956642998f013739714f",
+    "backend/app/domain/inference/value_range.py": "112c38ee3d5b6324de0d7415949a09df2c14a2a1dc1efe3b01f446f4875b6910",
+    "backend/app/infrastructure/adapters/nldi_request_state.py": "c5716a1cf7ccf458052c2187114f6eb1c8841f4de25646e896a018834cdd42a2"
+  }
+}

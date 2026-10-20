@@ -1,12 +1,12 @@
 # M5 Evidence Tools + EvidenceBundle API / 读取契约
 
-更新日期：2026-10-01
+更新日期：2026-10-19
 
 > 状态：当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。M5 不增加 production tool invocation endpoint；本文定义现有 run/session/transcript 路由如何读取 M5 typed content，以及只供自动化测试的独立调用面。真实 USGS/NWS/EPA 请求与 Ubuntu/macOS/Windows 三平台 CI 尚未执行，完成证据与剩余风险见 [M5 Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
-## 1. Production 路由不变
+## 1. Production run 与 transcript 路由
 
-M5 继续使用 M3/M4 已有路由：
+分析继续使用 M3/M4 已有路由，并增加一个历史距离只读视图：
 
 ```text
 POST /api/analysis/runs
@@ -19,11 +19,16 @@ GET  /api/analysis/runs/{run_id}/events
 GET  /api/analysis/runs/{run_id}/sessions/{session_id}/events
 POST /api/analysis/runs/{run_id}/cancel
 POST /api/analysis/runs/{run_id}/persistence/retry
+GET  /api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates?view=history
 ```
 
 production OpenAPI 中不得出现 `/tools`、`/evidence/collect` 或等价的直接调用路由。frontend 只读取已发生的 transcript/evidence/result，不提交 provider、station、半径、geometry、URL 或 tool policy。
 
 M5 不改变 create request。所有新内容继续使用当前唯一 `schema_version: 1`；没有 `EvidenceFragmentV2`、`EvidenceBundleV2`、旧/新 union 或 milestone compatibility 字段。
+
+最后一条是历史结果的按需只读派生视图，`item_id` 必须指向该 run 已保存的 `inference_result`。响应包含 `result_item_id` 和 `estimates`；每条 estimate 包含 `cell_id`、从零开始的 `anchor_index`、非负的 `distance_km` 以及固定的 `distance_basis=mapped_channel_estimate`。只列出原结果中距离仍未知、且可用已保存数据沿河道估算的锚点。
+
+`cell_id` 和 `anchor_index` 指向该结果原有锚点；缺少坐标、几何或有效连接的条目省略，空数组不代表距离为零。此读取只查询同一次运行已保存的结果、原始记录、拓扑和查询坐标；不调用外部数据源或模型，也不修改原 transcript、result 或历史摘要。其他 `view` 值不被接受。
 
 ## 2. 统一 transcript envelope
 

@@ -66,12 +66,21 @@ class GatedWorkflow:
 
 
 async def wait_saved(application, run_id) -> None:
-    for _ in range(200):
-        state = await application.state.run_coordinator.get_persistence_info(run_id)
-        if state.state.value == "up_to_date":
-            return
-        await asyncio.sleep(0)
-    raise AssertionError("persistence writer did not settle")
+    try:
+        async with asyncio.timeout(3):
+            while True:
+                state = await application.state.run_coordinator.get_persistence_info(run_id)
+                if state.state.value == "up_to_date":
+                    return
+                await asyncio.sleep(0.01)
+    except TimeoutError:
+        raise AssertionError("persistence writer did not settle") from None
+
+
+async def wait_cleaned(coordinator, run_id: UUID) -> None:
+    async with asyncio.timeout(3):
+        while run_id in coordinator._runs:
+            await asyncio.sleep(0.01)
 
 
 def run(exercise) -> None:
@@ -768,10 +777,7 @@ def test_live_cleanup_waits_for_terminal_quiescence_and_retries_failure() -> Non
 
             coordinator._release_live_state = fail_once
             workflow.release.set()
-            for _ in range(500):
-                if created.run_id not in coordinator._runs:
-                    break
-                await asyncio.sleep(0.001)
+            await wait_cleaned(coordinator, created.run_id)
             assert attempts >= 2
             assert created.run_id not in coordinator._runs
             assert await store.read_run(created.run_id) is not None
@@ -813,10 +819,7 @@ def test_live_cleanup_retries_registered_run_resource_hook_before_release() -> N
             await workflow.started.wait()
             workflow.release.set()
 
-            for _ in range(500):
-                if created.run_id not in coordinator._runs:
-                    break
-                await asyncio.sleep(0.001)
+            await wait_cleaned(coordinator, created.run_id)
 
             assert attempts == [created.run_id, created.run_id]
             assert created.run_id not in coordinator._runs

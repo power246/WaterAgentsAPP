@@ -1060,11 +1060,21 @@ def test_session_ends_without_waiting_for_run_and_run_ends_after_quiescence() ->
 def test_released_live_stream_returns_history_location_but_missing_is_404() -> None:
     async def exercise() -> None:
         async with run_runtime() as (app, coordinator, created, _, release, store):
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.QUERY_PARSER,
+            )
             release.set()
             runtime = coordinator._runs[created.run_id]
             await runtime.workflow_quiesced.wait()
             await coordinator._transcript_writer.drain(runtime)
             coordinator._runs.pop(created.run_id)
+            original_read = store.read_run
+
+            async def fail_full_read(run_id):
+                raise AssertionError("released streams must not read a full run")
+
+            store.read_run = fail_full_read
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=app),
                 base_url="http://test",
@@ -1077,18 +1087,38 @@ def test_released_live_stream_returns_history_location_but_missing_is_404() -> N
                 assert released.json()["history_url"].endswith(
                     f"/{created.run_id}?view=history"
                 )
-                original_read = store.read_run
+                session_path = (
+                    f"/api/analysis/runs/{created.run_id}/sessions/"
+                    f"{session.session_id}/events"
+                )
+                released_session = await client.get(session_path)
+                assert released_session.status_code == 410
+                assert released_session.json()["history_url"].endswith(
+                    f"/{session.session_id}/transcript?view=history"
+                )
+                missing_session = await client.get(
+                    session_path.replace(str(session.session_id), str(uuid4()))
+                )
+                assert missing_session.status_code == 404
+                assert missing_session.json()["error"]["code"] == "session_not_found"
+                missing_run = await client.get(
+                    session_path.replace(str(created.run_id), str(uuid4()))
+                )
+                assert missing_run.status_code == 404
+                assert missing_run.json()["error"]["code"] == "run_not_found"
 
-                async def fail_read(run_id):
+                original_exists = store.run_exists
+
+                async def fail_lookup(run_id):
                     raise OSError("database unavailable")
 
-                store.read_run = fail_read
+                store.run_exists = fail_lookup
                 unavailable = await client.get(
                     f"/api/analysis/runs/{uuid4()}/events"
                 )
                 assert unavailable.status_code == 503
                 assert unavailable.json()["error"]["code"] == "database_unavailable"
-                store.read_run = original_read
+                store.run_exists = original_exists
             with pytest.raises(LiveStreamReleasedError) as error:
                 await create_run_event_response(
                     coordinator,
@@ -1102,6 +1132,7 @@ def test_released_live_stream_returns_history_location_but_missing_is_404() -> N
                     app.state.transcript_reader,
                     uuid4(),
                 )
+            store.read_run = original_read
 
     run(exercise)
 

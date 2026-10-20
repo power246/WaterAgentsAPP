@@ -166,11 +166,17 @@ Stop 只调用 run cancel。关闭页面、切 tab、关闭 session stream 或�
 
 time-series 在地图底部可关闭区域展开，只画 backend 结果提供的 series、window、unit 和 quality/availability。不得使用 `value * (1-confidence)` 等前端公式制造 confidence band，也不得自行补点、换单位或生成风险。
 
+结果包含 `range_estimate` 时显示服务端保存的 `value_lower`–`value_upper`，不取中点制造单点。模型预测有单点时同时显示可能范围；没有同指标原始实测的范围标为“低依据范围预测”，一般知识依据明确说明缺少当地实测。明细依据 `inference_method` 区分明确计算与模型估计，并展示 `measured_anchors` 中最近原始测站的累计河道距离、经过的水体数和来源路径。未知距离显示未知，不能写成 0；流量缺失与供应商失败事实仍可在依据详情中查看。可信度低不隐藏已有预测，可能范围不称为已校准置信区间。
+
+沿保存河道几何算出的距离标为近似值；同一测站有多条路径时显示各路径，不取直线距离，也不把未知当作 0。历史结果缺少距离时，可按需请求服务端只读计算的展示值，仅覆盖本次页面显示且保持原记录不变；计算失败仍显示未知。
+
 ## 8. 右侧 Detail
 
 ### 8.1 Overview
 
 展示 run status/phase、后端 run summary、graph coverage、partial/失败分支、特殊值与 persistence。run summary unavailable/failed 时显示安全失败信息，不用前端模板拼一个“看似成功”的总结。
+
+分别显示参与水体结果的可用数量与上游来源搜索的覆盖情况；`partial` 需按保存的分支结局解释实际缺口及备选搜索，不得将备选搜索触及节点上限说成必需来源搜索失败。
 
 ### 8.2 Agent
 

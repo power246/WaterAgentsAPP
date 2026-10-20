@@ -61,6 +61,7 @@ from app.application.evidence_tools.scope import (
     EvidenceWindow,
     assemble_evidence_session_scope,
     with_evidence_rule_plan,
+    with_intermediate_parameters,
 )
 from app.application.evidence_tools.upstream_projection import (
     ResolvedInferenceResult,
@@ -136,6 +137,7 @@ __all__ = [
     "StoredPolicyObservations",
     "assemble_evidence_session_scope",
     "with_evidence_rule_plan",
+    "with_intermediate_parameters",
     "authorize_evidence_tool_request",
     "authorize_provider_request",
     "build_collection_manifest",

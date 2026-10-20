@@ -1,5 +1,5 @@
 from datetime import datetime
-from decimal import Decimal, ROUND_CEILING
+from decimal import ROUND_CEILING, Decimal
 
 from app.application.evidence_policy.errors import EvidencePolicyError
 from app.application.evidence_policy.models import PolicyObservation
@@ -132,26 +132,11 @@ def calculate_coverage(
                 window_seconds,
                 effective_count * expected_cadence_seconds,
             )
-            largest_gap = _largest_point_gap(point_times, window)
-            if effective_count >= profile.minimum_usable_count:
-                if (
-                    profile.complete_ratio is not None
-                    and ratio >= Decimal(profile.complete_ratio)
-                    and largest_gap is not None
-                    and profile.max_gap_cadence_multiplier is not None
-                    and Decimal(largest_gap)
-                    <= Decimal(expected_cadence_seconds)
-                    * Decimal(profile.max_gap_cadence_multiplier)
-                ):
-                    status = CoverageStatus.COMPLETE
-                elif (
-                    profile.partial_ratio is not None
-                    and ratio >= Decimal(profile.partial_ratio)
-                ):
-                    status = CoverageStatus.PARTIAL
-        elif observed_count:
-            status = CoverageStatus.INSUFFICIENT
-            largest_gap = _largest_point_gap(point_times, window)
+        largest_gap = _largest_point_gap(point_times, window) if point_times else None
+        # A completed window with a usable reading can supply its representative
+        # value. Cadence and gaps remain descriptive metrics, not eligibility gates.
+        if observed_count >= profile.minimum_usable_count:
+            status = CoverageStatus.COMPLETE
     elif profile.policy_kind is CoveragePolicyKind.CONTINUOUS_LATEST:
         largest_gap = _largest_point_gap(point_times, window)
         if observed_count >= profile.minimum_usable_count:

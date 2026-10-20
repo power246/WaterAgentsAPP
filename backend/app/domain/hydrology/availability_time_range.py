@@ -7,6 +7,7 @@ from app.domain.common import DomainModel, UtcDatetime
 
 class AvailabilityTimeRange(DomainModel):
     segment_index: int = Field(strict=True, ge=0)
+    window_index: int | None = Field(default=None, strict=True, ge=0)
     start: UtcDatetime
     end: UtcDatetime
 

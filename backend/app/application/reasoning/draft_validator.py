@@ -1,12 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from collections.abc import Iterable
-from typing import Self
+from typing import Literal, Self
 from uuid import UUID
 
-from pydantic import StrictBool, ValidationError, field_validator, model_validator
+from pydantic import (
+    StrictBool,
+    StrictInt,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
+from app.application.evidence_tools.measurement_provenance import (
+    derive_measured_anchors,
+)
 from app.application.reasoning.batch_planner import (
     ReasoningBatch,
     ReasoningBatchPlan,
@@ -35,6 +46,7 @@ from app.domain import (
     ConversionPayload,
     DataQualityFlag,
     DirectRecordPayload,
+    DomainFloat,
     DomainModel,
     EvidenceApplicability,
     EvidenceCellRole,
@@ -44,14 +56,19 @@ from app.domain import (
     IndeterminateReason,
     InferenceMode,
     NonEmptyString,
+    NumericDerivedPayload,
     OutcomeStatus,
     ParameterKey,
     RelationSupportPayload,
     ResultSource,
     RiskLevel,
+    TemporalEstimatePayload,
     TimeRange,
     ensure_unique_tuple,
 )
+from app.domain.evidence.measured_anchor import MeasuredAnchor
+
+logger = logging.getLogger("wateragents.reasoning")
 
 
 class EvidenceValidationFact(DomainModel):
@@ -64,6 +81,11 @@ class EvidenceValidationFact(DomainModel):
     result_eligibility: EvidenceResultEligibility
     payload_type: NonEmptyString
     value: NonEmptyString | None
+    value_lower: NonEmptyString | None = None
+    value_upper: NonEmptyString | None = None
+    method_kind: Literal["explicit_calculation", "model_estimate"] | None = None
+    inference_basis: Literal["same_parameter_measurement", "related_evidence", "general_knowledge"] | None = None
+    measured_anchors: tuple[MeasuredAnchor, ...] = ()
     unit_id: NonEmptyString | None
     aggregation_method: AggregationMethod | None
     source_record_refs: tuple[NonEmptyString, ...]
@@ -72,6 +94,20 @@ class EvidenceValidationFact(DomainModel):
     quality_class: EvidenceQualityClass | None
     quality_flags: tuple[DataQualityFlag, ...]
     registered_reversible_conversion: StrictBool
+    location_comid: NonEmptyString | None = None
+    station_id: NonEmptyString | None = None
+    temporal_method: NonEmptyString | None = None
+    anchor_distance_seconds: tuple[StrictInt, ...] = ()
+    numeric_method_id: NonEmptyString | None = None
+    numeric_method_version: StrictInt | None = None
+    numeric_task_id: NonEmptyString | None = None
+    numeric_plan_digest: NonEmptyString | None = None
+    numeric_plan_item_id: NonEmptyString | None = None
+    numeric_method_registry_digest: NonEmptyString | None = None
+    numeric_confidence_cap: DomainFloat | None = None
+    numeric_input_bindings: tuple[
+        tuple[NonEmptyString, NonEmptyString, NonEmptyString], ...
+    ] = ()
 
     @field_validator(
         "source_record_refs",
@@ -159,6 +195,11 @@ class ReasoningEvidenceCatalog(DomainModel):
         ):
             raise ValueError("cell evidence scope references unknown evidence")
         facts = {fact.evidence_ref: fact for fact in self.facts}
+        for fact in self.facts:
+            if fact.payload_type == "temporal_estimate":
+                _validate_temporal_estimate_fact(fact, facts)
+            elif fact.payload_type == "numeric_derived":
+                _validate_numeric_derived_fact(fact, facts)
         for scope in self.cell_scopes:
             for refs, expected_applicability in (
                 (
@@ -226,6 +267,36 @@ def build_reasoning_evidence_catalog(
         for fragment in fragments
     ):
         raise ValueError("evidence validation source record is outside sealed scope")
+    window_ranges = {
+        window.window_id: window.time_range for window in sealed.windows
+    }
+    for fragment in fragments:
+        if isinstance(fragment.payload, TemporalEstimatePayload):
+            plan_ref = fragment.payload.plan_item_ref
+            if (
+                plan_ref is not None
+                and plan_ref.item_id not in sealed.numeric_plan_item_refs
+            ):
+                raise ValueError("temporal derivation plan is outside sealed closure")
+        if not isinstance(fragment.payload, NumericDerivedPayload):
+            continue
+        payload = fragment.payload
+        if payload.plan_item_ref.item_id not in sealed.numeric_plan_item_refs:
+            raise ValueError("numeric derivation plan is outside sealed closure")
+        for reference, window_id in zip(
+            payload.input_evidence_refs, payload.input_window_ids, strict=True
+        ):
+            input_fragment = by_id.get(reference.evidence_id)
+            if (
+                reference_by_id.get(reference.evidence_id) != reference
+                or input_fragment is None
+                or (window_id == "context" and payload.method_kind != "model_estimate")
+                or (window_id != "context" and (
+                    window_id not in window_ranges
+                    or not input_fragment.time_range.overlaps(window_ranges[window_id])
+                ))
+            ):
+                raise ValueError("numeric derivation input is outside sealed scope")
 
     facts = tuple(
         sorted(
@@ -234,6 +305,11 @@ def build_reasoning_evidence_catalog(
                     reference_by_id[fragment.evidence_id].item_id,
                     fragment,
                     capability_registry_digest=sealed.capability_registry_digest,
+                    measured_anchors=derive_measured_anchors(
+                        parameter=fragment.parameter_refs[0],
+                        target_comid=sealed.target_comid,
+                        evidence_ids=(fragment.evidence_id,), fragments=by_id,
+                    ) if len(fragment.parameter_refs) == 1 else (),
                 )
                 for fragment in fragments
             ),
@@ -305,7 +381,11 @@ class DraftValidator:
         raw: object,
     ) -> ValidatedReasoningBatch:
         self._validate_batch_identity(batch)
-        draft = _parse_draft(raw, ReasoningBatchDraft)
+        normalized, filled_unit_paths = _fill_single_allowed_units(raw, batch)
+        normalized, filled_range_paths = _fill_cited_numeric_ranges(
+            normalized, batch, self._facts, self._cell_scopes
+        )
+        draft = _parse_draft(normalized, ReasoningBatchDraft)
         issues: list[DraftValidationIssue] = []
         if draft.batch_id != batch.batch_id:
             _issue(issues, "batch_identity_mismatch", "$.batch_id")
@@ -323,16 +403,68 @@ class DraftValidator:
             _issue(issues, "cell_order_mismatch", "$.cells")
 
         scopes = {cell.cell_id: cell for cell in batch.cells}
+        normalized_cells: list[ReasoningCellDraft] = []
+        normalized_flag_paths: list[str] = []
         for index, cell in enumerate(draft.cells):
             planned = scopes.get(cell.cell_id)
             if planned is not None:
+                if set(cell.evidence_refs) <= set(planned.allowed_evidence_refs):
+                    expected_flags = _quality_flags_from_facts(
+                        self._facts[ref] for ref in cell.evidence_refs
+                    )
+                    if cell.quality_flags != expected_flags:
+                        cell = cell.model_copy(
+                            update={"quality_flags": expected_flags}
+                        )
+                        normalized_flag_paths.append(
+                            f"$.cells[{index}].quality_flags"
+                        )
                 self._validate_cell(
                     cell,
                     planned=planned,
                     path=f"$.cells[{index}]",
                     issues=issues,
                 )
+            normalized_cells.append(cell)
         _raise_issues(issues)
+        draft = draft.model_copy(update={"cells": tuple(normalized_cells)})
+        for path in filled_unit_paths:
+            logger.info(
+                "Reasoning draft unit filled from its single allowed unit.",
+                extra={
+                    "event_name": "reasoning_draft_single_unit_filled",
+                    "run_id": batch.run_id,
+                    "session_id": batch.session_id,
+                    "operation": batch.operation_id,
+                    "schema_path": path,
+                    "schema_rule": "single_allowed_unit",
+                },
+            )
+        for path in filled_range_paths:
+            logger.info(
+                "Reasoning draft range filled from its uniquely cited numeric evidence.",
+                extra={
+                    "event_name": "reasoning_draft_numeric_range_filled",
+                    "run_id": batch.run_id,
+                    "session_id": batch.session_id,
+                    "operation": batch.operation_id,
+                    "batch_id": batch.batch_id,
+                    "schema_path": path,
+                    "schema_rule": "unique_cited_numeric_derived_range",
+                },
+            )
+        for path in normalized_flag_paths:
+            logger.info(
+                "Reasoning draft quality flags normalized from cited evidence.",
+                extra={
+                    "event_name": "reasoning_draft_quality_flags_normalized",
+                    "run_id": batch.run_id,
+                    "session_id": batch.session_id,
+                    "operation": batch.operation_id,
+                    "schema_path": path,
+                    "schema_rule": "cited_evidence_union",
+                },
+            )
         values = {
             "batch_id": batch.batch_id,
             "scope_digest": batch.scope_digest,
@@ -613,12 +745,28 @@ class DraftValidator:
     ) -> None:
         evidence_scope = self._cell_scopes[cell.cell_id]
         refs = set(cell.evidence_refs)
+        for field_name in ("risk_rationale", "confidence_rationale", "explanation"):
+            value = getattr(cell, field_name)
+            if any(
+                ref not in refs
+                and re.search(
+                    rf"(?<![A-Za-z0-9_:#-]){re.escape(ref)}(?![A-Za-z0-9_:#-])",
+                    value,
+                )
+                for ref in self._facts
+            ):
+                _issue(issues, "text_evidence_ref_missing", f"{path}.{field_name}")
         if not refs <= set(planned.allowed_evidence_refs):
             _issue(issues, "evidence_out_of_scope", f"{path}.evidence_refs")
             return
         facts = tuple(self._facts[ref] for ref in cell.evidence_refs)
         dependencies = {
-            dependency for fact in facts for dependency in fact.dependency_evidence_refs
+            dependency
+            for fact in facts
+            if fact.payload_type not in {
+                "relation_support", "temporal_estimate", "numeric_derived"
+            }
+            for dependency in fact.dependency_evidence_refs
         }
         if not dependencies <= refs:
             _issue(
@@ -631,14 +779,75 @@ class DraftValidator:
         )
         if cell.series_refs != expected_series:
             _issue(issues, "series_refs_incomplete", f"{path}.series_refs")
-        expected_flags = tuple(
-            sorted(
-                {flag for fact in facts for flag in fact.quality_flags},
-                key=lambda flag: flag.value,
-            )
-        )
+        expected_flags = _quality_flags_from_facts(facts)
         if cell.quality_flags != expected_flags:
             _issue(issues, "quality_flags_mismatch", f"{path}.quality_flags")
+        selected_direct = any(
+            fact.evidence_ref in evidence_scope.target_direct_refs
+            and fact.value == cell.representative_value
+            and fact.value_lower == cell.value_lower
+            and fact.value_upper == cell.value_upper
+            and fact.unit_id == cell.target_unit_id
+            and fact.aggregation_method is cell.aggregation_method
+            for fact in facts
+        )
+        selected_derived = tuple(
+            fact for fact in facts
+            if not selected_direct
+            and fact.evidence_ref in evidence_scope.target_indirect_refs
+            and fact.value == cell.representative_value
+            and fact.value_lower == cell.value_lower
+            and fact.value_upper == cell.value_upper
+            and fact.unit_id == cell.target_unit_id
+            and fact.aggregation_method is cell.aggregation_method
+        )
+        temporal_facts = tuple(
+            fact for fact in selected_derived
+            if fact.payload_type == "temporal_estimate"
+        )
+        numeric_facts = tuple(
+            fact for fact in selected_derived
+            if fact.payload_type == "numeric_derived"
+        )
+        support_refs = (
+            *evidence_scope.support_direct_refs,
+            *evidence_scope.support_indirect_refs,
+        )
+        if support_refs and all(
+            self._facts[ref].payload_type
+            in {"temporal_estimate", "numeric_derived"}
+            for ref in support_refs
+        ):
+            cited_support_refs = refs & set(support_refs)
+            if (
+                cell.outcome_status is not OutcomeStatus.INDETERMINATE
+                and not cited_support_refs
+            ):
+                _issue(
+                    issues,
+                    (
+                        "temporal_discharge_support_missing"
+                        if all(
+                            self._facts[ref].payload_type == "temporal_estimate"
+                            for ref in support_refs
+                        )
+                        else "derived_discharge_support_missing"
+                    ),
+                    f"{path}.evidence_refs",
+                )
+        if temporal_facts:
+            confidence_cap = min(
+                _temporal_confidence_cap(fact, evidence_scope.time_range)
+                for fact in temporal_facts
+            )
+            if cell.confidence > confidence_cap:
+                _issue(issues, "temporal_confidence_too_high", f"{path}.confidence")
+        numeric_caps = tuple(fact.numeric_confidence_cap for fact in numeric_facts)
+        if numeric_caps and (
+            None in numeric_caps
+            or cell.confidence > min(cap for cap in numeric_caps if cap is not None)
+        ):
+            _issue(issues, "numeric_confidence_too_high", f"{path}.confidence")
         if any(
             fact.quality_class is EvidenceQualityClass.INVALID
             or fact.result_eligibility is EvidenceResultEligibility.EXPLANATORY_ONLY
@@ -670,14 +879,27 @@ class DraftValidator:
             )
         target_direct = refs & set(evidence_scope.target_direct_refs)
         target_indirect = refs & set(evidence_scope.target_indirect_refs)
-        if cell.outcome_status is OutcomeStatus.QUANTIFIED:
-            if not target_direct:
+        target_estimates = {
+            ref
+            for ref in target_indirect
+            if self._facts[ref].payload_type == "temporal_estimate"
+        }
+        target_derived = {
+            ref
+            for ref in target_indirect
+            if self._facts[ref].payload_type == "numeric_derived"
+        }
+        selected_direct = target_direct
+        if cell.outcome_status in {OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE}:
+            if not target_direct and not target_estimates and not target_derived:
                 _issue(issues, "only_indirect_quantified", f"{path}.outcome_status")
             candidates = tuple(
                 fact
                 for fact in facts
-                if fact.evidence_ref in target_direct
+                if fact.evidence_ref in target_direct | target_estimates | target_derived
                 and fact.value == cell.representative_value
+                and fact.value_lower == cell.value_lower
+                and fact.value_upper == cell.value_upper
                 and fact.unit_id == cell.target_unit_id
             )
             if not candidates:
@@ -686,15 +908,46 @@ class DraftValidator:
                     "quantified_value_not_backed",
                     f"{path}.representative_value",
                 )
-            elif not any(
-                fact.aggregation_method is cell.aggregation_method
+            matching_method = tuple(
+                fact
                 for fact in candidates
-            ):
+                if fact.aggregation_method is cell.aggregation_method
+            )
+            if candidates and not matching_method:
                 _issue(
                     issues,
                     "aggregation_mismatch",
                     f"{path}.aggregation_method",
                 )
+            selected_direct = {
+                fact.evidence_ref
+                for fact in matching_method
+                if fact.evidence_ref in target_direct
+            }
+            if (
+                not selected_direct
+                and target_estimates
+                and any(
+                    fact.evidence_ref in target_estimates for fact in matching_method
+                )
+                and cell.source is not (
+                    ResultSource.PREDICTED if planned.mode is InferenceMode.PREDICTION
+                    else ResultSource.INFERRED
+                )
+            ):
+                _issue(issues, "temporal_estimate_requires_inferred", f"{path}.source")
+            if (
+                not selected_direct
+                and target_derived
+                and any(
+                    fact.evidence_ref in target_derived for fact in matching_method
+                )
+                and cell.source is not (
+                    ResultSource.PREDICTED if planned.mode is InferenceMode.PREDICTION
+                    else ResultSource.INFERRED
+                )
+            ):
+                _issue(issues, "numeric_derivation_requires_inferred", f"{path}.source")
         elif (
             cell.outcome_status is OutcomeStatus.DIRECTIONAL
             and not target_direct
@@ -704,8 +957,7 @@ class DraftValidator:
         if cell.source is ResultSource.OBSERVED:
             self._validate_observed(
                 facts,
-                target_direct=target_direct,
-                target_indirect=target_indirect,
+                target_direct=selected_direct,
                 path=path,
                 issues=issues,
             )
@@ -729,7 +981,6 @@ class DraftValidator:
         facts: tuple[EvidenceValidationFact, ...],
         *,
         target_direct: set[str],
-        target_indirect: set[str],
         path: str,
         issues: list[DraftValidationIssue],
     ) -> None:
@@ -752,8 +1003,7 @@ class DraftValidator:
             if fact.evidence_ref not in depended_on
         }
         if (
-            target_indirect
-            or len(source_records) != 1
+            len(source_records) != 1
             or len(series) != 1
             or len(terminal_target_facts) != 1
         ):
@@ -904,6 +1154,7 @@ def _evidence_fact(
     fragment: EvidenceFragment,
     *,
     capability_registry_digest: str,
+    measured_anchors: tuple[MeasuredAnchor, ...] = (),
 ) -> EvidenceValidationFact:
     payload = fragment.payload
     value = None
@@ -921,6 +1172,12 @@ def _evidence_fact(
         value = payload.value
         unit_id = payload.unit
         aggregation_method = AggregationMethod(payload.method.value)
+    elif isinstance(payload, (TemporalEstimatePayload, NumericDerivedPayload)):
+        value = payload.value
+        unit_id = payload.unit
+        dependencies = tuple(
+            reference.evidence_id for reference in payload.input_evidence_refs
+        )
     elif isinstance(payload, RelationSupportPayload):
         dependencies = tuple(
             reference.evidence_id for reference in payload.input_evidence_refs
@@ -941,6 +1198,13 @@ def _evidence_fact(
         result_eligibility=fragment.result_eligibility,
         payload_type=payload.payload_type,
         value=value,
+        value_lower=payload.value_lower if isinstance(payload, NumericDerivedPayload) else None,
+        value_upper=payload.value_upper if isinstance(payload, NumericDerivedPayload) else None,
+        method_kind=(payload.method_kind if isinstance(payload, NumericDerivedPayload)
+                     else "explicit_calculation" if isinstance(payload, (AggregatePayload, TemporalEstimatePayload))
+                     else None),
+        inference_basis=payload.inference_basis if isinstance(payload, NumericDerivedPayload) else None,
+        measured_anchors=measured_anchors,
         unit_id=unit_id,
         aggregation_method=aggregation_method,
         source_record_refs=source_refs,
@@ -948,6 +1212,57 @@ def _evidence_fact(
         series_ref=fragment.series_identity,
         quality_class=fragment.quality_class,
         quality_flags=fragment.quality_flags,
+        location_comid=fragment.location.comid,
+        station_id=fragment.location.station_id,
+        temporal_method=(
+            payload.method if isinstance(payload, TemporalEstimatePayload) else None
+        ),
+        anchor_distance_seconds=(
+            payload.anchor_distance_seconds
+            if isinstance(payload, TemporalEstimatePayload)
+            else ()
+        ),
+        numeric_method_id=(
+            payload.method_id if isinstance(payload, NumericDerivedPayload) else None
+        ),
+        numeric_method_version=(
+            payload.method_version
+            if isinstance(payload, NumericDerivedPayload)
+            else None
+        ),
+        numeric_task_id=(
+            payload.task_id if isinstance(payload, NumericDerivedPayload) else None
+        ),
+        numeric_plan_digest=(
+            payload.plan_digest if isinstance(payload, NumericDerivedPayload) else None
+        ),
+        numeric_plan_item_id=(
+            payload.plan_item_ref.item_id
+            if isinstance(payload, NumericDerivedPayload)
+            else None
+        ),
+        numeric_method_registry_digest=(
+            payload.method_registry_digest
+            if isinstance(payload, NumericDerivedPayload)
+            else None
+        ),
+        numeric_confidence_cap=(
+            payload.confidence_cap
+            if isinstance(payload, NumericDerivedPayload)
+            else None
+        ),
+        numeric_input_bindings=(
+            tuple(
+                (reference.evidence_id, reference.item_id, window_id)
+                for reference, window_id in zip(
+                    payload.input_evidence_refs,
+                    payload.input_window_ids,
+                    strict=True,
+                )
+            )
+            if isinstance(payload, NumericDerivedPayload)
+            else ()
+        ),
         registered_reversible_conversion=(
             isinstance(payload, ConversionPayload)
             and fragment.derivation is not None
@@ -956,6 +1271,156 @@ def _evidence_fact(
             and fragment.derivation.registry_digest == capability_registry_digest
         ),
     )
+
+
+def _validate_temporal_estimate_fact(
+    fact: EvidenceValidationFact,
+    facts: dict[str, EvidenceValidationFact],
+) -> None:
+    dependencies = tuple(facts[ref] for ref in fact.dependency_evidence_refs)
+    method = fact.temporal_method
+    if (
+        fact.applicability is not EvidenceApplicability.ALLOWED_INDIRECT
+        or fact.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY
+        or fact.value is None
+        or fact.unit_id is None
+        or fact.aggregation_method is not None
+        or fact.source_record_refs
+        or fact.quality_class not in {
+            EvidenceQualityClass.VALID,
+            EvidenceQualityClass.SUSPICIOUS,
+        }
+        or fact.series_ref is None
+        or fact.location_comid is None
+        or fact.station_id is None
+        or len(fact.parameter_refs) != 1
+        or DataQualityFlag.TEMPORAL_ESTIMATE not in fact.quality_flags
+        or method not in {"linear_interpolation", "nearest_hold"}
+        or len(dependencies) != (2 if method == "linear_interpolation" else 1)
+        or len(fact.anchor_distance_seconds) != len(dependencies)
+        or any(distance <= 0 for distance in fact.anchor_distance_seconds)
+    ):
+        raise ValueError("temporal estimate fact has invalid typed evidence")
+    if any(
+        anchor.payload_type != "aggregate"
+        or anchor.aggregation_method not in {
+            AggregationMethod.MEAN,
+            AggregationMethod.LATEST,
+        }
+        or anchor.applicability is not EvidenceApplicability.DIRECT_MEASUREMENT
+        or anchor.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY
+        or anchor.quality_class not in {
+            EvidenceQualityClass.VALID,
+            EvidenceQualityClass.SUSPICIOUS,
+        }
+        or anchor.target_comid != fact.target_comid
+        or anchor.location_comid != fact.location_comid
+        or anchor.station_id != fact.station_id
+        or anchor.series_ref != fact.series_ref
+        or anchor.parameter_refs != fact.parameter_refs
+        or anchor.value is None
+        or anchor.unit_id != fact.unit_id
+        or (anchor.time_range.start < fact.time_range.end
+            and anchor.time_range.end > fact.time_range.start)
+        for anchor in dependencies
+    ):
+        raise ValueError("temporal estimate anchors must be matching measured windows")
+    if method == "linear_interpolation" and not (
+        any(anchor.time_range.end <= fact.time_range.start for anchor in dependencies)
+        and any(anchor.time_range.start >= fact.time_range.end for anchor in dependencies)
+    ):
+        raise ValueError("temporal interpolation requires anchors on both sides")
+
+
+def _validate_numeric_derived_fact(
+    fact: EvidenceValidationFact,
+    facts: dict[str, EvidenceValidationFact],
+) -> None:
+    bindings = fact.numeric_input_bindings
+    if (
+        fact.applicability is not EvidenceApplicability.ALLOWED_INDIRECT
+        or fact.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY
+        or (fact.value is None and fact.method_kind != "model_estimate")
+        or fact.unit_id is None
+        or fact.aggregation_method is not None
+        or fact.source_record_refs
+        or fact.quality_class not in {
+            EvidenceQualityClass.VALID,
+            EvidenceQualityClass.SUSPICIOUS,
+        }
+        or len(fact.parameter_refs) != 1
+        or DataQualityFlag.ESTIMATED not in fact.quality_flags
+        or fact.numeric_method_id is None
+        or fact.numeric_method_version is None
+        or fact.numeric_method_version < 1
+        or fact.numeric_task_id is None
+        or fact.numeric_plan_digest is None
+        or fact.numeric_plan_item_id is None
+        or fact.numeric_method_registry_digest is None
+        or fact.numeric_confidence_cap is None
+        or not 0 <= fact.numeric_confidence_cap <= 1
+        or (not bindings and fact.method_kind != "model_estimate")
+        or {binding[0] for binding in bindings}
+        != set(fact.dependency_evidence_refs)
+        or len(bindings) != len(fact.dependency_evidence_refs)
+    ):
+        raise ValueError("numeric derivation fact has invalid typed evidence")
+    if fact.method_kind == "model_estimate":
+        from decimal import Decimal
+
+        if (fact.value_lower is None or fact.value_upper is None
+                or Decimal(fact.value_lower) >= Decimal(fact.value_upper)
+                or (fact.value is not None and (
+                    not fact.measured_anchors
+                    or not Decimal(fact.value_lower) <= Decimal(fact.value) <= Decimal(fact.value_upper)
+                ))
+                or bool(fact.measured_anchors) != (fact.inference_basis == "same_parameter_measurement")
+                or any(facts[ref].item_id != item_id for ref, item_id, _ in bindings)):
+            raise ValueError("model estimate fact has invalid range or provenance")
+        return
+    for evidence_ref, item_id, _window_id in bindings:
+        dependency = facts[evidence_ref]
+        if (
+            dependency.item_id != item_id
+            or dependency.target_comid != fact.target_comid
+            or dependency.value is None
+            or dependency.unit_id is None
+            or dependency.quality_class not in {
+                EvidenceQualityClass.VALID,
+                EvidenceQualityClass.SUSPICIOUS,
+            }
+            or dependency.result_eligibility
+            is EvidenceResultEligibility.EXPLANATORY_ONLY
+            or not set(dependency.quality_flags) <= set(fact.quality_flags)
+            or (
+                dependency.quality_class is EvidenceQualityClass.SUSPICIOUS
+                and fact.quality_class is not EvidenceQualityClass.SUSPICIOUS
+            )
+            or (
+                dependency.payload_type == "numeric_derived"
+                and (
+                    dependency.numeric_confidence_cap is None
+                    or fact.numeric_confidence_cap
+                    > dependency.numeric_confidence_cap
+                )
+            )
+            or (
+                dependency.payload_type == "temporal_estimate"
+                and fact.numeric_confidence_cap
+                > _temporal_confidence_cap(dependency, dependency.time_range)
+            )
+        ):
+            raise ValueError("numeric derivation input is incompatible")
+
+
+def _temporal_confidence_cap(
+    fact: EvidenceValidationFact,
+    window: TimeRange,
+) -> float:
+    window_seconds = (window.end - window.start).total_seconds()
+    farthest_anchor_seconds = max(fact.anchor_distance_seconds)
+    base = 0.75 if fact.temporal_method == "linear_interpolation" else 0.55
+    return round(base * min(1.0, window_seconds / farthest_anchor_seconds), 6)
 
 
 def _fact_closure(
@@ -984,8 +1449,146 @@ def _references_are_closed(
     return {
         dependency
         for fact in facts
+        if fact.payload_type not in {
+            "relation_support", "temporal_estimate", "numeric_derived"
+        }
         for dependency in fact.dependency_evidence_refs
     } <= set(evidence_refs)
+
+
+def _quality_flags_from_facts(
+    facts: Iterable[EvidenceValidationFact],
+) -> tuple[DataQualityFlag, ...]:
+    return tuple(
+        sorted(
+            {flag for fact in facts for flag in fact.quality_flags},
+            key=lambda flag: flag.value,
+        )
+    )
+
+
+def _fill_single_allowed_units(
+    raw: object, batch: ReasoningBatch
+) -> tuple[object, tuple[str, ...]]:
+    if isinstance(raw, str):
+        try:
+            value = _strict_json_object(raw)
+        except (TypeError, ValueError):
+            return raw, ()
+    else:
+        value = raw
+    if not isinstance(value, dict) or not isinstance(value.get("cells"), list):
+        return value, ()
+    units_by_cell = {
+        cell.cell_id: cell.allowed_unit_ids[0]
+        for cell in batch.cells
+        if len(cell.allowed_unit_ids) == 1
+    }
+    cells = list(value["cells"])
+    paths = []
+    for index, cell in enumerate(cells):
+        if not isinstance(cell, dict) or not isinstance(cell.get("cell_id"), str):
+            continue
+        unit = units_by_cell.get(cell["cell_id"])
+        if (
+            unit is not None
+            and cell.get("outcome_status") in {
+                OutcomeStatus.QUANTIFIED.value, OutcomeStatus.RANGE_ESTIMATE.value
+            }
+            and "target_unit_id" in cell
+            and cell["target_unit_id"] is None
+        ):
+            cells[index] = {**cell, "target_unit_id": unit}
+            paths.append(f"$.cells[{index}].target_unit_id")
+    return {**value, "cells": cells}, tuple(paths)
+
+
+def _fill_cited_numeric_ranges(
+    raw: object,
+    batch: ReasoningBatch,
+    facts: dict[str, EvidenceValidationFact],
+    scopes: dict[str, CellEvidenceValidationScope],
+) -> tuple[object, tuple[str, ...]]:
+    if not isinstance(raw, dict) or not isinstance(raw.get("cells"), list):
+        return raw, ()
+    planned_by_id = {cell.cell_id: cell for cell in batch.cells}
+    cells = list(raw["cells"])
+    filled_paths: list[str] = []
+    for index, cell in enumerate(cells):
+        if not isinstance(cell, dict):
+            continue
+        status = cell.get("outcome_status")
+        if status == OutcomeStatus.RANGE_ESTIMATE.value:
+            if (
+                "value_lower" in cell
+                or "value_upper" in cell
+                or "representative_value" not in cell
+                or cell["representative_value"] is not None
+            ):
+                continue
+        elif status == OutcomeStatus.QUANTIFIED.value:
+            bounds_missing = (
+                "value_lower" not in cell and "value_upper" not in cell
+            )
+            bounds_null = (
+                "value_lower" in cell
+                and "value_upper" in cell
+                and cell["value_lower"] is None
+                and cell["value_upper"] is None
+            )
+            if not (bounds_missing or bounds_null) or not isinstance(
+                cell.get("representative_value"), str
+            ):
+                continue
+        else:
+            continue
+        cell_id = cell.get("cell_id")
+        planned = planned_by_id.get(cell_id) if isinstance(cell_id, str) else None
+        scope = scopes.get(cell_id) if isinstance(cell_id, str) else None
+        refs = cell.get("evidence_refs")
+        if (
+            planned is None
+            or scope is None
+            or not isinstance(refs, (list, tuple))
+            or not refs
+            or any(not isinstance(ref, str) for ref in refs)
+            or len(set(refs)) != len(refs)
+            or not set(refs) <= set(planned.allowed_evidence_refs)
+        ):
+            continue
+        candidates = tuple(
+            facts[ref]
+            for ref in refs
+            if ref in scope.target_indirect_refs
+            and facts[ref].payload_type == "numeric_derived"
+            and facts[ref].method_kind == "model_estimate"
+            and (facts[ref].value is None) == (
+                status == OutcomeStatus.RANGE_ESTIMATE.value
+            )
+            and facts[ref].value_lower is not None
+            and facts[ref].value_upper is not None
+        )
+        if len(candidates) != 1:
+            continue
+        fact = candidates[0]
+        if (
+            fact.parameter_refs != (planned.parameter,)
+            or fact.time_range.start != planned.start_time
+            or fact.time_range.end != planned.end_time
+            or fact.unit_id != cell.get("target_unit_id")
+            or fact.value != cell["representative_value"]
+        ):
+            continue
+        cells[index] = {
+            **cell,
+            "value_lower": fact.value_lower,
+            "value_upper": fact.value_upper,
+        }
+        filled_paths.extend((
+            f"$.cells[{index}].value_lower",
+            f"$.cells[{index}].value_upper",
+        ))
+    return {**raw, "cells": cells}, tuple(filled_paths)
 
 
 def _parse_draft(raw: object, model_type):
@@ -1041,7 +1644,7 @@ def _strict_json_object(value: str) -> dict[str, object]:
         parse_constant=reject_constant,
     )
     if not isinstance(parsed, dict):
-        raise ValueError("draft must be one JSON object")
+        raise TypeError("draft must be one JSON object")
     return parsed
 
 

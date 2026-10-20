@@ -83,6 +83,7 @@ def test_production_registry_has_only_real_writable_types() -> None:
         ("evidence_tool_call", 1),
         ("evidence_source_records", 1),
         ("evidence_fragment", 1),
+        ("numeric_dependency_plan", 1),
         ("evidence_tool_result", 1),
         ("evidence_bundle", 1),
         ("waterbody_agent_input", 1),

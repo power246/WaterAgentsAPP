@@ -112,7 +112,7 @@ alias 先做 Unicode NFKC、trim、casefold 和受控空白规范化，再查精
 | count density | count/100mL 等 | 分母体积是单位的一部分 |
 | precipitation depth | mm、in | 线性；累计/区间含义由 value semantics 决定 |
 
-未知单位、化学基准不一致、温度基准不一致或 dimension 不同均返回 `evidence_unit_unresolved`，保留原记录但不能进入 quantified aggregate。Agent 不能自行提供换算系数。
+未知单位、化学基准不一致、温度基准不一致或 dimension 不同均返回 `evidence_unit_unresolved`，保留该原始项及 invalid 事实，但该项不参与数值计算。同一序列中其他单位可转换、质量可用的读数在采集完整时仍可聚合。Agent 不能自行提供换算系数。
 
 ### 3.3 自定义目标单位接力
 
@@ -134,6 +134,8 @@ M9 的 session override 只能选择已登记、dimension 兼容的 target unit�
 | `forecast_interval` | 预报在有效区间的值 | NWS grid forecast |
 
 provider statistic 是 series identity 的一部分。`daily mean` 已经是 interval_mean，不能当作瞬时值后再与 daily max 混合，也不能再次对“累计总量”无条件求和。
+
+USGS WDFN 连续序列的证据策略视图对已核实代码做受控映射：`00400` 且原始方法类别 `STNRD` 映射为 `Water / Total / sensor / instantaneous`；`00060` 且原始方法类别为空映射为 `Water / null / sensor / instantaneous`，两者均要求原始统计码 `00011`。原始 `SourceRecord` 和原始代码仍保留；其他代码组合不猜测。这里的 `sensor` 是连续自动序列的策略分类，不表示流量由物理流量传感器直接测得；`STNRD` 是 USGS 方法类别代码，不等同于 `sensor`。代码含义见 USGS [pH 参数](https://api.waterdata.usgs.gov/ogcapi/v1/collections/parameter-codes/items?f=json&id=00400)、[流量参数](https://api.waterdata.usgs.gov/ogcapi/v1/collections/parameter-codes/items?f=json&id=00060)、[统计码](https://api.waterdata.usgs.gov/ogcapi/v1/collections/statistic-codes/items?f=json&id=00011)和[方法类别](https://api.waterdata.usgs.gov/ogcapi/v1/collections/method-categories/items?f=json&id=STNRD)。
 
 ## 5. Aggregation policy
 
@@ -179,10 +181,10 @@ counter_delta_sum
 
 - 所有输入属于同一 `series_identity`；
 - ParameterKey、provider/channel、station/site、medium、fraction、method、statistic 和 value semantics 兼容；
-- 全部单位可确定性转为 capability canonical unit；
+- 用于数值计算的输入单位均可确定性转为 capability canonical unit；
 - record 时间与目标 window 的相交规则由 profile 允许；
 - 方法存在于 capability 的 allowed methods；
-- 没有 invalid input；
+- invalid 原始项保留审计引用但不参与数值计算，至少有一条可用输入；
 - technical collection completeness 已证明；
 - count/coverage 达到 profile 阈值。
 
@@ -218,13 +220,13 @@ CoverageSummary
 
 | profile | complete | partial | insufficient |
 |---|---|---|---|
-| `continuous_regular` | expected cadence 已知，ratio ≥ 0.75 且 largest gap ≤ 2× cadence | ratio ≥ 0.50 | 低于 partial 或 expected cadence 不可确认 |
+| `continuous_regular` | 采集完整且所选窗口内至少 1 条可用读数，可形成该窗代表值 | 无；采集未完成标为 unknown | 无可用读数 |
 | `continuous_latest` | 窗口内至少 1 条且距 window end 不超过 2× cadence | 有记录但更旧 | 无记录 |
 | `discrete_sample` | 不宣称持续覆盖；单条为 partial | 至少 1 条 usable record | 无 usable record |
 | `provider_interval` | provider interval 完整覆盖或按 policy 可精确裁切 | 只覆盖部分窗口 | 无覆盖/边界不明 |
 | `forecast_interval` | union 覆盖完整 window | union 覆盖部分 window | 无交集 |
 
-profile threshold 是默认值；capability/channel 可以通过命名 profile 收紧。不能因记录很多就猜 expected cadence，也不能用 partial coverage 掩盖 pagination 技术失败。
+profile threshold 是默认值；capability/channel 可以通过命名 profile 收紧。对 `continuous_regular`，`complete` 只表示该窗口具备可用代表值，不表示整窗连续实测。cadence、ratio 和 largest gap 若有依据仍如实记录，但不作为此类窗口数值的资格门槛；cadence 未知时不猜 expected cadence。分页等采集技术失败标为 `unknown`，不能用读数或 `partial_coverage` 掩盖。
 
 aggregation 允许 partial coverage 时，derived fragment 必须标记 `partial_coverage` 和真实 coverage；是否足以进入 M6 directional/quantified gate 由 capability relation 与 M6 policy 决定。`insufficient` 不形成可解锁门禁的 aggregate。
 

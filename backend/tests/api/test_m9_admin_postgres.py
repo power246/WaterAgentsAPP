@@ -322,6 +322,7 @@ def test_profile_handoff_reader_drain_and_index_only_deletion() -> None:
     )))
 
     async def exercise(settings):
+        settings = settings.model_copy(update={"memory_enabled": True})
         application = create_test_app(
             settings.model_copy(update={
                 "rag_reconciliation_interval_seconds": 0.01,
@@ -425,6 +426,7 @@ def test_saved_desired_profile_does_not_apply_on_restart_without_confirmation() 
     )))
 
     async def exercise(settings):
+        settings = settings.model_copy(update={"memory_enabled": True})
         active_id = None
         first = create_test_app(
             settings, model_catalog=catalog, m8_runtime_builder=_deterministic_m8,
@@ -474,6 +476,7 @@ def test_saved_desired_profile_does_not_apply_on_restart_without_confirmation() 
 
 def test_failed_job_retry_uses_safe_codes_and_keeps_history() -> None:
     async def exercise(settings):
+        settings = settings.model_copy(update={"memory_enabled": True})
         application = create_test_app(
             settings.model_copy(update={"rag_reconciliation_interval_seconds": 600}),
             m8_runtime_builder=_deterministic_m8,
@@ -545,6 +548,7 @@ def test_failed_job_retry_uses_safe_codes_and_keeps_history() -> None:
 
 def test_history_admin_cascade_repreviews_new_consumption_and_leaves_no_links() -> None:
     async def exercise(settings):
+        settings = settings.model_copy(update={"memory_enabled": True})
         application = create_test_app(
             settings.model_copy(update={"rag_reconciliation_interval_seconds": 600}),
             m8_runtime_builder=_deterministic_m8,

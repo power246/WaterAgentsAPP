@@ -276,10 +276,11 @@ export function SettingsDrawer({ settings, onSettings, onClose }: {
           const resolution = server.catalog.time_resolutions.find((value) => value === event.target.value)
           if (resolution) change('time_resolution', resolution)
         }}>{server.catalog.time_resolutions.map((resolution) => <option key={resolution}>{resolution}</option>)}</select></label>
-        <label>Desired embedding profile<select value={draft.desired_embedding_profile_id} onChange={(event) =>
+        <label>Desired embedding profile<select value={draft.desired_embedding_profile_id}
+          disabled={!server.catalog.embedding_profiles.some((profile) => profile.available)} onChange={(event) =>
           change('desired_embedding_profile_id', event.target.value)}>
-          {server.catalog.embedding_profiles.filter((profile) => profile.available).map((profile) =>
-            <option key={profile.profile_id} value={profile.profile_id}>{profile.label}</option>)}
+          {server.catalog.embedding_profiles.map((profile) =>
+            <option key={profile.profile_id} value={profile.profile_id} disabled={!profile.available}>{profile.label}</option>)}
         </select></label>
         <button type="button" disabled={busy || !defaultsDirty || Boolean(conflict)} onClick={() => void saveDefaults()}>Save full defaults</button>
         {conflict && <div className="conflict" role="alert">

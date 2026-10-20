@@ -192,6 +192,7 @@ def create_app(
                     active_settings_store, resolved_model_catalog.snapshot(),
                     initial_defaults, resolved_clock,
                     unit_registry=resolved_parameter_capabilities,
+                    memory_enabled=resolved_settings.memory_enabled,
                 )
             except ValueError as error:
                 raise SettingsConfigurationError(
@@ -294,7 +295,9 @@ def create_app(
                     preview_bytes=resolved_settings.transcript_preview_bytes // 2,
                 )
                 query_topology_workflow = runtime.query_topology_workflow
-                result_reader = TranscriptUpstreamInferenceResultReader(transcript_reader)
+                result_reader = TranscriptUpstreamInferenceResultReader(
+                    transcript_reader, coordinator
+                )
                 upstream_results = RunLocalUpstreamResultRegistry(result_reader)
                 if engine is None and m8_runtime_builder is None:
                     raise SettingsConfigurationError(

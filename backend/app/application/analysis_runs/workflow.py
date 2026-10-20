@@ -9,12 +9,15 @@ from uuid import UUID
 
 from app.application.analysis_runs.models import (
     AgentRole,
+    AgentSessionStatus,
     AnalysisRunSnapshot,
     OperationIdentity,
     PublicError,
+    RunStatus,
     SessionSummary,
     TranscriptItemIdentity,
 )
+
 if TYPE_CHECKING:
     from app.application.analysis_runs.persistence import RAGConsumptionSource
     from app.application.analysis_runs.topology_result_models import (
@@ -34,6 +37,24 @@ if TYPE_CHECKING:
 
 class WorkflowStopped(Exception):
     pass
+
+
+class InvalidRunTransitionError(Exception):
+    def __init__(self, run: AnalysisRunSnapshot, target_status: RunStatus) -> None:
+        self.run = run
+        self.target_status = target_status
+        super().__init__("The run cannot enter the requested state.")
+
+
+class InvalidAgentSessionTransitionError(Exception):
+    def __init__(
+        self,
+        session: SessionSummary,
+        target_status: AgentSessionStatus,
+    ) -> None:
+        self.session = session
+        self.target_status = target_status
+        super().__init__("The Agent session cannot enter the requested state.")
 
 
 class WorkflowFailed(Exception):
@@ -193,6 +214,12 @@ class WorkflowOperations(Protocol):
         private_values: tuple[str, ...] = (),
         rag_consumption_sources: tuple[RAGConsumptionSource, ...] = (),
     ) -> TranscriptItemIdentity: ...
+
+    async def wait_for_transcript_items_persisted(
+        self,
+        run_id: UUID | str,
+        item_ids: tuple[UUID | str, ...],
+    ) -> PublicError | None: ...
 
     async def start_transcript_message(
         self,

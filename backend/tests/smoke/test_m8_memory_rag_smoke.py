@@ -489,6 +489,7 @@ def test_production_entrypoint_indexes_searches_consumes_and_restarts(
     async def exercise(settings) -> None:
         resolved = settings.model_copy(
             update={
+                "memory_enabled": True,
                 "rag_reconciliation_interval_seconds": 1.0,
                 "rag_worker_shutdown_grace_seconds": 1,
                 "live_state_grace_seconds": 60,

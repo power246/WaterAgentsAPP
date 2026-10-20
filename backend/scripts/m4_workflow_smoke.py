@@ -21,8 +21,8 @@ from app.application.transcripts.registry import create_production_registry
 from app.domain import (
     AdministrativeLocation,
     EmbeddingProfile,
-    GeoPoint,
     GeocodingCandidate,
+    GeoPoint,
     HydrologyGraph,
     ModelCapability,
     ModelRole,
@@ -47,6 +47,7 @@ from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from app.infrastructure.runtime import compose_m4_workflow
 from app.main import create_app
 from app.ports import PortUnavailableError
+
 try:
     from scripts.m6_fixture_runtime import build_fixture_m6_runtime
     from scripts.m8_fixture_runtime import build_fixture_m8_runtime
@@ -327,6 +328,13 @@ class FixtureUsgsMetadata:
                 )
         return tuple(records)
 
+    async def get_time_series_observation_windows(
+        self, series, requested, *, deadline=None
+    ):
+        del series, deadline
+        self.requests += 1
+        return tuple(item.window_index for item in requested)
+
     async def get_sample_periods(self, station_id: str, *, deadline=None):
         del deadline
         self.requests += 1
@@ -343,6 +351,13 @@ class FixtureUsgsMetadata:
             )
             for key in sorted(samples, key=lambda item: item.code)
         )
+
+    async def get_sample_observation_windows(
+        self, period, parameter, requested, *, deadline=None
+    ):
+        del period, parameter, deadline
+        self.requests += 1
+        return tuple(item.window_index for item in requested)
 
     def _station_ids(self) -> tuple[str, ...]:
         if self.profile is FixtureProfile.FULL:
@@ -504,6 +519,12 @@ async def run_case(
         )
         assert replay.run_id == created.run_id
         assert parser.calls == 1
+        live = await coordinator.get_live_read(created.run_id)
+        assert live is not None
+        assert await coordinator.wait_for_transcript_items_persisted(
+            created.run_id,
+            tuple(item.item_id for item in live.items),
+        ) is None
         stored = await store.read_run(created.run_id)
         assert stored is not None
         context = parsed_content(stored, "query_understood")

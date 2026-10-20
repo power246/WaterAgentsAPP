@@ -16,7 +16,7 @@ from tests.application.evidence_tools.fakes import (
 )
 
 
-def test_station_backed_empty_preflight_stops_before_any_model_call() -> None:
+def test_station_backed_empty_preflight_allows_numeric_estimation() -> None:
     async def exercise() -> None:
         scope = make_scope(run_id="run-smoke", session_id="session-smoke")
         store = MemoryEvidenceStore()
@@ -45,8 +45,10 @@ def test_station_backed_empty_preflight_stops_before_any_model_call() -> None:
         if not handoff.stop_before_model:
             model_calls += 1
 
-        assert handoff.stop_before_model
-        assert model_calls == 0
+        assert not handoff.stop_before_model
+        assert handoff.numeric_estimation_allowed
+        assert handoff.stop_facts == ()
+        assert model_calls == 1
         assert len(store.calls) == 1
         assert len(store.results) == 1
         assert store.fragments

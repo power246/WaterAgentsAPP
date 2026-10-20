@@ -7,6 +7,7 @@ from app.application.analysis_runs.models import (
     AgentSessionStatus,
     RunStatus,
 )
+from app.application.analysis_runs.persistence import PersistenceState
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from tests.application.analysis_runs._m7_projection_support import coordinator_for
 from tests.m4_support import create_request_bytes
@@ -93,8 +94,12 @@ def test_cancel_acceptance_precedes_quiescence_stream_close_and_cleanup() -> Non
 
             workflow.release.set()
             await asyncio.wait_for(runtime.workflow_quiesced.wait(), timeout=1)
+            await asyncio.wait_for(coordinator._transcript_writer.drain(runtime), timeout=1)
+            final = await asyncio.wait_for(waiting_for_end, timeout=1)
+            assert final.status is RunStatus.CANCELLED
+            assert final.persistence.state is PersistenceState.UP_TO_DATE
             with pytest.raises(StopAsyncIteration):
-                await asyncio.wait_for(waiting_for_end, timeout=1)
+                await asyncio.wait_for(anext(stream), timeout=1)
             async with asyncio.timeout(1):
                 while not cleaned:
                     await asyncio.sleep(0)

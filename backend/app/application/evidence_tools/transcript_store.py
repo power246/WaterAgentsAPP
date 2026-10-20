@@ -1,11 +1,16 @@
+import asyncio
 from collections import defaultdict
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from app.application.analysis_runs.models import SessionSummary
 from app.application.analysis_runs.persistence import RAGConsumptionSource
 from app.application.analysis_runs.workflow import WorkflowOperations
+from app.application.evidence_policy import PolicyObservation
 from app.application.evidence_tools.collection_service import build_policy_observation
-from app.application.evidence_tools.errors import EvidenceScopeViolationError
+from app.application.evidence_tools.errors import (
+    EvidencePersistenceUnavailableError,
+    EvidenceScopeViolationError,
+)
 from app.application.evidence_tools.models import (
     EvidenceCollectionArtifacts,
     EvidencePolicyClass,
@@ -29,12 +34,15 @@ from app.domain import (
     EvidenceToolCall,
     EvidenceToolRequest,
     EvidenceToolResult,
+    GeoPoint,
     HistoricalTranscriptRecord,
     ItemReference,
+    NumericDependencyPlan,
     ParameterCapabilityRegistry,
     ReferenceScope,
     SourceRecord,
     SourceRecordReference,
+    TimeRange,
 )
 
 
@@ -159,6 +167,42 @@ class EvidenceTranscriptStore:
             evidence_id=fragment.evidence_id,
         )
 
+    async def write_numeric_plan(
+        self,
+        scope: EvidenceSessionScope,
+        plan: NumericDependencyPlan,
+    ) -> ItemReference:
+        if (
+            plan.run_id != scope.run_id
+            or plan.session_id != scope.session_id
+            or plan.target_comid != scope.agent_comid
+        ):
+            raise EvidenceScopeViolationError()
+        return await self._write(
+            scope,
+            content_type="numeric_dependency_plan",
+            body=plan,
+            operation_id=str(uuid5(
+                NAMESPACE_URL,
+                f"m5:numeric-plan:{scope.run_id}:{scope.session_id}:{plan.plan_digest}",
+            )),
+        )
+
+    async def read_numeric_plan(
+        self,
+        scope: EvidenceSessionScope,
+        reference: ItemReference,
+    ) -> NumericDependencyPlan:
+        body = await self._read_session_item(scope, reference.item_id)
+        if (
+            not isinstance(body, NumericDependencyPlan)
+            or body.run_id != scope.run_id
+            or body.session_id != scope.session_id
+            or body.target_comid != scope.agent_comid
+        ):
+            raise EvidenceScopeViolationError()
+        return body
+
     async def write_result(
         self,
         scope: EvidenceSessionScope,
@@ -188,26 +232,44 @@ class EvidenceTranscriptStore:
         scope: EvidenceSessionScope,
         reference: EvidenceFragmentReference,
     ) -> EvidenceFragment:
-        body = await self._read_session_item(scope, reference.item_id)
-        if (
-            not isinstance(body, EvidenceFragment)
-            or body.evidence_id != reference.evidence_id
-            or body.target_comid != scope.agent_comid
-        ):
-            raise EvidenceScopeViolationError()
-        return body
+        return (await self.read_fragments(scope, (reference,)))[0]
+
+    async def read_fragments(
+        self,
+        scope: EvidenceSessionScope,
+        references: tuple[EvidenceFragmentReference, ...],
+    ) -> tuple[EvidenceFragment, ...]:
+        bodies = await self._read_session_items(
+            scope, tuple(reference.item_id for reference in references)
+        )
+        fragments = []
+        for reference, body in zip(references, bodies, strict=True):
+            if (
+                not isinstance(body, EvidenceFragment)
+                or body.evidence_id != reference.evidence_id
+                or body.target_comid != scope.agent_comid
+            ):
+                raise EvidenceScopeViolationError()
+            fragments.append(body)
+        return tuple(fragments)
 
     async def read_policy_observations(
         self,
         scope: EvidenceSessionScope,
         references: tuple[SourceRecordReference, ...],
+        window: TimeRange,
     ) -> StoredPolicyObservations:
         if not references or len(references) != len(set(references)):
             raise EvidenceScopeViolationError()
         bodies: dict[str, EvidenceSourceRecords] = {}
         records: dict[SourceRecordReference, SourceRecord] = {}
-        for item_id, grouped in _group_record_references(references).items():
-            body = await self._read_session_item(scope, item_id)
+        grouped_references = _group_record_references(references)
+        source_bodies = await self._read_session_items(
+            scope, tuple(grouped_references)
+        )
+        for (item_id, grouped), body in zip(
+            grouped_references.items(), source_bodies, strict=True
+        ):
             if not isinstance(body, EvidenceSourceRecords):
                 raise EvidenceScopeViolationError()
             bodies[item_id] = body
@@ -229,11 +291,38 @@ class EvidenceTranscriptStore:
         )
         if any(item is None for item in observations):
             raise EvidenceScopeViolationError()
+        selected = observations[0]
+        eligible_refs = {
+            reference
+            for item_id, body in bodies.items()
+            for record in body.records
+            if (
+                observation := build_policy_observation(
+                    self._capabilities,
+                    record,
+                    SourceRecordReference(item_id=item_id, record_id=record.record_id),
+                    provider_name=body.manifest.provider,
+                    channel=body.manifest.channel,
+                )
+            ) is not None
+            if observation.parameter == selected.parameter
+            and observation.station_id == selected.station_id
+            and observation.series_identity == selected.series_identity
+            and (
+                window.contains(observation.observed_time)
+                if observation.observed_time is not None
+                else observation.valid_time_range is not None
+                and window.overlaps(observation.valid_time_range)
+            )
+            for reference in (observation.record_ref,)
+        }
         return StoredPolicyObservations(
             observations=tuple(item for item in observations if item is not None),
             collection_complete=all(
                 body.manifest.completion_proof.complete for body in bodies.values()
             ),
+            selection_complete=eligible_refs == set(references),
+            station_point=_consistent_station_point(observations),
         )
 
     async def read_source_records(
@@ -253,34 +342,18 @@ class EvidenceTranscriptStore:
     ) -> tuple[ReferenceScope, ...]:
         if len(item_ids) != len(set(item_ids)):
             raise EvidenceScopeViolationError()
-        resolved: list[ReferenceScope] = []
-        try:
-            run_id = UUID(scope.run_id)
-            for item_id in item_ids:
-                item = await self._reader.read_registered_item(
-                    run_id,
-                    UUID(item_id),
-                    self._read_view,
-                )
-                resolved.append(ReferenceScope(
-                    item_id=item_id,
-                    run_id=scope.run_id,
-                    session_id=(
-                        None
-                        if item.item.content_type
-                        in {"query_understood", "topology_ready"}
-                        else str(item.item.session_id)
-                        if item.item.session_id is not None
-                        else None
-                    ),
-                ))
-        except (
-            ValueError,
-            TranscriptItemNotFoundError,
-            TranscriptContentUnreadableError,
-        ) as error:
-            raise EvidenceScopeViolationError() from error
-        return tuple(resolved)
+        items = await self._read_items(scope, item_ids)
+        return tuple(ReferenceScope(
+            item_id=item_id,
+            run_id=scope.run_id,
+            session_id=(
+                None
+                if item.item.content_type in {"query_understood", "topology_ready"}
+                else str(item.item.session_id)
+                if item.item.session_id is not None
+                else None
+            ),
+        ) for item_id, item in zip(item_ids, items, strict=True))
 
     async def _write_source_batch(
         self,
@@ -301,15 +374,17 @@ class EvidenceTranscriptStore:
             for record in records
             if isinstance(record, HistoricalTranscriptRecord)
         )
+        body = await asyncio.to_thread(
+            EvidenceSourceRecords,
+            operation_id=operation_id,
+            batch_id=manifest.manifest_id,
+            manifest=manifest,
+            records=records,
+        )
         return await self._write(
             scope,
             content_type="evidence_source_records",
-            body=EvidenceSourceRecords(
-                operation_id=operation_id,
-                batch_id=manifest.manifest_id,
-                manifest=manifest,
-                records=records,
-            ),
+            body=body,
             operation_id=operation_id,
             rag_consumption_sources=consumption_sources,
         )
@@ -352,20 +427,50 @@ class EvidenceTranscriptStore:
         scope: EvidenceSessionScope,
         item_id: str,
     ) -> object:
+        return (await self._read_session_items(scope, (item_id,)))[0]
+
+    async def _read_session_items(
+        self,
+        scope: EvidenceSessionScope,
+        item_ids: tuple[str, ...],
+    ) -> tuple[object, ...]:
+        items = await self._read_items(scope, item_ids)
+        if any(
+            item.item.session_id != UUID(scope.session_id)
+            for item in items
+        ):
+            raise EvidenceScopeViolationError()
+        return tuple(item.body for item in items)
+
+    async def _read_items(
+        self,
+        scope: EvidenceSessionScope,
+        item_ids: tuple[str, ...],
+    ):
         try:
-            item = await self._reader.read_registered_item(
-                UUID(scope.run_id),
-                UUID(item_id),
-                self._read_view,
-                session_id=UUID(scope.session_id),
+            keys = tuple(UUID(item_id) for item_id in item_ids)
+            warning = await self._operations.wait_for_transcript_items_persisted(
+                scope.run_id, keys
+            )
+            if warning is not None:
+                raise EvidencePersistenceUnavailableError()
+            selected = await self._reader.read_registered_items_persisted(
+                UUID(scope.run_id), keys, self._read_view
             )
         except (
             ValueError,
             TranscriptItemNotFoundError,
             TranscriptContentUnreadableError,
+            TranscriptRunNotFoundError,
         ) as error:
             raise EvidenceScopeViolationError() from error
-        return item.body
+        by_id = {item.item.item_id: item for item in selected}
+        if len(by_id) != len(keys) or any(
+            item_id not in by_id or by_id[item_id].body is None
+            for item_id in keys
+        ):
+            raise EvidenceScopeViolationError()
+        return tuple(by_id[item_id] for item_id in keys)
 
 
 def _assign_records_to_manifests(
@@ -405,3 +510,16 @@ def _group_record_references(
     for reference in references:
         grouped[reference.item_id].append(reference)
     return {key: tuple(value) for key, value in grouped.items()}
+
+
+def _consistent_station_point(
+    observations: tuple[PolicyObservation | None, ...],
+) -> GeoPoint | None:
+    if not observations or observations[0] is None:
+        return None
+    point = observations[0].location_point
+    if point is None or any(
+        item is None or item.location_point != point for item in observations[1:]
+    ):
+        return None
+    return point

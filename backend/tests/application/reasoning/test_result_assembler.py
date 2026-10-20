@@ -7,23 +7,29 @@ from app.application.reasoning import (
 from app.domain import (
     AssessmentAvailability,
     EvidenceReference,
-    InferenceResult,
     IndeterminateReason,
+    InferenceResult,
     ModelExecutionSummary,
     ModelSelection,
     OutcomeStatus,
     RiskLevel,
+    SourceRecordReference,
     WaterQualityParameter,
 )
+from app.domain.evidence.measured_anchor import MeasuredAnchor
 from app.domain.settings_admin import UnitPreference
 from app.infrastructure.config import load_parameter_capability_registry
 from tests.application.reasoning.m7_support import (
     batch_payload,
     m7_fixture,
+    rebuild_catalog,
     synthesis_payload,
     validated_reasoning,
 )
-
+from tests.application.reasoning.test_draft_validator import (
+    _numeric_derived_fixture,
+    _temporal_estimate_fixture,
+)
 
 MODEL = ModelSelection(provider="test-provider", model="waterbody-model")
 TRANSCRIPT_ITEM_REFS = (
@@ -138,6 +144,99 @@ def test_assembler_preserves_validated_agent_judgments_and_reference_closure():
     assert {item.evidence_id for item in result.evidence_chain.references} == set(
         skeleton.evidence_allowlist
     )
+
+
+def test_assembler_marks_only_target_temporal_value() -> None:
+    skeleton, plan, batch, catalog, payload, _estimate_ref, _anchor_refs = (
+        _temporal_estimate_fixture(
+            method="linear_interpolation", distance_seconds=21600,
+        )
+    )
+    validator = DraftValidator(catalog)
+    validated = validator.validate_batch(batch, payload)
+    reasoning = validator.complete_batches(plan.batch_plan, (validated,))
+    synthesis_draft = synthesis_payload(skeleton, plan, reasoning)
+    synthesis_draft["attribution_summary"]["primary_factors"] = []
+    synthesis = validator.validate_synthesis(
+        skeleton,
+        plan.batch_plan,
+        plan.synthesis_plan,
+        reasoning,
+        synthesis_draft,
+    )
+    result = assemble_inference_result(
+        skeleton,
+        reasoning=reasoning,
+        synthesis=synthesis,
+        parameter_definitions=_parameters(skeleton),
+        evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
+        model_execution_summary=_summary(
+            skeleton, batches=plan.batch_plan.batch_count, synthesis=1,
+        ),
+        evidence_catalog=catalog,
+    )
+    points = result.series[0].points
+    assert points[0].temporal_estimate_method is None
+    assert points[1].temporal_estimate_method == "linear_interpolation"
+    assert points[2].temporal_estimate_method is None
+    assert InferenceResult.model_validate_json(result.model_dump_json()) == result
+
+
+@pytest.mark.parametrize("range_only", [False, True])
+def test_assembler_keeps_saved_model_range_and_measured_lineage(range_only):
+    skeleton, plan, _catalog, _validator = m7_fixture()
+    batch, catalog, payload, input_ref, result_ref = _numeric_derived_fixture()
+    input_fact = next(fact for fact in catalog.facts if fact.evidence_ref == input_ref)
+    anchors = () if range_only else (MeasuredAnchor(
+        parameter=input_fact.parameter_refs[0],
+        source_record_refs=(SourceRecordReference(item_id="original-records", record_id="reading-1"),),
+        origin_comid="upstream-1", station_id="station-1",
+        evidence_time_range=input_fact.time_range,
+        path_comids=("upstream-1", skeleton.target_comid), distance_km=145.6,
+    ),)
+    facts = tuple(
+        fact.model_copy(update={
+            "value": None if range_only else "7",
+            "value_lower": "6.2", "value_upper": "8.4",
+            "method_kind": "model_estimate",
+            "inference_basis": "general_knowledge" if range_only else "same_parameter_measurement",
+            "measured_anchors": anchors,
+            "numeric_confidence_cap": 0.08,
+            "dependency_evidence_refs": () if range_only else fact.dependency_evidence_refs,
+            "numeric_input_bindings": () if range_only else fact.numeric_input_bindings,
+        }) if fact.evidence_ref == result_ref else fact
+        for fact in catalog.facts
+    )
+    catalog = rebuild_catalog(catalog, facts=facts)
+    payload["cells"][1].update(
+        outcome_status="range_estimate" if range_only else "quantified",
+        representative_value=None if range_only else "7",
+        value_lower="6.2", value_upper="8.4", confidence=0.08,
+    )
+    validator = DraftValidator(catalog)
+    validated = validator.validate_batch(batch, payload)
+    reasoning = validator.complete_batches(plan.batch_plan, (validated,))
+    synthesis_draft = synthesis_payload(skeleton, plan, reasoning)
+    synthesis_draft["attribution_summary"]["primary_factors"] = []
+    synthesis = validator.validate_synthesis(
+        skeleton, plan.batch_plan, plan.synthesis_plan, reasoning, synthesis_draft,
+    )
+    result = assemble_inference_result(
+        skeleton, reasoning=reasoning, synthesis=synthesis,
+        parameter_definitions=_parameters(skeleton),
+        evidence_references=_references(skeleton),
+        transcript_item_refs=TRANSCRIPT_ITEM_REFS,
+        model_execution_summary=_summary(skeleton, batches=1, synthesis=1),
+        evidence_catalog=catalog,
+    )
+    point = result.series[0].points[1]
+    assert (point.value_lower, point.value_upper) == ("6.2", "8.4")
+    assert point.representative_value == (None if range_only else "7")
+    assert point.inference_method == "model_estimate"
+    assert point.measured_anchors == anchors
+    assert point.confidence == 0.08
+    assert InferenceResult.model_validate_json(result.model_dump_json()) == result
 
 
 def test_unit_decision_source_and_digest_survive_result_round_trip():

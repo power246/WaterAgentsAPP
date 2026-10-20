@@ -276,6 +276,7 @@ async def complete_m7_run(
     workflow.release.set()
     async with asyncio.timeout(2):
         await coordinator._runs[prepared.run_id].workflow_quiesced.wait()
+        await coordinator._transcript_writer.drain(coordinator._runs[prepared.run_id])
     return prepared
 
 

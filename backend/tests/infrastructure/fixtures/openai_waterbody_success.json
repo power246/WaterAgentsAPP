@@ -8,6 +8,21 @@
     "item": {"id": "reasoning-hidden-1", "type": "reasoning", "encrypted_content": "fixture-hidden-content"}
   },
   {
+    "type": "response.content_part.added",
+    "item_id": "reasoning-hidden-1",
+    "part": {"type": "reasoning_text", "text": ""}
+  },
+  {
+    "type": "response.reasoning_text.delta",
+    "item_id": "reasoning-hidden-1",
+    "delta": "fixture-hidden-reasoning"
+  },
+  {
+    "type": "response.content_part.done",
+    "item_id": "reasoning-hidden-1",
+    "part": {"type": "reasoning_text", "text": "fixture-hidden-reasoning"}
+  },
+  {
     "type": "response.reasoning_summary_text.delta",
     "item_id": "reasoning-hidden-1",
     "delta": "fixture-hidden-summary"

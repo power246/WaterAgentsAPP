@@ -510,6 +510,196 @@ class PostgresTranscriptStore:
             contents=tuple(content_models.values()),
         )
 
+    async def read_run_detail_roots(self, run_id: UUID) -> StoredRunRead | None:
+        try:
+            async with self._read_transaction() as connection:
+                run_row = (await connection.execute(
+                    select(analysis_runs).where(analysis_runs.c.run_id == run_id)
+                )).mappings().one_or_none()
+                if run_row is None:
+                    return None
+                session_rows = tuple((await connection.execute(
+                    select(analysis_sessions)
+                    .where(analysis_sessions.c.run_id == run_id)
+                    .order_by(
+                        analysis_sessions.c.created_at,
+                        analysis_sessions.c.session_id,
+                    )
+                )).mappings())
+                session_lifecycle_ids = tuple(
+                    item_id
+                    for row in session_rows
+                    for item_id in (row["created_item_id"], row["terminal_item_id"])
+                    if item_id is not None
+                )
+                item_rows = tuple((await connection.execute(
+                    select(transcript_items)
+                    .where(
+                        transcript_items.c.run_id == run_id,
+                        or_(
+                            transcript_items.c.session_id.is_(None),
+                            transcript_items.c.content_type == "query_understood",
+                            transcript_items.c.item_id.in_(session_lifecycle_ids),
+                        ),
+                    )
+                    .order_by(transcript_items.c.transcript_sequence)
+                )).mappings())
+                external_ids = tuple(
+                    row["item_id"] for row in item_rows if row["inline_body"] is None
+                )
+                content_rows = (
+                    tuple((await connection.execute(
+                        select(transcript_contents).where(
+                            transcript_contents.c.item_id.in_(external_ids)
+                        )
+                    )).mappings())
+                    if external_ids else ()
+                )
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("run detail is unavailable") from error
+        item_models = {
+            row["item_id"]: StoredTranscriptItem.model_validate(dict(row))
+            for row in item_rows
+        }
+        content_models = {
+            row["item_id"]: StoredTranscriptContent.model_validate(dict(row))
+            for row in content_rows
+        }
+        resolved_sessions = tuple(
+            _session_summary_from_rows(row, item_models, content_models)
+            for row in session_rows
+        )
+        visible_ids = {
+            item.item_id for item in item_models.values()
+            if item.session_id is None or item.content_type == "query_understood"
+        }
+        return StoredRunRead(
+            run=self._stored_run_header(run_row),
+            sessions=tuple(session for session, _ in resolved_sessions),
+            session_issues=tuple(
+                issue for _, issue in resolved_sessions if issue is not None
+            ),
+            items=tuple(
+                item for item in item_models.values() if item.item_id in visible_ids
+            ),
+            contents=tuple(
+                content for item_id, content in content_models.items()
+                if item_id in visible_ids
+            ),
+        )
+
+    async def run_exists(self, run_id: UUID) -> bool:
+        try:
+            async with self._read_transaction() as connection:
+                return (
+                    await connection.scalar(
+                        select(analysis_runs.c.run_id).where(
+                            analysis_runs.c.run_id == run_id
+                        )
+                    )
+                ) is not None
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("run lookup is unavailable") from error
+
+    async def session_exists(self, run_id: UUID, session_id: UUID) -> bool:
+        try:
+            async with self._read_transaction() as connection:
+                return (
+                    await connection.scalar(
+                        select(analysis_sessions.c.session_id).where(
+                            analysis_sessions.c.run_id == run_id,
+                            analysis_sessions.c.session_id == session_id,
+                        )
+                    )
+                ) is not None
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("session lookup is unavailable") from error
+
+    async def read_run_items(
+        self,
+        run_id: UUID,
+        item_ids: tuple[UUID, ...],
+    ) -> StoredRunRead | None:
+        requested = set(item_ids)
+        try:
+            async with self._read_transaction() as connection:
+                run_row = (
+                    await connection.execute(
+                        select(analysis_runs).where(analysis_runs.c.run_id == run_id)
+                    )
+                ).mappings().one_or_none()
+                if run_row is None:
+                    return None
+                item_rows = tuple((await connection.execute(
+                    select(transcript_items)
+                    .where(
+                        transcript_items.c.run_id == run_id,
+                        transcript_items.c.item_id.in_(requested),
+                    )
+                    .order_by(transcript_items.c.transcript_sequence)
+                )).mappings())
+                external_ids = tuple(
+                    row["item_id"] for row in item_rows if row["inline_body"] is None
+                )
+                content_rows = (
+                    tuple((await connection.execute(
+                        select(transcript_contents).where(
+                            transcript_contents.c.item_id.in_(external_ids)
+                        )
+                    )).mappings())
+                    if external_ids else ()
+                )
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("transcript items are unavailable") from error
+        return StoredRunRead(
+            run=self._stored_run_header(run_row),
+            items=tuple(
+                StoredTranscriptItem.model_validate(dict(row)) for row in item_rows
+            ),
+            contents=tuple(
+                StoredTranscriptContent.model_validate(dict(row))
+                for row in content_rows
+            ),
+        )
+
+    async def list_session_item_ids(
+        self,
+        run_id: UUID,
+        session_id: UUID,
+        content_type: str | None,
+    ) -> tuple[UUID, ...]:
+        statement = select(transcript_items.c.item_id).where(
+            transcript_items.c.run_id == run_id,
+            transcript_items.c.session_id == session_id,
+        )
+        if content_type is not None:
+            statement = statement.where(transcript_items.c.content_type == content_type)
+        try:
+            async with self._read_transaction() as connection:
+                return tuple((await connection.execute(
+                    statement.order_by(transcript_items.c.transcript_sequence)
+                )).scalars())
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("session transcript items are unavailable") from error
+
+    async def list_run_item_ids(
+        self,
+        run_id: UUID,
+        content_type: str,
+    ) -> tuple[UUID, ...]:
+        try:
+            async with self._read_transaction() as connection:
+                return tuple((await connection.execute(
+                    select(transcript_items.c.item_id)
+                    .where(
+                        transcript_items.c.run_id == run_id,
+                        transcript_items.c.content_type == content_type,
+                    )
+                    .order_by(transcript_items.c.transcript_sequence)
+                )).scalars())
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            raise PortUnavailableError("run transcript item lookup is unavailable") from error
+
     async def list_interrupted_run_ids(self) -> tuple[UUID, ...]:
         active_session_runs = select(analysis_sessions.c.run_id).where(
             analysis_sessions.c.status.in_(("pending", "running"))

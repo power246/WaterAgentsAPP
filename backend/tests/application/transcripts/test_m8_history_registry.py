@@ -22,7 +22,6 @@ from app.application.transcripts.read_models import (
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import create_production_registry
 from app.domain import (
-    CollectionStatus,
     EvidenceBundle,
     EvidenceFragmentReference,
     EvidenceSourceRecords,
@@ -166,6 +165,31 @@ def test_m8_typed_facts_round_trip_through_registry_and_history_readers() -> Non
         class Store:
             async def read_run(self, run_id):
                 return stored if run_id == RUN_ID else None
+
+            async def read_run_detail_roots(self, run_id):
+                return await self.read_run(run_id)
+
+            async def read_run_items(self, run_id, item_ids):
+                selected = await self.read_run(run_id)
+                if selected is None:
+                    return None
+                return selected.model_copy(update={
+                    "items": tuple(
+                        item for item in selected.items if item.item_id in item_ids
+                    ),
+                })
+
+            async def list_session_item_ids(
+                self, run_id, session_id, content_type
+            ):
+                selected = await self.read_run(run_id)
+                if selected is None:
+                    return ()
+                return tuple(
+                    item.item_id for item in selected.items
+                    if item.session_id == session_id
+                    and (content_type is None or item.content_type == content_type)
+                )
 
             async def list_runs(
                 self,

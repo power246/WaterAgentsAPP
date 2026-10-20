@@ -8,11 +8,15 @@ from uuid import UUID
 
 from app.application.analysis_runs.models import AnalysisConfigurationSnapshot
 from app.application.analysis_runs.workflow import AnalysisWorkflow
-from app.application.evidence_tools import RunLocalUpstreamResultRegistry, UpstreamInferenceResultReader
+from app.application.evidence_tools import (
+    RunLocalUpstreamResultRegistry,
+    UpstreamInferenceResultReader,
+)
 from app.application.settings_admin.credential_service import CredentialService
 from app.domain import ModelCatalogSnapshot, ModelRole, ParameterCapabilityRegistry
 from app.domain.settings_admin import CredentialName
 from app.infrastructure.adapters import OpenAIEmbeddingAdapter
+from app.infrastructure.adapters.nldi_request_state import NldiRequestState
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.runtime.m4 import build_m4_runtime
@@ -73,6 +77,10 @@ class RunProviderBundleFactory:
         self._clock = clock
         self._id_factory = id_factory
         self._unit_policy_store = unit_policy_store
+        self._nldi_request_state = NldiRequestState(
+            cache_ttl_seconds=3600.0,
+            cache_max_entries=512,
+        )
 
     async def build(self, configuration: AnalysisConfigurationSnapshot) -> RunProviderBundle:
         if not self._catalog.supports(configuration.parser_model, ModelRole.QUERY_PARSER):
@@ -93,6 +101,7 @@ class RunProviderBundleFactory:
                 parameter_capabilities=self._capabilities,
                 error_id_factory=self._id_factory, provider_http=self._http,
                 unit_policy_store=self._unit_policy_store,
+                nldi_request_state=self._nldi_request_state,
             ))
             m6 = await stack.enter_async_context(build_m6_runtime(
                 settings, operations=self._operations, m5_runtime=self._m5_runtime,

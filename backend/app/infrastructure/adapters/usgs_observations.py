@@ -12,10 +12,6 @@ from urllib.parse import parse_qsl, urlsplit
 
 from pydantic import ValidationError
 
-from app.infrastructure.adapters._evidence_collection import (
-    request_identity as shared_request_identity,
-    safe_error_code,
-)
 from app.domain import (
     CollectionCompletionContract,
     CollectionCompletionProof,
@@ -33,6 +29,13 @@ from app.domain import (
     WaterObservationRecord,
     WaterObservationRequest,
 )
+from app.domain.time.timezone import get_iana_timezone
+from app.infrastructure.adapters._evidence_collection import (
+    request_identity as shared_request_identity,
+)
+from app.infrastructure.adapters._evidence_collection import (
+    safe_error_code,
+)
 from app.infrastructure.adapters._parsing import (
     invalid_response,
     require_list,
@@ -40,7 +43,6 @@ from app.infrastructure.adapters._parsing import (
     require_string,
 )
 from app.infrastructure.http import ProviderHttpClient
-from app.domain.time.timezone import get_iana_timezone
 from app.ports import PortError, PortResponseLimitError, UnsupportedPortVersionError
 
 WDFN_PROVIDER = "usgs_waterdata"
@@ -164,7 +166,10 @@ class UsgsObservationAdapter:
             "monitoring_location_id": request.station_id,
             "time_series_id": ",".join(sorted(request.series_refs)),
             "parameter_code": ",".join(self._parameter_codes(request)),
-            "datetime": self._interval(request.request_range),
+            "datetime": self._interval(
+                request.request_range,
+                exclusive_end=request.channel == "continuous",
+            ),
             "f": "json",
             "limit": self._page_size,
         }
@@ -175,6 +180,7 @@ class UsgsObservationAdapter:
         pages: list[CollectionPageManifest] = []
         visited: set[str] = set()
         request_count = 0
+        raw_record_count = 0
         retrieved_at = self._retrieved_at()
         request_identity = shared_request_identity(collection_url, params)
 
@@ -235,13 +241,14 @@ class UsgsObservationAdapter:
                     contract=CollectionCompletionContract.OFFICIAL_NEXT_CHAIN,
                 )
             try:
-                page_records, next_url = self._parse_ogc_page(
+                page_records, next_url, page_record_count = self._parse_ogc_page(
                     content,
                     request=request,
                     page_identity=page_identity,
                     request_identity=request_identity,
                     retrieved_at=retrieved_at,
                     collection_url=collection_url,
+                    previous_record_count=raw_record_count,
                 )
                 accepted = self._accept_page_records(
                     page_records,
@@ -268,6 +275,7 @@ class UsgsObservationAdapter:
                     failed_page_bytes=len(content),
                     contract=CollectionCompletionContract.OFFICIAL_NEXT_CHAIN,
                 )
+            raw_record_count += page_record_count
             records.extend(accepted)
             next_identity = (
                 shared_request_identity(next_url, None) if next_url else None
@@ -329,13 +337,25 @@ class UsgsObservationAdapter:
     ) -> ProviderCollectionBatch[ObservationRecord]:
         operation = request.operation_id
         url = f"{self._samples_base_url}/results/narrow"
-        upper_date = (request.request_range.end - timedelta(microseconds=1)).date()
-        params: dict[str, str | tuple[str, ...]] = {
+        identities = self._sample_identities(request)
+        if len(identities) > self._max_pages:
+            raise PortResponseLimitError(
+                "USGS Samples request exceeded the configured page limit.",
+                provider=SAMPLES_PROVIDER,
+                operation=operation,
+            )
+        # Samples filters by the activity's local date. A sample within the
+        # requested UTC interval can therefore have an adjacent local date.
+        lower_date = request.request_range.start.date() - timedelta(days=1)
+        upper_date = (
+            request.request_range.end - timedelta(microseconds=1)
+        ).date() + timedelta(days=1)
+        common_params: dict[str, str | tuple[str, ...]] = {
             "mimeType": "text/csv",
             "activityMediaName": "Water",
             "monitoringLocationIdentifier": request.station_id,
             "usgsPCode": self._parameter_codes(request),
-            "activityStartDateLower": request.request_range.start.date().isoformat(),
+            "activityStartDateLower": lower_date.isoformat(),
             "activityStartDateUpper": upper_date.isoformat(),
         }
         request_count = 0
@@ -344,56 +364,100 @@ class UsgsObservationAdapter:
             nonlocal request_count
             request_count += 1
 
-        started = asyncio.get_running_loop().time()
-        logger.info(
-            "USGS samples request started.",
-            extra={"event_name": "usgs_samples_request_started",
-                   "operation": operation, "provider": SAMPLES_PROVIDER},
-        )
-        content = await self._http.get_bytes(
-            url,
-            provider=SAMPLES_PROVIDER,
-            operation=operation,
-            params=params,
-            headers=self._headers("text/csv"),
-            deadline=deadline,
-            on_attempt=count_attempt,
-        )
-        logger.info(
-            "USGS samples downloaded.",
-            extra={"event_name": "usgs_samples_downloaded",
-                   "operation": operation, "provider": SAMPLES_PROVIDER,
-                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
-                   "response_bytes": len(content)},
-        )
-        page_identity = shared_request_identity(url, params)
-        request_identity = page_identity
-        records = self._parse_samples_csv(
-            content,
-            request=request,
-            page_identity=page_identity,
-            request_identity=request_identity,
-            retrieved_at=self._retrieved_at(),
-            source_uri=url,
-        )
-        logger.info(
-            "USGS samples parsed.",
-            extra={"event_name": "usgs_samples_parsed",
-                   "operation": operation, "provider": SAMPLES_PROVIDER,
-                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
-                   "result_count": len(records)},
-        )
-        return self._batch(
-            request=request,
-            records=list(records),
-            pages=[
+        records: list[ObservationRecord] = []
+        by_id: dict[str, ObservationRecord] = {}
+        pages: list[CollectionPageManifest] = []
+        retrieved_at = self._retrieved_at()
+        for _, group, characteristic, user_supplied in identities:
+            # Narrow CSV exposes characteristic, but not group or user-supplied label.
+            params = {
+                **common_params,
+                "characteristicGroup": group,
+                "characteristic": characteristic,
+                "characteristicUserSupplied": user_supplied,
+            }
+            page_identity = shared_request_identity(url, params)
+            content = b""
+            started = asyncio.get_running_loop().time()
+            logger.info(
+                "USGS samples request started.",
+                extra={"event_name": "usgs_samples_request_started",
+                       "operation": operation, "provider": SAMPLES_PROVIDER},
+            )
+            try:
+                content = await self._http.get_bytes(
+                    url,
+                    provider=SAMPLES_PROVIDER,
+                    operation=operation,
+                    params=params,
+                    headers=self._headers("text/csv"),
+                    deadline=deadline,
+                    on_attempt=count_attempt,
+                )
+                logger.info(
+                    "USGS samples downloaded.",
+                    extra={"event_name": "usgs_samples_downloaded",
+                           "operation": operation, "provider": SAMPLES_PROVIDER,
+                           "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                           "response_bytes": len(content)},
+                )
+                page_records = self._parse_samples_csv(
+                    content,
+                    request=request,
+                    expected_characteristic=characteristic,
+                    page_identity=page_identity,
+                    request_identity=page_identity,
+                    retrieved_at=retrieved_at,
+                    source_uri=url,
+                )
+                accepted: list[ObservationRecord] = []
+                for record in page_records:
+                    previous = by_id.get(record.record_id)
+                    if previous is not None:
+                        if not self._same_record(
+                            previous, record, distinct_request=True
+                        ):
+                            raise invalid_response(SAMPLES_PROVIDER, operation)
+                        continue
+                    if len(records) + len(accepted) >= self._max_records:
+                        raise PortResponseLimitError(
+                            "USGS Samples response exceeded the configured record limit.",
+                            provider=SAMPLES_PROVIDER,
+                            operation=operation,
+                        )
+                    by_id[record.record_id] = record
+                    accepted.append(record)
+                logger.info(
+                    "USGS samples parsed.",
+                    extra={"event_name": "usgs_samples_parsed",
+                           "operation": operation, "provider": SAMPLES_PROVIDER,
+                           "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                           "result_count": len(accepted)},
+                )
+            except PortError as error:
+                return self._partial_or_raise(
+                    error,
+                    request=request,
+                    records=records,
+                    pages=pages,
+                    request_count=request_count,
+                    failed_page_identity=page_identity,
+                    failed_page_bytes=len(content),
+                    contract=CollectionCompletionContract.COMPLETE_CSV_STREAM,
+                )
+            records.extend(accepted)
+            pages.append(
                 CollectionPageManifest(
                     page_identity=page_identity,
-                    record_count=len(records),
+                    record_count=len(accepted),
                     response_bytes=len(content),
                     page_complete=True,
                 )
-            ],
+            )
+        return self._batch(
+            request=request,
+            records=records,
+            pages=pages,
             request_count=request_count,
             complete=True,
             completed_ranges=(request.request_range,),
@@ -409,7 +473,8 @@ class UsgsObservationAdapter:
         request_identity: str,
         retrieved_at: datetime,
         collection_url: str,
-    ) -> tuple[tuple[ObservationRecord, ...], str | None]:
+        previous_record_count: int,
+    ) -> tuple[tuple[ObservationRecord, ...], str | None, int]:
         operation = request.operation_id
         try:
             payload = json.loads(content)
@@ -421,21 +486,27 @@ class UsgsObservationAdapter:
         features = require_list(
             root.get("features"), provider=WDFN_PROVIDER, operation=operation
         )
+        if previous_record_count + len(features) > self._max_records:
+            raise PortResponseLimitError(
+                "USGS observations exceeded the configured record limit.",
+                provider=WDFN_PROVIDER,
+                operation=operation,
+            )
         parsed: list[ObservationRecord] = []
         for feature in features:
-            parsed.append(
-                self._ogc_record(
-                    require_mapping(
-                        feature, provider=WDFN_PROVIDER, operation=operation
-                    ),
-                    request=request,
-                    page_identity=page_identity,
-                    request_identity=request_identity,
-                    retrieved_at=retrieved_at,
-                    source_uri=collection_url,
-                )
+            record = self._ogc_record(
+                require_mapping(
+                    feature, provider=WDFN_PROVIDER, operation=operation
+                ),
+                request=request,
+                page_identity=page_identity,
+                request_identity=request_identity,
+                retrieved_at=retrieved_at,
+                source_uri=collection_url,
             )
-        return tuple(parsed), self._next_url(root, operation)
+            if record is not None:
+                parsed.append(record)
+        return tuple(parsed), self._next_url(root, operation), len(features)
 
     def _ogc_record(
         self,
@@ -446,7 +517,7 @@ class UsgsObservationAdapter:
         request_identity: str,
         retrieved_at: datetime,
         source_uri: str,
-    ) -> ObservationRecord:
+    ) -> ObservationRecord | None:
         operation = request.operation_id
         if feature.get("type") != "Feature":
             raise invalid_response(WDFN_PROVIDER, operation)
@@ -485,8 +556,17 @@ class UsgsObservationAdapter:
         )
         if not self._time_overlaps(observed_time, valid_range, request.request_range):
             raise invalid_response(WDFN_PROVIDER, operation)
+        if "value" not in properties:
+            raise invalid_response(WDFN_PROVIDER, operation)
+        qualifiers = self._ogc_qualifiers(properties.get("qualifier"), operation)
+        # The OGC feed includes timestamped features with no measurement.
+        # They prove neither a numeric observation nor an incomplete page.
+        if properties["value"] is None:
+            return None
+        value = require_string(
+            properties["value"], provider=WDFN_PROVIDER, operation=operation
+        )
         approval = self._optional_string(properties.get("approval_status"))
-        qualifier = self._optional_string(properties.get("qualifier"))
         method = self._optional_string(properties.get("method_category"))
         provider_record_id = (
             f"usgs-wdfn:v1:{request.channel}:{feature_id}"
@@ -508,7 +588,7 @@ class UsgsObservationAdapter:
                 ),
                 provider_quality=ProviderQuality(
                     approval=approval,
-                    qualifiers=(qualifier,) if qualifier else (),
+                    qualifiers=qualifiers,
                 ),
                 raw_unit=require_string(
                     properties.get("unit_of_measure"),
@@ -525,11 +605,7 @@ class UsgsObservationAdapter:
                     source_utc_offset="+00:00" if observed_time is not None else None,
                 ),
                 parameter=parameter,
-                value=require_string(
-                    properties.get("value"),
-                    provider=WDFN_PROVIDER,
-                    operation=operation,
-                ),
+                value=value,
                 medium="surface water",
                 fraction=None,
                 method=method,
@@ -542,11 +618,25 @@ class UsgsObservationAdapter:
         except (ValidationError, TypeError, ValueError) as error:
             raise invalid_response(WDFN_PROVIDER, operation) from error
 
+    @staticmethod
+    def _ogc_qualifiers(value: object, operation: str) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            stripped = value.strip()
+            return (stripped,) if stripped else ()
+        if isinstance(value, list) and all(
+            isinstance(item, str) and item.strip() for item in value
+        ):
+            return tuple(item.strip() for item in value)
+        raise invalid_response(WDFN_PROVIDER, operation)
+
     def _parse_samples_csv(
         self,
         content: bytes,
         *,
         request: WaterObservationRequest,
+        expected_characteristic: str,
         page_identity: str,
         request_identity: str,
         retrieved_at: datetime,
@@ -571,6 +661,7 @@ class UsgsObservationAdapter:
                 record = self._sample_record(
                     row,
                     request=request,
+                    expected_characteristic=expected_characteristic,
                     page_identity=page_identity,
                     request_identity=request_identity,
                     retrieved_at=retrieved_at,
@@ -602,6 +693,7 @@ class UsgsObservationAdapter:
         row: Mapping[str | None, str | list[str] | None],
         *,
         request: WaterObservationRequest,
+        expected_characteristic: str,
         page_identity: str,
         request_identity: str,
         retrieved_at: datetime,
@@ -621,7 +713,20 @@ class UsgsObservationAdapter:
                 operation=operation,
             ),
         )
-        if station != request.station_id or parameter not in request.parameter_keys:
+        if (
+            station != request.station_id
+            or parameter not in request.parameter_keys
+            or require_string(
+                row.get("Result_Characteristic"),
+                provider=SAMPLES_PROVIDER,
+                operation=operation,
+            ) != expected_characteristic
+            or require_string(
+                row.get("Activity_Media"),
+                provider=SAMPLES_PROVIDER,
+                operation=operation,
+            ) != "Water"
+        ):
             raise invalid_response(SAMPLES_PROVIDER, operation)
         observed_time, valid_range, source_timezone, source_offset = (
             self._sample_time(row, operation)
@@ -902,10 +1007,44 @@ class UsgsObservationAdapter:
                 raise ValueError("USGS Samples requires discrete_samples channel")
         else:
             raise ValueError("USGS observation adapter received another provider")
-        if "," in request.station_id or any("," in item for item in request.series_refs):
-            raise ValueError("USGS identities must not contain commas")
+        if "," in request.station_id or (
+            request.provider is ParameterProvider.WDFN_TIME_SERIES
+            and any("," in item for item in request.series_refs)
+        ):
+            raise ValueError(
+                "comma-delimited USGS request identities must not contain commas"
+            )
         if any(not self._is_usgs_key(item) for item in request.parameter_keys):
             raise ValueError("USGS observations require five-digit USGS parameters")
+
+    @staticmethod
+    def _sample_identities(
+        request: WaterObservationRequest,
+    ) -> tuple[tuple[str, str, str, str], ...]:
+        identities: list[tuple[str, str, str, str]] = []
+        prefix = "usgs-samples:v1:"
+        for reference in request.series_refs:
+            try:
+                if not reference.startswith(prefix):
+                    raise ValueError("invalid USGS Samples identity")
+                identity = json.loads(reference[len(prefix) :])
+                if (
+                    not isinstance(identity, list)
+                    or len(identity) != 4
+                    or any(
+                        not isinstance(item, str) or not item.strip()
+                        for item in identity
+                    )
+                    or identity[0] != request.station_id
+                ):
+                    raise ValueError("invalid USGS Samples identity")
+            except (TypeError, ValueError) as error:
+                raise ValueError("invalid USGS Samples identity") from error
+            parsed = tuple(identity)
+            if parsed in identities:
+                raise ValueError("duplicate USGS Samples identity")
+            identities.append(parsed)
+        return tuple(identities)
 
     def _record_type(
         self, parameter: ParameterKey
@@ -927,8 +1066,11 @@ class UsgsObservationAdapter:
         return tuple(sorted(parameter.code for parameter in request.parameter_keys))
 
     @staticmethod
-    def _interval(value: TimeRange) -> str:
-        return f"{UsgsObservationAdapter._iso(value.start)}/{UsgsObservationAdapter._iso(value.end)}"
+    def _interval(value: TimeRange, *, exclusive_end: bool = False) -> str:
+        end = value.end - timedelta(microseconds=1) if exclusive_end else value.end
+        start_text = UsgsObservationAdapter._iso(value.start)
+        end_text = UsgsObservationAdapter._iso(end)
+        return f"{start_text}/{end_text}"
 
     @staticmethod
     def _iso(value: datetime) -> str:
@@ -1068,13 +1210,20 @@ class UsgsObservationAdapter:
         return scope.overlaps(record.valid_time_range)
 
     @staticmethod
-    def _same_record(first: ObservationRecord, second: ObservationRecord) -> bool:
+    def _same_record(
+        first: ObservationRecord,
+        second: ObservationRecord,
+        *,
+        distinct_request: bool = False,
+    ) -> bool:
         first_value = first.model_dump(mode="json")
         second_value = second.model_dump(mode="json")
         for value in (first_value, second_value):
             provenance = value.get("provenance")
             if isinstance(provenance, dict):
                 provenance.pop("page_identity", None)
+                if distinct_request:
+                    provenance.pop("request_identity", None)
         return first_value == second_value
 
     @staticmethod

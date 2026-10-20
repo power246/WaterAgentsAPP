@@ -34,6 +34,7 @@ class EvidenceBundle(DomainModel):
     time_resolution_source: TimeResolutionSource
     requested_parameters: tuple[ParameterKey, ...]
     supporting_parameters: tuple[ParameterKey, ...]
+    intermediate_parameters: tuple[ParameterKey, ...] = ()
     window_refs: tuple[NonEmptyString, ...]
     cells: tuple[EvidenceCell, ...]
     fragment_refs: tuple[EvidenceFragmentReference, ...]
@@ -60,7 +61,7 @@ class EvidenceBundle(DomainModel):
             raise ValueError("bundle requested parameters must not be empty")
         return ensure_unique_tuple(value, field_name="bundle parameters")
 
-    @field_validator("supporting_parameters")
+    @field_validator("supporting_parameters", "intermediate_parameters")
     @classmethod
     def validate_supporting_parameters(
         cls,
@@ -84,9 +85,13 @@ class EvidenceBundle(DomainModel):
     def validate_reference_closure(self) -> Self:
         if not self.window_refs:
             raise ValueError("window_refs must not be empty")
-        overlap = set(self.requested_parameters) & set(self.supporting_parameters)
-        if overlap:
-            raise ValueError("requested and supporting parameters must be disjoint")
+        groups = (
+            self.requested_parameters,
+            self.supporting_parameters,
+            self.intermediate_parameters,
+        )
+        if sum(len(group) for group in groups) != len(set().union(*groups)):
+            raise ValueError("requested, supporting, and intermediate parameters must be disjoint")
 
         reference_roles = (
             ("context", {self.context_ref.item_id}),
@@ -110,6 +115,10 @@ class EvidenceBundle(DomainModel):
         } | {
             (parameter, window_id, EvidenceCellRole.REQUIRED_SUPPORT)
             for parameter in self.supporting_parameters
+            for window_id in self.window_refs
+        } | {
+            (parameter, window_id, EvidenceCellRole.METHOD_INPUT)
+            for parameter in self.intermediate_parameters
             for window_id in self.window_refs
         }
         actual_cells = tuple(

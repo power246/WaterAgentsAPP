@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Protocol
 from uuid import UUID
@@ -62,8 +63,15 @@ from app.domain import (
     ReferenceScope,
 )
 
+logger = logging.getLogger("wateragents.analysis_runs")
+
 
 class EvidenceAcquisitionPort(Protocol):
+    def prepare_scope(
+        self,
+        scope: EvidenceSessionScope,
+    ) -> EvidenceSessionScope: ...
+
     async def start(
         self,
         scope: EvidenceSessionScope,
@@ -149,6 +157,7 @@ class TopologyWaterbodyExecutionStage:
             run_id=context.run.run_id,
             topology=graph,
             topology_ref=topology_ref,
+            target_point=analysis_context.target.point,
         )
         node_runner = self._node_runner_factory.build(
             context=context,
@@ -359,6 +368,7 @@ class ProductionTopologyNodeRunner:
             registry=self._capability_registry,
             cancel_token=self._context.cancellation,
         )
+        scope = self._acquisition.prepare_scope(scope)
         task = await validate_waterbody_agent_task(
             WaterbodyAgentTask(
                 run_id=request.run_id,
@@ -433,8 +443,17 @@ class ProductionTopologyNodeRunner:
         request: NodeExecutionRequest,
         error: Exception,
     ):
-        del error
         session_id = self._session_ids.get(request.node.comid)
+        logger.error(
+            "Waterbody node execution failed.",
+            exc_info=(type(error), error, error.__traceback__),
+            extra={
+                "event_name": "waterbody_node_execution_failed",
+                "run_id": request.run_id,
+                "session_id": session_id,
+                "target_comid": request.node.comid,
+            },
+        )
         if session_id is None:
             if self._context.cancellation.is_requested():
                 raise asyncio.CancelledError()

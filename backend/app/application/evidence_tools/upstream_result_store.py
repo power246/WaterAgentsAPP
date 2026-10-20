@@ -23,6 +23,7 @@ from app.application.evidence_tools.upstream_projection import (
 )
 from app.application.transcripts.models import TranscriptContentRef
 from app.domain import (
+    GeoPoint,
     HydrologyGraph,
     HydrologyParticipation,
     ProviderCollectionBatch,
@@ -59,12 +60,16 @@ class RunLocalUpstreamResultStore:
         topology: HydrologyGraph,
         topology_ref: TranscriptContentRef,
         result_reader: UpstreamInferenceResultReader,
+        target_point: GeoPoint | None = None,
     ) -> None:
         if topology_ref.run_id != run_id:
             raise OutcomeIdentityError()
         self._run_id = run_id
         self._topology_ref = topology_ref
         self._result_reader = result_reader
+        self._topology = topology
+        self._target_point = target_point
+        self._node_points = {node.comid: node.point for node in topology.nodes}
         self._active_comids = frozenset(
             node.comid
             for node in topology.nodes
@@ -77,6 +82,10 @@ class RunLocalUpstreamResultStore:
                 if edge.participating and edge.downstream_comid == comid
             ))
             for comid in self._active_comids
+        }
+        self._edge_distances = {
+            (edge.upstream_comid, edge.downstream_comid): edge.distance_km
+            for edge in topology.edges if edge.participating
         }
         self._outcomes: dict[str, _PublishedOutcome] = {}
         self._session_owners: dict[UUID, str] = {}
@@ -179,7 +188,17 @@ class RunLocalUpstreamResultStore:
                 if item.outcome.status is DependencyStatus.USABLE
                 and item.resolved is not None
             )
-            return project_upstream_results(request, usable)
+            return project_upstream_results(
+                request,
+                usable,
+                edge_distances=self._edge_distances,
+                topology=self._topology,
+                destination_point=(
+                    self._target_point or self._node_points[request.agent_comid]
+                    if request.agent_comid == self._topology.target_comid
+                    else self._node_points[request.agent_comid]
+                ),
+            )
 
     async def cleanup_run(self, run_id: UUID | str) -> None:
         async with self._lock:
@@ -225,12 +244,14 @@ class RunLocalUpstreamResultRegistry:
         run_id: UUID,
         topology: HydrologyGraph,
         topology_ref: TranscriptContentRef,
+        target_point: GeoPoint | None = None,
     ) -> RunLocalUpstreamResultStore:
         store = RunLocalUpstreamResultStore(
             run_id=run_id,
             topology=topology,
             topology_ref=topology_ref,
             result_reader=self._result_reader,
+            target_point=target_point,
         )
         async with self._lock:
             if run_id in self._stores:

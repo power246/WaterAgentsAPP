@@ -15,10 +15,11 @@ from app.application.reasoning.sufficiency import (
     validate_sealed_evidence_input,
 )
 from app.application.reasoning.task import ValidatedWaterbodyAgentTask
-from app.domain.settings_admin import UnitPreference
 from app.domain import (
     AggregationMethod,
     DomainModel,
+    EvidenceCell,
+    EvidenceCellStatus,
     IndeterminateReason,
     InferenceMode,
     ItemReference,
@@ -37,6 +38,7 @@ from app.domain import (
     UtcDatetime,
     ensure_unique_tuple,
 )
+from app.domain.settings_admin import UnitPreference
 
 
 class ResultSkeletonWindow(DomainModel):
@@ -418,7 +420,9 @@ def build_result_skeleton(
                 )
             )
         else:
-            fixed_cells.append(_fixed_cell(gate, window))
+            fixed_cells.append(
+                _fixed_cell(gate, window, target_cells[(gate.parameter, gate.window_id)])
+            )
 
     values = {
         "schema_version": 1,
@@ -469,6 +473,7 @@ def validate_result_skeleton(value: ResultSkeleton) -> ResultSkeleton:
 def _fixed_cell(
     gate: ReasoningCellGate,
     window: ResultSkeletonWindow,
+    target_cell: EvidenceCell,
 ) -> FixedSkeletonCell:
     blocked = gate.decision is ReasoningGateDecision.BLOCKED
     evidence_refs = (
@@ -485,11 +490,22 @@ def _fixed_cell(
         if blocked
         else IndeterminateReason.INSUFFICIENT_EVIDENCE
     )
-    rationale = (
-        "Required evidence collection was technically blocked."
-        if blocked
-        else "No direct or materialized allowed-indirect evidence supports this cell."
-    )
+    if blocked:
+        rationale = "Required evidence collection was technically blocked."
+    elif (
+        gate.target_status is EvidenceCellStatus.SUPPORTED
+        and gate.discharge_status is EvidenceCellStatus.UNSUPPORTED
+    ):
+        rationale = (
+            "The target parameter has allowed indirect evidence, but required "
+            "discharge evidence is missing; no directional or quantified result "
+            "can be determined."
+            if target_cell.allowed_indirect_fragment_refs
+            else "The target parameter has direct evidence, but required discharge "
+            "evidence is missing; no result can be determined."
+        )
+    else:
+        rationale = "No direct or materialized allowed-indirect evidence supports this cell."
     result = TimeWindowResult(
         cell_id=gate.cell_id,
         start_time=window.start_time,

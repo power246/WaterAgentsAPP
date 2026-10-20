@@ -49,6 +49,7 @@ from app.domain.evidence.evidence_fragment import EvidenceFragment
 from app.domain.evidence.evidence_source_records import EvidenceSourceRecords
 from app.domain.evidence.evidence_tool_call import EvidenceToolCall
 from app.domain.evidence.evidence_tool_result import EvidenceToolResult
+from app.domain.evidence.numeric_dependency_plan import NumericDependencyPlan
 from app.domain.hydrology import HydrologyGraph
 from app.domain.inference import InferenceResult
 
@@ -544,6 +545,12 @@ def _evidence_references(body: object) -> tuple[UUID, ...]:
     return tuple(UUID(item_id) for item_id in body.referenced_item_ids())
 
 
+def _numeric_plan_references(body: object) -> tuple[UUID, ...]:
+    if not isinstance(body, NumericDependencyPlan):
+        raise TypeError("numeric plan reference extractor received another content type")
+    return tuple(UUID(item_id) for item_id in body.referenced_item_ids())
+
+
 def _evidence_fragment_metadata(body: object) -> TranscriptMetadata:
     if not isinstance(body, EvidenceFragment):
         raise TypeError("evidence metadata extractor received another content type")
@@ -578,7 +585,11 @@ def _waterbody_request_references(body: object) -> tuple[UUID, ...]:
 
     if not isinstance(body, WaterbodyModelRequestV1):
         raise TypeError("waterbody request reference extractor received another type")
-    return (body.evidence_bundle_ref.item_id,)
+    return _unique_uuid_references((
+        body.evidence_bundle_ref.item_id,
+        *((body.numeric_plan_ref.item_id,) if body.numeric_plan_ref is not None else ()),
+        *(UUID(reference.item_id) for reference in body.numeric_input_refs),
+    ))
 
 
 def _waterbody_response_references(body: object) -> tuple[UUID, ...]:
@@ -953,6 +964,12 @@ def create_production_registry() -> TranscriptRegistry:
         adapter=TypeAdapter(EvidenceFragment),
         references=_evidence_references,
         metadata=_evidence_fragment_metadata,
+    ))
+    registry.register(ContentRegistration(
+        content_type="numeric_dependency_plan",
+        content_schema_version=1,
+        adapter=TypeAdapter(NumericDependencyPlan),
+        references=_numeric_plan_references,
     ))
     registry.register(ContentRegistration(
         content_type="evidence_tool_result",

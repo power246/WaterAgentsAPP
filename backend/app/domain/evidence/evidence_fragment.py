@@ -8,6 +8,7 @@ from app.domain.evidence.collection_fact_payload import CollectionFactPayload
 from app.domain.evidence.collection_status import CollectionStatus
 from app.domain.evidence.context_payload import ContextPayload
 from app.domain.evidence.conversion_payload import ConversionPayload
+from app.domain.evidence.coverage_status import CoverageStatus
 from app.domain.evidence.data_quality import DataQualityFlag
 from app.domain.evidence.direct_record_payload import DirectRecordPayload
 from app.domain.evidence.evidence_applicability import EvidenceApplicability
@@ -22,10 +23,12 @@ from app.domain.evidence.evidence_result_eligibility import (
 from app.domain.evidence.historical_inference_payload import (
     HistoricalInferencePayload,
 )
+from app.domain.evidence.numeric_derived_payload import NumericDerivedPayload
 from app.domain.evidence.provenance import Provenance
-from app.domain.evidence.source_record_reference import SourceRecordReference
-from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
 from app.domain.evidence.relation_support_payload import RelationSupportPayload
+from app.domain.evidence.source_record_reference import SourceRecordReference
+from app.domain.evidence.temporal_estimate_payload import TemporalEstimatePayload
+from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.time.time_range import TimeRange
 
@@ -184,6 +187,52 @@ class EvidenceFragment(DomainModel):
                 raise ValueError("relation support requires evidence-only derivation")
             if self.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY:
                 raise ValueError("relation support is inferred only")
+        elif isinstance(self.payload, TemporalEstimatePayload):
+            if (
+                self.applicability is not EvidenceApplicability.ALLOWED_INDIRECT
+                or self.relation_id != "temporal_gap_fill_v1"
+                or self.data_type != "temporal_estimate"
+                or self.source != "m5_temporal_gap_fill"
+            ):
+                raise ValueError("temporal estimate requires its dedicated evidence identity")
+            if self.source_record_refs or self.derivation is None:
+                raise ValueError("temporal estimate requires evidence-only derivation")
+            if self.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY:
+                raise ValueError("temporal estimate is inferred only")
+            if self.quality_class is EvidenceQualityClass.INVALID:
+                raise ValueError("temporal estimate requires usable anchors")
+            if DataQualityFlag.TEMPORAL_ESTIMATE not in self.quality_flags:
+                raise ValueError("temporal estimate requires its quality flag")
+            if (
+                self.coverage.observed_count != 0
+                or self.coverage.status is not CoverageStatus.INSUFFICIENT
+            ):
+                raise ValueError("temporal estimate window has no observations")
+        elif isinstance(self.payload, NumericDerivedPayload):
+            if (
+                self.applicability is not EvidenceApplicability.ALLOWED_INDIRECT
+                or self.relation_id != self.payload.method_id
+                or self.data_type != "numeric_derived"
+                or self.source != "numeric_method"
+            ):
+                raise ValueError("numeric derivation requires its method identity")
+            if self.source_record_refs or self.derivation is None:
+                raise ValueError("numeric derivation requires evidence-only inputs")
+            if (
+                self.derivation.algorithm != self.payload.method_id
+                or self.derivation.algorithm_version != self.payload.method_version
+                or self.derivation.policy_id != self.payload.method_id
+                or self.derivation.registry_digest
+                != self.payload.method_registry_digest
+            ):
+                raise ValueError("numeric derivation metadata must match its payload")
+            if self.result_eligibility is not EvidenceResultEligibility.INFERRED_ONLY:
+                raise ValueError("numeric derivation is inferred only")
+            if (
+                self.quality_class is EvidenceQualityClass.INVALID
+                or DataQualityFlag.ESTIMATED not in self.quality_flags
+            ):
+                raise ValueError("numeric derivation must retain estimated quality")
         elif isinstance(self.payload, HistoricalInferencePayload):
             if self.applicability is not EvidenceApplicability.CONTEXTUAL_ONLY:
                 raise ValueError("historical inference must be contextual_only")
@@ -206,9 +255,19 @@ class EvidenceFragment(DomainModel):
         elif isinstance(self.payload, UpstreamResultPayload):
             item_ids.append(self.payload.result_ref.item_id)
             item_ids.extend(reference.item_id for reference in self.payload.closure_refs)
-        elif isinstance(self.payload, RelationSupportPayload):
+        elif isinstance(
+            self.payload,
+            (RelationSupportPayload, TemporalEstimatePayload, NumericDerivedPayload),
+        ):
             item_ids.extend(
                 reference.item_id
                 for reference in self.payload.input_evidence_refs
             )
+            if isinstance(self.payload, NumericDerivedPayload):
+                item_ids.append(self.payload.plan_item_ref.item_id)
+            elif (
+                isinstance(self.payload, TemporalEstimatePayload)
+                and self.payload.plan_item_ref is not None
+            ):
+                item_ids.append(self.payload.plan_item_ref.item_id)
         return tuple(dict.fromkeys(item_ids))

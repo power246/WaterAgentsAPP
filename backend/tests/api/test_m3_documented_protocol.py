@@ -203,12 +203,16 @@ def test_parent_docs_describe_the_implemented_m3_public_protocol() -> None:
         "/api/analysis/runs/{run_id}/sessions/{session_id}": {"get"},
         "/api/analysis/runs/{run_id}/sessions/{session_id}/transcript": {"get"},
         "/api/analysis/runs/{run_id}/transcript/{item_id}/content": {"get"},
+        "/api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates": {"get"},
         "/api/analysis/runs/{run_id}/events": {"get"},
         "/api/analysis/runs/{run_id}/sessions/{session_id}/events": {"get"},
         "/api/analysis/runs/{run_id}/cancel": {"post"},
         "/api/analysis/runs/{run_id}/persistence/retry": {"post"},
     }
     assert actual_routes == expected_routes
+    api_guide = API_GUIDE.read_text(encoding="utf-8")
+    assert "/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates" in api_guide
+    assert "view=history" in api_guide
 
     documents = {
         "architecture": ARCHITECTURE_GUIDE.read_text(encoding="utf-8"),

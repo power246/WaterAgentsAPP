@@ -40,6 +40,19 @@ function setup() {
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); localStorage.clear() })
 
+it('shows the reserved embedding profile as disabled when historical memory is off', () => {
+  const disabled: Settings = { ...settings, catalog: { ...settings.catalog,
+    embedding_profiles: [{ ...settings.catalog.embedding_profiles[0]!, available: false,
+      unavailable_reason: 'Historical memory is disabled.' }],
+  } }
+  vi.spyOn(api, 'keys').mockResolvedValue({ keys: [key] })
+  vi.spyOn(api, 'settings').mockResolvedValue(disabled)
+  render(<MemoryRouter><SettingsDrawer settings={disabled} onSettings={() => undefined} onClose={() => undefined} /></MemoryRouter>)
+  expect(screen.getByLabelText('Desired embedding profile')).toBeDisabled()
+  expect(screen.getByLabelText('Desired embedding profile')).toHaveValue(profile)
+  expect(screen.getByLabelText('Memory mode')).toHaveValue('stateless')
+})
+
 it('preserves edits made before the initial settings refresh completes', async () => {
   let resolve!: (value: Settings) => void
   vi.spyOn(api, 'settings').mockReturnValue(new Promise<Settings>((done) => { resolve = done }))

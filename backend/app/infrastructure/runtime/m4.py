@@ -12,6 +12,9 @@ from app.application.analysis_runs.query_topology_workflow import (
     TopologyBuildingStage,
 )
 from app.application.analysis_runs.workflow import AnalysisWorkflow
+from app.application.evidence_tools.numeric_methods import (
+    create_production_numeric_method_registry,
+)
 from app.application.hydrology_topology import HydrologyGraphBuilder
 from app.application.query_understanding import (
     AnalysisContextResolver,
@@ -32,6 +35,7 @@ from app.infrastructure.adapters import (
     OpenAIResponsesParserAdapter,
     UsgsWaterDataAdapter,
 )
+from app.infrastructure.adapters.nldi_request_state import NldiRequestState
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
 from app.infrastructure.http import ProviderHttpClient
 from app.ports.clock import ClockPort
@@ -77,6 +81,7 @@ async def build_m4_runtime(
     error_id_factory: Callable[[], UUID],
     provider_http: ProviderHttpClient | None = None,
     unit_policy_store: SettingsStorePort | None = None,
+    nldi_request_state: NldiRequestState | None = None,
 ) -> AsyncIterator[RuntimeComponents]:
     parser_providers = {
         capability.provider.casefold()
@@ -130,7 +135,11 @@ async def build_m4_runtime(
             geocoding_http,
             api_key=google_key,
         )
-        nldi = NldiAdapter(metadata_http)
+        nldi = NldiAdapter(
+            metadata_http,
+            request_interval_seconds=settings.nldi_request_interval_seconds,
+            shared_state=nldi_request_state,
+        )
         usgs = UsgsWaterDataAdapter(
             metadata_http,
             api_key=usgs_key,
@@ -166,6 +175,10 @@ async def build_m4_runtime(
             max_concurrency=settings.topology_max_concurrency,
             stage_timeout_seconds=settings.topology_stage_timeout_seconds,
             prediction_baseline_hours=settings.prediction_baseline_hours,
+            numeric_registry=create_production_numeric_method_registry(
+                parameter_capabilities
+            ),
+            capability_registry=parameter_capabilities,
         )
         private_values = tuple(
             value for value in (openai_key, google_key, usgs_key) if value

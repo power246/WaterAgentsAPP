@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from math import isclose, isfinite
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import ValidationError
 
@@ -24,17 +25,19 @@ from app.domain import (
     HydrologyGraph,
     HydrologyNode,
     HydrologyParticipation,
+    ParameterCapabilityRegistry,
+    ParameterKey,
     ParameterProvider,
     RiverSegment,
     StationAvailability,
     StationAvailabilityRequest,
-    TopologyCoverage,
     TopologyLimits,
     TopologySearchStats,
-    TopologyStationRef,
     TopologySeriesRef,
+    TopologyStationRef,
     WaterbodyGeometry,
 )
+from app.domain.hydrology.topology_coverage import derive_topology_coverage
 from app.ports import (
     InvalidPortResponseError,
     PortError,
@@ -45,6 +48,10 @@ from app.ports import (
 
 ResultT = TypeVar("ResultT")
 PROVIDER = "hydrology_topology"
+logger = logging.getLogger("wateragents.hydrology_topology")
+
+if TYPE_CHECKING:
+    from app.application.evidence_tools.numeric_methods import NumericMethodRegistry
 
 
 @dataclass(frozen=True)
@@ -55,6 +62,7 @@ class _PathState:
     depth: int
     cumulative_distance_km: float
     coverage_units: tuple[CoverageUnit, ...]
+    historical_candidates: tuple[CoverageUnit, ...] = ()
 
 
 @dataclass
@@ -90,6 +98,8 @@ class HydrologyGraphBuilder:
         max_concurrency: int,
         stage_timeout_seconds: float,
         prediction_baseline_hours: int = 48,
+        numeric_registry: NumericMethodRegistry | None = None,
+        capability_registry: ParameterCapabilityRegistry | None = None,
     ) -> None:
         if (
             isinstance(max_concurrency, bool)
@@ -116,6 +126,10 @@ class HydrologyGraphBuilder:
         self._max_concurrency = max_concurrency
         self._stage_timeout_seconds = float(stage_timeout_seconds)
         self._prediction_baseline_hours = prediction_baseline_hours
+        if numeric_registry is not None and capability_registry is None:
+            raise ValueError("numeric methods require a capability registry")
+        self._numeric_registry = numeric_registry
+        self._capability_registry = capability_registry
 
     async def build(
         self,
@@ -135,7 +149,42 @@ class HydrologyGraphBuilder:
             supporting_parameters=tuple(item.key for item in context.supporting_params),
             evidence_parameters=context.evidence_rule_parameters,
             time_segments=context.time_segments,
+            time_resolution=context.time_resolution,
+            analysis_timezone=context.analysis_timezone,
             prediction_baseline_hours=self._prediction_baseline_hours,
+        )
+        method_input_parameters = self._method_input_parameters(context)
+        auxiliary_units = tuple(
+            sorted(
+                {
+                    CoverageUnit(
+                        parameter=parameter,
+                        segment_index=unit.segment_index,
+                        window_index=unit.window_index,
+                    )
+                    for unit in base_request.coverage_units
+                    for parameter in method_input_parameters
+                },
+                key=_coverage_key,
+            )
+        )
+        availability_request = (
+            StationAvailabilityRequest(
+                comid=base_request.comid,
+                coverage_units=tuple(
+                    sorted(
+                        {*base_request.coverage_units, *auxiliary_units},
+                        key=_coverage_key,
+                    )
+                ),
+                historical_ranges=base_request.historical_ranges,
+                prediction_baseline_ranges=base_request.prediction_baseline_ranges,
+            )
+            if auxiliary_units
+            else base_request
+        )
+        historical_segment_indexes = frozenset(
+            item.segment_index for item in base_request.historical_ranges
         )
         target_comid = context.target.comid
         target_segment = await self._external_call(
@@ -146,13 +195,16 @@ class HydrologyGraphBuilder:
             semaphore=semaphore,
             deadline=effective_deadline,
             operation="get_segment",
+            comid=target_comid,
         )
         if target_segment is not None and target_segment.comid != target_comid:
-            raise InvalidPortResponseError(
+            error = InvalidPortResponseError(
                 "Target segment response referenced a different COMID.",
                 provider=PROVIDER,
                 operation="get_segment",
             )
+            self._log_port_failure(error, operation="get_segment", comid=target_comid)
+            raise error
         nodes: dict[str, _NodeRecord] = {
             target_comid: _NodeRecord(
                 point=(
@@ -189,7 +241,8 @@ class HydrologyGraphBuilder:
             grouped = self._group_frontier(ordered_frontier)
             evaluations = await self._evaluate_frontier(
                 grouped,
-                base_request=base_request,
+                availability_request=availability_request,
+                historical_segment_indexes=historical_segment_indexes,
                 availability_cache=availability_cache,
                 upstream_cache=upstream_cache,
                 semaphore=semaphore,
@@ -205,6 +258,7 @@ class HydrologyGraphBuilder:
                     for unit in item.covered_units
                 }
                 for state in states:
+                    historical_candidates = set(state.historical_candidates)
                     qualified = tuple(
                         unit for unit in state.coverage_units if unit in covered
                     )
@@ -222,29 +276,15 @@ class HydrologyGraphBuilder:
                             )
                         )
                     remaining = tuple(
-                        unit for unit in state.coverage_units if unit not in covered
+                        unit
+                        for unit in state.coverage_units
+                        if unit not in covered
+                        or (
+                            unit.segment_index in historical_segment_indexes
+                            and unit not in historical_candidates
+                        )
                     )
                     if not remaining:
-                        continue
-
-                    limit_reason = self._current_limit_reason(state)
-                    if limit_reason is not None:
-                        self._add_terminal_outcomes(
-                            outcomes,
-                            state,
-                            remaining,
-                            BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
-                            limit_reason,
-                        )
-                        continue
-                    if not upstreams:
-                        self._add_terminal_outcomes(
-                            outcomes,
-                            state,
-                            remaining,
-                            BranchOutcomeStatus.NO_QUALIFYING_SOURCE,
-                            BranchOutcomeReason.NATURAL_HEADWATER,
-                        )
                         continue
 
                     remaining_state = _PathState(
@@ -254,7 +294,39 @@ class HydrologyGraphBuilder:
                         depth=state.depth,
                         cumulative_distance_km=state.cumulative_distance_km,
                         coverage_units=remaining,
+                        historical_candidates=tuple(
+                            sorted(
+                                historical_candidates.union(
+                                    unit
+                                    for unit in qualified
+                                    if unit.segment_index
+                                    in historical_segment_indexes
+                                ),
+                                key=_coverage_key,
+                            )
+                        ),
                     )
+
+                    limit_reason = self._current_limit_reason(state)
+                    if limit_reason is not None:
+                        self._add_terminal_outcomes(
+                            outcomes,
+                            remaining_state,
+                            remaining,
+                            BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+                            limit_reason,
+                        )
+                        continue
+                    if not upstreams:
+                        self._add_terminal_outcomes(
+                            outcomes,
+                            remaining_state,
+                            remaining,
+                            BranchOutcomeStatus.NO_QUALIFYING_SOURCE,
+                            BranchOutcomeReason.NATURAL_HEADWATER,
+                        )
+                        continue
+
                     for segment in upstreams:
                         decision = self._decide_expansion(
                             remaining_state,
@@ -294,6 +366,7 @@ class HydrologyGraphBuilder:
                         depth=expansion.depth,
                         cumulative_distance_km=expansion.cumulative_distance_km,
                         coverage_units=expansion.parent.coverage_units,
+                        historical_candidates=expansion.parent.historical_candidates,
                     )
                 )
             frontier = tuple(next_frontier)
@@ -304,13 +377,64 @@ class HydrologyGraphBuilder:
             edges=edges,
             outcomes=outcomes,
             availability_cache=availability_cache,
+            auxiliary_units=auxiliary_units,
+        )
+
+    def _method_input_parameters(
+        self,
+        context: AnalysisContext,
+    ) -> tuple[ParameterKey, ...]:
+        registry = self._numeric_registry
+        capabilities = self._capability_registry
+        if registry is None or capabilities is None:
+            return ()
+        modes = {segment.mode.value for segment in context.time_segments}
+        roots = {
+            item.key for item in (*context.params_used, *context.supporting_params)
+        }
+        visited: set[ParameterKey] = set()
+        inputs: set[ParameterKey] = set()
+
+        def visit(parameter: ParameterKey) -> None:
+            if parameter in visited:
+                return
+            visited.add(parameter)
+            for method in registry.for_output(parameter):
+                if not modes.intersection(method.allowed_modes):
+                    continue
+                for input_ in method.inputs:
+                    if input_.parameter == parameter:
+                        continue
+                    inputs.add(input_.parameter)
+                    visit(input_.parameter)
+
+        for parameter in roots:
+            visit(parameter)
+        return tuple(
+            sorted(
+                (
+                    parameter
+                    for parameter in inputs - roots
+                    if (
+                        capability := capabilities.get(parameter)
+                    ) is not None
+                    and any(
+                        policy.direct_observation
+                        and policy.provider in capability.availability_providers
+                        and policy.provider in capability.observation_providers
+                        for policy in capability.channel_policies
+                    )
+                ),
+                key=lambda item: (item.code_system, item.code),
+            )
         )
 
     async def _evaluate_frontier(
         self,
         grouped: dict[str, tuple[_PathState, ...]],
         *,
-        base_request: StationAvailabilityRequest,
+        availability_request: StationAvailabilityRequest,
+        historical_segment_indexes: frozenset[int],
         availability_cache: dict[str, tuple[StationAvailability, ...]],
         upstream_cache: dict[str, tuple[RiverSegment, ...]],
         semaphore: asyncio.Semaphore,
@@ -325,11 +449,9 @@ class HydrologyGraphBuilder:
             if availability is None:
                 request = StationAvailabilityRequest(
                     comid=comid,
-                    coverage_units=base_request.coverage_units,
-                    historical_ranges=base_request.historical_ranges,
-                    prediction_baseline_ranges=(
-                        base_request.prediction_baseline_ranges
-                    ),
+                    coverage_units=availability_request.coverage_units,
+                    historical_ranges=availability_request.historical_ranges,
+                    prediction_baseline_ranges=availability_request.prediction_baseline_ranges,
                 )
                 availability = await self._external_call(
                     lambda: self._station_inventory.check_availability(
@@ -339,15 +461,29 @@ class HydrologyGraphBuilder:
                     semaphore=semaphore,
                     deadline=deadline,
                     operation="check_availability",
+                    comid=comid,
                 )
-                availability = self._normalize_availability(comid, availability)
+                try:
+                    availability = self._normalize_availability(comid, availability)
+                except PortError as error:
+                    self._log_port_failure(
+                        error, operation="check_availability", comid=comid
+                    )
+                    raise
                 availability_cache[comid] = availability
 
             covered = {
                 unit for item in availability for unit in item.covered_units
             }
             needs_upstreams = any(
-                any(unit not in covered for unit in state.coverage_units)
+                any(
+                    unit not in covered
+                    or (
+                        unit.segment_index in historical_segment_indexes
+                        and unit not in state.historical_candidates
+                    )
+                    for unit in state.coverage_units
+                )
                 and self._current_limit_reason(state) is None
                 for state in grouped[comid]
             )
@@ -362,8 +498,15 @@ class HydrologyGraphBuilder:
                     semaphore=semaphore,
                     deadline=deadline,
                     operation="get_direct_upstreams",
+                    comid=comid,
                 )
-                upstreams = self._normalize_upstreams(comid, upstreams)
+                try:
+                    upstreams = self._normalize_upstreams(comid, upstreams)
+                except PortError as error:
+                    self._log_port_failure(
+                        error, operation="get_direct_upstreams", comid=comid
+                    )
+                    raise
                 upstream_cache[comid] = upstreams
             return comid, availability, upstreams
 
@@ -387,26 +530,51 @@ class HydrologyGraphBuilder:
         semaphore: asyncio.Semaphore,
         deadline: float,
         operation: str,
+        comid: str,
     ) -> ResultT:
-        self._ensure_deadline(deadline, operation)
-        async with semaphore:
+        try:
             self._ensure_deadline(deadline, operation)
-            try:
+            async with semaphore:
+                self._ensure_deadline(deadline, operation)
                 async with asyncio.timeout_at(deadline):
                     return await call()
-            except PortError as error:
-                # Normalize provider-specific sub-operations at this application
-                # boundary. Public workflow errors distinguish topology lookup from
-                # station qualification, not the adapter method that happened to
-                # fail inside either operation.
-                error.operation = operation
-                raise
-            except TimeoutError:
-                raise PortTimeoutError(
-                    "Hydrology topology deadline was exhausted.",
-                    provider=PROVIDER,
-                    operation=operation,
-                ) from None
+        except PortError as error:
+            self._log_port_failure(error, operation=operation, comid=comid)
+            # Normalize provider-specific sub-operations at this application
+            # boundary. Public workflow errors distinguish topology lookup from
+            # station qualification, not the adapter method that happened to
+            # fail inside either operation.
+            error.operation = operation
+            raise
+        except TimeoutError:
+            error = PortTimeoutError(
+                "Hydrology topology deadline was exhausted.",
+                provider=PROVIDER,
+                operation=operation,
+            )
+            self._log_port_failure(error, operation=operation, comid=comid)
+            raise error from None
+
+    @staticmethod
+    def _log_port_failure(error: PortError, *, operation: str, comid: str) -> None:
+        logger.warning(
+            "Hydrology topology %s failed for COMID %s: %s",
+            operation,
+            comid,
+            error,
+            extra={
+                "event_name": "topology_provider_failed",
+                "operation": operation,
+                "comid": comid,
+                "provider": error.provider,
+                "provider_operation": error.operation,
+                "provider_error": type(error).__name__,
+                "provider_status": error.status_code,
+                "provider_retry_after_seconds": getattr(
+                    error, "retry_after_seconds", None
+                ),
+            },
+        )
 
     def _current_limit_reason(
         self,
@@ -617,7 +785,18 @@ class HydrologyGraphBuilder:
         reason: BranchOutcomeReason,
     ) -> None:
         for unit in units:
-            outcomes.add(self._outcome(state, unit, status, reason))
+            outcomes.add(
+                self._outcome(
+                    state,
+                    unit,
+                    (
+                        BranchOutcomeStatus.BACKUP_SEARCH_ENDED
+                        if unit in state.historical_candidates
+                        else status
+                    ),
+                    reason,
+                )
+            )
 
     def _add_blocked_expansion_outcomes(
         self,
@@ -630,7 +809,11 @@ class HydrologyGraphBuilder:
                 self._outcome(
                     expansion.parent,
                     unit,
-                    BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+                    (
+                        BranchOutcomeStatus.BACKUP_SEARCH_ENDED
+                        if unit in expansion.parent.historical_candidates
+                        else BranchOutcomeStatus.SEARCH_LIMIT_REACHED
+                    ),
                     reason,
                     blocked_upstream_comid=expansion.segment.comid,
                 )
@@ -644,6 +827,7 @@ class HydrologyGraphBuilder:
         edges: dict[tuple[str, str], float],
         outcomes: set[BranchOutcome],
         availability_cache: dict[str, tuple[StationAvailability, ...]],
+        auxiliary_units: tuple[CoverageUnit, ...],
     ) -> HydrologyGraph:
         ordered_outcomes = tuple(sorted(outcomes, key=_outcome_key))
         active_comids = {context.target.comid}
@@ -667,6 +851,8 @@ class HydrologyGraphBuilder:
             code = (
                 ExclusionReasonCode.NO_QUALIFYING_SOURCE
                 if outcome.outcome is BranchOutcomeStatus.NO_QUALIFYING_SOURCE
+                else ExclusionReasonCode.BACKUP_SEARCH_ENDED
+                if outcome.outcome is BranchOutcomeStatus.BACKUP_SEARCH_ENDED
                 else ExclusionReasonCode.SEARCH_LIMIT_REACHED
             )
             reason = HydrologyExclusionReason(
@@ -713,6 +899,11 @@ class HydrologyGraphBuilder:
                     station_refs=self._station_refs(
                         availability_cache.get(comid, ()),
                         qualified_units,
+                        (
+                            auxiliary_units
+                            if participation is HydrologyParticipation.ACTIVE
+                            else ()
+                        ),
                     ),
                     excluded_reasons=tuple(
                         sorted(exclusions.get(comid, set()), key=_exclusion_key)
@@ -739,16 +930,7 @@ class HydrologyGraphBuilder:
             active_edge_pairs,
             target_comid=context.target.comid,
         )
-        qualified_count = sum(
-            outcome.outcome is BranchOutcomeStatus.QUALIFIED
-            for outcome in ordered_outcomes
-        )
-        if qualified_count == len(ordered_outcomes):
-            coverage = TopologyCoverage.COMPLETE
-        elif qualified_count:
-            coverage = TopologyCoverage.PARTIAL
-        else:
-            coverage = TopologyCoverage.NONE
+        coverage = derive_topology_coverage(ordered_outcomes)
         stats = TopologySearchStats(
             discovered_nodes=len(ordered_nodes),
             queried_nodes=len(availability_cache),
@@ -785,11 +967,12 @@ class HydrologyGraphBuilder:
     def _station_refs(
         availability: tuple[StationAvailability, ...],
         qualified_units: tuple[CoverageUnit, ...],
+        auxiliary_units: tuple[CoverageUnit, ...] = (),
     ) -> tuple[TopologyStationRef, ...]:
-        selected = set(qualified_units)
+        selected = {*qualified_units, *auxiliary_units}
         grouped: dict[
             tuple[ParameterProvider, str],
-            dict[tuple[str, ParameterKey, str], set[int]],
+            dict[tuple[str, ParameterKey, str], tuple[set[int], set[str]]],
         ] = {}
         for item in availability:
             for reference in item.series_refs:
@@ -804,9 +987,13 @@ class HydrologyGraphBuilder:
                         reference.parameter,
                         reference.channel,
                     )
-                    station_series.setdefault(key, set()).update(
-                        unit.segment_index for unit in covered
+                    segments, windows = station_series.setdefault(
+                        key, (set(), set())
                     )
+                    for unit in covered:
+                        segments.add(unit.segment_index)
+                        if unit.window_index is not None:
+                            windows.add(f"window-{unit.window_index:03d}")
         return tuple(
             TopologyStationRef(
                 provider=provider,
@@ -818,13 +1005,16 @@ class HydrologyGraphBuilder:
                                 series_identity=series_identity,
                                 parameter=parameter,
                                 channel=channel,
-                                covered_segment_indexes=tuple(sorted(indexes)),
+                                covered_segment_indexes=tuple(sorted(segments)),
+                                covered_window_ids=(
+                                    tuple(sorted(windows)) if windows else None
+                                ),
                             )
                             for (
                                 series_identity,
                                 parameter,
                                 channel,
-                            ), indexes in series_refs.items()
+                            ), (segments, windows) in series_refs.items()
                         ),
                         key=lambda reference: (
                             reference.parameter.code_system,
@@ -898,13 +1088,18 @@ def _comid_key(comid: str) -> tuple[int, str]:
     return int(comid), comid
 
 
-def _coverage_key(unit: CoverageUnit) -> tuple[int, str, str]:
-    return unit.segment_index, unit.parameter.code_system, unit.parameter.code
+def _coverage_key(unit: CoverageUnit) -> tuple[int, int, str, str]:
+    return (
+        unit.segment_index,
+        -1 if unit.window_index is None else unit.window_index,
+        unit.parameter.code_system,
+        unit.parameter.code,
+    )
 
 
 def _state_key(
     state: _PathState,
-) -> tuple[int, float, int, str, int, str, tuple[str, ...], tuple[tuple[int, str, str], ...]]:
+) -> tuple[object, ...]:
     return (
         state.depth,
         state.cumulative_distance_km,
@@ -912,6 +1107,7 @@ def _state_key(
         *_comid_key(state.branch_root_comid),
         state.path_to_target,
         tuple(_coverage_key(unit) for unit in state.coverage_units),
+        tuple(_coverage_key(unit) for unit in state.historical_candidates),
     )
 
 

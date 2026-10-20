@@ -53,6 +53,26 @@ test('workspace routes and form use the current API surface', async ({ page }) =
   await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible()
 })
 
+test('mobile map fills its panel after opening the hidden map tab', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route(/\/api\/settings$/, async (route) => route.fulfill({ json: settings }))
+  await page.route(/tile\.openstreetmap\.org/, async (route) => route.fulfill({ status: 200, contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4////fwAJ+wP9Z9b0WQAAAABJRU5ErkJggg==', 'base64') }))
+  await page.goto('/')
+  const map = page.locator('section.map-panel')
+  await expect(map).toBeHidden()
+  await page.getByRole('tab', { name: 'map' }).click()
+  await expect(map).toBeVisible()
+  await expect.poll(() => map.locator('.leaflet-tile').count()).toBeGreaterThan(1)
+  await map.locator('.map-canvas').click()
+  await page.getByRole('tab', { name: 'controls' }).click()
+  const picked = await page.getByText(/^Map point:/).textContent()
+  const coordinates = picked?.match(/Map point: (-?\d+\.\d+), (-?\d+\.\d+)/)
+  expect(coordinates).not.toBeNull()
+  expect(Math.abs(Number(coordinates![1]) - 39)).toBeLessThan(1)
+  expect(Math.abs(Number(coordinates![2]) + 97)).toBeLessThan(1)
+})
+
 test('map renders saved topology status, labels and a frozen running halo', async ({ page }) => {
   const runId = '00000000-0000-4000-8000-000000000001'
   const time = '2026-10-08T00:00:00Z'

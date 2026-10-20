@@ -1,6 +1,21 @@
 # M9 Settings/Keys/Admin + Frontend Implementation TODO
 
-更新日期：2026-10-08
+更新日期：2026-10-19
+
+## 来源覆盖与距离展示追加验收（2026-10-19）
+
+- [x] Overview 分别展示参与水体可用结果数和上游来源搜索覆盖；按保存的分支结局解释 `partial`，不把备选搜索上限误称必需来源失败。
+- [x] Time Series 标明沿河道几何的近似距离、路径及水体数。历史结果只在当前页面按 run/session/result item 请求临时距离；无法估算时仍显示未知，原保存结果不变。
+- [x] 前端单元测试 **79 passed**，类型检查、lint、生产构建及生成 OpenAPI 类型校验通过。真实浏览器、供应商以及新的付费模型完整分析本轮未运行。
+
+## 范围、依据与传递距离追加验收（2026-10-17）
+
+- [x] 结果消费规则同步支持 `range_estimate`，展示服务端可能范围并保持单点为空；明确计算与模型估计分辨显示。
+- [x] 当前 `TimeSeries` 消费来源分类与 `measured_anchors`，说明相关读数／当地资料／一般规律，并展示原始测量距离和路径水体数；未知距离不能显示为 0。
+- [x] 后端来源传递专项验证包含跨两个水体累计 300 公里、原始测站引用保持，以及无实测范围不可提升为单点。相关上游套件实际 **25 passed**；新模型 bundle、来源和 domain architecture 组合实际 **42 passed**。两者为后端离线证据。
+- [ ] 本轮前端组件、类型生成、构建、真实浏览器与供应商复验结果待最终集成记录填写；既有运行记录不能替代这次改动的验证。
+
+展示规则见 [Frontend Experience §7](m9_frontend_experience_design.md#7-地图拓扑与-time-series)。低可信度不隐藏已有预测；可能范围尚未通过回测校准，不能标为置信区间。
 
 > 当前状态：M9 产品、Frontend Experience、Policy Catalog、API 与实施设计已经冻结；Milestone 0–9 的本机实现及阶段验证已完成并分别保留本地提交。真实 provider、真实 OS credential backend、容量与 Ubuntu/macOS 验证仍按实际证据保持 partial / not run。
 
@@ -538,6 +553,13 @@
 - 2026-10-09 CI 修复：无前端构建时先判定 HTML 导航，让未知路径和缺失资源保持 404；后端 CI 在生产冒烟测试前安装并构建前端；M4 假引擎测试显式固定空模型目录，避免受 CI 环境变量影响。Windows 本机前端 build、相关回归 **116 passed**，专用 PostgreSQL 全量 **2379 passed、2 第三方 warnings**。
 - 11 份相关文档链接与代码围栏均 0 问题，contract matrix 30 条、27 implemented / 3 partial；15 个本阶段源码/文档文件凭据特征扫描 0 命中，frontend bundle 边界检查通过。旧目录的部分 pytest 临时文件存在 ACL 限制，未扫描或提交这些目录；仅按列出的路径暂存本阶段文件。
 - 真实 OpenAI/Google provider、三个 OS credential backend 实机、容量与 Ubuntu/macOS CI **not run**；Windows 本机 fake/PG/Chrome 不能替代它们。原因是需要明确授权/可用凭据或对应平台；matrix 的 GLOBAL-C11、M9-C01、M9-C03 保持 partial。本地提交见该阶段 HEAD；未 push。
+
+### 真实运行修复记录（2026-10-16，未提交）
+
+- 已保存的上游 pH 8.2 图表直接显示 inferred、mean、partial_coverage 和 provider_flagged；“complete”结果可用性与全天采样覆盖分别展示。Frontend 70 passed，typecheck、lint、build 通过。
+- 时间序列按目标值的 `temporal_estimate_method` 区分空窗推测与窗内读数/样本聚合，并单列其他推断或预测；流量支持证据的推测标记不会把有 pH 读数的窗口误标为空窗。图表用不同颜色和线型，明细显示补值方法、置信度说明与证据引用，并解释质量标记可能来自流量等支持证据。前端定向测试 `1 passed`、完整前端 `70 passed`，typecheck、lint、build 通过；浏览器复验见下文。
+- 历史页曾因单条内容或单个会话都读取整次 run 约 500 条 transcript 项而超过数据库 5 秒读取期限，返回 database_unavailable。改为按单项、目标会话和实际引用按需读取，保留可见性、损坏项与引用闭包语义；应用层 25 passed、PostgreSQL 定向与既有契约 7 passed、完整 backend 2610 passed、2 warnings。服务重启后，同一已保存运行的 run、会话及内容请求均返回 200；已释放的实时事件流返回预期 410 并由页面转接历史。完整付费分析复验见下文；跨平台 CI 未运行。
+- 最终复验：2026-10-14 至 15 日、6h、stateless、DeepSeek flash 的真实浏览器 run `bcb21e89-35a6-41d5-bc54-8b281b0a04b6` 完成 9 个 session，页面重载后显示最终摘要、39 个拓扑水体和上游窗内 pH 8.2。目标 COMID 1777642 仍无可支持的 pH 数值。此 run 有 1,146 条 transcript 项；终态 run 详情读取采用单请求增量解析缓存，保持引用闭包和 AUTO/HISTORY 语义。真实 HTTP 详情由约 119 秒降至 15.934 秒，返回 5 条运行项、1,017 条引用项、0 个读取问题；`/health` 为 200。独立测试库完整 backend 回归 `2640 passed, 2 warnings`，frontend `70 passed` 及 typecheck、lint、build 通过。空窗补值未由本次真实数据触发；跨平台 CI 未运行。
 
 ## Contract 承接矩阵（实施时填写）
 

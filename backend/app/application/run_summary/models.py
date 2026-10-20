@@ -9,18 +9,18 @@ from pydantic import Field, StrictBool, StrictInt, field_validator, model_valida
 
 from app.application.analysis_runs.models import SessionResultReference
 from app.application.analysis_runs.topology_result_models import (
-    DependencyStatus,
-    GraphCoverage,
     MAX_M7_DIRECT_UPSTREAM_NODES,
     MAX_M7_TOPOLOGY_NODES,
+    DependencyStatus,
+    GraphCoverage,
     StableSourceReference,
 )
+from app.application.canonical_json import canonical_json_digest
 from app.application.reasoning.model_models import (
     JsonObjectText,
     ModelItemName,
     NonBlankText,
 )
-from app.application.canonical_json import canonical_json_digest
 from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
@@ -38,12 +38,14 @@ from app.domain.domain_enum import DomainEnum
 from app.domain.domain_model import DomainModel
 from app.domain.inference import (
     AssessmentAvailability,
-    InferenceResult,
     InferenceMode,
+    InferenceResult,
     ModelExecutionSummary,
     ModelUsageSummary,
+    OutcomeStatus,
     RiskLevel,
 )
+from app.domain.inference.value_range import validate_result_range
 from app.domain.model_catalog import ModelSelection
 from app.domain.time.time_range import TimeRange
 from app.domain.time.timezone import get_iana_timezone
@@ -91,13 +93,21 @@ class NotableFinding(DomainModel):
     text: NonBlankText
     source_ref: StableSourceReference
     display_value: CanonicalDecimal | None = None
+    value_lower: CanonicalDecimal | None = None
+    value_upper: CanonicalDecimal | None = None
     display_unit: NonEmptyString | None = None
     window_id: NonEmptyString | None = None
 
     @model_validator(mode="after")
     def validate_display_value(self) -> Self:
+        validate_result_range(
+            OutcomeStatus.QUANTIFIED if self.display_value is not None
+            else OutcomeStatus.RANGE_ESTIMATE if self.value_lower is not None
+            else OutcomeStatus.DIRECTIONAL,
+            self.display_value, self.value_lower, self.value_upper,
+        )
         numeric_fields = (
-            self.display_value is not None,
+            self.display_value is not None or self.value_lower is not None,
             self.display_unit is not None,
             self.window_id is not None,
         )
@@ -608,13 +618,21 @@ class RunSummaryHighlight(DomainModel):
     text: NonBlankText
     source_ref: StableSourceReference
     display_value: CanonicalDecimal | None = None
+    value_lower: CanonicalDecimal | None = None
+    value_upper: CanonicalDecimal | None = None
     display_unit: NonEmptyString | None = None
     window_id: NonEmptyString | None = None
 
     @model_validator(mode="after")
     def validate_display_value(self) -> Self:
+        validate_result_range(
+            OutcomeStatus.QUANTIFIED if self.display_value is not None
+            else OutcomeStatus.RANGE_ESTIMATE if self.value_lower is not None
+            else OutcomeStatus.DIRECTIONAL,
+            self.display_value, self.value_lower, self.value_upper,
+        )
         numeric_fields = (
-            self.display_value is not None,
+            self.display_value is not None or self.value_lower is not None,
             self.display_unit is not None,
             self.window_id is not None,
         )

@@ -26,6 +26,7 @@ def test_production_lifespan_builds_one_worker_and_injects_its_m5_producer() -> 
         application = create_test_app(
             settings.model_copy(
                 update={
+                    "memory_enabled": True,
                     "rag_reconciliation_interval_seconds": 0.01,
                     "rag_worker_shutdown_grace_seconds": 1,
                 }

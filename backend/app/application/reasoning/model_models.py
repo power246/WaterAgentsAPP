@@ -18,6 +18,7 @@ from pydantic import (
 from app.domain import (
     DomainEnum,
     DomainModel,
+    EvidenceFragmentReference,
     ItemReference,
     ModelSelection,
     NonEmptyString,
@@ -117,6 +118,7 @@ TokenCount: TypeAlias = Annotated[int, Field(strict=True, ge=0)]
 
 class WaterbodyModelPhase(DomainEnum):
     EVIDENCE_PLANNING = "evidence_planning"
+    NUMERIC_ESTIMATION = "numeric_estimation"
     REASONING_BATCH = "reasoning_batch"
     OVERALL_SYNTHESIS = "overall_synthesis"
     SCHEMA_REPAIR = "schema_repair"
@@ -193,8 +195,22 @@ class WaterbodyModelRequest(DomainModel):
     prompt_policy_digest: NonEmptyString
     scope_digest: NonEmptyString
     evidence_bundle_ref: ItemReference
+    numeric_plan_ref: ItemReference | None = None
+    numeric_input_refs: tuple[EvidenceFragmentReference, ...] = ()
     batch_id: NonEmptyString | None = None
     deadline: UtcDatetime
+
+    @model_validator(mode="after")
+    def validate_numeric_references(self) -> Self:
+        if self.phase is WaterbodyModelPhase.NUMERIC_ESTIMATION:
+            if self.numeric_plan_ref is None:
+                raise ValueError("numeric estimation requires its saved dependency plan")
+        elif self.numeric_plan_ref is not None or self.numeric_input_refs:
+            raise ValueError("numeric references require the numeric estimation phase")
+        identities = tuple(item.evidence_id for item in self.numeric_input_refs)
+        if len(identities) != len(set(identities)):
+            raise ValueError("numeric input references must be unique")
+        return self
 
     @field_validator("messages")
     @classmethod

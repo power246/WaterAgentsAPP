@@ -189,11 +189,14 @@ GET  /api/analysis/runs/{run_id}
 GET  /api/analysis/runs/{run_id}/sessions/{session_id}
 GET  /api/analysis/runs/{run_id}/sessions/{session_id}/transcript
 GET  /api/analysis/runs/{run_id}/transcript/{item_id}/content
+GET  /api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates?view=history
 GET  /api/analysis/runs/{run_id}/events
 GET  /api/analysis/runs/{run_id}/sessions/{session_id}/events
 POST /api/analysis/runs/{run_id}/cancel
 POST /api/analysis/runs/{run_id}/persistence/retry
 ```
+
+历史距离只读视图是 M5 之后增加的路由，仅从同一次运行已保存的结果、证据和拓扑按需派生显示值，不改写原结果；见 [M5 Evidence Tools API](M5/m5_evidence_tools_api.md)。
 
 消息流按 [D86](M3/m3_transcript_history_design.md#d86消息流划分为开始增量和定稿事件) 使用 message_started / message_delta / message_finalized，分别提供原消息元信息、本次新增文本及定稿表示。三者沿原 session SSE 编号续传，数据库不逐帧保存，其他过程事实仍完整记录；字段、组装和解析由实现者直接落实。
 

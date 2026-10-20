@@ -263,6 +263,13 @@ def test_waterbody_model_stream_signature_is_provider_neutral() -> None:
             ("self", "limit", "after_created_at", "after_run_id"),
         ),
         (TranscriptReadStorePort.read_run, ("self", "run_id")),
+        (TranscriptReadStorePort.run_exists, ("self", "run_id")),
+        (TranscriptReadStorePort.session_exists, ("self", "run_id", "session_id")),
+        (TranscriptReadStorePort.read_run_items, ("self", "run_id", "item_ids")),
+        (
+            TranscriptReadStorePort.list_session_item_ids,
+            ("self", "run_id", "session_id", "content_type"),
+        ),
         (
             EmbeddingPort.embed,
             ("self", "profile", "texts", "deadline", "cancel_token"),

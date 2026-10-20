@@ -51,10 +51,11 @@ class EvidenceRelationMaterializer:
         *,
         operation_id: str,
     ) -> tuple[EvidenceFragmentReference, ...]:
-        stored = [
-            (reference, await self._reader.read_fragment(scope, reference))
-            for reference in references
-        ]
+        stored = list(zip(
+            references,
+            await self._reader.read_fragments(scope, references),
+            strict=True,
+        ))
         created: list[EvidenceFragmentReference] = []
         existing_ids = {fragment.evidence_id for _, fragment in stored}
         for _ in range(max(1, len(scope.evidence_rule_plan.effective_rules))):

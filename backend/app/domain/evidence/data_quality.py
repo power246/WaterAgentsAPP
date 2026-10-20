@@ -7,6 +7,7 @@ class DataQualityFlag(DomainEnum):
     POSSIBLE_FREEZING = "possible_freezing"
     ANOMALOUS = "anomalous"
     ESTIMATED = "estimated"
+    TEMPORAL_ESTIMATE = "temporal_estimate"
     HISTORICAL_INFERENCE = "historical_inference"
     STALE = "stale"
     PROVIDER_FLAGGED = "provider_flagged"

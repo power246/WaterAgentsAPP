@@ -1,4 +1,4 @@
-from typing import Annotated, Self
+from typing import Annotated, Literal, Self
 
 from pydantic import Field, model_validator
 
@@ -12,6 +12,7 @@ class EvidenceLocation(DomainModel):
     station_id: NonEmptyString | None
     provider_location_id: NonEmptyString | None = None
     distance_to_target_km: Annotated[DomainFloat, Field(ge=0)] | None
+    distance_basis: Literal["mapped_channel_estimate"] | None = None
 
     @model_validator(mode="after")
     def require_location_identity(self) -> Self:
@@ -24,4 +25,8 @@ class EvidenceLocation(DomainModel):
             raise ValueError(
                 "point, comid, station_id, or provider_location_id is required"
             )
+        if self.distance_basis is not None and (
+            self.point is None or self.distance_to_target_km is None
+        ):
+            raise ValueError("mapped distance requires a point and distance")
         return self

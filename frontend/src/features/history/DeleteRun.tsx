@@ -53,8 +53,8 @@ export function DeleteRun({ runId, onClose, onAccepted }: {
       <p>Run {runId}</p>
       {!preview && !error && <p>Preparing dependency preview…</p>}
       {preview && <>
-        <p>{preview.estimated.runs} runs, {preview.estimated.sessions} sessions and {preview.estimated.transcript_items} transcript items will be removed.</p>
-        <p>{preview.estimated.retained_idempotency_tombstones} idempotency tombstones retained.</p>
+        <p>{preview.estimated.runs} {preview.estimated.runs === 1 ? 'run' : 'runs'}, {preview.estimated.sessions} sessions and {preview.estimated.transcript_items} transcript items will be removed.</p>
+        <p>{preview.estimated.retained_idempotency_tombstones} idempotency {preview.estimated.retained_idempotency_tombstones === 1 ? 'tombstone' : 'tombstones'} retained.</p>
         <p>Preserved: {preview.preserved.join(', ')}</p>
         {preview.delete_run_ids.length > 1 && <ul>{preview.delete_run_ids.map((id) => <li key={id}>{id}</li>)}</ul>}
         {preview.dependencies.length > 0 && <p>Dependent links: {preview.dependencies.length}</p>}

@@ -1,5 +1,6 @@
 import logging
-from typing import Annotated
+from contextlib import suppress
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Header, Query, Request
@@ -7,6 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import TypeAdapter, ValidationError
 from starlette.responses import Response
 
+from app.api.http.errors import UnknownQueryParametersError
 from app.api.schemas.analysis_runs import (
     AnalysisRunErrorResponse,
     AnalysisRunResponse,
@@ -19,17 +21,20 @@ from app.api.schemas.analysis_runs import (
     SessionTranscriptResponse,
     TranscriptContentResponse,
 )
-from app.api.http.errors import UnknownQueryParametersError
 from app.api.sse.response import (
     create_run_event_response,
     create_session_event_response,
 )
-from app.application.analysis_runs.models import AnalysisRunSnapshot, RunStatus
-from app.application.analysis_runs.persistence import PersistenceState
-from app.application.analysis_runs.creation import InvalidIdempotencyKeyError
 from app.application.analysis_runs.coordinator import (
     InvalidRunTransitionError,
     RunNotFoundError,
+)
+from app.application.analysis_runs.creation import InvalidIdempotencyKeyError
+from app.application.analysis_runs.models import AnalysisRunSnapshot, RunStatus
+from app.application.analysis_runs.persistence import PersistenceState
+from app.application.evidence_tools.anchor_distance_view import (
+    AnchorDistanceEstimatesResponse,
+    read_anchor_distance_estimates,
 )
 from app.application.transcripts.read_models import ReadView
 from app.application.transcripts.reader import (
@@ -247,6 +252,26 @@ async def get_transcript_content(
 
 
 @router.get(
+    "/{run_id}/transcript/{item_id}/anchor-distance-estimates",
+    response_model=AnchorDistanceEstimatesResponse,
+    responses={**error_responses(404), 200: {"headers": REQUEST_ID_HEADERS}},
+)
+async def get_anchor_distance_estimates(
+    request: Request,
+    run_id: UUID,
+    item_id: UUID,
+    view: Literal["history"] = "history",
+) -> AnchorDistanceEstimatesResponse:
+    _reject_unknown_query_parameters(request, {"view"})
+    request.state.run_id = run_id
+    return await read_anchor_distance_estimates(
+        request.app.state.transcript_reader,
+        run_id,
+        item_id,
+    )
+
+
+@router.get(
     "/{run_id}/events", response_class=Response,
     description=(
         "Sends the latest complete lightweight run snapshot, then replacement snapshots "
@@ -328,10 +353,11 @@ async def subscribe_session_events(
 async def cancel_run(request: Request, run_id: UUID) -> RunStatusResponse:
     _reject_unknown_query_parameters(request, set())
     request.state.run_id = run_id
-    _logger.info(
-        "Cancellation request entered the API.",
-        extra={"event_name": "cancel_endpoint_entered", "run_id": run_id},
-    )
+    with suppress(Exception):
+        _logger.info(
+            "Cancellation request entered the API.",
+            extra={"event_name": "cancel_endpoint_entered", "run_id": run_id},
+        )
     coordinator = request.app.state.run_coordinator
     try:
         snapshot = await coordinator.cancel_run(run_id)

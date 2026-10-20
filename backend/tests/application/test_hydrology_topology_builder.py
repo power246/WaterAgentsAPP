@@ -1,10 +1,19 @@
 import asyncio
-from collections.abc import Iterable
-from datetime import date, datetime, timezone
+import logging
+from dataclasses import replace
+from datetime import UTC, date, datetime
 from hashlib import sha256
 
 import pytest
-
+from app.application.analysis_runs.workflow import CancellationToken
+from app.application.evidence_tools.authorization import build_water_observation_plans
+from app.application.evidence_tools.numeric_dependency import prepare_numeric_scope
+from app.application.evidence_tools.numeric_methods import (
+    NumericMethod,
+    NumericMethodInput,
+    NumericMethodRegistry,
+)
+from app.application.evidence_tools.scope import assemble_evidence_session_scope
 from app.application.hydrology_topology import (
     HydrologyGraphBuilder,
     TopologyInvariantError,
@@ -25,7 +34,7 @@ from app.domain import (
     AvailabilityCoverageSource,
     BranchOutcomeReason,
     BranchOutcomeStatus,
-    CoverageUnit,
+    EvidenceToolRequest,
     GeoPoint,
     HydrologyParticipation,
     MemoryMode,
@@ -33,6 +42,7 @@ from app.domain import (
     MonitoringStation,
     ParameterKey,
     ParameterProvider,
+    ReferenceScope,
     RiverSegment,
     SeriesRef,
     StationAvailability,
@@ -43,20 +53,26 @@ from app.domain import (
     TopologyLimits,
     WaterbodyGeometry,
 )
+from app.infrastructure.config import load_parameter_capability_registry
 from app.ports import InvalidPortResponseError, PortRateLimitError, PortTimeoutError
 
-UTC = timezone.utc
 DECISION = datetime(2026, 9, 25, 8, tzinfo=UTC)
 TARGET = "100"
 OXYGEN = ParameterKey(code_system="usgs", code="00300")
 DISCHARGE = ParameterKey(code_system="usgs", code="00060")
+TEMPERATURE = ParameterKey(code_system="usgs", code="00010")
+CONDUCTANCE = ParameterKey(code_system="usgs", code="00095")
 
 
 def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def context(*, end_date: date = date(2026, 9, 24)) -> AnalysisContext:
+def context(
+    *,
+    end_date: date = date(2026, 9, 24),
+    decision: datetime = DECISION,
+) -> AnalysisContext:
     parsed = ParsedIntentV1(
         start_date=date(2026, 9, 24),
         end_date=end_date,
@@ -71,7 +87,7 @@ def context(*, end_date: date = date(2026, 9, 24)) -> AnalysisContext:
     dates = DateResolver().resolve(
         None,
         parsed,
-        decision_instant=DECISION,
+        decision_instant=decision,
         analysis_timezone="America/New_York",
         resolution_preference=TimeResolutionPreference.AUTO,
         resolution_preference_source=TimeResolutionPreferenceSource.FRONTEND,
@@ -80,7 +96,7 @@ def context(*, end_date: date = date(2026, 9, 24)) -> AnalysisContext:
     temporal = dates.temporal
     return AnalysisContext(
         query="Was dissolved oxygen safe yesterday?",
-        decision_instant=DECISION,
+        decision_instant=decision,
         analysis_timezone="America/New_York",
         target=ResolvedTarget(
             comid=TARGET,
@@ -195,7 +211,7 @@ class FakeTopology:
 class FakeInventory:
     def __init__(
         self,
-        coverage: dict[str, set[tuple[str, int]]],
+        coverage: dict[str, set[tuple[str, int] | tuple[str, int, int]]],
         *,
         probe: ConcurrencyProbe | None = None,
         error: Exception | None = None,
@@ -220,32 +236,67 @@ class FakeInventory:
         selected = tuple(
             unit
             for unit in request.coverage_units
-            if (unit.parameter.code, unit.segment_index)
-            in self.coverage.get(request.comid, set())
+            if (
+                (unit.parameter.code, unit.segment_index)
+                in self.coverage.get(request.comid, set())
+                or (
+                    unit.window_index is not None
+                    and (
+                        unit.parameter.code,
+                        unit.segment_index,
+                        unit.window_index,
+                    )
+                    in self.coverage.get(request.comid, set())
+                )
+            )
         )
         if not selected:
             return ()
         station_id = f"USGS-{request.comid}"
-        historical_indexes = {
-            item.segment_index for item in request.historical_ranges
-        }
         references = tuple(
             SeriesRef(
                 provider=ParameterProvider.WDFN_TIME_SERIES,
                 station_id=station_id,
-                parameter=unit.parameter,
+                parameter=parameter,
                 channel="continuous",
                 series_identity=(
-                    f"series-{request.comid}-{unit.parameter.code}-{unit.segment_index}"
+                    f"series-{request.comid}-{parameter.code}-{source.value}"
                 ),
-                coverage_source=(
-                    AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_ENVELOPE
-                    if unit.segment_index in historical_indexes
-                    else AvailabilityCoverageSource.PREDICTION_TIME_SERIES_BASELINE
+                coverage_source=source,
+                covered_units=tuple(
+                    unit
+                    for unit in selected
+                    if unit.parameter == parameter
+                    and (unit.window_index is not None)
+                    == (source is AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_OBSERVATION)
                 ),
-                covered_units=(unit,),
             )
-            for unit in selected
+            for parameter in sorted(
+                {unit.parameter for unit in selected},
+                key=lambda item: (item.code_system, item.code),
+            )
+            for source in (
+                AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_OBSERVATION,
+                AvailabilityCoverageSource.PREDICTION_TIME_SERIES_BASELINE,
+            )
+            if any(
+                unit.parameter == parameter
+                and (unit.window_index is not None)
+                == (source is AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_OBSERVATION)
+                for unit in selected
+            )
+        )
+        references = tuple(
+            sorted(
+                references,
+                key=lambda reference: (
+                    reference.provider.value,
+                    reference.parameter.code_system,
+                    reference.parameter.code,
+                    reference.coverage_source.value,
+                    reference.series_identity,
+                ),
+            )
         )
         return (
             StationAvailability(
@@ -272,6 +323,7 @@ def builder(
     limits: TopologyLimits | None = None,
     max_concurrency: int = 8,
     timeout: float = 1,
+    numeric_registry: NumericMethodRegistry | None = None,
 ) -> HydrologyGraphBuilder:
     return HydrologyGraphBuilder(
         topology=topology,
@@ -284,7 +336,104 @@ def builder(
         ),
         max_concurrency=max_concurrency,
         stage_timeout_seconds=timeout,
+        numeric_registry=numeric_registry,
+        capability_registry=(
+            load_parameter_capability_registry() if numeric_registry else None
+        ),
     )
+
+
+def test_method_input_only_station_reaches_m5_without_qualifying_target() -> None:
+    methods = NumericMethodRegistry(
+        (
+            NumericMethod(
+                method_id="test:oxygen_from_local_inputs",
+                version=1,
+                output_parameter=OXYGEN,
+                output_unit="mg/l",
+                inputs=(
+                    NumericMethodInput(parameter=TEMPERATURE, unit="deg C"),
+                    NumericMethodInput(parameter=CONDUCTANCE, unit="uS/cm"),
+                ),
+                calculate=lambda values, _windows, _target: sum(values),
+                confidence_cap=0.5,
+            ),
+        )
+    )
+    inventory = FakeInventory(
+        {
+            TARGET: {
+                (code, 0, window_index)
+                for code in (TEMPERATURE.code, CONDUCTANCE.code)
+                for window_index in range(4)
+            },
+        }
+    )
+    graph = run(
+        builder(FakeTopology({}), inventory, numeric_registry=methods)
+        .build(context())
+    )
+    target = next(node for node in graph.nodes if node.comid == TARGET)
+    assert graph.coverage is TopologyCoverage.NONE
+    assert target.participation is HydrologyParticipation.ACTIVE
+    assert not target.is_inlet
+    assert target.qualified_units == ()
+    assert {
+        reference.parameter
+        for station in target.station_refs
+        for reference in station.series_refs
+    } == {TEMPERATURE, CONDUCTANCE}
+    assert {item.coverage_unit.parameter for item in graph.branch_outcomes} == {
+        OXYGEN,
+        DISCHARGE,
+    }
+
+    scope = assemble_evidence_session_scope(
+        run_id="run-input-only",
+        session_id="session-input-only",
+        session_fact=ReferenceScope(
+            item_id="session", run_id="run-input-only", session_id="session-input-only"
+        ),
+        analysis_context_ref=ReferenceScope(item_id="context", run_id="run-input-only"),
+        topology_ref=ReferenceScope(item_id="topology", run_id="run-input-only"),
+        context=context(),
+        topology=graph,
+        agent_comid=TARGET,
+        registry=load_parameter_capability_registry(),
+        cancel_token=CancellationToken(asyncio.Event()),
+    )
+    scope = prepare_numeric_scope(scope, methods)
+    assert scope.intermediate_parameters == (TEMPERATURE, CONDUCTANCE)
+    plans = build_water_observation_plans(
+        scope,
+        EvidenceToolRequest(
+            tool_call_id="collect-method-inputs",
+            session_id=scope.session_id,
+            tool_name="collect_water_observations",
+            purpose="Collect registered method inputs.",
+            window_ids=tuple(window.window_id for window in scope.time_windows),
+            parameter_keys=scope.intermediate_parameters,
+        ),
+        operation_id="collect-method-inputs",
+        registry=load_parameter_capability_registry(),
+    )
+    assert {plan.parameter_keys[0] for plan in plans} == {
+        TEMPERATURE,
+        CONDUCTANCE,
+    }
+
+    production_methods = NumericMethodRegistry(
+        (replace(methods.methods[0], production=True),)
+    )
+    production_graph = run(
+        builder(FakeTopology({}), inventory, numeric_registry=production_methods)
+        .build(context())
+    )
+    assert {
+        reference.parameter
+        for station in production_graph.nodes[0].station_refs
+        for reference in station.series_refs
+    } == {TEMPERATURE, CONDUCTANCE}
 
 
 def codes(*values: str, segment_index: int = 0) -> set[tuple[str, int]]:
@@ -315,7 +464,7 @@ def statuses(graph, status: BranchOutcomeStatus) -> list[BranchOutcomeReason]:
     ]
 
 
-def test_target_complete_stops_without_topology_navigation() -> None:
+def test_target_historical_candidate_checks_for_one_backup() -> None:
     topology = FakeTopology({})
     inventory = FakeInventory({TARGET: codes("00060", "00300")})
 
@@ -326,7 +475,120 @@ def test_target_complete_stops_without_topology_navigation() -> None:
     assert graph.nodes[0].is_inlet
     assert graph.execution_layers[0].root == (TARGET,)
     assert topology.segment_calls == [TARGET]
-    assert topology.calls == []
+    assert topology.calls == [(TARGET, 100.0)]
+    assert set(statuses(graph, BranchOutcomeStatus.BACKUP_SEARCH_ENDED)) == {
+        BranchOutcomeReason.NATURAL_HEADWATER
+    }
+
+
+def test_historical_candidate_search_keeps_one_upstream_alternative() -> None:
+    topology = FakeTopology(linear_topology(3))
+    inventory = FakeInventory(
+        {
+            "200": codes("00060", "00300"),
+            "201": codes("00060", "00300"),
+            "202": codes("00060", "00300"),
+        }
+    )
+
+    graph = run(
+        builder(topology, inventory).build(
+            context(decision=datetime(2026, 9, 27, 8, tzinfo=UTC))
+        )
+    )
+
+    assert {node.comid for node in graph.nodes if node.is_inlet} == {"200", "201"}
+    assert "202" not in {node.comid for node in graph.nodes}
+    assert graph.coverage is TopologyCoverage.COMPLETE
+    assert graph.stats.qualified_inlets == 2
+    assert topology.calls == [(TARGET, 100.0), ("200", 100.0)]
+
+
+def test_historical_qualification_and_station_refs_are_window_specific() -> None:
+    topology = FakeTopology({TARGET: (segment("200", TARGET),)})
+    inventory = FakeInventory(
+        {
+            TARGET: {(code, 0, 0) for code in ("00060", "00300")},
+            "200": {
+                (code, 0, window_index)
+                for code in ("00060", "00300")
+                for window_index in (1, 2, 3)
+            },
+        }
+    )
+
+    graph = run(builder(topology, inventory).build(context()))
+
+    assert graph.coverage is TopologyCoverage.COMPLETE
+    target = next(node for node in graph.nodes if node.comid == TARGET)
+    upstream = next(node for node in graph.nodes if node.comid == "200")
+    assert {unit.window_index for unit in target.qualified_units} == {0}
+    assert {unit.window_index for unit in upstream.qualified_units} == {1, 2, 3}
+    assert {
+        window_id
+        for station in target.station_refs
+        for reference in station.series_refs
+        for window_id in reference.covered_window_ids
+    } == {"window-000"}
+    assert {
+        window_id
+        for station in upstream.station_refs
+        for reference in station.series_refs
+        for window_id in reference.covered_window_ids
+    } == {"window-001", "window-002", "window-003"}
+    assert all(
+        reference.covered_segment_indexes == (0,)
+        for node in (target, upstream)
+        for station in node.station_refs
+        for reference in station.series_refs
+    )
+
+
+def test_mixed_prediction_stops_at_first_candidate_while_history_continues() -> None:
+    topology = FakeTopology({TARGET: (segment("200", TARGET),)})
+    inventory = FakeInventory(
+        {
+            TARGET: codes("00060", "00300", segment_index=1),
+            "200": codes("00060", "00300", segment_index=0),
+        }
+    )
+
+    graph = run(
+        builder(topology, inventory).build(context(end_date=date(2026, 9, 25)))
+    )
+
+    target = next(node for node in graph.nodes if node.comid == TARGET)
+    upstream = next(node for node in graph.nodes if node.comid == "200")
+    assert graph.coverage is TopologyCoverage.COMPLETE
+    assert {unit.window_index for unit in target.qualified_units} == {None}
+    assert {unit.window_index for unit in upstream.qualified_units} == {0, 1, 2, 3}
+    assert all(
+        reference.covered_window_ids is None
+        for station in target.station_refs
+        for reference in station.series_refs
+    )
+    assert topology.calls == [(TARGET, 100.0), ("200", 100.0)]
+
+
+def test_missing_historical_alternative_does_not_downgrade_qualified_branch() -> None:
+    topology = FakeTopology({TARGET: (segment("200", TARGET),), "200": (segment("201", "200"),)})
+    inventory = FakeInventory({"200": codes("00060", "00300")})
+
+    graph = run(
+        builder(topology, inventory).build(
+            context(decision=datetime(2026, 9, 27, 8, tzinfo=UTC))
+        )
+    )
+
+    assert graph.coverage is TopologyCoverage.COMPLETE
+    assert set(statuses(graph, BranchOutcomeStatus.BACKUP_SEARCH_ENDED)) == {
+        BranchOutcomeReason.NATURAL_HEADWATER
+    }
+    node_201 = next(node for node in graph.nodes if node.comid == "201")
+    assert node_201.participation is HydrologyParticipation.EXCLUDED
+    assert {reason.code.value for reason in node_201.excluded_reasons} == {
+        "backup_search_ended"
+    }
 
 
 def test_target_geometry_is_stored_once_with_resolved_node_summary() -> None:
@@ -354,21 +616,22 @@ def test_target_geometry_is_stored_once_with_resolved_node_summary() -> None:
     assert graph.model_dump_json().count('"full_coordinates"') == 1
 
 
-def test_every_segment_contains_deduplicated_discharge_and_target_parameter() -> None:
+def test_every_historical_window_and_prediction_segment_have_required_parameters() -> None:
     inventory = FakeInventory({})
 
     run(builder(FakeTopology({}), inventory).build(context(end_date=date(2026, 9, 25))))
 
     request = inventory.requests[0]
-    assert [
-        (unit.segment_index, unit.parameter.code)
+    assert len(request.historical_ranges) == 4
+    assert len(request.prediction_baseline_ranges) == 1
+    assert {
+        (unit.segment_index, unit.window_index, unit.parameter.code)
         for unit in request.coverage_units
-    ] == [
-        (0, "00060"),
-        (0, "00300"),
-        (1, "00060"),
-        (1, "00300"),
-    ]
+    } == {
+        *((0, index, code) for index in range(4) for code in ("00060", "00300")),
+        (1, None, "00060"),
+        (1, None, "00300"),
+    }
 
 
 def test_multibranch_partial_station_coverage_continues_only_missing_units() -> None:
@@ -592,7 +855,7 @@ def test_shared_upstream_is_queried_once_without_swallowing_branch_outcomes() ->
             if outcome.stop_comid == "400"
             and outcome.outcome is BranchOutcomeStatus.QUALIFIED
         ]
-    ) == 4
+    ) == 16
     assert {edge.downstream_comid for edge in graph.edges if edge.upstream_comid == "400"} == {
         "200",
         "300",
@@ -723,13 +986,18 @@ def test_production_concurrency_cap_never_exceeds_eight_external_requests() -> N
     assert probe.peak == 8
 
 
-def test_provider_failure_and_deadline_are_not_published_as_partial_graph() -> None:
+def test_provider_failure_and_deadline_are_not_published_as_partial_graph(caplog) -> None:
     failure = PortRateLimitError(
         "limited",
         provider="fixture",
-        operation="availability",
+        operation="get_time_series_observation_windows",
+        status_code=429,
+        retry_after_seconds=3267,
     )
-    with pytest.raises(PortRateLimitError) as captured:
+    with (
+        caplog.at_level(logging.WARNING, logger="wateragents.hydrology_topology"),
+        pytest.raises(PortRateLimitError) as captured,
+    ):
         run(
             builder(
                 FakeTopology({}),
@@ -737,6 +1005,20 @@ def test_provider_failure_and_deadline_are_not_published_as_partial_graph() -> N
             ).build(context())
         )
     assert captured.value is failure
+    assert failure.operation == "check_availability"
+    [record] = [
+        item for item in caplog.records
+        if item.name == "wateragents.hydrology_topology"
+    ]
+    assert record.comid == TARGET
+    assert record.operation == "check_availability"
+    assert record.provider == "fixture"
+    assert record.provider_operation == "get_time_series_observation_windows"
+    assert record.provider_error == "PortRateLimitError"
+    assert record.provider_status == 429
+    assert record.provider_retry_after_seconds == 3267
+    assert f"COMID {TARGET}" in record.getMessage()
+    assert "limited" in record.getMessage()
 
     slow_probe = ConcurrencyProbe({TARGET: 0.02})
     with pytest.raises(PortTimeoutError):
@@ -747,3 +1029,76 @@ def test_provider_failure_and_deadline_are_not_published_as_partial_graph() -> N
                 timeout=0.001,
             ).build(context())
         )
+
+
+def test_invalid_availability_result_logs_the_queried_comid(caplog) -> None:
+    class WrongComidInventory(FakeInventory):
+        async def check_availability(
+            self,
+            request: StationAvailabilityRequest,
+            *,
+            deadline: float | None = None,
+        ) -> tuple[StationAvailability, ...]:
+            valid = await super().check_availability(request, deadline=deadline)
+            return (valid[0].model_copy(update={"comid": "200"}),)
+
+    with (
+        caplog.at_level(logging.WARNING, logger="wateragents.hydrology_topology"),
+        pytest.raises(InvalidPortResponseError, match="different COMID"),
+    ):
+        run(
+            builder(
+                FakeTopology({}),
+                WrongComidInventory({TARGET: codes("00060", "00300")}),
+            ).build(context())
+        )
+
+    [record] = [
+        item for item in caplog.records
+        if item.name == "wateragents.hydrology_topology"
+    ]
+    assert (record.comid, record.operation) == (TARGET, "check_availability")
+    assert record.provider_error == "InvalidPortResponseError"
+    assert f"COMID {TARGET}" in record.getMessage()
+
+
+def test_invalid_upstream_result_logs_the_queried_comid(caplog) -> None:
+    with (
+        caplog.at_level(logging.WARNING, logger="wateragents.hydrology_topology"),
+        pytest.raises(InvalidPortResponseError, match="downstream COMID"),
+    ):
+        run(
+            builder(
+                FakeTopology({TARGET: (segment("200", "999"),)}),
+                FakeInventory({}),
+            ).build(context())
+        )
+
+    [record] = [
+        item for item in caplog.records
+        if item.name == "wateragents.hydrology_topology"
+    ]
+    assert (record.comid, record.operation) == (TARGET, "get_direct_upstreams")
+    assert record.provider_error == "InvalidPortResponseError"
+    assert f"COMID {TARGET}" in record.getMessage()
+
+
+def test_invalid_target_segment_logs_the_queried_comid(caplog) -> None:
+    with (
+        caplog.at_level(logging.WARNING, logger="wateragents.hydrology_topology"),
+        pytest.raises(InvalidPortResponseError, match="different COMID"),
+    ):
+        run(
+            builder(
+                FakeTopology({}, target_segment=segment("200", TARGET)),
+                FakeInventory({}),
+            ).build(context())
+        )
+
+    [record] = [
+        item for item in caplog.records
+        if item.name == "wateragents.hydrology_topology"
+    ]
+    assert (record.comid, record.operation) == (TARGET, "get_segment")
+    assert record.provider_error == "InvalidPortResponseError"
+    assert f"COMID {TARGET}" in record.getMessage()

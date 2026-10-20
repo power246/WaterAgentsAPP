@@ -68,8 +68,13 @@ class HydrologyNode(DomainModel):
             raise ValueError("excluded_reasons must be sorted")
         if self.is_inlet != bool(self.qualified_units):
             raise ValueError("inlet identity must match qualified_units")
-        if self.is_inlet != bool(self.station_refs):
-            raise ValueError("inlet identity must match station_refs")
+        if self.is_inlet and not self.station_refs:
+            raise ValueError("qualified inlet requires station_refs")
+        if (
+            self.station_refs
+            and self.participation is HydrologyParticipation.EXCLUDED
+        ):
+            raise ValueError("excluded node must not retain station_refs")
         if self.participation is HydrologyParticipation.ACTIVE:
             if self.excluded_reasons:
                 raise ValueError("active nodes must not have excluded reasons")

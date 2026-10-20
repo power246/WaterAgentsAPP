@@ -2,11 +2,11 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-
 from app.application.analysis_runs.models import (
     AgentSessionStatus,
     SessionResultReference,
@@ -49,7 +49,6 @@ from tests.application.evidence_tools.fakes import (
 from tests.application.reasoning.test_batch_planner import ExactByteEstimator
 from tests.application.reasoning.test_planning_loop import _fixture
 from tests.application.reasoning.test_task_and_skeleton import _catalog
-
 
 ERROR_ID = UUID("90000000-0000-4000-8000-000000000001")
 RESULT_ITEM_ID = UUID("90000000-0000-4000-8000-000000000002")
@@ -135,6 +134,14 @@ class AdaptiveWaterbodyModelPort:
     def _payload(self, request):
         if request.phase is WaterbodyModelPhase.EVIDENCE_PLANNING:
             return {"decision": "evidence_ready"}
+        if request.phase is WaterbodyModelPhase.NUMERIC_ESTIMATION:
+            return {
+                "value": None,
+                "value_lower": None,
+                "value_upper": None,
+                "confidence": 0.0,
+                "rationale": "No useful range can be inferred from the available evidence.",
+            }
         if request.phase is WaterbodyModelPhase.REASONING_BATCH:
             return self._reasoning_payload(request)
         if request.phase is WaterbodyModelPhase.OVERALL_SYNTHESIS:
@@ -150,9 +157,80 @@ class AdaptiveWaterbodyModelPort:
         summaries = {
             item["evidence_ref"]: item for item in body["evidence_summaries"]
         }
+        details = {
+            evidence_ref: json.loads(summary["summary"])
+            for evidence_ref, summary in summaries.items()
+        }
         cells = []
         for planned in body["cells"]:
-            refs = planned["allowed_evidence_refs"]
+            allowed_refs = planned["allowed_evidence_refs"]
+            target = planned["parameter"]
+            numeric_refs = tuple(
+                evidence_ref
+                for evidence_ref in allowed_refs
+                if target in details[evidence_ref]["parameters"]
+                and details[evidence_ref]["payload"]["payload_type"]
+                in {"aggregate", "temporal_estimate"}
+                and details[evidence_ref]["payload"].get("value") is not None
+                and details[evidence_ref]["payload"].get("unit")
+                in planned["allowed_unit_ids"]
+                and details[evidence_ref]["quality_class"]
+                in {"valid", "suspicious"}
+                and details[evidence_ref]["result_eligibility"] == "inferred_only"
+                and (
+                    details[evidence_ref]["payload"]["payload_type"]
+                    == "temporal_estimate"
+                    or details[evidence_ref]["payload"]["method"]
+                    in planned["allowed_aggregation_methods"]
+                )
+            )
+            target_ref = next(
+                (ref for ref in numeric_refs
+                 if details[ref]["payload"]["payload_type"] == "aggregate"),
+                numeric_refs[0] if numeric_refs else None,
+            )
+            support_ref = None
+            if target_ref is not None and target != {"code_system": "usgs", "code": "00060"}:
+                support_ref = next(
+                    (ref for ref in allowed_refs
+                     if {"code_system": "usgs", "code": "00060"}
+                     in details[ref]["parameters"]
+                     and details[ref]["payload"]["payload_type"]
+                     in {"aggregate", "temporal_estimate", "direct_record"}
+                     and details[ref]["quality_class"] in {"valid", "suspicious"}),
+                    None,
+                )
+            numeric = (
+                target_ref is not None
+                and "inferred" in planned["allowed_result_sources"]
+                and (
+                    target == {"code_system": "usgs", "code": "00060"}
+                    or support_ref is not None
+                )
+            )
+            refs = sorted({target_ref, support_ref} - {None}) if numeric else allowed_refs
+            temporal = tuple(
+                details[ref]["payload"] for ref in refs
+                if details[ref]["payload"]["payload_type"] == "temporal_estimate"
+            )
+            window_seconds = (
+                datetime.fromisoformat(planned["end_time"])
+                - datetime.fromisoformat(planned["start_time"])
+            ).total_seconds()
+            caps = tuple(
+                round(
+                    (0.75 if payload["method"] == "linear_interpolation" else 0.55)
+                    * min(1.0, window_seconds / max(payload["anchor_distance_seconds"])),
+                    6,
+                )
+                for payload in temporal
+            )
+            confidence = min((0.7, *caps))
+            quality_flags = sorted({
+                flag
+                for evidence_ref in refs
+                for flag in details[evidence_ref]["quality_flags"]
+            })
             series_refs = sorted(
                 {
                     series_ref
@@ -165,24 +243,37 @@ class AdaptiveWaterbodyModelPort:
                 if "inferred" in planned["allowed_result_sources"]
                 else planned["allowed_result_sources"][0]
             )
+            target_payload = details[target_ref]["payload"] if numeric else None
             cells.append(
                 {
                     "cell_id": planned["cell_id"],
-                    "outcome_status": "directional",
-                    "representative_value": None,
-                    "target_unit_id": None,
+                    "outcome_status": "quantified" if numeric else "directional",
+                    "representative_value": target_payload["value"] if numeric else None,
+                    "target_unit_id": target_payload["unit"] if numeric else None,
                     "source": source,
                     "trend": "rising",
                     "risk_level": "medium",
                     "risk_rationale": "The cited evidence supports a material risk signal.",
-                    "confidence": 0.7,
-                    "confidence_rationale": "The judgment is limited to sealed evidence.",
-                    "aggregation_method": None,
+                    "confidence": confidence,
+                    "confidence_rationale": (
+                        f"Validated {temporal[0]['method']} estimate; the farthest "
+                        f"anchor is {max(temporal[0]['anchor_distance_seconds'])} "
+                        "seconds away, limiting confidence."
+                        if temporal else "The judgment is limited to sealed evidence."
+                    ),
+                    "aggregation_method": (
+                        target_payload["method"]
+                        if numeric and target_payload["payload_type"] == "aggregate"
+                        else None
+                    ),
                     "evidence_refs": refs,
                     "series_refs": series_refs,
                     "reason_codes": [],
-                    "quality_flags": [],
-                    "explanation": "The direction is supported without inventing a value.",
+                    "quality_flags": quality_flags,
+                    "explanation": (
+                        "The cited deterministic evidence supports this inferred value."
+                        if numeric else "The direction is supported without inventing a value."
+                    ),
                 }
             )
         return {
@@ -258,6 +349,40 @@ class AdaptiveWaterbodyModelPort:
             {ref for cell in validated for ref in cell["evidence_refs"]}
         )
         first = validated[0]
+        details = {
+            item["evidence_ref"]: json.loads(item["summary"])
+            for item in body["bounded_reference_summaries"]
+        }
+        attribution = next(
+            (
+                (cell, evidence_ref)
+                for cell in validated
+                for evidence_ref in cell["evidence_refs"]
+                if (detail := details.get(evidence_ref))
+                and detail["applicability"] == "direct_measurement"
+                and detail["payload"]["payload_type"]
+                in {"direct_record", "aggregate"}
+                and {
+                    "code_system": cell["cell_id"].split(":", 3)[1],
+                    "code": cell["cell_id"].split(":", 3)[2],
+                } in detail["parameters"]
+            ),
+            None,
+        )
+        primary_factors = []
+        if attribution is not None:
+            cell, evidence_ref = attribution
+            primary_factors.append(
+                {
+                    "factor": "Cited water evidence",
+                    "direction": "increasing",
+                    "magnitude": "medium",
+                    "basis": "inferred",
+                    "explanation": "The factor is limited to the cited result.",
+                    "evidence_refs": [evidence_ref],
+                    "result_cell_refs": [cell["cell_id"]],
+                }
+            )
         return {
             "schema_version": 1,
             "decision_type": "overall_synthesis",
@@ -288,18 +413,12 @@ class AdaptiveWaterbodyModelPort:
                 ],
             },
             "attribution_summary": {
-                "summary": "The sealed evidence is the primary factor.",
-                "primary_factors": [
-                    {
-                        "factor": "Sealed water observation",
-                        "direction": "increasing",
-                        "magnitude": "medium",
-                        "basis": "inferred",
-                        "explanation": "The factor is limited to the cited result.",
-                        "evidence_refs": [first["evidence_refs"][0]],
-                        "result_cell_refs": [first["cell_id"]],
-                    }
-                ],
+                "summary": (
+                    "The cited measured-window evidence supports the factor."
+                    if primary_factors
+                    else "No supported attribution is available from these cells."
+                ),
+                "primary_factors": primary_factors,
             },
         }
 
@@ -330,6 +449,147 @@ def _runner(loop, port, *, planner=None, clock=None, transcript_store=None):
     )
 
 
+@pytest.mark.parametrize(
+    ("target_payload", "flow_payload", "expected_method", "expected_confidence"),
+    (
+        (
+            {"payload_type": "aggregate", "value": "8.1", "unit": "pH", "method": "latest"},
+            {"payload_type": "temporal_estimate", "value": "20", "unit": "ft3/s",
+             "method": "nearest_hold", "anchor_distance_seconds": [43200]},
+            "latest",
+            0.275,
+        ),
+        (
+            {"payload_type": "temporal_estimate", "value": "8.2", "unit": "pH",
+             "method": "linear_interpolation", "anchor_distance_seconds": [21600, 64800]},
+            {"payload_type": "aggregate", "value": "20", "unit": "ft3/s", "method": "mean"},
+            None,
+            0.25,
+        ),
+    ),
+)
+def test_adaptive_fake_quantifies_registered_values_with_temporal_confidence_cap(
+    target_payload,
+    flow_payload,
+    expected_method,
+    expected_confidence,
+) -> None:
+    target = {"code_system": "usgs", "code": "00400"}
+    flow = {"code_system": "usgs", "code": "00060"}
+
+    def summary(evidence_ref, parameter, payload):
+        return {
+            "evidence_ref": evidence_ref,
+            "series_refs": [f"series:{evidence_ref}"],
+            "summary": json.dumps({
+                "data_type": payload["payload_type"],
+                "payload": payload,
+                "parameters": [parameter],
+                "quality_class": "suspicious",
+                "quality_flags": (
+                    ["temporal_estimate"]
+                    if payload["payload_type"] == "temporal_estimate" else []
+                ),
+                "result_eligibility": "inferred_only",
+            }),
+        }
+
+    body = {
+        "cells": [{
+            "cell_id": "cell:usgs:00400:window-1",
+            "parameter": target,
+            "start_time": "2026-10-02T00:00:00+00:00",
+            "end_time": "2026-10-02T06:00:00+00:00",
+            "allowed_evidence_refs": ["e:target", "e:flow"],
+            "allowed_result_sources": ["inferred"],
+            "allowed_unit_ids": ["pH"],
+            "allowed_aggregation_methods": ["latest"],
+        }],
+        "evidence_summaries": [
+            summary("e:target", target, target_payload),
+            summary("e:flow", flow, flow_payload),
+        ],
+    }
+    request = SimpleNamespace(
+        messages=(SimpleNamespace(text=json.dumps(body)),),
+        batch_id="batch-1",
+        scope_digest="digest-1",
+    )
+    cell = AdaptiveWaterbodyModelPort()._reasoning_payload(request)["cells"][0]
+    assert cell["outcome_status"] == "quantified"
+    assert cell["representative_value"] == target_payload["value"]
+    assert cell["target_unit_id"] == target_payload["unit"]
+    assert cell["source"] == "inferred"
+    assert cell["aggregation_method"] == expected_method
+    assert cell["evidence_refs"] == ["e:flow", "e:target"]
+    assert cell["quality_flags"] == ["temporal_estimate"]
+    assert cell["confidence"] == expected_confidence
+    assert "anchor" in cell["confidence_rationale"]
+
+    body["cells"][0]["allowed_result_sources"] = ["observed"]
+    request.messages[0].text = json.dumps(body)
+    unpermitted = AdaptiveWaterbodyModelPort()._reasoning_payload(request)["cells"][0]
+    assert unpermitted["outcome_status"] == "directional"
+
+
+def test_adaptive_fake_synthesis_uses_a_measured_window_for_attribution() -> None:
+    def summary(evidence_ref, parameter, payload_type):
+        return {
+            "evidence_ref": evidence_ref,
+            "summary": json.dumps({
+                "applicability": (
+                    "allowed_indirect"
+                    if payload_type == "temporal_estimate" else "direct_measurement"
+                ),
+                "parameters": [{"code_system": "usgs", "code": parameter}],
+                "payload": {"payload_type": payload_type},
+            }),
+        }
+
+    estimated = {
+        "cell_id": "cell:usgs:00400:window-1",
+        "window_id": "window-1",
+        "evidence_refs": ["e:flow-estimate", "e:ph-estimate"],
+    }
+    measured = {
+        "cell_id": "cell:usgs:00400:window-2",
+        "window_id": "window-2",
+        "evidence_refs": ["e:flow-aggregate", "e:ph-aggregate"],
+    }
+    body = {
+        "validated_cells": [estimated, measured],
+        "fixed_cells": [],
+        "bounded_reference_summaries": [
+            summary("e:flow-estimate", "00060", "temporal_estimate"),
+            summary("e:ph-estimate", "00400", "temporal_estimate"),
+            summary("e:ph-anchor", "00400", "aggregate"),
+            summary("e:flow-aggregate", "00060", "aggregate"),
+            summary("e:ph-aggregate", "00400", "aggregate"),
+        ],
+    }
+    request = SimpleNamespace(
+        messages=(SimpleNamespace(text=json.dumps(body)),),
+        scope_digest="digest-1",
+    )
+    port = AdaptiveWaterbodyModelPort()
+    factor = port._synthesis_payload(request)["attribution_summary"]["primary_factors"]
+    assert factor == [{
+        "factor": "Cited water evidence",
+        "direction": "increasing",
+        "magnitude": "medium",
+        "basis": "inferred",
+        "explanation": "The factor is limited to the cited result.",
+        "evidence_refs": ["e:ph-aggregate"],
+        "result_cell_refs": [measured["cell_id"]],
+    }]
+
+    body["validated_cells"] = [estimated]
+    request.messages[0].text = json.dumps(body)
+    assert port._synthesis_payload(request)["attribution_summary"][
+        "primary_factors"
+    ] == []
+
+
 def test_runner_executes_planning_batches_synthesis_and_deterministic_assembly():
     async def exercise():
         port = AdaptiveWaterbodyModelPort()
@@ -346,10 +606,17 @@ def test_runner_executes_planning_batches_synthesis_and_deterministic_assembly()
         assert outcome.error is None
         assert outcome.result is not None
         assert outcome.result.result_id == "result:m8:fixture"
+        sealed_evidence_ids = {
+            reference.evidence_id
+            for reference in outcome.result.evidence_chain.references
+        }
         assert outcome.result.analysis_detail.transcript_item_refs == tuple(
             sorted(
                 {
-                    *(item_id for item_id, _evidence_id in store.fragments),
+                    *(
+                        item_id for item_id, evidence_id in store.fragments
+                        if evidence_id in sealed_evidence_ids
+                    ),
                     *(item_id for _run_id, _session_id, item_id in store.records),
                 }
             )
@@ -430,8 +697,13 @@ def test_runner_all_fixed_station_path_skips_batch_and_synthesis():
 
         assert outcome.status is WaterbodyAgentRunStatus.COMPLETED, outcome.error
         assert outcome.result is not None
-        assert port.calls == []
-        assert outcome.result.model_execution_summary.planning_calls == 0
+        assert outcome.planning_counts is not None
+        assert outcome.planning_counts.numeric_estimation_calls > 0
+        assert {call.phase for call in port.calls} == {
+            WaterbodyModelPhase.EVIDENCE_PLANNING,
+            WaterbodyModelPhase.NUMERIC_ESTIMATION,
+        }
+        assert outcome.result.model_execution_summary.planning_calls == 1
         assert outcome.result.model_execution_summary.reasoning_batches == 0
         assert outcome.result.model_execution_summary.synthesis_calls == 0
         assert outcome.result.overall_assessment.availability is (
@@ -460,8 +732,13 @@ def test_stationless_natural_absence_skips_all_model_reasoning():
 
         assert outcome.status is WaterbodyAgentRunStatus.COMPLETED, outcome.error
         assert outcome.result is not None
-        assert port.calls == []
-        assert outcome.result.model_execution_summary.planning_calls == 0
+        assert outcome.planning_counts is not None
+        assert outcome.planning_counts.numeric_estimation_calls > 0
+        assert {call.phase for call in port.calls} == {
+            WaterbodyModelPhase.EVIDENCE_PLANNING,
+            WaterbodyModelPhase.NUMERIC_ESTIMATION,
+        }
+        assert outcome.result.model_execution_summary.planning_calls == 1
         assert outcome.result.model_execution_summary.reasoning_batches == 0
         assert outcome.result.model_execution_summary.synthesis_calls == 0
 

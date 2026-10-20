@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import Field, StrictInt, field_validator, model_validator
 
 from app.application.evidence_tools import EvidenceToolDescriptor
+from app.application.evidence_tools.evidence_sources import weather_capable_parameters
 from app.application.reasoning.model_models import (
     ModelItemName,
     NonBlankText,
@@ -240,17 +241,28 @@ class FixedCellPromptSummary(DomainModel):
 
 
 class OverallSynthesisPromptInput(_PromptInput):
+    requested_parameters: tuple[ParameterKey, ...]
+    window_ids: tuple[NonEmptyString, ...]
     validated_cells: tuple[ValidatedCellPromptSummary, ...]
     fixed_cells: tuple[FixedCellPromptSummary, ...]
 
     @model_validator(mode="after")
     def validate_synthesis_scope(self) -> Self:
+        if not self.requested_parameters or not self.window_ids:
+            raise ValueError("overall synthesis requires requested parameters and windows")
+        ensure_unique_tuple(self.requested_parameters, field_name="synthesis parameters")
+        ensure_unique_tuple(self.window_ids, field_name="synthesis windows")
         identities = tuple(
             cell.cell_id for cell in (*self.validated_cells, *self.fixed_cells)
         )
         if not identities:
             raise ValueError("overall synthesis requires at least one cell")
         ensure_unique_tuple(identities, field_name="synthesis cell IDs")
+        if any(
+            cell.window_id not in self.window_ids
+            for cell in (*self.validated_cells, *self.fixed_cells)
+        ):
+            raise ValueError("synthesis cells refer to an unknown window")
         refs = {
             ref
             for cell in self.validated_cells
@@ -279,6 +291,8 @@ class SchemaRepairPromptInput(_PromptInput):
     batch_id: NonEmptyString | None = None
     original_visible_response: NonBlankText
     issues: tuple[PromptValidationIssue, ...]
+    batch_prompt: ReasoningBatchPromptInput | None = None
+    synthesis_prompt: OverallSynthesisPromptInput | None = None
 
     @field_validator("original_visible_response")
     @classmethod
@@ -297,6 +311,25 @@ class SchemaRepairPromptInput(_PromptInput):
             self.original_phase is WaterbodyModelPhase.REASONING_BATCH
         ) != (self.batch_id is not None):
             raise ValueError("reasoning-batch repair requires exactly one batch identity")
+        if (
+            self.original_phase is WaterbodyModelPhase.REASONING_BATCH
+        ) != (self.batch_prompt is not None):
+            raise ValueError("reasoning-batch repair requires its original batch scope")
+        if self.batch_prompt is not None and (
+            self.batch_prompt.batch_id != self.batch_id
+            or self.batch_prompt.context != self.context
+            or self.batch_prompt.response_schema != self.response_schema
+        ):
+            raise ValueError("reasoning-batch repair scope does not match the original request")
+        if (
+            self.original_phase is WaterbodyModelPhase.OVERALL_SYNTHESIS
+        ) != (self.synthesis_prompt is not None):
+            raise ValueError("synthesis repair requires its original synthesis scope")
+        if self.synthesis_prompt is not None and (
+            self.synthesis_prompt.context.scope_digest != self.context.scope_digest
+            or self.synthesis_prompt.response_schema != self.response_schema
+        ):
+            raise ValueError("synthesis repair scope does not match the original request")
         return self
 
 
@@ -358,6 +391,10 @@ class PromptBuilder:
             "budget": prompt.budget,
             "authorized_tools": prompt.authorized_tools,
             "unit_preferences": prompt.unit_preferences,
+            "response_schema": {
+                "name": prompt.response_schema.name,
+                "schema": json.loads(prompt.response_schema.schema_text),
+            },
         }
         _add_dependency_context(body, prompt.context)
         return self._request(
@@ -384,9 +421,15 @@ class PromptBuilder:
             "evidence_summaries": prompt.context.evidence_summaries,
             "response_schema": {
                 "name": prompt.response_schema.name,
-                "digest": _schema_digest(prompt.response_schema),
+                "schema": json.loads(prompt.response_schema.schema_text),
             },
         }
+        coverage_facts = tuple(
+            fact for fact in prompt.context.facts
+            if fact.kind is WorkingContextFactKind.COVERAGE
+        )
+        if coverage_facts:
+            body["coverage_facts"] = coverage_facts
         _add_dependency_context(body, prompt.context)
         return self._request(
             phase=WaterbodyModelPhase.REASONING_BATCH,
@@ -405,6 +448,11 @@ class PromptBuilder:
             "bundle_ref": prompt.context.bundle_ref,
             "bundle_digest": prompt.context.bundle_digest,
             "working_context_digest": prompt.context.working_context_digest,
+            "requested_parameters": prompt.requested_parameters,
+            "window_ids": prompt.window_ids,
+            "overall_window_refs": tuple(
+                f"overall-window:{window_id}" for window_id in prompt.window_ids
+            ),
             "validated_cells": prompt.validated_cells,
             "fixed_cells": prompt.fixed_cells,
             "coverage_facts": tuple(
@@ -421,6 +469,10 @@ class PromptBuilder:
             # Keeping its contextual summaries lets the Agent propose an explicitly
             # hypothesized attribution without allowing those refs to unlock a cell.
             "bounded_reference_summaries": prompt.context.evidence_summaries,
+            "response_schema": {
+                "name": prompt.response_schema.name,
+                "schema": json.loads(prompt.response_schema.schema_text),
+            },
         }
         _add_dependency_context(body, prompt.context)
         return self._request(
@@ -441,13 +493,51 @@ class PromptBuilder:
             "scope_digest": prompt.context.scope_digest,
             "bundle_ref": prompt.context.bundle_ref,
             "bundle_digest": prompt.context.bundle_digest,
+            "evidence_summaries": prompt.context.evidence_summaries,
             "response_schema": {
                 "name": prompt.response_schema.name,
-                "digest": _schema_digest(prompt.response_schema),
+                "schema": json.loads(prompt.response_schema.schema_text),
             },
             "original_visible_response": prompt.original_visible_response,
             "issues": prompt.issues,
+            "repair_instruction": (
+                "Correct only the listed issues and preserve every other already valid field."
+            ),
         }
+        coverage_facts = tuple(
+            fact for fact in prompt.context.facts
+            if fact.kind is WorkingContextFactKind.COVERAGE
+        )
+        if coverage_facts:
+            body["coverage_facts"] = coverage_facts
+        if prompt.batch_prompt is not None:
+            body["batch_cells"] = prompt.batch_prompt.cells
+            body["range_estimate_instruction"] = (
+                "Every range_estimate cell must explicitly retain value_lower and "
+                "value_upper as non-null decimal strings, including when unchanged."
+            )
+            if any(
+                issue.code == "quantified_value_not_backed"
+                for issue in prompt.issues
+            ):
+                body["quantified_value_instruction"] = (
+                    "For a quantified cell citing an eligible saved numeric_derived "
+                    "model_estimate with a point, keep its representative_value and "
+                    "copy both saved value_lower and value_upper exactly. A missing "
+                    "bound does not make that saved point range-only. Use "
+                    "range_estimate only when the cited saved result has no point."
+                )
+        if prompt.synthesis_prompt is not None:
+            synthesis = prompt.synthesis_prompt
+            body["synthesis_scope"] = {
+                "requested_parameters": synthesis.requested_parameters,
+                "window_ids": synthesis.window_ids,
+                "overall_window_refs": tuple(
+                    f"overall-window:{window_id}" for window_id in synthesis.window_ids
+                ),
+                "validated_cells": synthesis.validated_cells,
+                "fixed_cells": synthesis.fixed_cells,
+            }
         return self._request(
             phase=WaterbodyModelPhase.SCHEMA_REPAIR,
             prompt=prompt,
@@ -523,12 +613,15 @@ class PromptBuilder:
             for field in tool.allowed_option_fields
         }
         window_ids = tuple(dict.fromkeys(gate.window_id for gate in prompt.gates))
+        authorized_parameters = (
+            prompt.authorized_parameters
+            or tuple(dict.fromkeys(gate.parameter for gate in prompt.gates))
+        )
+        if tool.name == "collect_weather_evidence":
+            authorized_parameters = weather_capable_parameters(authorized_parameters)
         parameter_keys = tuple(
             (parameter.code_system, parameter.code)
-            for parameter in (
-                prompt.authorized_parameters
-                or tuple(dict.fromkeys(gate.parameter for gate in prompt.gates))
-            )
+            for parameter in authorized_parameters
         )
         schema = {
             "type": "object",

@@ -41,6 +41,8 @@ from app.application.run_summary.prompt_builder import (
 )
 from app.application.transcripts.models import TranscriptContentRef
 from app.domain import (
+    BranchOutcomeReason,
+    BranchOutcomeStatus,
     HydrologyGraph,
     HydrologyParticipation,
     InferenceResult,
@@ -158,6 +160,7 @@ class RunSummaryInputBuilder:
         limits = _limit_facts(
             aggregation.graph_coverage,
             tuple(by_comid[comid] for comid in order),
+            topology,
             topology_source,
         )
         allowed_refs = tuple(
@@ -349,15 +352,19 @@ def _result_projection(
                     kind=(
                         "notable_value"
                         if point.outcome_status is OutcomeStatus.QUANTIFIED
+                        else "range_estimate"
+                        if point.outcome_status is OutcomeStatus.RANGE_ESTIMATE
                         else "directional_trend"
                     ),
                     text=point.assessment.risk_rationale,
                     source_ref=reference,
                     display_value=point.representative_value,
+                    value_lower=point.value_lower,
+                    value_upper=point.value_upper,
                     display_unit=point.unit_id,
                     window_id=(
                         reference.window_id
-                        if point.representative_value is not None
+                        if point.unit_id is not None
                         else None
                     ),
                 )
@@ -410,14 +417,76 @@ def _direct_upstream(topology: HydrologyGraph) -> dict[str, tuple[str, ...]]:
 def _limit_facts(
     coverage: GraphCoverage,
     outcomes: tuple[DependencyOutcome, ...],
+    topology: HydrologyGraph,
     topology_source: StableSourceReference,
 ) -> tuple[RunSummaryLimitFact, ...]:
     facts: list[RunSummaryLimitFact] = []
     if coverage is not GraphCoverage.COMPLETE:
+        usable = sum(outcome.status is DependencyStatus.USABLE for outcome in outcomes)
+        gaps = tuple(
+            item for item in topology.branch_outcomes
+            if item.outcome in {
+                BranchOutcomeStatus.NO_QUALIFYING_SOURCE,
+                BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+            }
+        )
+        reasons: list[str] = []
+        for status, description in (
+            (
+                BranchOutcomeStatus.NO_QUALIFYING_SOURCE,
+                "reached natural headwaters without a qualifying source",
+            ),
+            (
+                BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+                "stopped at a configured search limit; sources beyond it are unknown",
+            ),
+        ):
+            matching = tuple(item for item in gaps if item.outcome is status)
+            if matching:
+                roots = sorted({item.branch_root_comid for item in matching}, key=int)
+                parameters = sorted(
+                    {
+                        f"{item.coverage_unit.parameter.code_system}:"
+                        f"{item.coverage_unit.parameter.code}"
+                        for item in matching
+                    }
+                )
+                detail = (
+                    f" ({', '.join(sorted({item.reason.value for item in matching}))})"
+                    if status is BranchOutcomeStatus.SEARCH_LIMIT_REACHED
+                    else ""
+                )
+                reasons.append(
+                    f"{len(roots)} upstream branch roots ({', '.join(roots[:8])}"
+                    f"{', and more' if len(roots) > 8 else ''}) {description}{detail} "
+                    f"for {len(matching)} branch/parameter/time cases "
+                    f"({', '.join(parameters)})."
+                )
+        if not gaps:
+            reasons.append(
+                "The saved topology has no incomplete qualifying branch; "
+                "partial status reflects waterbody result availability."
+            )
+        backup_limits = tuple(
+            item for item in topology.branch_outcomes
+            if item.outcome is BranchOutcomeStatus.BACKUP_SEARCH_ENDED
+            and item.reason is not BranchOutcomeReason.NATURAL_HEADWATER
+        )
+        if backup_limits:
+            reasons.append(
+                f"{len({item.branch_root_comid for item in backup_limits})} "
+                "backup branch roots also reached a search limit "
+                f"({', '.join(sorted({item.reason.value for item in backup_limits}))}) "
+                "after another "
+                "qualifying path was found; they do not cause partial coverage."
+            )
         facts.append(
             RunSummaryLimitFact(
                 code="partial_topology_coverage",
-                text="The analysis does not have complete upstream branch coverage.",
+                text=(
+                    f"{usable}/{len(outcomes)} active waterbodies produced usable "
+                    f"results. {' '.join(reasons)}"
+                ),
                 source_ref=topology_source,
             )
         )

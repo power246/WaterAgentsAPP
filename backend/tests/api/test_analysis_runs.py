@@ -132,6 +132,19 @@ def events_from(messages):
     ]
 
 
+def run_status_changes(events):
+    snapshots = [event for event in events if "status" in event]
+    statuses = [event["status"] for event in snapshots]
+    assert all(
+        snapshots[index - 1] != snapshots[index]
+        for index in range(1, len(snapshots))
+    )
+    return [
+        status for index, status in enumerate(statuses)
+        if index == 0 or status != statuses[index - 1]
+    ]
+
+
 async def call_stream(application, path, *, send_hook=None, disconnect=None, spec="2.4", headers=()):
     messages = []
     sent_request = False
@@ -264,7 +277,24 @@ def test_explicit_test_workflow_completes_and_unkeyed_requests_are_independent()
                     headers={"Last-Event-ID": "2"},
                 )
                 assert reconnect.status_code == 200
-                assert reconnect.text == replay.text
+                replay_events = [
+                    json.loads(line[6:]) for line in replay.text.splitlines()
+                    if line.startswith("data: ")
+                ]
+                reconnect_events = [
+                    json.loads(line[6:]) for line in reconnect.text.splitlines()
+                    if line.startswith("data: ")
+                ]
+                replay_statuses = run_status_changes(replay_events)
+                assert replay_statuses[-1] == "completed"
+                assert replay_statuses == sorted(
+                    replay_statuses,
+                    key=("pending", "running", "completed").index,
+                )
+                assert run_status_changes(reconnect_events) == ["completed"]
+                assert replay_events[-2] == reconnect_events[-2]
+                assert replay_events[-2]["persistence"]["state"] == "up_to_date"
+                assert replay_events[-1] == reconnect_events[-1]
                 assert UUID(reconnect.headers["x-request-id"])
             assert len(app.state.run_coordinator._runs) == 2
 
@@ -842,7 +872,8 @@ def test_started_stream_receives_workflow_failure_with_correlated_error(caplog, 
                 assert UUID(headers[b"x-request-id"].decode())
                 assert headers[b"x-request-id"].decode() != created.headers["x-request-id"]
                 events = events_from(messages)
-                assert [event.get("status") for event in events[:-1]] == ["running", "failed"]
+                assert run_status_changes(events[:-1]) == ["running", "failed"]
+                assert events[-2]["persistence"]["state"] == "up_to_date"
                 assert events[-1]["stream"] == "run"
                 records = [record for record in caplog.records if getattr(record, "event_name", None) == "run_failed"]
                 assert len(records) == 1
@@ -911,6 +942,7 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
         BASE + "/{run_id}/sessions/{session_id}": {"get"},
         BASE + "/{run_id}/sessions/{session_id}/transcript": {"get"},
         BASE + "/{run_id}/transcript/{item_id}/content": {"get"},
+        BASE + "/{run_id}/transcript/{item_id}/anchor-distance-estimates": {"get"},
         BASE + "/{run_id}/events": {"get"},
         BASE + "/{run_id}/sessions/{session_id}/events": {"get"},
         BASE + "/{run_id}/cancel": {"post"},
@@ -972,6 +1004,27 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     assert set(events["responses"]["200"]["content"]) == {"text/event-stream"}
     assert "204" not in events["responses"]
     assert all(parameter["name"] != "Last-Event-ID" for parameter in events["parameters"])
+    distance_view = paths[
+        BASE + "/{run_id}/transcript/{item_id}/anchor-distance-estimates"
+    ]["get"]
+    assert distance_view["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]["$ref"].endswith("/AnchorDistanceEstimatesResponse")
+    assert {parameter["name"] for parameter in distance_view["parameters"]} == {
+        "run_id", "item_id", "view",
+    }
+    view = next(
+        parameter for parameter in distance_view["parameters"]
+        if parameter["name"] == "view"
+    )
+    assert view["schema"]["const"] == "history"
+    estimate_response_schema = schema["components"]["schemas"]["AnchorDistanceEstimatesResponse"]
+    assert set(estimate_response_schema["properties"]) == {"result_item_id", "estimates"}
+    estimate_schema = schema["components"]["schemas"]["AnchorDistanceEstimate"]
+    assert set(estimate_schema["properties"]) == {
+        "cell_id", "anchor_index", "distance_km", "distance_basis",
+    }
+    assert estimate_schema["properties"]["distance_basis"]["const"] == "mapped_channel_estimate"
     create_schema = schema["components"]["schemas"]["CreateAnalysisRunRequest"]
     assert set(create_schema["properties"]) == {
         "query",
@@ -1049,10 +1102,8 @@ def test_stream_keepalive_does_not_block_cancel_or_mix_request_contexts(caplog, 
                 header_id = dict(messages[0]["headers"])[b"x-request-id"].decode()
                 assert len({header_id, cancelled.headers["x-request-id"], created.headers["x-request-id"]}) == 3
                 delivered = events_from(messages)
-                assert [event.get("status") for event in delivered[:-1]] == [
-                    "running",
-                    "cancelled",
-                ]
+                assert run_status_changes(delivered[:-1]) == ["running", "cancelled"]
+                assert delivered[-2]["persistence"]["state"] == "up_to_date"
                 assert delivered[-1]["stream"] == "run"
                 assert b": keepalive\n\n" in frames_from(messages)
                 completed = [record for record in caplog.records if getattr(record, "event_name", None) == "http_request_completed"]
@@ -1101,7 +1152,7 @@ def test_failure_after_stream_headers_never_appends_http_error_json(monkeypatch,
                 assert raised.value.__suppress_context__ is True
                 assert raised.value.__cause__ is None
                 assert [message["status"] for message in delivered if message["type"] == "http.response.start"] == [200]
-                assert [event.get("status") for event in events_from(delivered)] == ["running"]
+                assert run_status_changes(events_from(delivered)) == ["running"]
                 assert SECRET not in repr(delivered)
                 logs = [json.loads(line) for line in application_logs]
                 failure = next(row for row in logs if row["event_name"] == "http_stream_failed")

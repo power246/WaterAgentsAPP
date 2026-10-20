@@ -14,7 +14,7 @@ from app.application.evidence_tools import (
 from app.application.analysis_runs.models import AgentRole, AgentSessionStatus, SessionSummary
 from app.application.analysis_runs.models import RunStatus
 from app.application.transcripts.models import StoredTranscriptItem, WorkflowQuiescedFact
-from app.application.transcripts.read_models import StoredRunHeader, StoredRunRead
+from app.application.transcripts.read_models import ReadView, StoredRunHeader, StoredRunRead
 from app.application.transcripts.reader import TranscriptReader
 from app.application.transcripts.registry import create_production_registry
 from app.domain import (
@@ -46,6 +46,35 @@ from tests.application.evidence_tools.test_upstream_result_store import (
 from tests.application.evidence_tools.fakes import MemoryEvidenceStore
 from tests.domain.test_results import ANALYSIS_TIMEZONE, local_day
 from tests.domain.test_evidence import sample_fragments, valid_bundle
+
+
+class PersistedWaiter:
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def wait_for_transcript_items_persisted(self, run_id, item_ids):
+        self.calls.append((run_id, item_ids))
+        return None
+
+
+class SelectedFixtureReader:
+    def __init__(self, items) -> None:
+        self.items = items
+        self.read_calls = []
+
+    async def read_registered_items_persisted(self, run_id, item_ids, view):
+        self.read_calls.append(item_ids)
+        assert run_id == RUN_ID
+        assert view is ReadView.AUTO
+        return tuple(item for item in self.items if item.item.item_id in item_ids)
+
+    async def list_registered_session_item_ids(self, run_id, session_id, content_type):
+        assert run_id == RUN_ID
+        return tuple(
+            item.item.item_id for item in self.items
+            if item.item.session_id == session_id
+            and item.item.content_type == content_type
+        )
 
 
 def test_usable_projection_preserves_result_identity_confidence_and_closure() -> None:
@@ -97,17 +126,11 @@ def test_transcript_result_reader_validates_the_registered_same_session_closure(
             self.result_item_id = result_item_id
             self.result = result
             self.calls = []
-
-        async def read_registered_run(
-            self,
-            run_id,
-            view,
-        ):
-            self.calls.append((run_id, view))
-            return SimpleNamespace(run=SimpleNamespace(run_id=run_id), items=(
+            self.items = (
                 SimpleNamespace(
                     item=SimpleNamespace(
                         item_id=self.result_item_id,
+                        run_id=RUN_ID,
                         session_id=self.result.session_id,
                         content_type="inference_result",
                         content_schema_version=1,
@@ -119,13 +142,25 @@ def test_transcript_result_reader_validates_the_registered_same_session_closure(
                         item_id=UUID(
                             self.result.analysis_detail.transcript_item_refs[0]
                         ),
+                        run_id=RUN_ID,
                         session_id=self.result.session_id,
                         content_type="evidence_bundle",
                         content_schema_version=1,
                     ),
                     body=SimpleNamespace(),
                 ),
-            ))
+            )
+
+        async def read_registered_items_persisted(self, run_id, item_ids, view):
+            self.calls.append((run_id, item_ids, view))
+            return tuple(item for item in self.items if item.item.item_id in item_ids)
+
+        async def list_registered_session_item_ids(self, run_id, session_id, content_type):
+            return tuple(
+                item.item.item_id for item in self.items
+                if item.item.session_id == session_id
+                and item.item.content_type == content_type
+            )
 
     async def exercise() -> None:
         session_id = UUID("30000000-0000-0000-0000-000000000200")
@@ -134,16 +169,78 @@ def test_transcript_result_reader_validates_the_registered_same_session_closure(
         assert outcome.result_ref is not None
         reader = RegisteredReader(outcome.result_ref.item_id, result)
 
-        resolved = await TranscriptUpstreamInferenceResultReader(reader).resolve(
-            outcome
-        )
+        waiter = PersistedWaiter()
+        resolved = await TranscriptUpstreamInferenceResultReader(
+            reader, waiter
+        ).resolve(outcome)
 
         assert resolved.result == result
         assert tuple(ref.item_id for ref in resolved.closure_refs) == (
             result.analysis_detail.transcript_item_refs[0],
         )
-        assert reader.calls[0][0] == RUN_ID
-        assert reader.calls[0][1].value == "auto"
+        assert reader.calls[0] == (
+            RUN_ID, (outcome.result_ref.item_id,), ReadView.AUTO
+        )
+        assert waiter.calls[0] == (RUN_ID, (outcome.result_ref.item_id,))
+
+    asyncio.run(exercise())
+
+
+def test_transcript_result_reader_waits_for_result_commit_before_reading() -> None:
+    class BlockingWaiter(PersistedWaiter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def wait_for_transcript_items_persisted(self, run_id, item_ids):
+            if not self.calls:
+                self.started.set()
+                await self.release.wait()
+            return await super().wait_for_transcript_items_persisted(
+                run_id, item_ids
+            )
+
+    async def exercise() -> None:
+        session_id = UUID("30000000-0000-0000-0000-000000000200")
+        result = inference_result("200", session_id)
+        outcome = dependency_outcome("200", session_id, result=result)
+        assert outcome.result_ref is not None
+        closure_id = UUID(result.analysis_detail.transcript_item_refs[0])
+        items = (
+            SimpleNamespace(
+                item=SimpleNamespace(
+                    item_id=outcome.result_ref.item_id,
+                    run_id=RUN_ID,
+                    session_id=session_id,
+                    content_type="inference_result",
+                    content_schema_version=1,
+                ),
+                body=result,
+            ),
+            SimpleNamespace(
+                item=SimpleNamespace(
+                    item_id=closure_id,
+                    run_id=RUN_ID,
+                    session_id=session_id,
+                    content_type="runtime_fact",
+                ),
+                body=object(),
+            ),
+        )
+        reader = SelectedFixtureReader(items)
+        waiter = BlockingWaiter()
+        task = asyncio.create_task(
+            TranscriptUpstreamInferenceResultReader(reader, waiter).resolve(outcome)
+        )
+        await asyncio.wait_for(waiter.started.wait(), 2)
+        assert reader.read_calls == []
+        waiter.release.set()
+        resolved = await asyncio.wait_for(task, 2)
+        assert resolved.result == result
+        assert reader.read_calls == [
+            (outcome.result_ref.item_id,), (closure_id,)
+        ]
 
     asyncio.run(exercise())
 
@@ -165,6 +262,7 @@ def test_transcript_result_reader_derives_production_closure_from_final_bundle()
         fragment_item_id = UUID("70000000-0000-0000-0000-000000000002")
         source_item_id = UUID("70000000-0000-0000-0000-000000000003")
         bundle = EvidenceBundle.model_construct(
+            agent_comid="200",
             fragment_refs=(
                 EvidenceFragmentReference(
                     item_id=str(fragment_item_id),
@@ -179,6 +277,7 @@ def test_transcript_result_reader_derives_production_closure_from_final_bundle()
             SimpleNamespace(
                 item=SimpleNamespace(
                     item_id=outcome.result_ref.item_id,
+                    run_id=RUN_ID,
                     session_id=session_id,
                     content_type="inference_result",
                     content_schema_version=1,
@@ -186,30 +285,33 @@ def test_transcript_result_reader_derives_production_closure_from_final_bundle()
                 body=result,
             ),
             SimpleNamespace(
-                item=SimpleNamespace(item_id=bundle_item_id, session_id=session_id),
+                item=SimpleNamespace(
+                    item_id=bundle_item_id, run_id=RUN_ID,
+                    session_id=session_id, content_type="evidence_bundle",
+                ),
                 body=bundle,
             ),
             SimpleNamespace(
-                item=SimpleNamespace(item_id=fragment_item_id, session_id=session_id),
-                body=SimpleNamespace(),
+                item=SimpleNamespace(
+                    item_id=fragment_item_id, run_id=RUN_ID,
+                    session_id=session_id, content_type="evidence_fragment",
+                ),
+                body=sample_fragments()[0].model_copy(update={
+                    "evidence_id": "evidence-empty", "target_comid": "200",
+                }),
             ),
             SimpleNamespace(
-                item=SimpleNamespace(item_id=source_item_id, session_id=session_id),
+                item=SimpleNamespace(
+                    item_id=source_item_id, run_id=RUN_ID,
+                    session_id=session_id, content_type="evidence_source_records",
+                ),
                 body=SimpleNamespace(),
             ),
         )
 
-        class RegisteredReader:
-            async def read_registered_run(
-                self,
-                run_id,
-                view,
-            ):
-                assert run_id == RUN_ID
-                return SimpleNamespace(run=SimpleNamespace(run_id=run_id), items=items)
-
+        selected_reader = SelectedFixtureReader(items)
         resolved = await TranscriptUpstreamInferenceResultReader(
-            RegisteredReader()
+            selected_reader, PersistedWaiter()
         ).resolve(outcome)
 
         assert tuple(reference.item_id for reference in resolved.closure_refs) == (
@@ -217,6 +319,29 @@ def test_transcript_result_reader_derives_production_closure_from_final_bundle()
             str(fragment_item_id),
             str(source_item_id),
         )
+        assert selected_reader.read_calls == [
+            (outcome.result_ref.item_id,),
+            (bundle_item_id,),
+            (fragment_item_id, source_item_id),
+        ]
+        with pytest.raises(ValueError, match="closure is incomplete"):
+            await TranscriptUpstreamInferenceResultReader(
+                SelectedFixtureReader(tuple(
+                    item for item in items
+                    if item.item.item_id != fragment_item_id
+                )),
+                PersistedWaiter(),
+            ).resolve(outcome)
+        wrong_bundle = bundle.model_copy(update={"agent_comid": "another-waterbody"})
+        with pytest.raises(ValueError, match="another waterbody"):
+            await TranscriptUpstreamInferenceResultReader(
+                SelectedFixtureReader(tuple(
+                    SimpleNamespace(item=item.item, body=wrong_bundle)
+                    if item.item.item_id == bundle_item_id else item
+                    for item in items
+                )),
+                PersistedWaiter(),
+            ).resolve(outcome)
 
     asyncio.run(exercise())
 
@@ -237,14 +362,24 @@ def test_transcript_result_reader_keeps_validated_upstream_refs_out_of_session_c
             result_ref=ItemReference(item_id=str(upstream_result_id)),
             closure_refs=(ItemReference(item_id=str(upstream_closure_id)),),
         )
-        fragment = EvidenceFragment.model_construct(payload=payload)
+        fragment = sample_fragments()[5].model_copy(update={
+            "evidence_id": "evidence-empty",
+            "target_comid": "200",
+            "payload": payload,
+        })
 
         def registered(item_id, owner, body):
             return SimpleNamespace(
                 item=SimpleNamespace(
                     item_id=item_id,
+                    run_id=RUN_ID,
                     session_id=owner,
-                    content_type="inference_result" if item_id == outcome.result_ref.item_id else "evidence_bundle",
+                    content_type=(
+                        "inference_result" if isinstance(body, type(result))
+                        else "evidence_bundle" if isinstance(body, EvidenceBundle)
+                        else "evidence_fragment" if isinstance(body, EvidenceFragment)
+                        else "runtime_fact"
+                    ),
                     content_schema_version=1,
                 ),
                 body=body,
@@ -254,8 +389,7 @@ def test_transcript_result_reader_keeps_validated_upstream_refs_out_of_session_c
             def __init__(self, extra_ref: bool = False) -> None:
                 self.extra_ref = extra_ref
 
-            async def read_registered_run(self, run_id, view):
-                assert run_id == RUN_ID
+            def selected(self):
                 closure = (upstream_result_id, upstream_closure_id)
                 if self.extra_ref:
                     closure = (*closure, UUID("70000000-0000-0000-0000-000000000005"))
@@ -264,6 +398,7 @@ def test_transcript_result_reader_keeps_validated_upstream_refs_out_of_session_c
                     if self.extra_ref else ()
                 )
                 bundle = EvidenceBundle.model_construct(
+                    agent_comid="200",
                     fragment_refs=(EvidenceFragmentReference(
                         item_id=str(fragment_id), evidence_id="evidence-empty"
                     ),),
@@ -279,23 +414,25 @@ def test_transcript_result_reader_keeps_validated_upstream_refs_out_of_session_c
                     registered(upstream_closure_id, upstream_session_id, object()),
                     *extra_items,
                 )
-                return SimpleNamespace(run=SimpleNamespace(run_id=run_id), items=items)
+                return SelectedFixtureReader(items)
 
         resolved = await TranscriptUpstreamInferenceResultReader(
-            RegisteredReader()
+            RegisteredReader().selected(), PersistedWaiter()
         ).resolve(outcome)
         assert tuple(ref.item_id for ref in resolved.closure_refs) == (
             str(bundle_id), str(fragment_id)
         )
         with pytest.raises(ValueError, match="upstream reference closure"):
             await TranscriptUpstreamInferenceResultReader(
-                RegisteredReader(extra_ref=True)
+                RegisteredReader(extra_ref=True).selected(), PersistedWaiter()
             ).resolve(outcome)
 
     asyncio.run(exercise())
 
 
-def test_production_transcript_reader_resolves_downstream_result_with_upstream_refs() -> None:
+def test_production_transcript_reader_resolves_downstream_result_with_upstream_refs(
+    monkeypatch,
+) -> None:
     async def exercise() -> None:
         upstream_session_id = UUID("30000000-0000-0000-0000-000000000100")
         downstream_session_id = UUID("30000000-0000-0000-0000-000000000200")
@@ -318,6 +455,7 @@ def test_production_transcript_reader_resolves_downstream_result_with_upstream_r
         fragment = EvidenceFragment.model_validate({
             **upstream_fragment.model_dump(mode="python"),
             "evidence_id": "evidence-empty",
+            "target_comid": "200",
             "payload": UpstreamResultPayload(
                 upstream_session_id=str(upstream_session_id),
                 result_ref=ItemReference(item_id=str(upstream_result_id)),
@@ -327,6 +465,7 @@ def test_production_transcript_reader_resolves_downstream_result_with_upstream_r
         base = valid_bundle()
         bundle = EvidenceBundle.model_validate({
             **base.model_dump(mode="python"),
+            "agent_comid": "200",
             "context_ref": ItemReference(item_id=str(UUID(int=21))),
             "topology_ref": ItemReference(item_id=str(UUID(int=22))),
             "window_refs": ("w000",),
@@ -380,9 +519,19 @@ def test_production_transcript_reader_resolves_downstream_result_with_upstream_r
             stored(downstream_result_id, downstream_session_id, 5,
                    "inference_result", downstream_result),
         )
+        safe_read_body = registry.safe_read_body
+
+        def check_read_type(content_type, content_schema_version, body):
+            assert content_type not in {"evidence_bundle", "evidence_fragment"}
+            return safe_read_body(content_type, content_schema_version, body)
+
+        monkeypatch.setattr(registry, "safe_read_body", check_read_type)
 
         class Store:
             async def read_run(self, run_id):
+                raise AssertionError("result resolution read the entire run")
+
+            async def read_run_items(self, run_id, item_ids):
                 assert run_id == RUN_ID
                 return StoredRunRead(
                     run=StoredRunHeader(
@@ -392,7 +541,17 @@ def test_production_transcript_reader_resolves_downstream_result_with_upstream_r
                         query="Inspect river",
                         request_item_id=UUID(int=10), created_item_id=UUID(int=11),
                     ),
-                    items=items,
+                    items=tuple(
+                        item for item in items if item.item_id in item_ids
+                    ),
+                )
+
+            async def list_session_item_ids(self, run_id, session_id, content_type):
+                assert run_id == RUN_ID
+                return tuple(
+                    item.item_id for item in items
+                    if item.session_id == session_id
+                    and item.content_type == content_type
                 )
 
         class NoLive:
@@ -405,7 +564,9 @@ def test_production_transcript_reader_resolves_downstream_result_with_upstream_r
             error_id_factory=lambda: UUID(int=12),
             inline_content_bytes=65536, preview_bytes=1024,
         )
-        resolved = await TranscriptUpstreamInferenceResultReader(reader).resolve(outcome)
+        resolved = await TranscriptUpstreamInferenceResultReader(
+            reader, PersistedWaiter()
+        ).resolve(outcome)
         assert resolved.result == downstream_result
         assert tuple(ref.item_id for ref in resolved.closure_refs) == (
             str(downstream_bundle_id), str(downstream_fragment_id)
@@ -414,7 +575,9 @@ def test_production_transcript_reader_resolves_downstream_result_with_upstream_r
             run_id=RUN_ID,
             topology=topology("chain"),
             topology_ref=TranscriptContentRef(run_id=RUN_ID, item_id=UUID(int=22)),
-            result_reader=TranscriptUpstreamInferenceResultReader(reader),
+            result_reader=TranscriptUpstreamInferenceResultReader(
+                reader, PersistedWaiter()
+            ),
         )
         await provider.publish(outcome)
         batch = await provider.collect(request(

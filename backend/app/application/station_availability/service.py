@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
-from datetime import timedelta
 
 from app.domain import (
     AvailabilityCoverageSource,
@@ -25,18 +25,20 @@ from app.domain import (
 from app.ports import (
     ClockPort,
     InvalidPortResponseError,
+    PortError,
     PortTimeoutError,
     StationMetadataPort,
     TopologyDataPort,
 )
 
 PROVIDER = "station_inventory"
+logger = logging.getLogger("wateragents.station_availability")
 
 
 @dataclass(frozen=True)
 class _AvailabilityPlan:
     units_by_parameter: dict[ParameterKey, tuple[CoverageUnit, ...]]
-    historical_ranges: dict[int, AvailabilityTimeRange]
+    historical_ranges: dict[tuple[int, int], AvailabilityTimeRange]
     prediction_baseline_ranges: dict[int, AvailabilityTimeRange]
 
     @classmethod
@@ -50,7 +52,9 @@ class _AvailabilityPlan:
                 for parameter, parameter_units in units.items()
             },
             historical_ranges={
-                item.segment_index: item for item in request.historical_ranges
+                (item.segment_index, item.window_index): item
+                for item in request.historical_ranges
+                if item.window_index is not None
             },
             prediction_baseline_ranges={
                 item.segment_index: item
@@ -73,6 +77,7 @@ class StationAvailabilityService:
         self._registry = capability_registry
         self._clock = clock
         self._sample_key_by_label = self._build_sample_label_index()
+        self._probe_semaphore = asyncio.Semaphore(4)
 
     async def check_availability(
         self,
@@ -236,10 +241,14 @@ class StationAvailabilityService:
         by_id: dict[str, MonitoringStation] = {}
         for station in stations:
             if station.associated_comid != comid:
-                raise self._invalid_metadata("get_monitoring_sites")
+                raise self._invalid_metadata(
+                    "get_monitoring_sites", station_id=station.station_id, comid=comid
+                )
             previous = by_id.get(station.station_id)
             if previous is not None and previous != station:
-                raise self._invalid_metadata("get_monitoring_sites")
+                raise self._invalid_metadata(
+                    "get_monitoring_sites", station_id=station.station_id, comid=comid
+                )
             by_id[station.station_id] = station
         return by_id
 
@@ -290,12 +299,13 @@ class StationAvailabilityService:
             routed_parameters,
             deadline=deadline,
         )
-        return self._qualify_time_series(
+        return await self._qualify_time_series(
             plan,
             series,
             stations=set(routed_stations),
             parameters=set(routed_parameters),
             capabilities=capabilities,
+            deadline=deadline,
         )
 
     def _parameter_directory(
@@ -309,14 +319,20 @@ class StationAvailabilityService:
         for record in records:
             capability = capabilities.get(record.key)
             if record.key not in requested or capability is None:
-                raise self._invalid_metadata("get_parameter_codes")
+                raise self._invalid_metadata(
+                    "get_parameter_codes", parameter_code=record.key.code
+                )
             if (
                 record.name != capability.official_name
                 or record.unit != capability.official_unit
             ):
-                raise self._invalid_metadata("get_parameter_codes")
+                raise self._invalid_metadata(
+                    "get_parameter_codes", parameter_code=record.key.code
+                )
             if record.key in by_key:
-                raise self._invalid_metadata("get_parameter_codes")
+                raise self._invalid_metadata(
+                    "get_parameter_codes", parameter_code=record.key.code
+                )
             by_key[record.key] = record
         return by_key
 
@@ -329,11 +345,13 @@ class StationAvailabilityService:
         by_id: dict[str, MonitoringLocationMetadata] = {}
         for record in records:
             if record.station_id not in requested or record.station_id in by_id:
-                raise self._invalid_metadata("get_monitoring_locations")
+                raise self._invalid_metadata(
+                    "get_monitoring_locations", station_id=record.station_id
+                )
             by_id[record.station_id] = record
         return by_id
 
-    def _qualify_time_series(
+    async def _qualify_time_series(
         self,
         plan: _AvailabilityPlan,
         records: tuple[TimeSeriesMetadata, ...],
@@ -341,6 +359,7 @@ class StationAvailabilityService:
         stations: set[str],
         parameters: set[ParameterKey],
         capabilities: dict[ParameterKey, ParameterCapability],
+        deadline: float | None,
     ) -> tuple[SeriesRef, ...]:
         seen_identities: set[str] = set()
         references: list[SeriesRef] = []
@@ -355,26 +374,46 @@ class StationAvailabilityService:
                 or source_unit.unit_id not in capability.accepted_source_units
                 or record.series_id in seen_identities
             ):
-                raise self._invalid_metadata("get_time_series_metadata")
+                raise self._invalid_metadata(
+                    "get_time_series_metadata",
+                    station_id=record.station_id,
+                    series_id=record.series_id,
+                    parameter_code=record.parameter.code,
+                )
             seen_identities.add(record.series_id)
-            references.extend(self._time_series_refs_for_record(plan, record))
+            references.extend(
+                await self._time_series_refs_for_record(plan, record, deadline)
+            )
         return tuple(sorted(references, key=self._series_ref_sort_key))
 
-    def _time_series_refs_for_record(
+    async def _time_series_refs_for_record(
         self,
         plan: _AvailabilityPlan,
         record: TimeSeriesMetadata,
+        deadline: float | None,
     ) -> tuple[SeriesRef, ...]:
         units = plan.units_by_parameter.get(record.parameter, ())
         historical = plan.historical_ranges
         prediction = plan.prediction_baseline_ranges
         by_source: dict[AvailabilityCoverageSource, list[CoverageUnit]] = {}
+        historical_units = tuple(
+            unit for unit in units if unit.window_index is not None
+        )
+        requested = tuple(
+            historical[(unit.segment_index, unit.window_index)]
+            for unit in historical_units
+        )
+        observed_windows = await self._time_series_observation_windows(
+            record, requested, deadline
+        )
+        observed_units = {
+            unit for unit in historical_units if unit.window_index in observed_windows
+        }
         for unit in units:
-            if unit.segment_index in historical:
-                requested = historical[unit.segment_index]
-                if record.begin <= requested.start and record.end >= requested.end:
+            if unit.window_index is not None:
+                if unit in observed_units:
                     by_source.setdefault(
-                        AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_ENVELOPE,
+                        AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_OBSERVATION,
                         [],
                     ).append(unit)
             else:
@@ -400,6 +439,42 @@ class StationAvailabilityService:
             )
         )
 
+    async def _time_series_observation_windows(
+        self,
+        record: TimeSeriesMetadata,
+        requested: tuple[AvailabilityTimeRange, ...],
+        deadline: float | None,
+    ) -> tuple[int, ...]:
+        if not requested:
+            return ()
+        try:
+            async with self._probe_semaphore:
+                self._ensure_deadline(deadline)
+                found = await self._metadata.get_time_series_observation_windows(
+                    record, requested, deadline=deadline
+                )
+            return self._validate_observed_windows(
+                found, requested, operation="get_time_series_observation_windows"
+            )
+        except PortError as error:
+            logger.warning(
+                "Time-series availability probe failed for station %s, series %s: %s",
+                record.station_id,
+                record.series_id,
+                error,
+                extra={
+                    "event_name": "station_time_series_probe_failed",
+                    "station_id": record.station_id,
+                    "series_id": record.series_id,
+                    "parameter_code": record.parameter.code,
+                    "provider": error.provider,
+                    "provider_operation": error.operation,
+                    "provider_error": type(error).__name__,
+                    "provider_status": error.status_code,
+                },
+            )
+            raise
+
     async def _sample_references(
         self,
         plan: _AvailabilityPlan,
@@ -411,27 +486,45 @@ class StationAvailabilityService:
         references: list[SeriesRef] = []
         for station_id in sorted(stations):
             self._ensure_deadline(deadline)
-            periods = await self._metadata.get_sample_periods(
-                station_id,
-                deadline=deadline,
-            )
+            try:
+                periods = await self._metadata.get_sample_periods(
+                    station_id,
+                    deadline=deadline,
+                )
+            except PortError as error:
+                logger.warning(
+                    "Sample periods lookup failed for station %s: %s",
+                    station_id,
+                    error,
+                    extra={
+                        "event_name": "station_sample_periods_failed",
+                        "station_id": station_id,
+                        "provider": error.provider,
+                        "provider_operation": error.operation,
+                        "provider_error": type(error).__name__,
+                        "provider_status": error.status_code,
+                    },
+                )
+                raise
             references.extend(
-                self._qualify_sample_periods(
+                await self._qualify_sample_periods(
                     plan,
                     station_id,
                     periods,
                     requested=requested,
+                    deadline=deadline,
                 )
             )
         return tuple(sorted(references, key=self._series_ref_sort_key))
 
-    def _qualify_sample_periods(
+    async def _qualify_sample_periods(
         self,
         plan: _AvailabilityPlan,
         station_id: str,
         records: tuple[SamplePeriodOfRecord, ...],
         *,
         requested: set[ParameterKey],
+        deadline: float | None,
     ) -> tuple[SeriesRef, ...]:
         seen_identities: set[str] = set()
         references: list[SeriesRef] = []
@@ -440,7 +533,11 @@ class StationAvailabilityService:
                 record.station_id != station_id
                 or record.provider_identity in seen_identities
             ):
-                raise self._invalid_metadata("get_sample_periods")
+                raise self._invalid_metadata(
+                    "get_sample_periods",
+                    station_id=record.station_id,
+                    sample_identity=record.provider_identity,
+                )
             seen_identities.add(record.provider_identity)
             parameter = self._sample_key_by_label.get(
                 normalize_parameter_concept(record.characteristic)
@@ -448,39 +545,50 @@ class StationAvailabilityService:
             if (
                 parameter is None
                 or parameter not in requested
-                or record.result_count == 0
-                or record.activity_count == 0
             ):
                 continue
-            references.extend(self._sample_refs_for_record(plan, record, parameter))
+            references.extend(
+                await self._sample_refs_for_record(plan, record, parameter, deadline)
+            )
         return tuple(sorted(references, key=self._series_ref_sort_key))
 
-    def _sample_refs_for_record(
+    async def _sample_refs_for_record(
         self,
         plan: _AvailabilityPlan,
         record: SamplePeriodOfRecord,
         parameter: ParameterKey,
+        deadline: float | None,
     ) -> tuple[SeriesRef, ...]:
         units = plan.units_by_parameter.get(parameter, ())
         historical = plan.historical_ranges
         prediction = plan.prediction_baseline_ranges
         by_source: dict[AvailabilityCoverageSource, list[CoverageUnit]] = {}
+        historical_units = tuple(
+            unit for unit in units if unit.window_index is not None
+        )
+        requested = tuple(
+            historical[(unit.segment_index, unit.window_index)]
+            for unit in historical_units
+        )
+        observed_windows = await self._sample_observation_windows(
+            record, parameter, requested, deadline
+        )
+        observed_units = {
+            unit for unit in historical_units if unit.window_index in observed_windows
+        }
         for unit in units:
-            if unit.segment_index in historical:
-                requested = historical[unit.segment_index]
-                requested_end = (requested.end - timedelta(microseconds=1)).date()
-                if (
-                    record.first_activity <= requested.start.date()
-                    and record.most_recent_activity >= requested_end
-                ):
+            if unit.window_index is not None:
+                if unit in observed_units:
                     by_source.setdefault(
-                        AvailabilityCoverageSource.HISTORICAL_SAMPLE_PERIOD,
+                        AvailabilityCoverageSource.HISTORICAL_SAMPLE_OBSERVATION,
                         [],
                     ).append(unit)
             else:
                 baseline = prediction[unit.segment_index]
                 if (
-                    record.first_activity <= baseline.end.date()
+                    record.result_count > 0
+                    and record.activity_count > 0
+                    and record.first_activity <= baseline.end.date()
                     and record.most_recent_activity >= baseline.start.date()
                 ):
                     by_source.setdefault(
@@ -502,6 +610,64 @@ class StationAvailabilityService:
                 key=lambda item: item[0].value,
             )
         )
+
+    async def _sample_observation_windows(
+        self,
+        record: SamplePeriodOfRecord,
+        parameter: ParameterKey,
+        requested: tuple[AvailabilityTimeRange, ...],
+        deadline: float | None,
+    ) -> tuple[int, ...]:
+        if not requested:
+            return ()
+        try:
+            async with self._probe_semaphore:
+                self._ensure_deadline(deadline)
+                found = await self._metadata.get_sample_observation_windows(
+                    record, parameter, requested, deadline=deadline
+                )
+            return self._validate_observed_windows(
+                found, requested, operation="get_sample_observation_windows"
+            )
+        except PortError as error:
+            logger.warning(
+                "Sample availability probe failed for station %s, sample %s: %s",
+                record.station_id,
+                record.provider_identity,
+                error,
+                extra={
+                    "event_name": "station_sample_probe_failed",
+                    "station_id": record.station_id,
+                    "sample_identity": record.provider_identity,
+                    "parameter_code": parameter.code,
+                    "provider": error.provider,
+                    "provider_operation": error.operation,
+                    "provider_error": type(error).__name__,
+                    "provider_status": error.status_code,
+                },
+            )
+            raise
+
+    @staticmethod
+    def _validate_observed_windows(
+        found: object,
+        requested: tuple[AvailabilityTimeRange, ...],
+        *,
+        operation: str,
+    ) -> tuple[int, ...]:
+        expected = {item.window_index for item in requested}
+        if (
+            type(found) is not tuple
+            or any(type(index) is not int for index in found)
+            or found != tuple(sorted(set(found)))
+            or not set(found).issubset(expected)
+        ):
+            raise InvalidPortResponseError(
+                "Observation probe returned invalid window indexes.",
+                provider=PROVIDER,
+                operation=operation,
+            )
+        return found
 
     def _build_sample_label_index(self) -> dict[str, ParameterKey]:
         matches: dict[str, set[ParameterKey]] = {}
@@ -526,8 +692,13 @@ class StationAvailabilityService:
         }
 
     @staticmethod
-    def _coverage_sort_key(unit: CoverageUnit) -> tuple[int, str, str]:
-        return unit.segment_index, unit.parameter.code_system, unit.parameter.code
+    def _coverage_sort_key(unit: CoverageUnit) -> tuple[int, int, str, str]:
+        return (
+            unit.segment_index,
+            -1 if unit.window_index is None else unit.window_index,
+            unit.parameter.code_system,
+            unit.parameter.code,
+        )
 
     @staticmethod
     def _series_ref_sort_key(
@@ -542,7 +713,30 @@ class StationAvailabilityService:
         )
 
     @staticmethod
-    def _invalid_metadata(operation: str) -> InvalidPortResponseError:
+    def _invalid_metadata(
+        operation: str,
+        *,
+        station_id: str | None = None,
+        series_id: str | None = None,
+        sample_identity: str | None = None,
+        parameter_code: str | None = None,
+        comid: str | None = None,
+    ) -> InvalidPortResponseError:
+        logger.warning(
+            "Provider metadata identities are inconsistent in %s.",
+            operation,
+            extra={
+                "event_name": "station_metadata_invalid",
+                "provider": PROVIDER,
+                "provider_operation": operation,
+                "provider_error": "InvalidPortResponseError",
+                "station_id": station_id,
+                "series_id": series_id,
+                "sample_identity": sample_identity,
+                "parameter_code": parameter_code,
+                "comid": comid,
+            },
+        )
         return InvalidPortResponseError(
             "Provider metadata identities are inconsistent.",
             provider=PROVIDER,

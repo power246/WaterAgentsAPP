@@ -7,8 +7,6 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-from pydantic import ValidationError
-
 from app.application.reasoning import ModelSizeEstimate
 from app.application.reasoning.model_models import (
     StructuredOutputCompleted,
@@ -44,15 +42,14 @@ from app.infrastructure.runtime import (
     safe_m6_metadata,
 )
 from app.infrastructure.runtime.m6_test import build_m6_test_runtime
+from pydantic import ValidationError
 from scripts import m6_provider_smoke
 from tests.m4_support import (
     EMBEDDING_CAPABILITY,
     MODEL_CATALOG,
-    WATERBODY_MODEL,
     _build_test_m6_runtime,
     create_test_app,
 )
-
 
 OPENAI_MODEL = ModelSelection(provider="openai", model="waterbody-v1")
 FIXED_NOW = datetime(2026, 10, 2, 12, tzinfo=UTC)
@@ -190,7 +187,8 @@ def test_m6_limit_defaults_and_derived_worst_case_are_fixed() -> None:
         limits.session_deadline_seconds,
     ) == (6, 4, 32, 24, 90.0, 600.0)
     assert limits.repairs_per_exchange == 1
-    assert limits.maximum_model_calls == 6 + 2 * 24 + 2 == 56
+    assert limits.numeric_estimation_calls == 64
+    assert limits.maximum_model_calls == 6 + 64 + 2 * 24 + 2 == 120
     assert not any("repair" in field for field in AppSettings.model_fields)
 
 
@@ -207,7 +205,7 @@ def test_m6_limits_accept_lower_values_and_keep_m5_budgets_independent() -> None
         evidence_max_transform_calls=3,
     )
 
-    assert m6_runtime_limits(settings).maximum_model_calls == 5
+    assert m6_runtime_limits(settings).maximum_model_calls == 69
     m5_limits = evidence_tool_limits(settings)
     assert m5_limits.collection_calls == 2
     assert m5_limits.transform_calls == 3
@@ -319,6 +317,30 @@ def test_router_uses_model_specific_limits_for_same_provider() -> None:
     )
 
 
+def test_router_never_plans_above_adapter_output_limit() -> None:
+    selected = ModelSelection(provider="openai", model="deepseek-flash")
+    router = WaterbodyModelRouter(
+        catalog(
+            capability(
+                selected,
+                ModelRole.WATERBODY,
+                context_window_tokens=1_048_576,
+                max_output_tokens=393_216,
+            ),
+        ),
+        (
+            WaterbodyAdapterRegistration(
+                provider="openai",
+                port=RecordingPort(),
+                size_estimator=FixedEstimator(),
+                max_output_tokens=16_384,
+            ),
+        ),
+    )
+
+    assert router.model_fit(selected).max_output_tokens == 16_384
+
+
 async def _collect(router: WaterbodyModelRouter, model_request):
     return [event async for event in router.stream(model_request)]
 
@@ -387,7 +409,8 @@ def test_runtime_composes_the_real_chain_and_reuses_m5_m3_instances() -> None:
             "model_timeout_seconds": 90.0,
             "session_deadline_seconds": 600.0,
             "repairs_per_exchange": 1,
-            "maximum_model_calls": 56,
+            "maximum_model_calls": 120,
+            "numeric_estimation_calls": 64,
         },
         "adapter_providers": ("openai",),
     }
@@ -560,7 +583,7 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
     schema = application.openapi()
     paths = set(schema["paths"])
 
-    assert len(paths) == 28
+    assert len(paths) == 29
     assert "/api/settings" in paths
     assert "/api/keys" in paths
     assert not any(
@@ -575,7 +598,7 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
         )
     )
     encoded = json.dumps(schema["x-m6-runtime"], sort_keys=True)
-    assert schema["x-m6-runtime"]["limits"]["maximum_model_calls"] == 56
+    assert schema["x-m6-runtime"]["limits"]["maximum_model_calls"] == 120
     assert "metadata-secret" not in encoded
     assert settings.openai_base_url not in encoded
     assert "prompt" not in encoded.casefold()
