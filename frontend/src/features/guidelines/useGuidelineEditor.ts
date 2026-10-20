@@ -69,8 +69,10 @@ export function useGuidelineEditor(onMutation: () => void) {
   }
   async function execute(pending: Pending): Promise<GuidelineDocument | null> {
     update((s) => ({ ...s, pending, busy: true, uncertain: false, error: '', review: null, epoch: s.epoch + 1 }))
+    let acknowledged = false
     try {
       const receipt = await api.mutateGuideline(pending.path, pending.method, pending.submission)
+      acknowledged = true
       if (!receipt.document_id || receipt.mutation.idempotency_key !== pending.submission.key) throw new Error('invalid_receipt')
       if (pending.kind === 'save' && (!Number.isSafeInteger(receipt.accepted_revision) || !receipt.content_digest)) throw new Error('incomplete_save_receipt')
       const accepted = await api.guideline(receipt.document_id)
@@ -87,7 +89,7 @@ export function useGuidelineEditor(onMutation: () => void) {
       onMutation()
       return doc
     } catch (cause) {
-      const rejected = confirmedRequestRejected(cause)
+      const rejected = !acknowledged && confirmedRequestRejected(cause)
       update((s) => ({ ...s, busy: false, uncertain: !rejected, pending: rejected ? null : pending,
         conflict: cause instanceof ApiError ? cause.currentDocument : null, error: message(cause) }))
       return null
@@ -159,8 +161,12 @@ export function useGuidelineEditor(onMutation: () => void) {
       try {
         await api.guidelineOperation(operationId, controller.signal)
         const doc = await api.guideline(documentId, controller.signal)
-        if (!controller.signal.aborted) update((s) => s.epoch === epoch && s.document?.identity.guideline_id === documentId &&
-          doc.revision >= s.document.revision ? { ...s, document: doc, review: null } : s)
+        if (!controller.signal.aborted) update((s) => {
+          if (s.epoch !== epoch || s.document?.identity.guideline_id !== documentId || doc.revision < s.document.revision) return s
+          const changed = doc.draft_digest !== s.document.draft_digest
+          return { ...s, document: doc, review: null, acceptedEditVersion: changed ? -1 : s.acceptedEditVersion,
+            error: changed ? '服务器草稿已变化，本地编辑已保留；请比较后再保存。' : s.error }
+        })
       } catch (cause) {
         if (!controller.signal.aborted) update((s) => s.epoch === epoch ? { ...s, error: message(cause) } : s)
       }

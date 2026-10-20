@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–10 已完成，Milestone 11 进行中，Milestone 12 待实施**。本文是后续 coding agent 的唯一实施进度清单。管理/人工发布、模型参考、typed 记录及结果/历史快照查看已接通；M11 已准备待审内容、公开 holdout 输入和评估工具，仍待实际内容批准、可用 embedding 及真实配对结果，不代表真实效果或最终验收已完成。
+状态：**Milestone 0–10 已完成，Milestone 11–12 为 partial**。本文是唯一实施进度清单。M12 已进行跨层审计、全栈回归和编辑器并发修复；最终阶段出口仍依赖 M11 的真实内容批准、可用 embedding 检索及真实配对结果，不能将本地程序检查视作整体验收。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -631,26 +631,26 @@ git diff --check
 - 新增审核导出、真实 PostgreSQL 检索评估入口、冻结输入/衍生链泄漏拒绝、统计可比性及保存配对审计工具。控制臂禁止任何已批准正文/实际 advisory；知识臂须匹配批准版本与实际 payload/delivery；比较时科学上下文/模型/version/budget 必须一致，保留失败/不可比项。此处是程序能力，尚无实际合格配对；不声称审计器能自行运行完整科学 workflow 或证明任意自由文字均无泄漏。
 - 阶段回归 **344 passed**，96.76s，路径为 application/guidelines、persistence/test_guidelines.py、domain/test_guidelines.py、ports/test_guideline_ports.py、architecture/test_guideline_boundaries.py。最终新增/调整定向 **33 passed**，3.94s（`test_evaluation.py`）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`；`pytest.main` 使用 `-q -p no:cacheprovider --tb=short --show-capture=no`，task-local 前缀 `.tmp/guidelines-m11-20261021/{regression-final,targeted-verified}`（XML/log 同名）。临时审核/embedding 向量只作程序测试，不算实际批准或检索质量证据。
 - 实际配置预检：`text-embedding-3-small` 向已配置 `api.deepseek.com` 发出 1 次请求，HTTP **404**，安全码 `guideline_embedding_unavailable`；未擅自切供应商/密钥或改 `.env`。实际 `deepseek-flash` 经既有 `m6_provider_smoke._main()` 连通性预检 **1 request / 1 response**（76 input / 25 output tokens），仅证明响应契约，不是 pH 对照或固定权重版本证明。真实检索排名/cutoff 核对、no-guide/with-guide 成对结果、解释质量及 hosted CI：**not run**。
-- 后续仍须：用户明确批准具体内容；修正本地兼容 embedding 配置；生成真实、冻结证据/同配置的 3–5 例配对，至少一完整配对，再记录实际提供/采用、点/范围误差及人工解释评价。当前不将通用“完成 M11”当作对尚未见到的草稿的批准，M11 未完成项目与 M12 保持未勾选。
+- 后续仍须：用户明确批准具体内容；修正本地兼容 embedding 配置；生成真实、冻结证据/同配置的 3–5 例配对，至少一完整配对，再记录实际提供/采用、点/范围误差及人工解释评价。当前不将通用“完成 M11”当作对尚未见到的草稿的批准，M11 未完成项目及 M12 的最终阶段出口保持未完成。
 
 
 ## Milestone 12：整体回归、契约审计与交付
 
 ### Work
 
-- [ ] 逐项审计 GK-C01–GK-C24 和下方 GK-A01–GK-A12，将证据定位到实际测试/记录；修复仅局部通过而完整调用链失败的问题。
-- [ ] 复查 domain/ports、schema/迁移、provider/runtime、request/response builders、numeric/assembler、registry/projection/M8、API/generated types、UI/history 全部消费者均已更新。
-- [ ] 运行完整后端、PostgreSQL、前端 lint/typecheck/unit/build 和浏览器回归；真实 provider 与 hosted CI 仅在实际执行后填写，环境失败与产品失败分开。
-- [ ] 检查旧历史内容仍可读、旧 digests 不变、无新增观察资格旁路/第三 SSE/归档 imports/测试生产入口；库更新保留用户内容。
-- [ ] 更新技术设计中的真实实现路径、配置、操作说明和验证限制，本文原位填写各阶段完成记录；清除仅属过渡且不再需要的实现，不清理用户文件。
+- [x] 逐项审计 GK-C01–GK-C24 和下方 GK-A01–GK-A12，将证据定位到实际测试/记录；修复仅局部通过而完整调用链失败的问题。
+- [x] 复查 domain/ports、schema/迁移、provider/runtime、request/response builders、numeric/assembler、registry/projection/M8、API/generated types、UI/history 全部消费者均已更新。
+- [x] 运行完整后端、PostgreSQL、前端 lint/typecheck/unit/build 和浏览器回归；真实 provider 与 hosted CI 仅在实际执行后填写，环境失败与产品失败分开。
+- [x] 检查旧历史内容仍可读、旧 digests 不变、无新增观察资格旁路/第三 SSE/归档 imports/测试生产入口；库更新保留用户内容。
+- [x] 更新技术设计中的真实实现路径、配置、操作说明和验证限制，本文原位填写各阶段完成记录；清除仅属过渡且不再需要的实现，不清理用户文件。
 - [ ] 交付记录实际 branch/HEAD/commits、文件范围、命令/计数、人工批准版本、3–5 例结果摘要、未完成项；按后续用户授权范围执行 commit/push/PR，不对已授权动作重复索取确认，不能把本次写 TODO 视作代码实现授权。
 
 ### Tests
 
-- [ ] 全部新增针对性测试与完整后端/架构/专用 PostgreSQL 回归通过，无跳过后伪称全通过。
-- [ ] 前端生成契约、lint、typecheck、unit/build、mock UI 与真实后端浏览器链路结果分别可核对。
-- [ ] 对本次发现的并发缺陷保留实际操作顺序的回归测试，不能用仅断言最终状态的测试替代。
-- [ ] 真实 embedding/分析模型与 pH holdout 的通过范围有限且明确；没有对应证据的 hosted CI/平台检查标 `not run`。
+- [x] 全部新增针对性测试与完整后端/架构/专用 PostgreSQL 回归通过，无跳过后伪称全通过。
+- [x] 前端生成契约、lint、typecheck、unit/build、mock UI 与真实后端浏览器链路结果分别可核对。
+- [x] 对本次发现的并发缺陷保留实际操作顺序的回归测试，不能用仅断言最终状态的测试替代。
+- [x] 真实 embedding/分析模型与 pH holdout 的通过范围有限且明确；没有对应证据的 hosted CI/平台检查标 `not run`。
 
 ### Verify
 
@@ -675,22 +675,63 @@ git rev-parse HEAD
 
 提交边界：最终回归修复、必要文档和完成记录；提交前确认无密钥、业务库快照、新日志/模型输出、无关改动或未经审核内容。
 
-完成记录：`pending`。
+完成记录：**partial**（2026-10-21；本地审计、回归与修复完成，真实内容与实测阶段出口仍未满足）。
+
+- 当前分支 `codex/guidelines-m0`，基线 `db1e11699161c719e7b636001aac2b9bcfcb05c8`，初始 tracked tree 干净；本阶段提交待验证完成后记录。本次仅修改编辑器、其回归测试和现有两份 guideline 文档，不新建状态文档、不修改 `.env`、业务库、归档或生产 bundle，不 push/PR。
+- 复查路径覆盖 domain/ports → `20261020_02` schema/repository → runtime/provider/worker → run pin/retrieval → planning/numeric/batch/repair/synthesis builders → assembler/result usage → registry/public projection/M8 source reader → API/generated types → UI/history。既有 canonical/domain inference/evidence/hydrology 与 M8 projection 未变；旧 canonical golden、旧无知识记录、当前新增引用闭包和两个 SSE/单 workflow/无测试入口的架构守卫均纳入完整回归。没有发现需要保留的过渡实现或需要清理的用户文件。
+- 两处确认缺陷及回归在 `frontend/src/features/guidelines/useGuidelineEditor.ts`、`frontend/tests/guidelines.test.tsx`：① A 保存 ACK 成功 → 用户已输入 B → ACK 后 GET 返回 403/404/409/422，保留 A 的原 key/body 对账及 B 脏状态，不能把读失败当成写未生效；② 本地 A 已保存 → preparation poll 的 GET 在途 → 另一客户端保存 C → GET 返回 C，保留本地 A 并标记为未保存，后续显式保存使用 C 的 revision。新增 **5 个**精确顺序用例修复前失败、修复后通过；说明书定向 **28 passed**，最终前端全量 **114 passed / 15 files**。
+- 前端最终 `check:api`、`lint`、`typecheck`、`test -- --run`、`build` 均通过；生成契约未漂移。mock 浏览器 `WATERAGENTS_BROWSER_CHANNEL=chrome npm --prefix frontend run test:e2e` 为 **9 passed / 2 skipped**，13.6s；跳过的是需真实后端的 production 与 guideline 场景。最终 build JS 为 931.08 kB（gzip 277.83 kB），保留原有大 chunk 提示。
+- 随后 DB-only runner 开启 `WATERAGENTS_GUIDELINE_BROWSER_E2E=1` 和 `WATERAGENTS_M9_BROWSER_E2E=1`，运行 `backend/tests/smoke/test_guideline_browser.py` 与 `test_m9_production_pg.py`：**5 passed / 0 skipped**，33.78s。包括说明书创建/人工操作发布/准备/实际提供与引用/更改资料库后的历史 v1、生产构建与同源路由、run/SSE/重启历史、取消，以及 discharge-only / discharge+water-quality 的完整路径。HTTP、PostgreSQL 临时 schema 和 Chrome 为真实实现；模型、embedding 和采集器为测试 composition 的确定性实现，无生产测试后门。
+- 完整后端 **3338 passed / 1 skipped / 0 failed**，456.22s；含 architecture **171**、persistence **144**、domain **520**、ports **25**、application/guidelines **217**。唯一 skip 为说明书 opt-in 浏览器，已在上述单独运行通过；两条现有 warning 为 Starlette/httpx 与 anyio BlockingPortal 弃用。本地 Python 3.12，其他平台/Python hosted matrix **not run**。下面点名的 38 个后端测试函数均已与实际 JUnit passed 行核对，无漏项。
+- 实际后端命令从根目录由 `backend/.venv/Scripts/python.exe` 执行 DB-only `pytest.main`：清除子进程继承的 `WATERAGENTS_*`，只加载 `dotenv_values('backend/.env')` 的 `WATERAGENTS_DB_*`，设置进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，`sys.path` 加入 `backend`；参数为 `['backend/tests','-q','-p','no:cacheprovider','--tb=short','--show-capture=no','--basetemp','.tmp/guidelines-m12-20261021/backend-full','--junitxml','.tmp/guidelines-m12-20261021/backend-full.xml']`。独立集成运行仅增加两个浏览器 opt-in 环境变量、替换上述两个 smoke 路径及 `browser-integrated` 临时前缀。没有修改 dotenv 文件。所有日志/XML 仅留本机，不提交。
+- 人工批准版本：**none**。四份 v1 草稿原 SHA256 仍为 `c8105b605ca6e50b0410b2080c9123e1395eb3b067a7d6fea33d2ddebae662f2`，生产 manifest 仍为空。M11 已记录的真实 embedding preflight 为 HTTP 404，真实分析模型 smoke 只证明 1 次连通/响应；M12 未重复收费调用或更改供应商配置。真实检索、3 例 holdout 的 no-guide/with-guide 输出与误差、解释质量：**not run**；案例输入见 M11 的 Potomac 23/24、24/24 和 Delaware 6/0。实际人工审核、成功真实 embedding、成对结果和 hosted CI/其他平台均无新增通过证据。
+- 阶段出口：本次程序与本地回归范围通过，最终 Work 交付项、GK-A11/GK-A12 保留未勾选；待真实批准、服务修正及配对核对完成后补全。依据执行规则 9，不替内容制作者生成审核批准。该缺口不阻止提交已完成的审计/修复，但阻止声称 M12 或整个功能全部完成。
+
+契约审计定位（路径相对仓库根目录；`::` 后为测试函数，参数化行与验证计数由本阶段实际测试记录核对；“程序通过”不代表真实资料/效果通过）：
+
+| 契约 | 实际测试/记录 | 结论与边界 |
+| --- | --- | --- |
+| GK-C01 | `backend/tests/application/guidelines/test_model_context.py::test_unavailable_or_omitted_guidelines_do_not_gate_a_valid_numeric_range` | 缺失参考继续原数值路径。 |
+| GK-C02 | 同文件 `test_valid_guideline_alias_never_authorizes_an_unanchored_point`；既有 evidence/numeric 全量回归 | 不授予 observation/anchor/risk 资格。 |
+| GK-C03 | `backend/tests/application/guidelines/test_bundled.py::test_upgrade_local_edit_override_disable_and_explicit_restore_keep_history` | 真实 PG 升级保留 override/历史；本地库无自动公开入口。 |
+| GK-C04 | `backend/tests/application/guidelines/test_authoring.py::test_publication_rejects_unreviewed_or_invalid_saved_content`；`test_evaluation.py::test_export_requires_exact_confirmed_content_and_never_publishes_changed_drafts` | 审核绑定程序通过；四份真实内容尚未批准。 |
+| GK-C05 | `backend/tests/domain/test_guidelines.py::test_canonical_digest_normalizes_only_text_encoding_and_metadata`、`test_publication_utf8_exact_limit` | 内容、来源、边界及 Windows 换行规范化通过。 |
+| GK-C06 | 同文件 `test_model_projection_replaces_only_urls_and_preserves_conditions`；`frontend/tests/guidelines.test.tsx` inert Markdown/安全 source link 用例 | 原文留存，受限 model view 与安全查看分离。 |
+| GK-C07 | `backend/tests/persistence/test_guidelines.py::test_postgres_constraints_and_immutable_guards`、`test_disable_restore_invalidates_claims_and_preserves_historical_catalog` | PG 约束与 family 停用无回退。 |
+| GK-C08 | 同文件 `test_draft_save_receipt_precedes_cas_and_replays_lost_response`；`backend/tests/api/test_guidelines.py::test_all_mutations_replay_original_receipt_and_conflict_on_changed_body` | 同 key 重放优先于 CAS，异 body 拒绝。 |
+| GK-C09 | `backend/tests/application/guidelines/test_worker.py::test_late_override_preparation_respects_new_family_intent`、`test_expired_inflight_attempt_cannot_overwrite_restarted_worker_result` | 屏障控制的旧任务不能覆盖新意图。 |
+| GK-C10 | `backend/tests/infrastructure/embeddings/test_guideline_embeddings.py::test_ineligible_inputs_fail_before_any_dispatch_and_case_gate_is_preserved`；`test_embedding.py::test_profile_uses_catalog_configuration_and_separates_case_identity_and_threshold` | guideline/case namespace、输入校验和 cutoff 独立。 |
+| GK-C11 | `test_worker.py::test_generation_rebuild_reconciles_catalog_changes_before_atomic_switch`、`test_generation_switch_during_publication_recomputes_current_profile_with_same_attempt_lease` | PG 完整重建与原子切换、不混 profile。 |
+| GK-C12 | `backend/tests/application/guidelines/test_retrieval.py::test_real_postgres_two_sessions_keep_pin_across_catalog_changes_and_new_run_sees_change` | 同 run 跨 session 固定 pin，新 run 才见更新。 |
+| GK-C13 | 同文件 `test_real_postgres_exact_ranking_related_parameters_cutoff_top_k_stable_ties_and_profile_rejection`、`test_labeled_multilingual_fixture_uses_real_sql_and_counts_actual_embedding_dispatches` | SQL/cosine/预算程序通过；向量确定性，真实首批资料相关性待验。 |
+| GK-C14 | `test_model_context.py::test_first_actual_planning_or_numeric_dispatch_loads_once`、`test_knowledge_never_creates_a_dispatch`、`test_retrieval_finishing_after_boundary_never_dispatches_reasoning` | 实际测试 port dispatch 计数覆盖零模型/取消/deadline。 |
+| GK-C15 | 同文件 `test_final_serialized_request_preserves_evidence_and_output_reserve`；`test_transcript.py::test_repaired_output_usage_keeps_the_repair_operation_and_original_knowledge_subset` | 最终 payload/alias、完整主题裁剪、repair 一致。 |
+| GK-C16 | `test_transcript.py::test_selected_numeric_lineage_excludes_a_second_candidate_for_the_same_task_window`、`test_registry_writer_rejects_fabricated_citations_and_result_targets` | 候选丢弃、目标与采用 lineage 绑定。 |
+| GK-C17 | 同文件 `test_postgres_restart_history_keeps_original_versions_sources_and_closed_links`、`test_single_content_history_read_hydrates_and_validates_its_bounded_reference_chain`；真实后端浏览器说明书场景 | provided/used 分离；旧版快照/出处/闭包可读。 |
+| GK-C18 | `backend/tests/api/test_guidelines.py::test_security_boundary_headers_and_safe_validation`、`test_missing_resources_operations_and_storage_unavailable_are_safe` | Origin/Host/JSON/no-store 与 safe error。 |
+| GK-C19 | `frontend/tests/guidelines.test.tsx` 原 key 重放、save A ACK/typing B、旧 poll/disable/restore、M12 新增写后读失败/远端草稿竞态 | 顺序测试通过；失败读取不抹掉已接受写的对账状态。 |
+| GK-C20 | `test_transcript.py::test_historical_case_closure_accepts_usage_refs_without_indexing_knowledge`；`backend/tests/infrastructure/test_guideline_runtime.py::test_guideline_runtime_and_profile_are_independent_of_memory_setting`；M8 eligibility 全量回归 | canonical/投影相等；正文不成为历史 evidence，memory disabled 独立。 |
+| GK-C21 | `test_guideline_runtime.py::test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_persisting_secrets`、`test_run_pin_retrieval_uses_fixed_run_lease_once_and_empty_library_dispatches_zero`；`test_worker.py::test_worker_concurrency_is_bounded_and_stop_does_not_dispatch_more_tasks` | run/attempt lease、重启/有界重试/关闭各自验证。 |
+| GK-C22 | `backend/tests/architecture/test_production_test_isolation.py` two-SSE/one-runner/no-test-route；`test_archive_isolation.py`；`backend/tests/application/transcript_memory/test_projection.py::test_projection_replay_and_canonical_golden_are_stable` | 旧 golden `sha256:e6eb4684faad50a02b97c096602e9a096bc23e582fa0ee3cc87124570b1e738b` 与 case UUID 不变；无归档/生产测试入口。 |
+| GK-C23 | `backend/tests/application/guidelines/test_evaluation.py` 原始/派生/隐藏均值泄漏拒绝及统计匹配；M11 冻结公开输入记录 | 评估守卫通过；真实模型的完整成对结果 **not run**。 |
+| GK-C24 | 本阶段与 M11 完成记录、下方 GK-A 清单 | 程序/PG/browser/真实供应商/批准/CI 分列，不宣称整体完成。 |
 
 ## 最终验收清单
 
-- [ ] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。
-- [ ] **GK-A02**：内置说明书可本地编辑，升级保留修改，停用无暗中回退，显式恢复保留历史。
-- [ ] **GK-A03**：仅审核且 ready 的有效版被自动检索；empty/no-match/unavailable 分开且分析可继续。
-- [ ] **GK-A04**：无 planning 的 numeric 路径在估值前获得参考，模型可以忽略或在信息缺失时自主分析。
-- [ ] **GK-A05**：零模型、取消、deadline 路径无新增 provider dispatch，最终请求 fit、整份裁剪和实际 alias 一致。
-- [ ] **GK-A06**：transcript 显示实际随请求提供的版本；结果只显示明确有效引用，numeric lineage 与目标绑定正确。
-- [ ] **GK-A07**：实时与历史能打开当时正文/出处，库修改或恢复不改变旧结果引用，无跨 run/循环引用。
-- [ ] **GK-A08**：发布/编辑/停用/恢复/generation/重启/响应丢失的指定竞态有实测测试，旧 worker/ACK 不覆盖新意图。
-- [ ] **GK-A09**：旧 evidence/scope/numeric/observed/risk 与 M8 eligibility 不弱化；memory-disabled/stateless 可独立使用指南。
-- [ ] **GK-A10**：本地 API/安全渲染/供应商文本范围正确，用户本地内容不自动进入 Git/共享平台。
+- [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。
+- [x] **GK-A02**：内置说明书可本地编辑，升级保留修改，停用无暗中回退，显式恢复保留历史。证据：GK-C03/C07，PG bundle 升级/停用/恢复与前端 local-edit/restore 用例。
+- [x] **GK-A03**：仅审核且 ready 的有效版被自动检索；empty/no-match/unavailable 分开且分析可继续。证据：GK-C01/C07/C13，`test_retrieval.py::test_empty_or_no_metadata_candidates_never_dispatch_embedding`；真实语义质量另见 A11。
+- [x] **GK-A04**：无 planning 的 numeric 路径在估值前获得参考，模型可以忽略或在信息缺失时自主分析。证据：GK-C01/C14，`test_model_context.py` 首次 numeric、可忽略引用与 unavailable range 回归。
+- [x] **GK-A05**：零模型、取消、deadline 路径无新增 provider dispatch，最终请求 fit、整份裁剪和实际 alias 一致。证据：GK-C14/C15 与实际测试 port dispatch 计数。
+- [x] **GK-A06**：transcript 显示实际随请求提供的版本；结果只显示明确有效引用，numeric lineage 与目标绑定正确。证据：GK-C16/C17，`test_transcript.py::test_constructing_request_records_retrieval_but_never_delivery` 及真实 HTTP/SSE/PG 浏览器链路。
+- [x] **GK-A07**：实时与历史能打开当时正文/出处，库修改或恢复不改变旧结果引用，无跨 run/循环引用。证据：GK-C03/C17；保存 v1、当前库 v2 的真实后端浏览器与引用闭包拒绝测试。
+- [x] **GK-A08**：发布/编辑/停用/恢复/generation/重启/响应丢失的指定竞态有实测测试，旧 worker/ACK 不覆盖新意图。证据：GK-C08/C09/C11/C19/C21；PG 屏障和前端 deferred/fake-timer 操作顺序测试。
+- [x] **GK-A09**：旧 evidence/scope/numeric/observed/risk 与 M8 eligibility 不弱化；memory-disabled/stateless 可独立使用指南。证据：GK-C02/C10/C20/C22、完整旧数值/观测/M8 回归及 discharge 两类生产组合测试。
+- [x] **GK-A10**：本地 API/安全渲染/供应商文本范围正确，用户本地内容不自动进入 Git/共享平台。证据：GK-C03/C06/C18/C21；provider payload、safe error 与无上传/自动 Git 生产入口审计。
 - [ ] **GK-A11**：首批资料有真实人工批准，真实 embedding 检索已核对，3–5 个实测 holdout 成对案例如实报告。
 - [ ] **GK-A12**：全栈回归和交付证据完整，fake/真实供应商/数据库/浏览器/hosted CI 的结论与限制分开。
+
+GK-A11 尚缺实际批准、可用 embedding 和真实成对输出；GK-A12 的本地回归部分已通过，最终交付仍待这些必需证据。不是失败案例被排除，也不是以 fake 或现有说明文档替代真实验收。
 
 ## 附录 A：可复用验证环境与命令
 
@@ -741,4 +782,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–9 的实际命令与证据见对应完成记录；Milestone 10–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–10 的实际命令与证据见对应完成记录；Milestone 11–12 已有局部证据，内容批准、真实检索/实测配对及最终阶段出口仍未满足。

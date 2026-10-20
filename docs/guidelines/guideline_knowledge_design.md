@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，Milestone 0–10 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索、模型可选参考、typed 知识记录、结果/历史引用闭包与前端管理/快照查看。**真实内容、供应商效果与最终整体验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–10 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索、模型可选参考、typed 知识记录、结果/历史引用闭包与前端管理/快照查看；M11 已准备待审内容和冻结输入，M12 已实施本地契约审计与回归修复。**真实内容批准、检索效果与实测配对尚未完成，M11/M12 阶段出口仍未满足，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -471,6 +471,16 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 
 已确认允许向用户配置的模型服务发送必要内容：文档建索引时发送 canonical document text，查询时发送 canonical query，推理时发送选中的 model-view 正文。界面不宣称“所有内容绝不离开设备”。供应商处理范围以用户配置的服务为准，本功能不擅自切换供应商或使用额外公共知识平台。
 
+### 12.2 配置与本地操作
+
+按 [AGENT.md](../../AGENT.md) 构建前端并升级数据库；说明书迁移为 `20261020_02`。浏览器 `/guidelines` 提供双库列表、草稿保存、检查发布、准备状态/重试、停用/启用和显式恢复。自编内容可以无出处；整理资料须填写出处。检查对话框展示服务器保存版本，发布绑定其 digest；准备成功前新版本不进入有效目录。查看运行的参考资料使用 transcript 保存版本，不读取当前资料库替换旧正文。
+
+配置来源为 `AppSettings.guideline_policy` 和模型目录的 embedding 条目；当前适配器使用 `WATERAGENTS_OPENAI_BASE_URL` 及现有 OpenAI credential lease，分析与 embedding 共用这一服务配置。仅分析模型可调用不代表同一服务提供 embedding。`WATERAGENTS_MEMORY_ENABLED=false` 关闭历史 memory，不关闭说明书。需要调整时可在本地设置 `WATERAGENTS_GUIDELINE_POLICY` JSON（例如 `'{"worker_max_concurrency":1}'`）；未指定项沿用 `GuidelinePolicy` 默认值。默认 top-k=3、cosine cutoff=0.35、知识预算=3072 tokens，在线单次最多 3 秒；后台并发 2、单次 20 秒、最多 3 次，退避 2/10 秒。cutoff 尚未由真实首批资料标注集校准。
+
+草稿仍可在 embedding 不可用时保存。先修正本地服务、模型与密钥，再按需重启、对原批准版本显式重试；不能通过重新批准或改写版本解决供应商错误。版本/索引重建保留旧快照、用户 override 和历史引用；启动导入不删除资源包中缺失的用户内容。不执行业务库重置或自动 purge。
+
+编辑器对写请求 ACK 与后续读取分别处理：ACK 后的读取失败继续保留原 key/body 供对账，本地后续编辑保持脏状态；轮询读到其他客户端的新草稿时保留本地正文并提示比较后再保存。对应实际操作顺序的回归见 `frontend/tests/guidelines.test.tsx`。
+
 ## 13. 首批 pH 内容计划与调查依据
 
 首批建议整理以下独立、可人工检查的草稿。每份都包含完整解释、成立条件、可检查证据、反例/替代解释和来源；不是强制执行的数值算法。
@@ -549,7 +559,7 @@ embedding 检索原理参考 [Sentence Transformers Semantic Search](https://www
 
 ## 16. 验证命令与交付证据
 
-逐阶段命令、浏览器服务前置条件与实际完成记录以 [Implementation TODO 的 Verify 和附录](guideline_implementation_todo.md)为准。以下为整体验证摘要，供实现完成后执行；Milestone 1 的纯领域/ports 测试已经创建，后续应用/数据库/前端测试仍按阶段实施，不能把命令列出视为已运行。
+逐阶段命令、浏览器服务前置条件与实际完成记录以 [Implementation TODO 的 Verify 和附录](guideline_implementation_todo.md)为准。领域/ports、应用、PostgreSQL、API、前端及两类浏览器测试均已实施；M12 的契约证据表区分本地代码验证与尚缺的内容/真实供应商/实测验收，不能把命令列出视为已运行。
 
 从仓库根目录，在测试进程设置独立数据库名并使用 dotenv runner，确保 Windows 临时目录位于当前 task 可写路径；不把 `WATERAGENTS_TEST_DB_NAME` 写入 `.env`：
 
@@ -572,4 +582,4 @@ git diff --check
 
 结束时报告 branch/HEAD、改动范围、实际命令与通过/失败计数、未运行项目、真实供应商和小样本核对证据，以及人工批准的具体内容版本。区分 fake-provider、真实 embedding、真实分析模型、数据库、浏览器和 hosted CI；未获得对应证据的检查标为 `not run`。
 
-设计调查历史记录见讨论文档；实施阶段的实际验证统一见 TODO。Milestone 0–7 已运行本地后端、离线 HTTP 与真实 PostgreSQL 回归，尚未执行完整功能集成、真实模型调用、真实资料审核或实测对照。
+设计调查历史记录见讨论文档；实施阶段的实际计数统一见 TODO。M12 本地全栈与数据库/浏览器检查使用确定性测试供应商；M11 的真实分析模型烟测只证明一次连通/响应契约，embedding preflight 返回 HTTP 404。首批内容批准、真实检索和 pH 配对及 hosted CI 均未通过或未运行，不能与本地回归合并为正式验收。

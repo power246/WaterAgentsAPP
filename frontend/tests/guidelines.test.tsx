@@ -264,6 +264,7 @@ it('retries a failed approved version without another review or publication', as
 function EditorHarness() {
   const e = useGuidelineEditor(() => undefined)
   return <><button onClick={() => void e.load(id)}>load</button>
+    <button onClick={() => void e.save()}>save</button>
     <input aria-label="harness body" value={e.state.draft.body_markdown ?? ''} onChange={(event) => e.edit({ ...e.state.draft, body_markdown: event.target.value })} />
     <button onClick={() => void e.mutate('/api/guidelines/bundled-root/set-enabled', { expected_revision: 3, enabled: false })}>disable</button>
     <button onClick={() => void e.mutate('/api/guidelines/bundled-root/restore-bundled', { expected_revision: 3, version_id: version.version_id })}>restore</button>
@@ -315,6 +316,49 @@ it('retains B when a post-save GET is stale, then reconciles the original save r
   expect(mutate.mock.calls[1]![2]).toEqual(mutate.mock.calls[0]![2])
   expect(screen.getByLabelText('正文')).toHaveValue('new B during stale GET')
   expect(screen.getByText('有未保存编辑')).toBeVisible()
+})
+
+it.each([403, 404, 409, 422])('keeps an accepted save reconcilable when its follow-up read returns %s', async (status) => {
+  const get = setup()
+  const ack = deferred<GuidelineReceipt>()
+  const mutate = vi.spyOn(api, 'mutateGuideline').mockReturnValueOnce(ack.promise)
+    .mockImplementation(async (_path, _method, request) => receipt(request.key))
+  get.mockRejectedValueOnce(new ApiError(status, 'read_rejected', null))
+  fill(); fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))
+  fireEvent.change(screen.getByLabelText('正文'), { target: { value: 'B typed before accepted A is read' } })
+  await act(async () => ack.resolve(receipt(mutate.mock.calls[0]![2].key)))
+  await screen.findByText(/请求结果不确定/)
+  expect(screen.getByRole('button', { name: '保存草稿' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: '使用原请求对账' }))
+  await screen.findByRole('heading', { name: '编辑说明书' })
+  expect(mutate.mock.calls[1]![2]).toEqual(mutate.mock.calls[0]![2])
+  expect(screen.getByLabelText('正文')).toHaveValue('B typed before accepted A is read')
+  expect(screen.getByText('有未保存编辑')).toBeVisible()
+})
+
+it('marks retained local content dirty when an operation poll reads another client\'s saved draft', async () => {
+  vi.useFakeTimers()
+  const original: GuidelineDocument = { ...document, revision: 2, state: 'preparing', preparation: operation('pending') }
+  const get = vi.spyOn(api, 'guideline').mockResolvedValue(original)
+  const polled = deferred<GuidelineDocument>()
+  vi.spyOn(api, 'guidelineOperation').mockResolvedValue(operation('succeeded'))
+  const mutate = vi.spyOn(api, 'mutateGuideline').mockImplementation(async (_path, _method, request) => receipt(request.key, 4))
+  const rendered = render(<EditorHarness />)
+  await act(async () => fireEvent.click(screen.getByText('load')))
+  expect(screen.getByLabelText('harness state')).toHaveTextContent('"dirty":false')
+  get.mockReturnValueOnce(polled.promise)
+  await act(async () => vi.advanceTimersByTimeAsync(1200))
+  expect(get).toHaveBeenCalledTimes(2)
+  const remote = { ...original, revision: 3, state: 'available' as const, preparation: operation('succeeded'),
+    draft_digest: 'b'.repeat(64), draft: { ...draft, body_markdown: 'C saved in another client' } }
+  await act(async () => polled.resolve(remote))
+  expect(screen.getByLabelText('harness body')).toHaveValue(draft.body_markdown)
+  expect(screen.getByLabelText('harness state')).toHaveTextContent('"dirty":true')
+  get.mockResolvedValue({ ...remote, revision: 4, draft, draft_digest: document.draft_digest })
+  await act(async () => fireEvent.click(screen.getByText('save')))
+  expect(JSON.parse(mutate.mock.calls[0]![2].bytes).expected_revision).toBe(3)
+  expect(screen.getByLabelText('harness state')).toHaveTextContent('"dirty":false')
+  rendered.unmount()
 })
 
 it('keeps a changed server draft separate from the acknowledged save instead of silently marking it clean', async () => {
