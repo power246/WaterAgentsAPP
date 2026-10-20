@@ -267,7 +267,7 @@ wheel 安装/读取验证使用不含业务凭据的隔离环境，记录实际�
 
 完成记录（2026-10-20）：
 
-- 保持 `codex/guidelines-m0`，起点 `3034eed9dc1367a48fa67396a97f8ef93952c3fd`；本阶段实现 commit：提交后补记。
+- 保持 `codex/guidelines-m0`，起点 `3034eed9dc1367a48fa67396a97f8ef93952c3fd`；本阶段实现 commit：`9e1a9d0e16b14fa3a428639490d77a5ce814ef7d`（`feat(guidelines): add milestone 3 bundled resources and overrides`）；随后仅补记此 hash。
 - 已实现 JSON manifest/Markdown reader、稳定 document/version UUID、digest/metadata/source/review 校验及逐 family safe-error importer；批准版本原子进入持久化 pending 队列，重复导入保留 receipt/重试状态，新内置版本不覆盖或取消本地稿/批准任务。effective selection、首次 local-edit CAS/克隆、已有稿返回与最新已完成版本的显式 restore 已实现；恢复清除 override 激活指针并保留全部修改历史。格式和事务说明见主设计 §4。
 - 本节 Verify 的两组测试加 guideline boundary：首轮 **70 passed**，30.21s。补齐重试去重、local-edit/replay、版本跳号/降级及 pending restore 回归后，最终完整 `backend/tests` **3074 passed，0 failed/errors/skipped**，341.97s；其中新增 M3 **36 项**，含 **10 项真实 PostgreSQL**（另保留 M2 的 31 项）。runner 沿用 M2 的 DB-only 环境隔离，仅注入 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，调用 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m3-20261020/full','--junitxml','.tmp/guidelines-m3-20261020/full.xml'])`；仅有两条既有弃用 warning。
 - 实际打包：`py -m uv build --project backend --out-dir .tmp/guidelines-m3-20261020/package` 成功生成 sdist/wheel；用 `py -m uv pip install --python backend/.venv/Scripts/python.exe --target .tmp/guidelines-m3-20261020/installed --no-deps <wheel>` 安装。另在任务目录复制源码并仅为临时样本包覆盖测试 manifest/Markdown，再 build/install 到独立目录。两个全新 `python -I` probe 均去除业务/provider 环境变量、确认 `app.__file__` 来自目标目录；源码/安装包的资源集合、资源 SHA-256 与全部批准版本快照一致：正式包 **1 个资源/0 个批准版本**，临时样本包 **2 个资源/1 个合成批准版本**。正式 wheel 未包含 tests、样本正文或 `.env`，项目 venv 未被安装修改。
