@@ -391,7 +391,7 @@ git diff --check
 
 完成记录：**complete**（2026-10-21）。
 
-- 沿当前 `codex/guidelines-m0`，基线 `2190248e01f91da20cd2e7a46ec6edacaea09252`；本阶段实现 commit：`待本地提交后补记`。仅修改 worker/repository/ports/runtime、必要测试及本目录原有文档，无新 worktree 或状态 Markdown。
+- 沿当前 `codex/guidelines-m0`，基线 `2190248e01f91da20cd2e7a46ec6edacaea09252`；本阶段实现 commit：`8100f7f3a5c1c77c07eb288028111b591fa7d1c3`（`feat(guidelines): add milestone 6 durable preparation and activation`），随后仅补记此 hash。仅修改 worker/repository/ports/runtime、必要测试及本目录原有文档，无新 worktree 或状态 Markdown。
 - `GuidelinePreparationWorker` 接入启动导入及有界关闭，默认并发 2、attempt 20 秒、最多 3 次与 2/10 秒退避；租约在锁后读取 clock 校验。向量、active/pending pointer、catalog intervals/revision 与 operation 在 `complete_operation()` 同事务提交；失败保留旧有效版，retry 复用批准版本。
 - 空库先初始化首个 generation；配置变化按当前目录和保留 active pointers（含停用项/被覆盖 base）补齐后 CAS 切换。失败重建锁定为 failed，现有列表返回安全状态，详情提供 retry operation ref；变更配置将废弃任务 supersede。旧版本/generation 保留，主设计 §6/§7/§12 已同步。
 - 新增 worker **20 项**及 runtime **2 项**：真实 PostgreSQL 屏障覆盖 A 批准后保存草稿 B、停用/恢复/新审核/内置更新、重建期间改目录、profile 切换、锁等待后 lease 过期、重启、超时及 rollback。应用 lifespan 实际取消两条在途 MockTransport 请求后才关闭共享 pool，新 worker 回收原租约；缺 key 后补 key/重启/retry 实际只发一次请求且 version 不变。最终针对性 worker/runtime/persistence/API **95 passed**，61.93s。
