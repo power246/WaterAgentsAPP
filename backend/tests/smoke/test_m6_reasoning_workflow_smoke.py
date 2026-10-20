@@ -70,11 +70,11 @@ async def _wait_persisted(application, run_id) -> None:
     coordinator = application.state.run_coordinator
     runtime = coordinator._runs[run_id]
     async with asyncio.timeout(5):
-        while (
-            coordinator._transcript_writer.info_locked(runtime).state
-            is not PersistenceState.UP_TO_DATE
-        ):
-            await asyncio.sleep(0)
+        await coordinator._transcript_writer.drain(runtime)
+    assert (
+        coordinator._transcript_writer.info_locked(runtime).state
+        is PersistenceState.UP_TO_DATE
+    )
 
 
 async def _collect_session_events(client, path, *, last_event_id=None):

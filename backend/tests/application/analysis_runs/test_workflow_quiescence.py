@@ -86,20 +86,21 @@ def test_cancel_acceptance_precedes_quiescence_stream_close_and_cleanup() -> Non
             assert completed.status is AgentSessionStatus.COMPLETED
             assert in_flight.status is AgentSessionStatus.CANCELLED
 
+            await asyncio.wait_for(
+                coordinator._transcript_writer.drain(runtime), timeout=1
+            )
             stream = await coordinator.subscribe_run(created.run_id)
-            assert (await anext(stream)).status is RunStatus.CANCELLED
+            initial = await anext(stream)
+            assert initial.status is RunStatus.CANCELLED
+            assert initial.persistence.state is PersistenceState.UP_TO_DATE
             waiting_for_end = asyncio.create_task(anext(stream))
             await asyncio.sleep(0)
             assert waiting_for_end.done() is False
 
             workflow.release.set()
             await asyncio.wait_for(runtime.workflow_quiesced.wait(), timeout=1)
-            await asyncio.wait_for(coordinator._transcript_writer.drain(runtime), timeout=1)
-            final = await asyncio.wait_for(waiting_for_end, timeout=1)
-            assert final.status is RunStatus.CANCELLED
-            assert final.persistence.state is PersistenceState.UP_TO_DATE
             with pytest.raises(StopAsyncIteration):
-                await asyncio.wait_for(anext(stream), timeout=1)
+                await asyncio.wait_for(waiting_for_end, timeout=1)
             async with asyncio.timeout(1):
                 while not cleaned:
                     await asyncio.sleep(0)

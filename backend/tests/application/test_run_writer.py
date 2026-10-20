@@ -251,12 +251,9 @@ async def wait_for_state(
     run_id,
     state: PersistenceState,
 ) -> None:
-    await wait_until(
-        lambda: coordinator._transcript_writer.info_locked(
-            coordinator._runs[run_id]
-        ).state
-        is state
-    )
+    runtime = coordinator._runs[run_id]
+    await coordinator._transcript_writer.drain(runtime)
+    assert coordinator._transcript_writer.info_locked(runtime).state is state
 
 
 def run(exercise) -> None:
