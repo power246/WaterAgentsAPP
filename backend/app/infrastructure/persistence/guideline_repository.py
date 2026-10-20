@@ -1,5 +1,6 @@
 import asyncio
 import json
+from math import isfinite
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -19,6 +20,7 @@ from app.domain.guidelines.canonical import canonical_text
 from app.domain.guidelines.identity import bundled_guideline_version_id
 from app.domain.guidelines.mutation_bodies import action_body, create_body, publish_body, save_body
 from app.domain.guidelines.policy import DEFAULT_GUIDELINE_POLICY
+from app.domain.guidelines import GuidelineMatch
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
 from app.domain.memory_rag.embedding_vector import EmbeddingVector
@@ -65,6 +67,17 @@ LEFT JOIN LATERAL (SELECT to_jsonb(o) AS body, o.state FROM guideline_operations
                   ORDER BY CASE WHEN o.activation_epoch IS NOT NULL THEN 0 ELSE 1 END,
                   CASE WHEN o.state IN ('pending', 'running', 'failed') THEN 0 ELSE 1 END,
                   o.next_attempt_at DESC, o.operation_id DESC LIMIT 1) job ON true
+"""
+
+_PINNED_CATALOG = """
+SELECT e.family_root_id, e.version_id, v.snapshot, b.embedding, b.canonical_document_digest,
+       EXISTS (SELECT 1 FROM jsonb_array_elements(
+           (v.snapshot->'content'->'parameter_keys') ||
+           (v.snapshot->'content'->'related_parameter_keys')) AS k
+           WHERE k.value IN (SELECT value FROM jsonb_array_elements(CAST(:keys AS jsonb)))) AS eligible
+FROM guideline_catalog_entries e JOIN guideline_versions v ON v.version_id = e.version_id
+LEFT JOIN guideline_embeddings b ON b.version_id = e.version_id AND b.generation_id = :generation
+WHERE e.valid_from_revision <= :revision AND (e.valid_to_revision IS NULL OR :revision < e.valid_to_revision)
 """
 
 
@@ -481,6 +494,59 @@ class PostgresGuidelineRepository:
             versions = tuple(GuidelineVersionV1.model_validate(body) for body in bodies)
             keys = set(parameter_keys)
             return tuple(v for v in versions if keys.intersection(v.content.parameter_keys))
+
+    async def _retrieval_parameters(self, connection, snapshot, parameter_keys):
+        snapshot = GuidelineCatalogSnapshot.model_validate(snapshot.model_dump())
+        if snapshot.profile is None or not parameter_keys or any(self._registry.get(key) is None for key in parameter_keys):
+            raise ValueError("invalid guideline retrieval scope")
+        row = (await connection.execute(text(
+            "SELECT g.profile, g.state, c.revision FROM guideline_index_generations g "
+            "CROSS JOIN guideline_catalog_state c WHERE c.singleton_id = 1 AND g.generation_id = :id"
+        ), {"id": snapshot.generation_id})).mappings().one_or_none()
+        if (row is None or row["state"] not in {"active", "retired"} or snapshot.revision > row["revision"]
+                or GuidelineEmbeddingProfileV1.model_validate(row["profile"]) != snapshot.profile):
+            raise GuidelineConflictError("guideline_snapshot_unavailable")
+        return {"generation": snapshot.generation_id, "revision": snapshot.revision,
+                "keys": canonical_text([key.model_dump(mode="json") for key in parameter_keys])}
+
+    async def retrieval_counts(self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...]):
+        async with self._connection() as connection:
+            parameters = await self._retrieval_parameters(connection, snapshot, parameter_keys)
+            row = (await connection.execute(text(
+                "WITH catalog AS (" + _PINNED_CATALOG + ") SELECT count(*) AS library, "
+                "count(*) FILTER (WHERE eligible) AS candidates, "
+                "count(*) FILTER (WHERE eligible AND embedding IS NOT NULL) AS ready FROM catalog"
+            ), parameters)).mappings().one()
+            if row["candidates"] != row["ready"]:
+                raise GuidelineConflictError("guideline_snapshot_unavailable")
+            return row["library"], row["candidates"]
+
+    async def rank_guidelines(self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
+                              vector: EmbeddingVector, *, cutoff: float, limit: int):
+        if not isfinite(cutoff) or not 0 <= cutoff <= 1 or type(limit) is not int or not 1 <= limit <= 3:
+            raise ValueError("invalid guideline ranking bounds")
+        if snapshot.profile is None:
+            raise ValueError("guideline profile is unavailable")
+        GuidelineEmbeddingBatch.model_validate({"profile": snapshot.profile.model_dump(), "vectors": [vector.model_dump()]})
+        async with self._connection() as connection:
+            parameters = await self._retrieval_parameters(connection, snapshot, parameter_keys)
+            rows = (await connection.execute(text(
+                "WITH catalog AS (" + _PINNED_CATALOG + "), "
+                "eligible AS MATERIALIZED (SELECT * FROM catalog WHERE eligible AND embedding IS NOT NULL), "
+                "ranked AS (SELECT *, greatest(-1.0, least(1.0, "
+                "1 - (embedding OPERATOR(public.<=>) CAST(:vector AS public.vector)))) AS similarity FROM eligible), "
+                "families AS (SELECT DISTINCT ON (family_root_id) * FROM ranked WHERE similarity >= :cutoff "
+                "ORDER BY family_root_id, similarity DESC, version_id) "
+                "SELECT * FROM families ORDER BY similarity DESC, family_root_id, version_id LIMIT :limit"
+            ), {**parameters, "vector": canonical_text(list(vector.values)), "cutoff": cutoff, "limit": limit})).mappings().all()
+            matches = []
+            for row in rows:
+                version = GuidelineVersionV1.model_validate(row["snapshot"])
+                expected = CanonicalGuidelineDocumentV1.from_content(version.content, snapshot.profile, self._registry)
+                if expected.canonical_digest != row["canonical_document_digest"]:
+                    raise GuidelineConflictError("guideline_embedding_conflict")
+                matches.append(GuidelineMatch(version=version, similarity=row["similarity"]))
+            return tuple(matches)
 
     @staticmethod
     def _generation(row):

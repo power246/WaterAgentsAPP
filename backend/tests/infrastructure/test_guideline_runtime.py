@@ -247,3 +247,58 @@ def test_first_missing_key_then_restart_and_manual_retry_activates_same_approved
                 await runtime.shutdown()
                 await repository.aclose()
     asyncio.run(exercise())
+
+
+def test_run_pin_retrieval_uses_fixed_run_lease_once_and_empty_library_dispatches_zero(database_settings):
+    from datetime import timedelta
+    from app.application.analysis_runs.workflow import CancellationToken
+    from tests.application.guidelines.test_retrieval import task
+
+    async def exercise():
+        clock=Clock()
+        registry=load_parameter_capability_registry()
+        repository=PostgresGuidelineRepository(database_settings,clock=clock)
+        service=credentials()
+        await service.save(CredentialName.OPENAI,SecretStr("fixture-pinned-run-key"))
+        calls=[]
+        selected=catalog(max_input_tokens=8192)
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200,json=response_body(selected.embedding_profile.model,[[1,0,0]]))
+        async with http_client(handler) as http:
+            runtime=GuidelineRuntime(settings=AppSettings(_env_file=None,memory_enabled=False),catalog=selected,
+                credentials=service,http=http,clock=clock)
+            try:
+                await runtime.start(repository,registry)
+                # Stop preparation polling; use the same durable preparation implementation deterministically.
+                await runtime.shutdown()
+                preparation=worker(repository,Embedding(),runtime.desired_profile)
+                await preparation.run_once()
+                run_id=uuid4()
+                runtime.bind_run_embedding(str(run_id),runtime.embedding_for_lease(await service.lease(CredentialName.OPENAI)))
+                token=CancellationToken(asyncio.Event())
+                empty_run=await runtime.pin_run(run_id,token)
+                empty=empty_run.session(task(run_id,token),deadline=clock.now()+timedelta(seconds=60))
+                try: assert (await empty.get_or_load()).status=="empty_library" and not calls
+                finally: await empty.aclose()
+                authoring=GuidelineAuthoringService(repository,registry,clock)
+                receipt=await custom(authoring)
+                await preparation.run_once()
+                runtime.release_run_embedding(str(run_id))
+                run_id=uuid4()
+                runtime.bind_run_embedding(str(run_id),runtime.embedding_for_lease(await service.lease(CredentialName.OPENAI)))
+                ready_run=await runtime.pin_run(run_id,token)
+                assert ready_run.pin.catalog!=empty_run.pin.catalog
+                await service.save(CredentialName.OPENAI,SecretStr("fixture-replacement-key"))
+                session=ready_run.session(task(run_id,token),deadline=clock.now()+timedelta(seconds=60))
+                try:
+                    first,second=await asyncio.gather(session.get_or_load(),session.get_or_load())
+                    assert first is second and first.matches[0].version.version_id==receipt.version_id
+                    assert len(calls)==1 and calls[0].headers["Authorization"]=="Bearer fixture-pinned-run-key"
+                finally: await session.aclose()
+                runtime.release_run_embedding(str(run_id))
+                assert runtime.embedding_for_run(str(run_id)) is None
+            finally:
+                await runtime.shutdown()
+                await repository.aclose()
+    asyncio.run(exercise())

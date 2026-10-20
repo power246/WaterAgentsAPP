@@ -252,7 +252,7 @@ def create_app(
                 runtime = await stack.enter_async_context(_provided_runtime(workflow))
                 guideline_runtime = GuidelineRuntime(
                     settings=resolved_settings, catalog=resolved_model_catalog.snapshot(),
-                    credentials=credential_service, http=provider_http,
+                    credentials=credential_service, http=provider_http, clock=resolved_clock,
                 )
                 provider_bundle_factory: RunProviderBundleFactory | None = None
 

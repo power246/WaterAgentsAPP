@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，Milestone 0–6 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding 与持久化准备生命周期。**Run 检索、模型/历史接入、前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–7 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备及 run pin/session 检索。**模型请求触发/注入、知识记录持久化、前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -222,6 +222,8 @@ document `revision` 用于编辑与管理 CAS；root `activation_epoch` 用于�
 
 目录不可用不阻止 run 的正常创建/分析；运行的 guideline context 记录 unavailable，并沿原分析契约继续。已有数据库/分析本身故障仍按原服务错误语义处理。
 
+M7 的 [GuidelineRunContext](../../backend/app/application/guidelines/retrieval.py) 在 `QueryTopologyWorkflow` 保存 topology 后、调用执行 stage 前取得一次 catalog，并以 `GuidelineRunPin` 固定 run ID、revision、generation/profile、策略版本及安全可用性状态；`WorkflowContext` 将它传到各 waterbody session。期望 profile 不兼容、缺配置或读取失败记录 unavailable，原执行 stage 继续。查询使用 pin 的 revision intervals 与 retained generation，不读取当前 disabled/active pointer；每轮发布、停用、恢复、切换只改变后续 run。当前 pin 是内存中的 typed context；`guideline_run_context` 的 registry/writer/history 记录由 M9 接入。
+
 ## 7. Embedding 与检索
 
 ### 7.1 Profile 与现有能力复用
@@ -258,6 +260,12 @@ M6 的 `ensure_generation()` / `queue_generation()` 每轮检查期望 profile�
 6. 保留 retrieval 状态、选中内容和实际请求子集。相似度只用于相关性，不提升 confidence、风险等级或 measurement eligibility。
 
 首版稳定排序为 similarity DESC、family root UUID ASC、version UUID ASC；不按用户来源或内置来源直接赋科学可信度。无关联候选或低于阈值时允许空结果。
+
+M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标检查候选，区分 empty-library/no-candidate；此时零 embedding。`rank_guidelines()` 在 materialized 授权候选内以 pgvector exact cosine 排序，执行 cutoff、family 去重及 top-k；拒绝不一致的 generation/profile、维度、向量范数或 canonical digest，并重新验证返回的批准版本/model view。scenario 仅进入语义 query，不授予候选资格。
+
+`build_guideline_query()` 只采用验证后的问题、canonical 指标、mode、agent/target COMID 和拓扑直接上游数；可选问题过长或包含不安全内容时整项省略，记录 `input_reduced`，结构化字段优先。包括角色前缀的实际输入仍受 8,192 bytes 与该 profile 的保守 max-input 约束，无法容纳必需字段则 unavailable。
+
+每个实际 Agent session 拥有独立 `GuidelineSessionKnowledge.get_or_load()`：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。`fit_guideline_selection()` 接受最终请求的 fit 判定，整份移除最低排名文档，全移除返回 budget-limited；M8 将传入既有实际模型 size estimator，M7 不把 bytes 当最终模型 token fit。M8 才在首次真实 planning/numeric 请求前调用惰性入口，M9 再持久化 retrieval/delivery/usage。
 
 ### 7.4 初始工程参数
 
@@ -433,7 +441,7 @@ guideline 与 M8 historical memory 是不同功能。`stateless` 或 `WATERAGENT
 
 后台 publication worker 在每次 attempt 开始获取自己的 credential lease；run 查询/分析复用 run-owned lease。替换密钥不把一个正在执行的 operation 改成混合凭据，也不把 lease 内容写入知识版本、manifest、transcript 或日志。
 
-M5 的 [GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 从既有 OpenAI lease 构造独立说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次获取一次新 lease，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M6 接入 worker/generation，run pin/readiness 仍由 M7 实施，未把 M8 generation 当作说明书索引。
+M5 的 [GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 从既有 OpenAI lease 构造独立说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次获取一次新 lease，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M6 已接入 worker/generation，M7 已接入 run pin/readiness 与 session 惰性检索，未把 M8 historical memory generation 当作说明书索引。
 
 M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并发 2，整个 attempt 有 20 秒上限，lease 至少 60 秒且大于 attempt 加两次 DB operation timeout。合法 profile 缺凭据时仍能初始化 generation，准备操作安全失败；补密钥、重启及显式 retry 继续原批准版本。配置无效时保留 durable pending，修正配置并重启后恢复。shutdown 先停止领取/派发，再按既有 `shutdown_save_grace_seconds` 有界等待，超时取消并回收全部子任务，然后应用才关闭共享 HTTP/engine。未完成 running 保留租约，重启后过期回收；不续派、不自动 purge 旧 generations/versions。
 
@@ -540,4 +548,4 @@ git diff --check
 
 结束时报告 branch/HEAD、改动范围、实际命令与通过/失败计数、未运行项目、真实供应商和小样本核对证据，以及人工批准的具体内容版本。区分 fake-provider、真实 embedding、真实分析模型、数据库、浏览器和 hosted CI；未获得对应证据的检查标为 `not run`。
 
-设计调查历史记录见讨论文档；实施阶段的实际验证统一见 TODO。Milestone 0–6 已运行本地后端、离线 HTTP 与真实 PostgreSQL 回归，尚未执行完整功能集成、真实模型调用、真实资料审核或实测对照。
+设计调查历史记录见讨论文档；实施阶段的实际验证统一见 TODO。Milestone 0–7 已运行本地后端、离线 HTTP 与真实 PostgreSQL 回归，尚未执行完整功能集成、真实模型调用、真实资料审核或实测对照。

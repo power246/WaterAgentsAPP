@@ -28,8 +28,12 @@ from app.domain.guidelines.source_ref import GuidelineSourceRef
 from app.domain.guidelines.usage_target import GuidelineUsageTarget
 from app.domain.guidelines.validation_error import GuidelineValidationError
 from app.domain.guidelines.version import GuidelineVersionV1
+from app.domain.guidelines.match import GuidelineMatch
+from app.domain.guidelines.run_pin import GuidelineRunPin
+from app.domain.guidelines.retrieval_result import GuidelineRetrievalResult
 
 __all__ = [
+    "GuidelineMatch", "GuidelineRunPin", "GuidelineRetrievalResult",
     "GuidelinePolicy",
     "GuidelineDocumentDetails", "GuidelineListItem",
     "CanonicalGuidelineDocumentV1", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",

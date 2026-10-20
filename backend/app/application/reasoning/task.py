@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from app.application.analysis_runs.models import (
@@ -29,6 +30,9 @@ from app.domain import (
     build_time_windows,
 )
 
+if TYPE_CHECKING:
+    from app.application.guidelines.retrieval import GuidelineSessionKnowledge
+
 
 @dataclass(frozen=True, slots=True)
 class WaterbodyAgentTask:
@@ -43,6 +47,7 @@ class WaterbodyAgentTask:
     cancellation_token: CancellationToken
     dependency_manifest: WaterbodyDependencyManifest | None = None
     agent_role: AgentRole = AgentRole.WATERBODY
+    guidelines: "GuidelineSessionKnowledge | None" = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if not self.target_comid.strip():

@@ -276,6 +276,7 @@ from app.domain.settings_admin import (
 )
 
 from app.domain.guidelines import (
+    GuidelineMatch, GuidelineRunPin, GuidelineRetrievalResult,
     CanonicalGuidelineDocumentV1, CanonicalGuidelineQueryV1, GuidelineCatalogSnapshot,
     GuidelineCitationV1, GuidelineContentV1, GuidelineDeliveryRef, GuidelineDocumentSnapshot,
     GuidelineDraftV1, GuidelineDraftSourceRef, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
@@ -290,6 +291,7 @@ from app.domain.guidelines.list_item import GuidelineListItem
 from app.domain.guidelines.policy import GuidelinePolicy
 
 __all__ = [
+    "GuidelineMatch", "GuidelineRunPin", "GuidelineRetrievalResult",
     "GuidelinePolicy", "GuidelineDocumentDetails", "GuidelineListItem",
     "CanonicalGuidelineDocumentV1", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
     "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",

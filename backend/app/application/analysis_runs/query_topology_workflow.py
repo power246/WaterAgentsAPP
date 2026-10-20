@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from typing import Protocol
 from uuid import UUID
 
@@ -50,6 +51,12 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
         self._query_understanding = query_understanding
         self._topology_builder = topology_builder
         self._execution_stage: TopologyExecutionStage | None = None
+        self._guideline_pinner = None
+
+    def bind_guidelines(self, pinner) -> None:
+        if self._guideline_pinner is not None:
+            raise RuntimeError("guideline pinning is already bound")
+        self._guideline_pinner = pinner
 
     @property
     def execution_bound(self) -> bool:
@@ -142,6 +149,10 @@ class QueryTopologyWorkflow(AnalysisWorkflow):
                 failed_stage="waterbody_execution",
                 retryable=False,
             )
+        if self._guideline_pinner is not None:
+            guidelines = await self._guideline_pinner(context.run.run_id, context.cancellation)
+            context.cancellation.checkpoint()
+            context = replace(context, guidelines=guidelines)
         await self._execution_stage.execute(
             context,
             analysis_context,

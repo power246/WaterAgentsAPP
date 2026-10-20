@@ -17,6 +17,7 @@ from app.domain.guidelines.index_generation import GuidelineIndexGeneration
 from app.domain.guidelines.mutation import GuidelineMutation
 from app.domain.guidelines.mutation_receipt import GuidelineMutationReceipt
 from app.domain.guidelines.operation import GuidelineOperation
+from app.domain.guidelines import GuidelineMatch
 from app.domain.guidelines.version import GuidelineVersionV1
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.memory_rag.embedding_vector import EmbeddingVector
@@ -67,6 +68,15 @@ class GuidelineRepositoryPort(Protocol):
     async def read_effective_versions(
         self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
     ) -> tuple[GuidelineVersionV1, ...]: ...
+
+    async def retrieval_counts(
+        self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
+    ) -> tuple[int, int]: ...
+
+    async def rank_guidelines(
+        self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
+        vector: EmbeddingVector, *, cutoff: float, limit: int,
+    ) -> tuple[GuidelineMatch, ...]: ...
 
     async def set_enabled(
         self, document_id: UUID, enabled: bool, *, expected_revision: Revision, mutation: GuidelineMutation,

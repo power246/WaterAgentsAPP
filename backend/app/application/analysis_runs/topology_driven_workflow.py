@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from collections.abc import Callable
 from typing import Protocol
 from uuid import UUID
@@ -404,11 +405,15 @@ class ProductionTopologyNodeRunner:
         )
         if decision.action is NodeLaunchAction.RUN_AGENT:
             self._context.cancellation.checkpoint()
-            await self._waterbody_runner.run(
-                task,
-                deadline=self._waterbody_runner.session_deadline(),
-                initial_handoff=handoff,
-            )
+            deadline = self._waterbody_runner.session_deadline()
+            knowledge = self._context.guidelines.session(task, deadline=deadline) if self._context.guidelines is not None else None
+            if knowledge is not None:
+                task = replace(task, task=replace(task.task, guidelines=knowledge))
+            try:
+                await self._waterbody_runner.run(task, deadline=deadline, initial_handoff=handoff)
+            finally:
+                if knowledge is not None:
+                    await knowledge.aclose()
         elif decision.action is NodeLaunchAction.DETERMINISTIC_INSUFFICIENT:
             self._context.cancellation.checkpoint()
             await self._zero_model.run(

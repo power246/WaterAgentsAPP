@@ -127,6 +127,7 @@ class RunProviderBundleFactory:
             ))
             workflow = m4.query_topology_workflow
             assert workflow is not None
+            workflow.bind_guidelines(self._guideline_runtime.pin_run)
             workflow.bind_execution_stage(compose_m7_execution_stage(
                 settings, operations=self._operations, m5_runtime=self._m5_runtime,
                 m6_runtime=m6, upstream_results=self._upstream_results,

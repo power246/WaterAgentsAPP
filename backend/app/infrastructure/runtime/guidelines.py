@@ -3,6 +3,7 @@ from math import ceil
 
 from app.application.guidelines.embedding import desired_guideline_profile, guideline_embedding_failure
 from app.application.guidelines.worker import GuidelinePreparationWorker
+from app.application.guidelines.retrieval import GuidelineRunContext
 from app.application.guidelines.bundled import BundledGuidelineImporter, BundledImportReport
 from app.application.embedding_validation import EmbeddingContractError
 from app.application.settings_admin.credential_service import CredentialService
@@ -16,16 +17,21 @@ from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.guidelines.bundled_source import PackageBundledGuidelineSource
 from app.ports import PortAuthenticationError, PortConfigurationError
 from app.ports.guidelines import BundledGuidelineSourcePort, GuidelineEmbeddingPort, GuidelineRepositoryPort
+from app.ports.clock import ClockPort
+from app.infrastructure.runtime.system_clock import SystemClock
 
 
 class GuidelineRuntime:
     """Guideline embedding lifetimes are independent of historical memory."""
 
     def __init__(self, *, settings: AppSettings, catalog: ModelCatalogSnapshot,
-                 credentials: CredentialService, http: ProviderHttpClient | None) -> None:
+                 credentials: CredentialService, http: ProviderHttpClient | None, clock: ClockPort | None = None) -> None:
         self.policy = settings.guideline_policy
         self._credentials = credentials
         self._http = http
+        self._clock = clock or SystemClock()
+        self._repository = None
+        self._registry = None
         self._base_url = settings.openai_base_url
         self._run_embeddings: dict[str, GuidelineEmbeddingPort | None] = {}
         self.worker: GuidelinePreparationWorker | None = None
@@ -68,6 +74,11 @@ class GuidelineRuntime:
     def release_run_embedding(self, run_id: str) -> None:
         self._run_embeddings.pop(run_id, None)
 
+    async def pin_run(self, run_id, cancellation) -> GuidelineRunContext:
+        return await GuidelineRunContext.prepare(run_id, repository=self._repository,
+            embedding=self.embedding_for_run(str(run_id)), profile=self.desired_profile,
+            registry=self._registry, policy=self.policy, clock=self._clock, cancellation=cancellation)
+
     async def embedding_for_attempt(self) -> GuidelineEmbeddingPort:
         if self._stopping.is_set():
             raise PortConfigurationError("Guideline runtime is shutting down.", operation="embed")
@@ -84,6 +95,8 @@ class GuidelineRuntime:
         if self._started or self._stopping.is_set():
             raise RuntimeError("guideline runtime cannot be restarted")
         self._started = True
+        self._repository = repository
+        self._registry = registry
         if repository is None:
             return
         self.import_report = await BundledGuidelineImporter(

@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–6 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–7 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API、独立 embedding 契约与凭据生命周期、持久化准备/激活与 generation 切换、run pin 与 session 惰性检索，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -402,25 +402,25 @@ git diff --check
 
 ### Work
 
-- [ ] 在 query/topology 准备后、waterbody 执行前固定 run catalog revision/generation/profile；全 run 各 session 查询同一快照，无可用目录记录 unavailable 并继续原分析。
-- [ ] session `get_or_load()` lazy/single-flight 一次加载；缓存绑定 run/profile/query/context，session 关闭释放，不使用跨用户/跨 profile 无界缓存。
-- [ ] 从已验证问题、canonical 指标、inference mode 与真实已知情境构造 query；不拼 raw transcript、凭据或无界观测；过长整字段省略可选文本并记录 `input_reduced`。
-- [ ] 按主/related parameter metadata 取候选，scenario 仅为排序信息；空库/无候选直接返回不调用 embedding。
-- [ ] 实现授权候选内 exact cosine、cutoff、family 去重、top-k；稳定按 similarity DESC、root UUID ASC、version UUID ASC 排序，不比较不同 profile。
-- [ ] query embedding 每 session 至多一次并受 3 秒和剩余 session deadline 约束，在线不重试；document vectors 复用预计算结果。
-- [ ] 明确 `empty_library`、`no_match`、`unavailable`、`budget_limited`、取消与输入缩减；相似度不是科学权威/预测 confidence，不变成数值或 risk 门槛。
+- [x] 在 query/topology 准备后、waterbody 执行前固定 run catalog revision/generation/profile；全 run 各 session 查询同一快照，无可用目录记录 unavailable 并继续原分析。
+- [x] session `get_or_load()` lazy/single-flight 一次加载；缓存绑定 run/profile/query/context，session 关闭释放，不使用跨用户/跨 profile 无界缓存。
+- [x] 从已验证问题、canonical 指标、inference mode 与真实已知情境构造 query；不拼 raw transcript、凭据或无界观测；过长整字段省略可选文本并记录 `input_reduced`。
+- [x] 按主/related parameter metadata 取候选，scenario 仅为排序信息；空库/无候选直接返回不调用 embedding。
+- [x] 实现授权候选内 exact cosine、cutoff、family 去重、top-k；稳定按 similarity DESC、root UUID ASC、version UUID ASC 排序，不比较不同 profile。
+- [x] query embedding 每 session 至多一次并受 3 秒和剩余 session deadline 约束，在线不重试；document vectors 复用预计算结果。
+- [x] 明确 `empty_library`、`no_match`、`unavailable`、`budget_limited`、取消与输入缩减；相似度不是科学权威/预测 confidence，不变成数值或 risk 门槛。
 
 ### Tests
 
-- [ ] 同 run 两 session 之间 publish/disable/restore/switch 不改变其 pin，新 run 看到新目录；旧向量/版本未被清理。
-- [ ] 覆盖跨指标 related keys、中英文同义 query、无关内容不凑数、同分稳定排序、family 唯一和混 profile 拒绝。
-- [ ] 覆盖空库、无 metadata 候选、并发 get_or_load、timeout、cancel/deadline、input_reduced；断言实际 embedding dispatch 数。
-- [ ] 保留一组小型人工标注检索 fixture，包括“上下游酸碱变化”→ pH、机制相关和应无命中 query；与 Milestone 11 的真实 provider 结果分开。
+- [x] 同 run 两 session 之间 publish/disable/restore/switch 不改变其 pin，新 run 看到新目录；旧向量/版本未被清理。
+- [x] 覆盖跨指标 related keys、中英文同义 query、无关内容不凑数、同分稳定排序、family 唯一和混 profile 拒绝。
+- [x] 覆盖空库、无 metadata 候选、并发 get_or_load、timeout、cancel/deadline、input_reduced；断言实际 embedding dispatch 数。
+- [x] 保留一组小型人工标注检索 fixture，包括“上下游酸碱变化”→ pH、机制相关和应无命中 query；与 Milestone 11 的真实 provider 结果分开。
 
 ### Verify
 
 ```powershell
-Invoke-GuidelinePytest -Stage gk-m7 -Paths @('backend/tests/application/guidelines/test_retrieval.py', 'backend/tests/persistence/test_guidelines.py', 'backend/tests/infrastructure/test_m7_runtime.py')
+Invoke-GuidelinePytest -Stage gk-m7 -Paths @('backend/tests/application/guidelines/test_retrieval.py', 'backend/tests/persistence/test_guidelines.py', 'backend/tests/infrastructure/test_guideline_runtime.py', 'backend/tests/infrastructure/test_m7_runtime.py', 'backend/tests/application/analysis_runs/test_topology_driven_workflow.py', 'backend/tests/architecture')
 git diff --check
 ```
 
@@ -428,7 +428,13 @@ git diff --check
 
 提交边界：run context、retrieval/cache/clock-cancellation、SQL ranking 与测试；不新增公开 semantic-search endpoint 或 agent tool。
 
-完成记录：`pending`。
+完成记录：**complete**（2026-10-21）。
+
+- 保持 `codex/guidelines-m0`，基线 `da4de12a59f052ab015a0658914c559f8ab1ba01`；本阶段实现 commit：`待 M7 本地提交后补记`。新增领域结果/port、query builder、run/session context 与 SQL exact ranking，并接入既有 workflow/provider bundle；原文档就地更新，无新 worktree 或状态 Markdown。
+- topology 保存后固定一次 catalog revision/generation/profile，可用性失败沿原分析执行；session 独立 single-flight，整次检索至多 3 秒且受剩余 deadline 约束，一次 embedding、无在线重试，finally 释放。SQL 按主/related metadata 授权后 exact cosine、cutoff、family 去重、稳定 tie-break/top-k；旧 revision/generation 在发布/停用/恢复/切换后仍有效。超长/不安全可选问题整项省略并标记 input-reduced；预算 helper 只整份移除主题，由 M8 提供最终序列化请求 fit。
+- 新增检索 **25 项**、HTTP/runtime **1 项**及扩展既有 node runner **1 项**，验证四类目录变更跨 session、related keys、profile/维度/范数拒绝、同分稳定性、并发单次加载、单等待者取消、deadline/关闭后不补发及缓存释放。5 条合成中英文人工标注 fixture 使用确定性 encoder + 真实 SQL，并逐条检查实际 embedding 调用数，不能证明真实模型检索质量。HTTP 层验证空库 0 请求，并发加载 1 请求，密钥替换仍用该 run 原 lease。针对性与架构 **339 passed**；补充范围 **80 passed**，28.88s；最终 deadline/检索/HTTP 复验 **35 passed**，8.45s，检查实际派发时的剩余预算，避免 Windows 定时器提前唤醒造成断言漂移。
+- 最终完整后端：**3250 passed，0 failed/errors/skipped**，341.20s（两条既有弃用 warning）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m7-20261021/full-verified','--junitxml','.tmp/guidelines-m7-20261021/full-verified.xml'])`。`npm --prefix frontend run check:api` 通过；测试库 `check --test-database` 为 `20261020_02`，无新 DDL、未改业务库或 `.env`，日志/XML 不提交。
+- 当前仅提供内存 typed run pin、惰性检索与完整 selection；首次真实模型入口触发/注入由 M8、registry/writer/history 记录由 M9 接入。主设计 §6.2/§7.3/§12 已说明边界。验证为本地后端、MockTransport、真实 PostgreSQL；真实 embedding/分析供应商、浏览器、hosted CI、专业资料批准和 pH 实测均 **not run**。M8–12 与最终验收保持待实施。
 
 ## Milestone 8：可选模型参考与数值链路
 
@@ -688,4 +694,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–6 的实际命令与证据见对应完成记录；Milestone 7–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–7 的实际命令与证据见对应完成记录；Milestone 8–12、内容审核、实测实验与最终功能验收仍待实施。
