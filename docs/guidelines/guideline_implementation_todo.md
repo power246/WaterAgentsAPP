@@ -469,7 +469,7 @@ git diff --check
 
 完成记录：**complete**（2026-10-21）。
 
-- 保持 `codex/guidelines-m0`，基线 `8ee9d1c163bdf7aec5cab3924170a2b20c0957df`；本阶段实现 commit：`待本地提交后补记`。只修改当前源码、测试与现有文档，无新 worktree 或状态 Markdown。
+- 保持 `codex/guidelines-m0`，基线 `8ee9d1c163bdf7aec5cab3924170a2b20c0957df`；本阶段实现 commit：`e6573fd0640b2845484e673bbdeba1727a278b22`（`feat(guidelines): add milestone 8 advisory model context and usages`），随后仅补记此 hash。只修改当前源码、测试与现有文档，无新 worktree 或状态 Markdown。
 - `GuidelineModelContext` 接入既有 planning/numeric/batch/synthesis/repair，共用 session selection，首次实际调用前加载；独立 user advisory block、最终请求 token/字节 fit 与整份裁剪，不占用原 evidence/output 预留。每 operation 使用独立 alias，repair 保持原子集；可空 refs 仅作内部 metadata，非法引用安全丢弃。独立 usage sidecar 绑定 numeric task/window 与既有 operation ID，synthesis 只沿已验证 cell/采用的 numeric evidence 依赖取版本，不改变科学 payload 或原校验。
 - 新增实际请求链测试 **27 项**，覆盖无 planning 仍估值、零调用/取消/deadline、空库/未命中/不可用、忽略/冲突资料、临界预算整份移除、安全 warning、修复与结果 lineage；生产 runtime/writer 完整流程通过。最终上下文/架构/固定摘要复验 **36 passed**，2.34s；新增 schema/policy 后固定计划摘要在 `PYTHONHASHSEED=0/1/41` 分别通过。
 - 完整后端 **3277 passed，0 failed/errors/skipped**，344.97s（两条既有弃用 warning）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，实际执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m8-20261021/full','--junitxml','.tmp/guidelines-m8-20261021/full.xml'])`；`npm --prefix frontend run check:api` 与测试库 `check --test-database` 均通过，schema `20261020_02`，无新迁移。日志/XML 不提交。
