@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import subprocess
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,38 +12,52 @@ import pytest
 from pydantic import SecretStr
 
 import app.infrastructure.runtime.m4 as m4_runtime
+import app.infrastructure.runtime.m5 as m5_runtime
 import app.infrastructure.runtime.m6 as m6_runtime
 import app.infrastructure.runtime.m8 as m8_runtime
-import app.infrastructure.runtime.m5 as m5_runtime
 import app.infrastructure.runtime.provider_bundle as provider_bundle
+from app.application.query_understanding import ParserFinishReason, QueryParserResponse
 from app.application.reasoning.model_models import (
-    StructuredOutputCompleted, Terminal, UsageReported, WaterbodyFinishReason,
+    StructuredOutputCompleted,
+    Terminal,
+    UsageReported,
+    WaterbodyFinishReason,
     WaterbodyModelRequest,
 )
-from app.application.query_understanding import ParserFinishReason, QueryParserResponse
-from app.infrastructure.config import load_parameter_capability_registry
 from app.domain import (
-    DischargeObservationRecord, EvidenceLocation, Provenance, ProviderQuality,
+    DischargeObservationRecord,
+    EvidenceLocation,
+    Provenance,
+    ProviderQuality,
     WaterObservationRecord,
 )
+from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.credentials.memory_key_store import InMemoryKeyStore
 from app.main import create_app
+from scripts.m4_workflow_smoke import (
+    FixtureGeocoder,
+    FixtureNldi,
+    FixtureParser,
+    FixtureProfile,
+    FixtureUsgsMetadata,
+)
 from scripts.run_sse_smoke import running_server, stream_headers
 from scripts.test_database import temporary_migrated_schema
+from tests.application.evidence_tools.fakes import complete_batch
+from tests.application.reasoning.test_runner import AdaptiveWaterbodyModelPort
 from tests.infrastructure.embeddings.fake import DeterministicEmbeddingPort
 from tests.infrastructure.test_m4_runtime import catalog
-from tests.application.reasoning.test_runner import AdaptiveWaterbodyModelPort
-from tests.application.evidence_tools.fakes import complete_batch
-from scripts.m4_workflow_smoke import (
-    FixtureGeocoder, FixtureNldi, FixtureParser,
-    FixtureProfile, FixtureUsgsMetadata,
-)
-
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("WATERAGENTS_TEST_DB_NAME"),
     reason="dedicated PostgreSQL test database was not configured",
 )
+
+_RECENT_OBSERVATION_TIME = (
+    datetime.now(UTC).replace(hour=12, minute=0, second=0, microsecond=0)
+    - timedelta(days=2)
+)
+_RECENT_DATE = _RECENT_OBSERVATION_TIME.date().isoformat()
 
 
 class _ParameterMetadata(FixtureUsgsMetadata):
@@ -108,6 +122,8 @@ class _CountingTester:
 class _OfflineModel:
     calls = []
     planning_gate = None
+    max_output_tokens = None
+
     def __init__(self, *args, **kwargs):
         del args, kwargs
         self._waterbody = AdaptiveWaterbodyModelPort()
@@ -168,7 +184,7 @@ class _OfflineObservation:
             provider=request.provider.value, channel=request.channel,
             source_uri="https://example.test/observations",
             retrieved_at=request.request_range.end,
-            observed_time=datetime(2026, 10, 8, 12, tzinfo=UTC),
+            observed_time=_RECENT_OBSERVATION_TIME,
             location=EvidenceLocation(point=None, comid="100", station_id=request.station_id,
                                       distance_to_target_km=0),
             provider_quality=ProviderQuality(approval="approved"),
@@ -276,7 +292,7 @@ def test_explicit_discharge_target_reaches_model_and_committed_result(
                 body = {
                     "query": f"Assess {' and '.join(concepts)} for this waterbody.",
                     "target": {"comid": "100"},
-                    "date_range": {"start_date": "2026-10-08", "end_date": "2026-10-08"},
+                    "date_range": {"start_date": _RECENT_DATE, "end_date": _RECENT_DATE},
                     "parser_model": {"provider": "openai", "model": "parser-v1"},
                     "waterbody_model": {"provider": "openai", "model": "waterbody-v1"},
                     "memory_mode": "stateless",
@@ -294,7 +310,25 @@ def test_explicit_discharge_target_reaches_model_and_committed_result(
                     }:
                         break
                     await asyncio.sleep(0.02)
-                assert detail.json()["run"]["status"] == "completed", detail.text
+                if detail.json()["run"]["status"] != "completed":
+                    failed_sessions = [
+                        session for session in detail.json()["sessions"]
+                        if session["status"] == "failed"
+                    ]
+                    failure_details = []
+                    for session in failed_sessions:
+                        transcript = await client.get(
+                            f"/api/analysis/runs/{run_id}/sessions/"
+                            f"{session['session_id']}/transcript"
+                        )
+                        events = [
+                            item["content"]["body"]
+                            for item in transcript.json()["items"]
+                            if item["content_type"] == "lifecycle_event"
+                            and item["content"]["body"]["type"] == "session_failed"
+                        ]
+                        failure_details.append((session["agent_role"], events))
+                    pytest.fail(str(failure_details))
                 assert detail.json()["run"]["result_ref"] is not None
                 target = next(session for session in detail.json()["sessions"]
                               if session["agent_role"] == "waterbody"
@@ -310,6 +344,42 @@ def test_explicit_discharge_target_reaches_model_and_committed_result(
                               if item["content_type"] == "evidence_bundle")
                 assert {item["code"] for item in bundle["content"]["body"]["requested_parameters"]} == expected_codes
                 assert bundle["content"]["body"]["supporting_parameters"] == []
+                result = next(item for item in transcript.json()["items"]
+                              if item["content_type"] == "inference_result")
+                discharge = next(series for series in result["content"]["body"]["series"]
+                                 if series["parameter"]["key"]["code"] == "00060")
+                observed_window, filled_window = discharge["points"]
+                assert observed_window["representative_value"] == "7"
+                assert observed_window["temporal_estimate_method"] is None
+                assert filled_window["outcome_status"] == "quantified"
+                assert filled_window["representative_value"] == "7"
+                assert filled_window["source"] == "inferred"
+                assert filled_window["temporal_estimate_method"] == "nearest_hold"
+                assert filled_window["confidence"] <= 0.55
+                fragment_ids = {
+                    reference["evidence_id"]
+                    for reference in bundle["content"]["body"]["fragment_refs"]
+                }
+                chain_ids = {
+                    reference["evidence_id"]
+                    for reference in result["content"]["body"]["evidence_chain"]["references"]
+                }
+                estimates = [
+                    item["content"]["body"]
+                    for item in transcript.json()["items"]
+                    if item["content_type"] == "evidence_fragment"
+                    and item["content"]["body"]["data_type"] == "temporal_estimate"
+                    and item["content"]["body"]["parameter_refs"][0]["code"] == "00060"
+                ]
+                assert len(estimates) == 1
+                estimate = estimates[0]
+                assert estimate["evidence_id"] in filled_window["evidence_refs"]
+                anchor_ids = {
+                    reference["evidence_id"]
+                    for reference in estimate["payload"]["input_evidence_refs"]
+                }
+                assert anchor_ids <= fragment_ids
+                assert anchor_ids <= chain_ids
 
         asyncio.run(exercise())
 
@@ -357,7 +427,7 @@ def test_production_routes_settings_run_sse_history_and_restart(monkeypatch):
                 body = {
                     "query": "Assess dissolved oxygen for the selected target and dates.",
                     "target": {"comid": "100"},
-                    "date_range": {"start_date": "2026-10-08", "end_date": "2026-10-08"},
+                    "date_range": {"start_date": _RECENT_DATE, "end_date": _RECENT_DATE},
                     "parser_model": {"provider": "openai", "model": "parser-v1"},
                     "waterbody_model": {"provider": "openai", "model": "waterbody-v1"},
                     "memory_mode": "stateless",
@@ -391,7 +461,21 @@ def test_production_routes_settings_run_sse_history_and_restart(monkeypatch):
                 assert detail.status_code == 200, detail.text
                 waterbody = next(s for s in detail.json()["sessions"] if s["agent_role"] == "waterbody")
                 transcript = await client.get(f"/api/analysis/runs/{run_id}/sessions/{waterbody['session_id']}/transcript")
-                assert detail.json()["run"]["status"] == "completed", _OfflineModel.calls
+                if detail.json()["run"]["status"] != "completed":
+                    items = transcript.json()["items"]
+                    failures = [
+                        item["content"]["body"]["payload"]["error"]
+                        for item in items
+                        if item["content_type"] == "lifecycle_event"
+                        and item["content"]["body"]["type"] == "session_failed"
+                    ]
+                    repairs = [
+                        json.loads(item["content"]["body"]["messages"][-1]["text"])["issues"]
+                        for item in items
+                        if item["content_type"] == "waterbody_model_request"
+                        and item["content"]["body"]["phase"] == "schema_repair"
+                    ]
+                    pytest.fail(str({"failures": failures, "repair_issues": repairs}))
                 assert detail.json()["run"]["result_ref"] is not None
                 assert waterbody["status"] == "completed"
                 assert waterbody["result_ref"] is not None
@@ -454,7 +538,33 @@ def test_production_routes_settings_run_sse_history_and_restart(monkeypatch):
                     if second_detail.status_code == 200 and second_detail.json()["run"]["status"] in {"completed", "failed", "cancelled"}:
                         break
                     await asyncio.sleep(0.02)
-                assert second_detail.json()["run"]["status"] == "completed"
+                if second_detail.json()["run"]["status"] != "completed":
+                    failed_sessions = [
+                        session for session in second_detail.json()["sessions"]
+                        if session["status"] == "failed"
+                    ]
+                    failure_details = []
+                    for session in failed_sessions:
+                        transcript = await client.get(
+                            f"/api/analysis/runs/{second_run_id}/sessions/"
+                            f"{session['session_id']}/transcript"
+                        )
+                        items = transcript.json()["items"]
+                        failure_details.append({
+                            "errors": [
+                                item["content"]["body"]["payload"]["error"]
+                                for item in items
+                                if item["content_type"] == "lifecycle_event"
+                                and item["content"]["body"]["type"] == "session_failed"
+                            ],
+                            "repair_issues": [
+                                json.loads(item["content"]["body"]["messages"][-1]["text"])["issues"]
+                                for item in items
+                                if item["content_type"] == "waterbody_model_request"
+                                and item["content"]["body"]["phase"] == "schema_repair"
+                            ],
+                        })
+                    pytest.fail(str(failure_details))
                 assert second_detail.json()["run"]["configuration"]["analysis_timezone"] == "Asia/Shanghai"
                 assert (await client.get("/api/admin/storage")).status_code == 200
             restarted = application()
@@ -535,7 +645,7 @@ def test_production_cancel_converges_real_session_without_result(monkeypatch):
                 created = await client.post("/api/analysis/runs", json={
                     "query": "Assess dissolved oxygen for the selected target and dates.",
                     "target": {"comid": "100"},
-                    "date_range": {"start_date": "2026-10-08", "end_date": "2026-10-08"},
+                    "date_range": {"start_date": _RECENT_DATE, "end_date": _RECENT_DATE},
                     "parser_model": {"provider": "openai", "model": "parser-v1"},
                     "waterbody_model": {"provider": "openai", "model": "waterbody-v1"},
                     "memory_mode": "stateless",

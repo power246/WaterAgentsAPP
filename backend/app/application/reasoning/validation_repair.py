@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from collections.abc import Callable
 from typing import Protocol, Self, TypeVar
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -36,6 +38,7 @@ from app.application.reasoning.model_protocol import (
     consume_waterbody_model_stream,
 )
 from app.application.reasoning.prompt_builder import (
+    OverallSynthesisPromptInput,
     PromptBuilder,
     PromptValidationIssue,
     SchemaRepairPromptInput,
@@ -52,11 +55,14 @@ from app.domain.settings_admin import UnitPreference
 from app.ports.errors import WaterbodyModelPortError
 from app.ports.waterbody_model import WaterbodyModelPort
 
-
 ValidatedDraftT = TypeVar(
     "ValidatedDraftT",
     ValidatedReasoningBatch,
     ValidatedOverallSynthesis,
+)
+logger = logging.getLogger("wateragents.reasoning")
+_SAFE_ISSUE_PATH = re.compile(
+    r"\$(?:\.[A-Za-z_][A-Za-z0-9_]{0,63}|\[\d{1,4}\]){0,24}\Z"
 )
 
 
@@ -243,9 +249,8 @@ class ValidationExchange:
             for batch in reasoning.batches
             for cell in batch.cells
         )
-        request = self._prompt_builder.build_overall_synthesis(
-            synthesis_plan.prompt_input(summaries)
-        )
+        synthesis_prompt = synthesis_plan.prompt_input(summaries)
+        request = self._prompt_builder.build_overall_synthesis(synthesis_prompt)
         validated, audit = await self._run(
             request,
             context=synthesis_plan.context,
@@ -257,6 +262,7 @@ class ValidationExchange:
                 reasoning,
                 value,
             ),
+            synthesis_prompt=synthesis_prompt,
         )
         return ValidatedSynthesisExchange(validated=validated, audit=audit)
 
@@ -268,6 +274,7 @@ class ValidationExchange:
         cancellation: CancellationProbe,
         validate: Callable[[str], ValidatedDraftT],
         batch: ReasoningBatch | None = None,
+        synthesis_prompt: OverallSynthesisPromptInput | None = None,
     ) -> tuple[ValidatedDraftT, ValidationExchangeAudit]:
         initial_response = await consume_waterbody_model_stream(
             self._model_port,
@@ -322,6 +329,8 @@ class ValidationExchange:
                     PromptValidationIssue(code=issue.code, path=issue.path)
                     for issue in initial_issues[:64]
                 ),
+                batch_prompt=batch.prompt_input() if batch is not None else None,
+                synthesis_prompt=synthesis_prompt,
             )
         )
         try:
@@ -343,6 +352,7 @@ class ValidationExchange:
                 repair_request=repair_request,
                 repair_error_code=error.code,
             )
+            _log_failed_repair(audit, context)
             raise ValidationRepairFailedError(
                 audit,
                 cause_code=error.code,
@@ -378,6 +388,7 @@ class ValidationExchange:
                 ),
                 repair_issues=repair_issues,
             )
+            _log_failed_repair(audit, context)
             raise ValidationRepairFailedError(
                 audit,
                 cause_code="reasoning_draft_invalid",
@@ -402,6 +413,54 @@ class ValidationExchange:
         if self._decision_store is not None:
             await self._decision_store.write_validated_exchange(audit)
         return validated, audit
+
+
+def _log_failed_repair(
+    audit: ValidationExchangeAudit,
+    context: WorkingContextProjection,
+) -> None:
+    initial_output = _structured_output(audit.initial_response)
+    repair_output = (
+        _structured_output(audit.repair_response)
+        if audit.repair_response is not None
+        else None
+    )
+    logger.warning(
+        "waterbody_model_validation_repair_failed",
+        extra={
+            "event_name": "waterbody_model_validation_repair_failed",
+            "run_id": context.run_id,
+            "session_id": context.session_id,
+            "target_comid": context.target_comid,
+            "phase": audit.original_phase,
+            "batch_id": audit.batch_id,
+            "initial_operation_id": audit.initial_request.operation_id,
+            "repair_operation_id": audit.repair_request.operation_id,
+            "failure_code": audit.repair_error_code or "reasoning_draft_invalid",
+            "initial_issue_count": len(audit.initial_issues),
+            "repair_issue_count": len(audit.repair_issues),
+            "initial_issues": _logged_issues(audit.initial_issues),
+            "repair_issues": _logged_issues(audit.repair_issues),
+            "initial_output_chars": len(initial_output.value) if initial_output else 0,
+            "repair_output_chars": len(repair_output.value) if repair_output else 0,
+        },
+    )
+
+
+def _logged_issues(
+    issues: tuple[DraftValidationIssue, ...],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "code": issue.code,
+            "path": (
+                issue.path
+                if issue.code != "extra_field" and _SAFE_ISSUE_PATH.fullmatch(issue.path)
+                else "[redacted]"
+            ),
+        }
+        for issue in issues[:16]
+    ]
 
 
 def _unit_decisions(

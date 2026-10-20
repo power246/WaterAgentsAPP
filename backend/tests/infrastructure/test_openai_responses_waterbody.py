@@ -12,7 +12,6 @@ import pytest
 from app.application.analysis_runs.workflow import CancellationToken
 from app.application.canonical_json import canonical_json_digest
 from app.application.reasoning.model_models import (
-    RefusalCompleted,
     StructuredOutputCompleted,
     Terminal,
     ToolCallCompleted,
@@ -322,6 +321,54 @@ def test_planning_request_and_fragmented_success_fixture_preserve_safe_order() -
 
 
 @pytest.mark.parametrize(
+    ("base_url", "deepseek_compat"),
+    [
+        ("https://api.deepseek.com", True),
+        ("https://api.deepseek.com.evil.example", False),
+    ],
+)
+def test_official_deepseek_request_uses_compatible_json_and_tool_format(
+    base_url: str,
+    deepseek_compat: bool,
+) -> None:
+    requests: list[httpx.Request] = []
+    events = load_fixture("openai_waterbody_success.json")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return response_for(request, (encode_events(events),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(http, model_request(), base_url=base_url)
+
+    result = run(exercise())
+    assert any(isinstance(event, StructuredOutputCompleted) for event in result)
+    assert requests[0].url == f"{base_url}/responses"
+    payload = json.loads(requests[0].content)
+    assert payload["tools"][0]["parameters"] == json.loads(
+        tool_descriptor().input_schema.schema_text
+    )
+    if deepseek_compat:
+        assert payload["instructions"].endswith("valid JSON object.")
+        assert payload["text"]["format"] == {"type": "json_object"}
+        assert "strict" not in payload["tools"][0]
+        assert payload["reasoning"] == {"effort": "low"}
+        assert payload["max_output_tokens"] == 16_384
+    else:
+        assert payload["instructions"] == model_request().system_prompt
+        assert "reasoning" not in payload
+        assert "max_output_tokens" not in payload
+        assert payload["text"]["format"] == {
+            "type": "json_schema",
+            "name": response_schema().name,
+            "schema": json.loads(response_schema().schema_text),
+            "strict": True,
+        }
+        assert payload["tools"][0]["strict"] is True
+
+
+@pytest.mark.parametrize(
     "phase",
     [
         WaterbodyModelPhase.REASONING_BATCH,
@@ -373,6 +420,118 @@ def test_run_summary_request_reuses_adapter_with_an_exact_empty_tool_roster() ->
         }
     ]
     assert payload["text"]["format"]["name"] == "run_summary"
+
+
+def test_deepseek_summary_schema_mismatch_reaches_application_repair() -> None:
+    raw_output = '{"language":"en"}'
+    events = [{
+        "type": "response.completed",
+        "response": {
+            "id": "resp-summary-missing-fields",
+            "model": MODEL.model,
+            "status": "completed",
+            "output": [{
+                "id": "output-summary-missing-fields",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": raw_output}],
+            }],
+        },
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(
+                http,
+                summary_model_request(),
+                base_url="https://api.deepseek.com",
+            )
+
+    result = run(exercise())
+    assert [type(event) for event in result] == [StructuredOutputCompleted, Terminal]
+    assert result[0].value == raw_output
+    assert result[1].finish_reason is WaterbodyFinishReason.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        WaterbodyModelPhase.REASONING_BATCH,
+        WaterbodyModelPhase.OVERALL_SYNTHESIS,
+        WaterbodyModelPhase.SCHEMA_REPAIR,
+    ],
+)
+def test_reasoning_schema_mismatch_reaches_application_validation(
+    phase: WaterbodyModelPhase,
+) -> None:
+    raw_output = '{"decision":"not-ready"}'
+    events = [{
+        "type": "response.completed",
+        "response": {
+            "id": "resp-reasoning-schema-mismatch",
+            "model": MODEL.model,
+            "status": "completed",
+            "output": [{
+                "id": "output-reasoning-schema-mismatch",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": raw_output}],
+            }],
+        },
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(
+                http,
+                model_request(phase=phase, tools=()),
+                base_url="https://api.deepseek.com",
+            )
+
+    result = run(exercise())
+    assert [type(event) for event in result] == [StructuredOutputCompleted, Terminal]
+    assert result[0].value == raw_output
+    assert result[1].finish_reason is WaterbodyFinishReason.COMPLETED
+
+
+@pytest.mark.parametrize("raw_output", ["not-json", '["array"]'])
+def test_reasoning_repairable_phase_still_rejects_non_object_json(
+    raw_output: str,
+) -> None:
+    events = [{
+        "type": "response.completed",
+        "response": {
+            "id": "resp-invalid-json",
+            "model": MODEL.model,
+            "status": "completed",
+            "output": [{
+                "id": "output-invalid-json",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": raw_output}],
+            }],
+        },
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            await collect(
+                http,
+                model_request(phase=WaterbodyModelPhase.REASONING_BATCH, tools=()),
+                base_url="https://api.deepseek.com",
+            )
+
+    with pytest.raises(WaterbodyModelProtocolError):
+        run(exercise())
 
 
 def test_tool_result_message_is_sent_as_function_call_output() -> None:
@@ -476,6 +635,358 @@ def test_checked_invalid_fixtures_are_typed_protocol_errors(case: str) -> None:
         run(exercise())
 
 
+def test_deepseek_json_mode_still_checks_the_original_response_schema() -> None:
+    events = load_fixture("openai_waterbody_invalid.json")["schema_mismatch"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            await collect(
+                http,
+                model_request(),
+                base_url="https://api.deepseek.com",
+            )
+
+    with pytest.raises(WaterbodyModelProtocolError):
+        run(exercise())
+
+
+def test_tool_call_with_whitespace_only_text_does_not_require_structured_output() -> None:
+    tool_item = {
+        "id": "function-with-whitespace",
+        "type": "function_call",
+        "call_id": "call-with-whitespace",
+        "name": "inspect_evidence",
+        "arguments": '{"item_id":"evidence-1"}',
+    }
+    whitespace_message = {
+        "id": "message-with-whitespace",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "   \n  "}],
+    }
+
+    def events(output: list[dict[str, object]]) -> list[dict[str, object]]:
+        return [{
+            "type": "response.completed",
+            "response": {
+                "id": "resp-with-whitespace",
+                "model": "waterbody-test",
+                "status": "completed",
+                "output": output,
+            },
+        }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events([whitespace_message, tool_item])),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(http, model_request(), base_url="https://api.deepseek.com")
+
+    result = run(exercise())
+    assert [type(item) for item in result] == [ToolCallCompleted, Terminal]
+    assert result[0].provider_call_id == "call-with-whitespace"
+    assert result[1].finish_reason is WaterbodyFinishReason.COMPLETED
+
+    def no_tool_handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events([whitespace_message])),))
+
+    async def no_tool_exercise() -> None:
+        async with client(no_tool_handler) as http:
+            await collect(http, model_request(), base_url="https://api.deepseek.com")
+
+    with pytest.raises(WaterbodyModelProtocolError):
+        run(no_tool_exercise())
+
+
+@pytest.mark.parametrize(
+    ("window_ids", "base_url", "arguments", "expected"),
+    [
+        (("window-000",), "https://api.deepseek.com", None, True),
+        (("window-000",), "https://api.openai.test/v1", None, False),
+        (("window-000", "window-001"), "https://api.deepseek.com", None, False),
+        (("window-000",), "https://api.deepseek.com", "extra_option", False),
+        (("window-000",), "https://api.deepseek.com", "wrong_window", False),
+        (("window-000",), "https://api.deepseek.com", "missing_parameter", False),
+        (("window-000",), "https://api.deepseek.com", "raw_mismatch", False),
+    ],
+)
+def test_deepseek_tool_can_fill_only_an_unambiguous_missing_window(
+    window_ids: tuple[str, ...],
+    base_url: str,
+    arguments: str | None,
+    expected: bool,
+) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "window_ids": {
+                "type": "array",
+                "items": {"type": "string", "enum": window_ids},
+                "minItems": 1,
+            },
+            "parameter_keys": {
+                "type": "array",
+                "items": {"type": "object"},
+                "minItems": 1,
+            },
+            "options": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
+        },
+        "required": ["window_ids", "parameter_keys", "options"],
+        "additionalProperties": False,
+    }
+    descriptor = WaterbodyToolDescriptor(
+        name="collect_weather_evidence",
+        description="Collect authorized weather evidence.",
+        input_schema=WaterbodyJsonSchema(
+            name="collect_weather_evidence",
+            schema_text=json.dumps(schema),
+        ),
+    )
+    tool_args = {"parameter_keys": [{"code_system": "USGS", "code": "00011"}], "options": {}}
+    if arguments == "extra_option":
+        tool_args["options"] = {"unapproved": True}
+    elif arguments == "wrong_window":
+        tool_args["window_ids"] = ["window-other"]
+    elif arguments == "missing_parameter":
+        del tool_args["parameter_keys"]
+    raw = json.dumps(tool_args, separators=(",", ":"))
+    item = {
+        "id": "weather-tool-item",
+        "type": "function_call",
+        "call_id": "weather-call",
+        "name": descriptor.name,
+        "arguments": raw,
+    }
+    if arguments == "raw_mismatch":
+        item["arguments"] = json.dumps(tool_args, indent=1)
+    events = [
+        {
+            "type": "response.created",
+            "response": {"id": "resp-weather", "model": MODEL.model, "status": "in_progress"},
+        },
+        {
+            "type": "response.output_item.added",
+            "item": {key: item[key] for key in ("id", "type", "call_id", "name")},
+        },
+        {
+            "type": "response.function_call_arguments.done",
+            "item_id": item["id"],
+            "arguments": raw,
+        },
+        {"type": "response.output_item.done", "item": item},
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp-weather",
+                "model": MODEL.model,
+                "status": "completed",
+                "output": [item],
+            },
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(
+                http, model_request(tools=(descriptor,)), base_url=base_url
+            )
+
+    if not expected:
+        with pytest.raises(WaterbodyModelProtocolError):
+            run(exercise())
+        return
+    outcome = run(exercise())
+    assert [type(event) for event in outcome] == [ToolCallCompleted, Terminal]
+    assert json.loads(outcome[0].arguments) == {
+        **tool_args,
+        "window_ids": ["window-000"],
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "base_url", "done_matches", "expected_path"),
+    [
+        (
+            '{"cells":[{"trend":null,"trend":null,"note":"private-visible-text"}]}',
+            "https://api.deepseek.com",
+            True,
+            "$.cells[0].trend",
+        ),
+        (
+            '{"meta":{"a":1,"b":2},"meta":{"b":2,"a":1}}',
+            "https://api.deepseek.com",
+            True,
+            "$.meta",
+        ),
+        (
+            '{"cells":[{"trend":null,"trend":"rising"}]}',
+            "https://api.deepseek.com",
+            True,
+            None,
+        ),
+        (
+            '{"cells":[{"trend":null,"trend":null}]}',
+            "https://api.openai.test/v1",
+            True,
+            None,
+        ),
+        (
+            '{"cells":[{"trend":null,"trend":null}]}',
+            "https://api.deepseek.com",
+            False,
+            None,
+        ),
+    ],
+)
+def test_duplicate_json_keys_are_canonicalized_only_when_unambiguous_on_deepseek(
+    raw: str,
+    base_url: str,
+    done_matches: bool,
+    expected_path: str | None,
+    caplog,
+) -> None:
+    item = {
+        "id": "output-duplicate-key",
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": raw}],
+    }
+    events = [
+        {
+            "type": "response.created",
+            "response": {"id": "resp-duplicate-key", "model": MODEL.model, "status": "in_progress"},
+        },
+        {
+            "type": "response.output_item.added",
+            "item": {"id": item["id"], "type": "message", "role": "assistant", "content": []},
+        },
+        {
+            "type": "response.output_text.done",
+            "item_id": item["id"],
+            "text": raw if done_matches else raw + " ",
+        },
+        {"type": "response.output_item.done", "item": item},
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp-duplicate-key",
+                "model": MODEL.model,
+                "status": "completed",
+                "output": [item],
+            },
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(
+                http,
+                model_request(phase=WaterbodyModelPhase.SCHEMA_REPAIR, tools=()),
+                base_url=base_url,
+            )
+
+    with caplog.at_level(logging.INFO, logger="wateragents.providers"):
+        if expected_path is None:
+            with pytest.raises(WaterbodyModelProtocolError):
+                run(exercise())
+            assert not any(
+                record.message == "provider_output_duplicate_keys_canonicalized"
+                for record in caplog.records
+            )
+            return
+        result = run(exercise())
+    assert [type(event) for event in result] == [StructuredOutputCompleted, Terminal]
+    assert json.loads(result[0].value) == json.loads(raw)
+    assert len(result[0].value) < len(raw)
+    canonicalization = next(
+        record for record in caplog.records
+        if record.message == "provider_output_duplicate_keys_canonicalized"
+    )
+    assert canonicalization.duplicate_key_count == 1
+    assert canonicalization.duplicate_key_paths == [expected_path]
+    assert "private-visible-text" not in caplog.text
+
+
+def test_protocol_failure_logs_event_metadata_without_model_text(caplog) -> None:
+    private_text = "private-model-output-should-stay-out-of-logs"
+    events = [{
+        "type": "response.output_text.delta",
+        "item_id": "missing-added-item",
+        "delta": private_text,
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            await collect(http, model_request())
+
+    with caplog.at_level(logging.WARNING, logger="wateragents.providers"):
+        with pytest.raises(WaterbodyModelProtocolError):
+            run(exercise())
+
+    diagnostic = next(
+        record for record in caplog.records
+        if record.message == "provider_stream_protocol_invalid"
+    )
+    assert diagnostic.stream_event_type == "response.output_text.delta"
+    assert diagnostic.stream_payload_keys == ["delta", "item_id", "type"]
+    assert diagnostic.stream_failure_rule.startswith("_require_item_type:")
+    assert private_text not in caplog.text
+
+
+def test_failed_stream_logs_error_code_without_provider_message(caplog) -> None:
+    private_text = "private-provider-message-should-stay-out-of-logs"
+    events = [{
+        "type": "response.failed",
+        "response": {
+            "id": "response-failed",
+            "model": "waterbody-test",
+            "status": "failed",
+            "error": {
+                "type": "api_error",
+                "code": "server_error",
+                "message": private_text,
+            },
+        },
+    }]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            await collect(http, model_request())
+
+    with caplog.at_level(logging.WARNING, logger="wateragents.providers"):
+        with pytest.raises(WaterbodyModelUnavailableError):
+            run(exercise())
+
+    diagnostic = next(
+        record for record in caplog.records
+        if record.message == "provider_stream_failed"
+    )
+    assert diagnostic.stream_event_type == "response.failed"
+    assert diagnostic.stream_error_type == "api_error"
+    assert diagnostic.stream_error_code == "server_error"
+    assert private_text not in caplog.text
+
+
 @pytest.mark.parametrize("case", ["malformed_json_sse", "incomplete_sse"])
 def test_malformed_or_incomplete_sse_is_a_typed_protocol_error(case: str) -> None:
     fixtures = load_fixture("openai_waterbody_invalid.json")
@@ -563,6 +1074,67 @@ def test_tool_arguments_and_roster_are_strictly_bounded(
 
     with pytest.raises(WaterbodyModelProtocolError):
         run(exercise())
+
+
+@pytest.mark.parametrize(
+    ("arguments", "schema_path", "schema_rule"),
+    [
+        ("{}", "$.item_id", "required"),
+        ('{"item_id":""}', "$.item_id", "minLength"),
+        (
+            '{"item_id":"private-item-value","unexpected":"private-argument-value"}',
+            "$",
+            "additionalProperties",
+        ),
+    ],
+)
+def test_invalid_tool_arguments_log_schema_rule_without_argument_values(
+    arguments: str,
+    schema_path: str,
+    schema_rule: str,
+    caplog,
+) -> None:
+    events = [
+        {
+            "type": "response.completed",
+            "response": {
+                "id": "resp-tool-invalid",
+                "model": "waterbody-test",
+                "status": "completed",
+                "output": [
+                    {
+                        "id": "function-invalid",
+                        "type": "function_call",
+                        "call_id": "call-invalid",
+                        "name": "inspect_evidence",
+                        "arguments": arguments,
+                    }
+                ],
+            },
+        }
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return response_for(request, (encode_events(events),))
+
+    async def exercise() -> None:
+        async with client(handler) as http:
+            await collect(http, model_request())
+
+    with caplog.at_level(logging.WARNING, logger="wateragents.providers"):
+        with pytest.raises(WaterbodyModelProtocolError):
+            run(exercise())
+    mismatch = next(
+        record for record in caplog.records
+        if record.getMessage() == "provider_schema_mismatch"
+    )
+    assert mismatch.tool_name == "inspect_evidence"
+    assert mismatch.schema_name == "inspect_evidence"
+    assert mismatch.schema_path == schema_path
+    assert mismatch.schema_rule == schema_rule
+    assert "private-item-value" not in caplog.text
+    assert "private-argument-value" not in caplog.text
+    assert "unexpected" not in caplog.text
 
 
 def test_http_timeout_network_failure_and_task_cancel_are_typed() -> None:

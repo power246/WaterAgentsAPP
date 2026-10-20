@@ -4,6 +4,7 @@ from datetime import datetime, time, timedelta, timezone
 from app.application.analysis_runs.workflow import CancellationToken
 from app.application.query_understanding import AnalysisContext, EvidenceRulePlan
 from app.domain import (
+    GeoPoint,
     HydrologyGraph,
     HydrologyNode,
     HydrologyParticipation,
@@ -19,7 +20,6 @@ from app.domain import (
     build_time_windows,
 )
 from app.domain.time.timezone import get_iana_timezone
-
 
 _SCOPE_SEAL = object()
 
@@ -43,9 +43,11 @@ class EvidenceSessionScope:
     topology_ref: ReferenceScope
     topology: HydrologyGraph
     target_node: HydrologyNode
+    analysis_target_point: GeoPoint
     time_windows: tuple[EvidenceWindow, ...]
     requested_parameters: tuple[ParameterKey, ...]
     supporting_parameters: tuple[ParameterKey, ...]
+    intermediate_parameters: tuple[ParameterKey, ...]
     evidence_rule_plan: EvidenceRulePlan
     station_refs: tuple[TopologyStationRef, ...]
     geometry_ref: str | None
@@ -70,6 +72,7 @@ class EvidenceSessionScope:
         topology_ref: ReferenceScope,
         topology: HydrologyGraph,
         target_node: HydrologyNode,
+        analysis_target_point: GeoPoint,
         time_windows: tuple[EvidenceWindow, ...],
         requested_parameters: tuple[ParameterKey, ...],
         supporting_parameters: tuple[ParameterKey, ...],
@@ -85,12 +88,19 @@ class EvidenceSessionScope:
         query_envelope: TimeRange,
         cancel_token: CancellationToken,
         _seal: object,
+        intermediate_parameters: tuple[ParameterKey, ...] = (),
     ) -> None:
         if _seal is not _SCOPE_SEAL:
             raise TypeError("EvidenceSessionScope must be assembled from saved facts")
         for name, value in (("run_id", run_id), ("session_id", session_id)):
             if not value.strip():
                 raise ValueError(f"{name} must not be empty")
+        if len(intermediate_parameters) != len(set(intermediate_parameters)):
+            raise ValueError("intermediate parameters must be unique")
+        if set(intermediate_parameters) & (
+            set(requested_parameters) | set(supporting_parameters)
+        ):
+            raise ValueError("intermediate parameters must not overlap target or support")
         values = {
             "run_id": run_id,
             "session_id": session_id,
@@ -101,9 +111,11 @@ class EvidenceSessionScope:
             "topology_ref": topology_ref,
             "topology": topology,
             "target_node": target_node,
+            "analysis_target_point": analysis_target_point,
             "time_windows": time_windows,
             "requested_parameters": requested_parameters,
             "supporting_parameters": supporting_parameters,
+            "intermediate_parameters": intermediate_parameters,
             "evidence_rule_plan": evidence_rule_plan,
             "station_refs": station_refs,
             "geometry_ref": geometry_ref,
@@ -186,6 +198,7 @@ def assemble_evidence_session_scope(
         topology_ref=topology_ref,
         topology=topology,
         target_node=node,
+        analysis_target_point=context.target.point,
         time_windows=windows,
         requested_parameters=tuple(item.key for item in context.params_used),
         supporting_parameters=tuple(item.key for item in context.supporting_params),
@@ -210,6 +223,23 @@ def with_evidence_rule_plan(
 ) -> EvidenceSessionScope:
     """Return the same sealed session scope with an append-only rule-plan view."""
 
+    return _clone_scope(scope, evidence_rule_plan, scope.intermediate_parameters)
+
+
+def with_intermediate_parameters(
+    scope: EvidenceSessionScope,
+    parameters: tuple[ParameterKey, ...],
+) -> EvidenceSessionScope:
+    """Set plan-derived parameters without changing requested or required support."""
+
+    return _clone_scope(scope, scope.evidence_rule_plan, parameters)
+
+
+def _clone_scope(
+    scope: EvidenceSessionScope,
+    evidence_rule_plan: EvidenceRulePlan,
+    intermediate_parameters: tuple[ParameterKey, ...],
+) -> EvidenceSessionScope:
     return EvidenceSessionScope(
         run_id=scope.run_id,
         session_id=scope.session_id,
@@ -220,9 +250,11 @@ def with_evidence_rule_plan(
         topology_ref=scope.topology_ref,
         topology=scope.topology,
         target_node=scope.target_node,
+        analysis_target_point=scope.analysis_target_point,
         time_windows=scope.time_windows,
         requested_parameters=scope.requested_parameters,
         supporting_parameters=scope.supporting_parameters,
+        intermediate_parameters=intermediate_parameters,
         evidence_rule_plan=evidence_rule_plan,
         station_refs=scope.station_refs,
         geometry_ref=scope.geometry_ref,

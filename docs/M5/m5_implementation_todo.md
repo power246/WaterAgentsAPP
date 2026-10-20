@@ -1,6 +1,22 @@
 # M5 Evidence Tools + EvidenceBundle Implementation TODO
 
-更新日期：2026-10-01
+更新日期：2026-10-19
+
+## 河道距离与旧运行只读展示追加验收（2026-10-19）
+
+- [x] 从原始记录保留测站坐标；来源 COMID 非空时核对水体，缺 COMID 时核对保存拓扑中的测站关联。沿完整河段几何与参与边估算各条有效路径，记录 `mapped_channel_estimate`；无法确认时保持距离未知。
+- [x] 历史只读 GET 仅按已保存的结果、原始记录、拓扑及查询坐标生成临时估算，不改写原 `InferenceResult`。保存的 run `56f8c8dd-042e-4d2f-a8c5-2e25d79ebe07` 只读回放得到 32 条：2.940691 km 与 3.784969 km 各 16 条；未调用模型或供应商，未写数据库。
+- [x] 距离专项 **65 passed**；完整后端及专用 PostgreSQL 套件 **2861 passed, 1 failed, 2 warnings**，唯一失败是本文件同级 API 文档新增 JSON 例子使固定例子数从 12 变 13。已改为字段说明，文档及 OpenAPI 定向复测 **10 passed**；这次文字修正后未重跑完整后端套件。
+
+## 统一数值流程与模型估计追加验收（2026-10-17）
+
+- [x] 明确计算与模型估计共用水体内数值依赖计划、数据库保存和下游引用；明确方法优先，模型估计保存单点／范围、方法、依据和调用来源。
+- [x] 服务端沿原始记录与输入证据追溯 `MeasuredAnchor`；上游传递保留原始水体、测站、记录引用和时间窗，并累计路径与距离。模型范围不会成为新的实测或无依据的单点。
+- [x] bundle 校验计划内输入、必需／选填前置项、同指标测量来源、单位和窗口；流量选填项失败后目标估计可继续，技术失败事实仍保留。
+- [x] 本机离线命令 `.venv/Scripts/python.exe -m pytest tests/application/evidence_tools/test_model_estimate_bundle.py tests/application/evidence_tools/test_bundle_builder.py tests/application/evidence_tools/test_measurement_provenance.py tests/architecture/test_domain_contracts.py -q --basetemp=target/model-bundle-20261017 -p no:cacheprovider`（工作目录 `backend`）实际为 **42 passed**。覆盖单点、相关读数范围、常识范围、伪造来源／输入、必需与选填依赖，以及流量放弃或技术失败后目标继续的真实调度路径。
+- [ ] 本轮完整后端／专用 PostgreSQL、真实供应商与浏览器复验由最终集成记录补充；上述离线结果不证明预测准确率。
+
+本轮业务规则见设计 D15–D20；下方带日期的旧运行记录保留当时事实，不表示新模型估计路径已获得真实运行验收。当前改动未提交。
 
 > 当前状态：Milestone 0–13 已完成本机实现、集成回归与契约审计。M5 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；真实 USGS/NWS/EPA 业务请求与 Ubuntu/macOS/Windows 三平台 CI 没有实际运行证据，继续记录为 `not run` / `partial`。
 
@@ -43,15 +59,15 @@
 - [x] 直接原子更新当前唯一 V1 的 domain、manifest、typed content、fixture、reader 和调用方。不得新增 `EvidenceFragmentV2`、`EvidenceBundleV2`、旧新 read union、migration branch、milestone feature flag、双写或临时兼容入口。
 - [x] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup。不得建立第二套事实库、历史、重试队列、session 状态或第三条 SSE。
 - [x] M5 扩展 M4 的唯一 capability manifest、`AnalysisContext`、`HydrologyGraph`、station/series refs 和 `topology_ready v1`；M4 availability 只是候选资格，不能直接变成 SourceRecord 或 EvidenceFragment。
-- [x] M5 只构造 evidence 和 M6 gate 输入，不输出最终水质结论、confidence、attribution 或 `InferenceResult`，不调度 DAG，也不为尚未准备执行的水体预建 session。
+- [x] M5 只构造 evidence 和 M6 gate 输入，不输出最终水质结论、confidence、attribution 或 `InferenceResult`，不调度水体间 DAG，也不为尚未准备执行的水体预建 session；水体内数值任务按 D20 的依赖执行。
 - [x] production 不公开直接 tool invocation route，当前 frontend 不改动。独立 test app 必须通过单独 composition 显式创建，不能由 production runtime flag 开启，也不能绕过 scope、writer 或授权。
 - [x] Agent-facing 请求不接受 provider、base URL、secret、任意 COMID、station、geometry、中心点或自由时间范围。server 必须从已保存的 context/topology/capability/station facts 生成 provider plan。
 - [x] 当前 Agent 只主动查询自身 `agent_comid`。上游 station 数据只能由上游 session 的结果引用传递；不得让下游 Agent 直接查询上游站点。provider 查询范围最多扩展到目标范围前后各一个当地日，且不新增结果窗口。
-- [x] discharge 对每个实际执行水体、每个最终窗口都是 required support。有站先查询直接 discharge；无站或本地缺失时只接受上游结果或 registry 登记的估算关系。未知 discharge 不能写成 0。
+- [x] discharge 对每个实际执行水体、每个最终窗口优先尝试；有站先查询，缺失时尝试明确计算或模型估计。目标模型估计允许流量选填前置项失败后继续；明确计算仍需其必需输入。未知 discharge 不能写成 0。
 - [x] weather observation/forecast 始终按需；prediction mode 不自动使天气必查。设施邻近与历史 RAG 默认 `contextual_only`，不能解锁 target/discharge gate。
 - [x] adapter 只返回强类型 SourceRecord 和 completion facts；quality、unit、coverage、aggregation、applicability、RAG candidate、fragment/cell/bundle 构造权统一属于 application policy/tool 层。
 - [x] provider success-empty 与 timeout、auth、rate limit、invalid response、超限、分页/stream 不完整必须分开。技术失败不得变成 `empty`；已解析事实不删除，但受影响窗口必须 blocked/`incomplete_source`。
-- [x] 单位与数值算法只使用 manifest 驱动的 `Decimal` 确定性实现。不得让 Agent 提供换算系数；不得按参数名称散落 if/else；不得插值、补值、替换异常值、跨 series 合并或在 M5 预测数值。
+- [x] 单位与明确计算使用已登记的 `Decimal` 实现，Agent 不提供换算系数。没有适用明确方法时，同一数值依赖计划执行模型估计，保存方法、范围和来源；模型估计不替换原始记录。
 - [x] `suspicious` 可按 capability policy 参与聚合并传播 flags/counts；`invalid` 只保留审计。M5 不自动检测跨 series 冲突，也不保留 `CONFLICTING_OBSERVATIONS` 兼容枚举。
 - [x] 只有一对一 local direct record 加可逆展示换算具备后续 `observed` 资格；任何多记录 aggregate、跨 series 选择、上游、天气、设施或历史支持均只能成为 inferred 候选。
 - [x] 外部真实 provider smoke 不是单元测试前置条件。先用 checked-in fixtures 和 fakes 完成确定性覆盖；需凭据、联网或可能计费的 smoke 必须先 preflight，0 请求、缺凭据或网络不满足一律记录 `not run`，不能写成通过或零结果。
@@ -67,7 +83,7 @@
 - [x] 八个 evidence tools 共用同一 registry、executor、scope、budget、dedup、writer、error mapping 和 result schema；M7/M8 producer 未接入时不向 production Agent 暴露假可用工具。
 - [x] 五类 M5 typed content 可写入、读取、补写、全文引用并由既有 session SSE 交付；公开投影不泄露 secret、raw provider envelope、无界 records 或内部异常。
 - [x] station-backed 全空、部分 evidence、provider failure 与 stationless upstream/optional 四条主路径均有 fixture；逐 ParameterKey × window 的 target/discharge cells 稳定区分 supported/unsupported/blocked。
-- [x] 全部 usable direct evidence 为空的 station-backed preflight 形成真实 call/result/facts/bundle 和停止指令，不调用水体模型；技术失败不走自然全空完成路径。
+- [x] 全部 usable direct evidence 为空时保留真实 call/result/facts；数值计划可继续范围估计，技术失败不改写成自然查空。实际模型调用和不足原因分别保存。
 - [x] run-local exact-request single-flight、success reuse、failed/cancelled 不缓存、跨 run 不复用、bounded retry/cancel/budget 和 partial-provider failure 均有并发测试。
 - [x] production OpenAPI 不含 tool/test route；独立 `create_m5_test_app()` 可通过 fixture scope 复用真实 executor，frontend 没有接入。
 - [x] M1–M4 regression、M5 focused tests、architecture guards、离线 manifest/doc/fixture audit、`compileall` 和 `git diff --check` 有实际通过证据；外部、PostgreSQL和三平台未执行项如实记录。
@@ -639,6 +655,28 @@
 - 复审修正：`adjacent_local_day` 统一按 IANA 当地自然日判断并覆盖 DST；M7 upstream output 在写入前复核直接上游 COMID、同 run session/COMID/completed、参数、窗口与引用归属；未知工具及 scope 越权在 call 前拒绝为 `0 call / 0 result`，合法 call 的取消仍保留 cancelled result。首轮完整回归因取消与 test API 仍沿用旧预检语义出现 `2 failed / 1528 passed`，分离预检与运行期取消并将 test API preflight 映射为 422 后，预检/API focused `12 passed`、当地自然日 focused `3 passed`、隔离 PostgreSQL 完整 backend `1531 passed`，health/history 与独立进程 restart/repair smoke 通过。
 - 复审修正（descriptor preflight）：registry roster 与 executor 共用 scope authorization；stationless/stateless、跨工具 options、facility/transform/inspection 必需 request shape 均在 scope preparer 和 call writer 前拒绝为 HTTP 422、`0 call / 0 result`，producer unavailable/cancel/budget 仍保留合法 call/result。删除 bundle 的单层时间策略转发函数；focused `46 passed`、evidence-tools/API/architecture `199 passed`、隔离 PostgreSQL 完整 backend `1545 passed`，health/history 与独立进程 restart/repair smoke 通过。
 
+#### 真实运行修复记录（2026-10-16，未提交）
+
+- 实现：USGS pH 字段转换为受控的规范身份；完整分页后的 24 小时原始读数可聚合均值，采样间隔未知时明确标记 `partial_coverage`，仅供推断使用，不宣称整日观测完整。手动聚合还校验所选参数、站点、序列和窗口的同批次记录完整性，缺页或漏选记录不得产生均值。证据投影去重、优先给出 gate 引用和质量事实；可选 provider 失败不占用后续工具 roster。
+- 验证：覆盖聚合、采集、bundle、USGS/NWS/EPA adapter 与 M6 消费路径的当前分支跨层回归为 `710 passed`，完整 backend 回归为 `2591 passed, 2 warnings`；一次已到达 M6 的真实运行在上游 COMID 1777616 产出 pH 8.2（均值、推断、`partial_coverage`），但整次运行随后失败，不能算前端端到端通过。上游水体读数不等于目标 COMID 的直接 pH，目标数值仍须由合法证据或已定义的跨水体推断规则支持。
+- 天气作用域补修：仅当请求参数、所需支持参数或生效规则输入中存在已登记的天气变量映射时，M5 才向规划阶段提供天气工具。执行器移除无映射参数的隐式 `temperature` 回退；含无映射参数的混合天气请求在 provider 调用前以 `evidence_scope_violation` 拒绝。邻近 evidence-tools、reasoning、M5 runtime 与 NWS adapter 回归 `312 passed`；此计数不替代上述较早的完整 backend 回归。
+- 后续真实运行：同一请求的完整 run 4dbef96f-9826-4c7b-b8a9-2ecda9702fc6 已完成。上游 COMID 1777616 取回 96 条 pH 与 96 条流量读数；pH 样本算术均值 8.2 standard units，流量样本算术均值 409.46875 ft³/s，均标记 partial_coverage、provider_flagged，pH 结果为 inferred。未知采样间隔下的完整分页只证明所请求记录已取完，不证明全天连续覆盖。目标 COMID 1777642 两项直接查询均为空，不能把上游 8.2 当作目标值。
+- 本轮历史窗口规则：所选 6h/12h/24h 窗口内有至少一条可用读数且采集完整时，按登记方法保存原始窗口代表值：WDFN continuous 为可用读数的 `mean`，USGS Samples `discrete_samples` 为 `latest`。单条读数也能成为依据，不要求固定采样频率或读数覆盖窗口首尾。未知连续采样频率仍如实保留 `partial_coverage`；离散样品不表示整窗连续实测。同序列的 `unit_unresolved` 原始项保留审计与引用，其余可转换读数仍可聚合。M4 站点资格记录真实有读数的窗口；M5 对已合格序列采集整个所选历史范围，逐窗保存完成、空值或技术失败事实，不能从 M4 资格推断空窗已查询完成。
+- 空窗补值：仅在采集完成且该窗无可用数值时，使用同水体、站点、序列和参数的其他窗口原始代表值作为锚点；仅有 `unit_unresolved` 原始项的已完整采集窗口也适用。双侧按窗口中点线性插值，单侧保持最近原始代表值，不设距离截止，也不以补值继续补值。持久化的 `temporal_estimate` 证据保存方法、锚点窗口/引用/距离、单位和继承质量标记，并额外标记系统补值；流量先补，pH 等指标各自需要本指标的原始读数。技术失败、分页不完整、所选范围内本指标全无可用读数均不生成数字。
+- 验证范围：本轮 domain、bundle、授权与 executor 核心定向回归 `160 passed`；此计数早于 producer 最后新增的长距离与无效输入测试，不代表这两项或完整 backend、真实 provider 重验。
+- 最终复验：已保存 run `bcb21e89-35a6-41d5-bc54-8b281b0a04b6` 在 2026-10-14 至 15 日、6h、stateless 的真实前端请求中完成 9 个 session。上游 COMID 1777616 的 8 个 pH 窗各有 24 条 Provisional 读数，均产出 8.2 的窗内聚合值，没有触发空窗补值；`partial_coverage` 与 `provider_flagged` 均保留，但不阻止数值结果。目标 COMID 1777642 无自身 pH 读数或已登记的跨水体定量规则，8 个窗仍为 `indeterminate`。空窗补值在本次数据中未触发，仅由离线测试验证。独立测试库完整 backend 回归 `2640 passed, 2 warnings`；跨平台 CI 未运行。
+
+#### 2026-10-19 覆盖语义回归
+
+- [x] 对 `continuous_regular`，完整采集且所选窗口有至少一条可用读数就形成窗口代表值；已知 cadence、ratio 和最大缺口保留为描述指标，不再据此加入 `partial_coverage`。空窗仍为 `insufficient`，采集未完成仍为 `unknown`；离散样品、最新值和区间总量沿用各自规则。
+- [x] 时间范围恰好覆盖目标窗口的上游推理结果标为该窗可用；这不声称原测站连续实测。上游结果投影保存质量标记，下游上下文及关系继承这些标记，旧投影仍可读取。
+- [x] 有可追溯同指标原始读数时，数值估计默认给出有依据的单点和可能范围；只有具体反证才仅给范围。缺少本地测站、流量或一般质量警示由范围和置信度表达，不单独阻止预测。
+- [x] 纯范围草稿漏写全部范围上下界时，只从当前窗唯一已引用、同参数、同单位、完全同窗的密封数值证据补回，并完整重跑校验；原始回复和验证摘要可重放。显式空值、仅缺一个界限、越界或多个候选均不自动补全。
+- [x] 单点草稿准确引用唯一同窗密封估值、却漏写全部范围上下界时，从该估值补齐范围后完整重跑校验；数值、单位、时间窗、引用或来源不匹配时仍拒绝，修复提示要求保留已有单点。
+- [x] 当前代码的 backend 全量回归 `2907 passed, 2 warnings`（从 `backend/` 直接运行 pytest，仅为测试设置独立数据库名；不把 `.env` 中的模型配置注入隔离用例）；前端单测 `81 passed`，类型检查、lint、API 类型核对、生产构建及连接本地生产服务的 Chrome 浏览器回归 `8 passed`。
+- [x] 真实 DeepSeek 运行 `12ccd705-d5be-4de9-8f53-0e04a358cb11` 完成 9 个会话、7/7 个水体结果可用。目标 COMID 1777642 在 2026-10-15（America/Chicago）的四个 6h 窗均给出推测 pH 8.2，可能范围依次为 7.8–8.6、7.8–8.6、7.8–8.6、7.9–8.5；`estimated`、`provider_flagged` 均保留。历史读取核对了每窗引用完整、证据属于目标水体、同指标原始测量来源和两条约 2.94/3.78 km、经过 3/4 个水体的路径。运行期间一次数据库写入超时自动恢复，未发现终止性错误；这些回归不证明预测准确率。
+- [x] 历史会话读取按请求复用解析结果，并按本阶段约定移除重复读时脱敏；保留写时处理、正文结构与字节数校验。上述真实目标会话的 91 条历史记录经 HTTP 读取为 200、约 1.45 秒，0 条读取问题；浏览器 Evidence 页显示证据，时序图显示数值、范围和来源路径，读取失败不会误显为空证据。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 实现位置 | 重点测试 | 证据与剩余风险 |
@@ -682,3 +720,15 @@ M5 完成后只交付以下稳定能力：
 - M9：现有 run/session/transcript/API/SSE 中的安全 M5 projections；M9 frontend 不调用 test route，也不提交 provider、station、radius、geometry、URL 或 tool policy。
 
 M5 不因上述阶段尚未实现而增加 fake production producer、临时 unsupported product response、feature flag、V2 或兼容层。后续阶段应直接扩展同一最终系统和当前唯一 V1。
+
+## 数值依赖调度追加验收（2026-10-16）
+
+- [x] 从用户目标和必需支持倒推本次采用的方法，固化带版本与摘要的水体内数值任务图；内部中间指标单独进入 scope，不改变 `AnalysisContext.params_used` 或 `supporting_params`。
+- [x] 每个就绪任务从数据库按引用读取输入、核对指标/单位/水体/窗口，写入并读回已验证的数值证据后才解锁下游；共享任务仅发布一次，缺数、技术失败与取消独立处理。
+- [x] `EvidenceBundle` 为内部指标的每个窗口建立 `method_input` cell，保持片段引用闭包；原有 target/support 门禁和用户结果指标范围不扩大。
+- [x] 生产仅启用已登记的窗口聚合与同指标历史补值；测试用多指标公式不得进入生产注册表。空窗补值继续禁止将补值充当新的实测锚点。
+- [x] 用可控完成顺序验证 A/B→C、C/D→T、共享 C、循环与跨窗口合法引用；用专用 PostgreSQL 验证独立 reader 从持久化引用读取中间值；复验现有时间窗、采集失败和取消场景。
+
+构造依赖链、压缩后证据包重建与独立 PostgreSQL reader 测试通过；双站点同窗只执行选定补值路径，未选中方案不产生重复数值。完整后端（含专用 PostgreSQL 测试库）`2693 passed, 2 warnings`，前端 `71 passed`，lint、类型检查、OpenAPI 类型检查和构建通过；本轮相关 Python 文件 Ruff F/I 通过。完整后端回归之后仅对摘要校验做了窄修复，摘要专项 `45 passed`，并用保存的真实首稿离线重放通过；未为该窄修复再次运行完整后端回归。
+
+2026-10-17 本机真实复验：使用 `America/Chicago` 的 2026-10-15 历史日（UTC `[2026-10-15T05:00:00Z, 2026-10-16T05:00:00Z)`），6h、stateless、DeepSeek `deepseek-flash`，按指定坐标发起 run `77d773b3-e806-42a2-a10d-5fd8bd678be9`。7 个水体会话与摘要会话均 completed；上游 1777616 四窗各有 24 条 pH 和 24 条流量读数，四窗 pH 代表值均为 8.2 standard units、推断、置信度 0.35。目标 COMID 1777642 四窗仍为 indeterminate；拓扑覆盖 partial，1 个水体可用、6 个证据不足。此前两日 run `c3c14521-e332-4d89-94ae-8f72367cae10` 的摘要因校验器误读已知 COMID 而失败，现已修复并在本次新运行中通过；本次首稿又因已知 `window-000` 被误判而触发一次摘要修复调用，相关校验器已在运行后细修并以本次首稿离线重放验证。有数值锚点的上游水体四窗均有聚合值，其他水体没有本水体的补值锚点，因此真实运行没有触发数值依赖任务；多层调度由可控测试与持久化读回测试验证。目标自身仍无 pH 数值依据或已登记的跨水体定量方法，不能以测试公式代替生产能力。

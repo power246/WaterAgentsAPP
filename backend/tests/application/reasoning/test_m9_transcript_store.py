@@ -2,12 +2,14 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
-from tests.application.coordinator_inspection import list_session_transcript_items
+import pytest
+from pydantic import ValidationError
 
 from app.application.analysis_runs.models import AgentRole, AgentSessionStatus
 from app.application.analysis_runs.persistence import PersistenceState
-from app.application.analysis_runs.workflow import WorkflowContext
+from app.application.analysis_runs.workflow import CancellationToken, WorkflowContext
 from app.application.reasoning.model_models import (
     StructuredOutputCompleted,
     Terminal,
@@ -22,7 +24,11 @@ from app.application.reasoning.model_models import (
     WaterbodyModelRequest,
 )
 from app.application.reasoning.model_protocol import consume_waterbody_model_stream
-from app.application.reasoning.transcript_models import ReasoningDecisionType
+from app.application.reasoning.transcript_models import (
+    ReasoningDecisionType,
+    StoredModelFinishReason,
+    WaterbodyModelResponseV1,
+)
 from app.application.reasoning.transcript_store import ReasoningTranscriptStore
 from app.application.transcripts.read_models import ReadView
 from app.application.transcripts.stream_models import (
@@ -34,6 +40,7 @@ from app.application.transcripts.stream_models import (
 from app.domain import ItemReference
 from app.infrastructure.config import AppSettings
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from tests.application.coordinator_inspection import list_session_transcript_items
 from tests.application.evidence_tools.conftest import MODEL
 from tests.application.evidence_tools.fakes import FixedClock
 from tests.application.reasoning.test_planning_loop import _fixture
@@ -258,6 +265,116 @@ def test_recording_port_uses_existing_message_stream_and_typed_items() -> None:
                 created.run_id,
                 session.session_id,
             )
+            workflow.release.set()
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_stored_response_can_precede_provider_identity() -> None:
+    response = WaterbodyModelResponseV1(
+        operation_id=uuid4(),
+        phase=WaterbodyModelPhase.EVIDENCE_PLANNING,
+        model=MODEL,
+        finish_reason=StoredModelFinishReason.CANCELLED,
+        message_refs=(),
+        provider_response_id=None,
+    )
+
+    assert response.finish_reason is StoredModelFinishReason.CANCELLED
+    assert response.provider_response_id is None
+
+
+@pytest.mark.parametrize(
+    "reason",
+    tuple(
+        reason
+        for reason in StoredModelFinishReason
+        if reason not in {
+            StoredModelFinishReason.ERROR,
+            StoredModelFinishReason.CANCELLED,
+        }
+    ),
+)
+def test_other_terminal_stored_responses_still_require_provider_identity(
+    reason: StoredModelFinishReason,
+) -> None:
+    with pytest.raises(ValidationError, match="require provider identity"):
+        WaterbodyModelResponseV1(
+            operation_id=uuid4(),
+            phase=WaterbodyModelPhase.EVIDENCE_PLANNING,
+            model=MODEL,
+            finish_reason=reason,
+            message_refs=(),
+            provider_response_id=None,
+        )
+
+
+def test_recording_port_saves_cancellation_before_provider_terminal() -> None:
+    async def exercise() -> None:
+        workflow = HoldingWorkflow()
+        application = create_test_app(
+            settings=AppSettings(_env_file=None),
+            clock=FixedClock(),
+            workflow=workflow,
+            transcript_store=InMemoryTranscriptStore(),
+            model_catalog=MODEL_CATALOG,
+            shutdown_grace_period=0,
+        )
+        async with application.router.lifespan_context(application):
+            coordinator = application.state.run_coordinator
+            created = await coordinator.create_run(create_request_bytes("cancel stream"))
+            await workflow.calls.get()
+            session = await coordinator.prepare_agent_session(
+                created.run_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="1234567",
+            )
+            await coordinator.mark_agent_session_running(
+                created.run_id,
+                session.session_id,
+            )
+            session_items = await list_session_transcript_items(
+                coordinator,
+                created.run_id,
+                session.session_id,
+            )
+            operation = await coordinator.create_operation(
+                created.run_id,
+                session.session_id,
+            )
+            request = _model_request(operation.operation_id, session_items[0].item_id)
+            store = ReasoningTranscriptStore(
+                operations=coordinator,
+                run_id=created.run_id,
+                session_id=session.session_id,
+            )
+            cancel_requested = asyncio.Event()
+            store._cancellation = CancellationToken(cancel_requested)
+            stream = store.recording_port(StreamingModelPort()).stream(request)
+            first = await stream.__anext__()
+            assert isinstance(first, VisibleTextDelta)
+
+            cancel_requested.set()
+            await stream.aclose()
+
+            transcript = await application.state.transcript_reader.get_session_transcript(
+                created.run_id,
+                session.session_id,
+                ReadView.AUTO,
+            )
+            response = next(
+                item for item in transcript.items
+                if item.content_type == "waterbody_model_response"
+            )
+            assert response.content.body["finish_reason"] == "cancelled"
+            assert response.content.body["provider_response_id"] is None
+            message = next(
+                item for item in transcript.items
+                if item.content_type == "waterbody_agent_message"
+            )
+            assert message.content.body["generation_status"] == "incomplete"
+            assert message.content.body["end_reason"] == "cancelled"
+            await coordinator.cancel_agent_session(created.run_id, session.session_id)
             workflow.release.set()
 
     asyncio.run(exercise())

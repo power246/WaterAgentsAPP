@@ -8,8 +8,8 @@ from uuid import UUID, uuid4
 import httpx
 import pytest
 
-from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.models import RunStatus
+from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.models import (
     LateMessageOutputFact,
@@ -22,8 +22,8 @@ from app.ports.errors import PortUnavailableError
 from tests.m4_support import (
     analysis_context,
     create_request,
-    create_test_app as create_app,
 )
+from tests.m4_support import create_test_app as create_app
 
 BASE = "/api/analysis/runs"
 
@@ -54,6 +54,9 @@ class ReadFailureStore(InMemoryTranscriptStore):
     async def read_run(self, run_id):
         raise PortUnavailableError("database unavailable")
 
+    async def read_run_detail_roots(self, run_id):
+        raise PortUnavailableError("database unavailable")
+
 
 class BlockingWriteStore(InMemoryTranscriptStore):
     def __init__(self) -> None:
@@ -76,23 +79,23 @@ async def app_client(*, store=None, workflow=None, clock=None, settings=None):
         clock=clock,
         shutdown_grace_period=0,
     )
-    async with application.router.lifespan_context(application):
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=application),
-            base_url="http://testserver",
-        ) as client:
-            yield application, client
+    async with application.router.lifespan_context(application), httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application),
+        base_url="http://testserver",
+    ) as client:
+        yield application, client
 
 
 async def wait_saved(application, run_id: UUID) -> None:
-    for _ in range(200):
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
         persistence = await application.state.run_coordinator.get_persistence_info(
             run_id
         )
         if persistence.state is not PersistenceState.PENDING:
             assert persistence.state is PersistenceState.UP_TO_DATE
             return
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.01)
     raise AssertionError("persistence writer did not settle")
 
 
@@ -250,6 +253,53 @@ def test_live_and_history_share_complete_reader_models_and_visibility() -> None:
             )
             assert fallback.status_code == 404
             coordinator._runs[run_id] = runtime
+
+    run(exercise)
+
+
+def test_run_detail_does_not_parse_unreferenced_session_items(monkeypatch) -> None:
+    async def exercise() -> None:
+        store = InMemoryTranscriptStore()
+        workflow = GatedWorkflow()
+        async with app_client(store=store, workflow=workflow) as (application, client):
+            created = await client.post(BASE, json=create_request("focused detail"))
+            run_id = UUID(created.json()["run_id"])
+            _, release = await workflow.started.get()
+            coordinator = application.state.run_coordinator
+            session = await coordinator.prepare_agent_session(
+                run_id, agent_role="query_parser"
+            )
+            unrelated = await coordinator.reserve_transcript_item(
+                run_id, session_id=session.session_id
+            )
+            await coordinator.finalize_transcript_item(
+                run_id,
+                unrelated.item_id,
+                "runtime_fact",
+                1,
+                WorkflowQuiescedFact(),
+            )
+            await wait_saved(application, run_id)
+
+            reader = application.state.transcript_reader
+            original_parse = reader._parse_item
+
+            def parse_selected(stored, item):
+                if item.item_id == unrelated.item_id:
+                    raise AssertionError("run detail parsed an unrelated session item")
+                return original_parse(stored, item)
+
+            monkeypatch.setattr(reader, "_parse_item", parse_selected)
+            for suffix, source in (("", "live"), ("?view=history", "postgresql")):
+                detail = await client.get(f"{BASE}/{run_id}{suffix}")
+                assert detail.status_code == 200
+                assert detail.json()["source"] == source
+                assert str(unrelated.item_id) not in {
+                    item["item_id"] for item in (
+                        *detail.json()["items"], *detail.json()["referenced_items"]
+                    )
+                }
+            release.set()
 
     run(exercise)
 
@@ -592,7 +642,7 @@ def test_history_never_mixes_unpersisted_live_items_into_postgres_view() -> None
     run(exercise)
 
 
-def test_corrupt_items_keep_safe_fulltext_unless_body_is_unreadable(
+def test_corrupt_items_preserve_stored_fulltext_unless_body_is_unreadable(
     application_logs: list[str],
 ) -> None:
     async def exercise() -> None:
@@ -654,25 +704,25 @@ def test_corrupt_items_keep_safe_fulltext_unless_body_is_unreadable(
                 f"{BASE}/{run_id}/transcript/{candidate.created_item_id}/content?view=history"
             )
             assert content_response.status_code == 200
-            safe_text = content_response.json()["text"]
-            assert json.loads(safe_text) == {
+            stored_text = content_response.json()["text"]
+            assert stored_text == unsafe_body
+            assert json.loads(stored_text) == {
                 "type": "run_created",
                 "payload": {
                     "configuration": 7,
                     "nested": {
-                        "api_key": "[REDACTED]",
-                        "note": "Authorization: [REDACTED]",
+                        "api_key": unsafe_values[0],
+                        "note": f"Authorization: Basic {unsafe_values[1]}",
                     },
-                    "private_key": "[REDACTED]",
+                    "private_key": unsafe_values[2],
                 },
             }
             assert content_response.json()["issues"][0]["error"]["code"] == (
                 "transcript_content_corrupt"
             )
             assert content_response.json()["content_bytes"] == len(
-                safe_text.encode("utf-8")
+                stored_text.encode("utf-8")
             )
-            assert all(secret not in content_response.text for secret in unsafe_values)
             assert all(secret not in "".join(application_logs) for secret in unsafe_values)
 
             store._items[item.item_id] = item.model_copy(

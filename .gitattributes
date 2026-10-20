@@ -1,0 +1,5 @@
+# Keep the archived evidence byte-for-byte stable on every checkout.
+runtime-test-1019/** -text
+runtime-test-1019/source-compatibility/tracked-changes.patch -diff
+runtime-test-1019/source-compatibility/manifest.json -diff
+runtime-test-1019/verification/** -diff

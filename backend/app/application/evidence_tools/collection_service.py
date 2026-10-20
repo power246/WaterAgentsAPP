@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 from collections import defaultdict
 from hashlib import sha256
 
@@ -15,6 +17,12 @@ from app.application.evidence_tools.collection_manifest import (
     build_collection_manifest,
 )
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
+from app.application.evidence_tools.evidence_sources import (
+    weather_parameter_for_variable,
+)
+from app.application.evidence_tools.measurement_provenance import (
+    estimate_mapped_channel_distance_km,
+)
 from app.application.evidence_tools.models import (
     EvidenceCollectionArtifacts,
     EvidenceCollectionInput,
@@ -23,9 +31,6 @@ from app.application.evidence_tools.models import (
     EvidenceToolWriter,
 )
 from app.application.evidence_tools.scope import EvidenceSessionScope, EvidenceWindow
-from app.application.evidence_tools.evidence_sources import (
-    weather_parameter_for_variable,
-)
 from app.domain import (
     CollectionFactPayload,
     CollectionManifest,
@@ -65,6 +70,7 @@ _CONTEXT_TYPES = (
     UpstreamResultRecord,
     HistoricalTranscriptRecord,
 )
+logger = logging.getLogger("wateragents.evidence_tools")
 
 
 def build_policy_observation(
@@ -96,6 +102,9 @@ def build_policy_observation(
         channel or record.channel,
         record.provider_quality,
     )
+    medium, fraction, method, statistic = _policy_source_fields(
+        record, provider, channel or record.channel
+    )
     return PolicyObservation(
         record_ref=reference,
         parameter=record.parameter,
@@ -103,10 +112,11 @@ def build_policy_observation(
         channel=channel or record.channel,
         location_comid=record.location.comid,
         station_id=record.location.station_id or "unknown-station",
-        medium=record.medium,
-        fraction=record.fraction,
-        method=record.method or "missing-method",
-        statistic=record.statistic,
+        location_point=record.location.point,
+        medium=medium,
+        fraction=fraction,
+        method=method,
+        statistic=statistic,
         value_semantics=policy.value_semantics,
         observed_time=record.observed_time,
         valid_time_range=record.valid_time_range,
@@ -115,6 +125,38 @@ def build_policy_observation(
         quality=quality,
         series_identity=_series_identity(record, policy.value_semantics.value),
     )
+
+
+def _policy_source_fields(
+    record: WaterObservationRecord | DischargeObservationRecord,
+    provider: ParameterProvider,
+    channel: str,
+) -> tuple[str | None, str | None, str, str]:
+    raw = (
+        record.medium,
+        record.fraction,
+        record.method or "missing-method",
+        record.statistic,
+    )
+    # The public WDFN continuous feed uses source codes, while the policy uses
+    # descriptive terms. Keep the persisted source record unchanged; translate
+    # only these verified pH and required discharge code combinations for policy use.
+    # "sensor" denotes the continuous automated feed in this policy; discharge
+    # itself may be computed from stage and a rating curve.
+    if (
+        provider is not ParameterProvider.WDFN_TIME_SERIES
+        or channel != "continuous"
+        or record.parameter.code_system != "usgs"
+        or record.medium != "surface water"
+        or record.fraction is not None
+        or record.statistic != "00011"
+    ):
+        return raw
+    if record.parameter.code == "00400" and record.method == "STNRD":
+        return "Water", "Total", "sensor", "instantaneous"
+    if record.parameter.code == "00060" and record.method is None:
+        return "Water", None, "sensor", "instantaneous"
+    return raw
 
 
 class EvidenceCollectionService:
@@ -143,11 +185,19 @@ class EvidenceCollectionService:
         ordered = tuple(sorted(collections, key=_collection_sort_key))
         manifests = tuple(self._manifest(scope, item) for item in ordered)
         records, discoveries = _deduplicate_records(ordered)
+        started = asyncio.get_running_loop().time()
         stored = await self._writer.write_collection(
             scope,
             operation_id=operation_id,
             manifests=manifests,
             records=records,
+        )
+        logger.info(
+            "Evidence source records written.",
+            extra={"event_name": "evidence_source_records_written",
+                   "run_id": scope.run_id, "session_id": scope.session_id,
+                   "operation": operation_id, "result_count": len(records),
+                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
         )
         if (
             len(stored.manifest_refs) != len(manifests)
@@ -164,6 +214,7 @@ class EvidenceCollectionService:
 
         fragments: dict[str, EvidenceFragment] = {}
         facts: dict[str, EvidenceFragment] = {}
+        started = asyncio.get_running_loop().time()
         for collection, manifest in zip(ordered, manifests, strict=True):
             built, collection_facts = self._build_collection_fragments(
                 scope,
@@ -177,24 +228,46 @@ class EvidenceCollectionService:
             for fact in collection_facts:
                 facts.setdefault(fact.evidence_id, fact)
 
+        logger.info(
+            "Evidence fragments built.",
+            extra={"event_name": "evidence_fragments_built",
+                   "run_id": scope.run_id, "session_id": scope.session_id,
+                   "operation": operation_id, "result_count": len(fragments) + len(facts),
+                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+        )
+
         fragment_refs = []
         fact_refs = []
-        for fragment in sorted(fragments.values(), key=lambda item: item.evidence_id):
-            fragment_refs.append(
-                await self._writer.write_fragment(
-                    scope,
-                    operation_id=operation_id,
-                    fragment=fragment,
-                )
-            )
-        for fact in sorted(facts.values(), key=lambda item: item.evidence_id):
-            fact_refs.append(
-                await self._writer.write_fragment(
-                    scope,
-                    operation_id=operation_id,
-                    fragment=fact,
-                )
-            )
+        started = asyncio.get_running_loop().time()
+        for entries, references in ((fragments, fragment_refs), (facts, fact_refs)):
+            ordered = sorted(entries.values(), key=lambda item: item.evidence_id)
+            for offset in range(0, len(ordered), 32):
+                async with asyncio.TaskGroup() as group:
+                    pending = tuple(
+                        group.create_task(self._writer.write_fragment(
+                            scope,
+                            operation_id=operation_id,
+                            fragment=fragment,
+                        ))
+                        for fragment in ordered[offset:offset + 32]
+                    )
+                references.extend(task.result() for task in pending)
+                if len(references) % 128 == 0:
+                    logger.info(
+                        "Evidence fragment write progress.",
+                        extra={"event_name": "evidence_fragment_write_progress",
+                               "run_id": scope.run_id, "session_id": scope.session_id,
+                               "operation": operation_id,
+                               "result_count": len(fragment_refs) + len(fact_refs),
+                               "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+                    )
+        logger.info(
+            "Evidence fragments written.",
+            extra={"event_name": "evidence_fragments_written",
+                   "run_id": scope.run_id, "session_id": scope.session_id,
+                   "operation": operation_id, "result_count": len(fragment_refs) + len(fact_refs),
+                   "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+        )
         return EvidenceCollectionArtifacts(
             manifest_refs=stored.manifest_refs,
             source_record_refs=stored.source_record_refs,
@@ -265,6 +338,11 @@ class EvidenceCollectionService:
         observations_by_series: dict[str, list[PolicyObservation]] = defaultdict(list)
         for _, observation, _ in observation_details.values():
             observations_by_series[observation.series_identity].append(observation)
+        series_observations = {
+            identity: tuple(items)
+            for identity, items in observations_by_series.items()
+        }
+        coverage_cache: dict[tuple[ParameterKey, str, str], EvidenceCoverage] = {}
 
         fragments: list[EvidenceFragment] = []
         unit_blockers: dict[tuple[ParameterKey, str], list[SourceRecordReference]] = (
@@ -308,9 +386,8 @@ class EvidenceCollectionService:
                             quality=quality,
                             observation=observation,
                             conversion=conversion,
-                            series_observations=tuple(
-                                observations_by_series[observation.series_identity]
-                            ),
+                            series_observations=series_observations[observation.series_identity],
+                            coverage_cache=coverage_cache,
                             discovery_identities=discoveries[record.record_id],
                         )
                     )
@@ -427,6 +504,7 @@ class EvidenceCollectionService:
         observation,
         conversion,
         series_observations,
+        coverage_cache,
         discovery_identities,
     ) -> EvidenceFragment:
         capability = self._registry.get(record.parameter)
@@ -452,18 +530,22 @@ class EvidenceCollectionService:
             and quality.quality_class is not EvidenceQualityClass.INVALID
             and applicability is EvidenceApplicability.DIRECT_MEASUREMENT
         )
-        try:
-            coverage = calculate_coverage(
-                self._registry,
-                capability,
-                observation.provider,
-                observation.channel,
-                series_observations,
-                window.time_range,
-                collection_complete=complete,
-            )
-        except EvidencePolicyError:
-            coverage = _basic_coverage(window, count=1, complete=complete)
+        coverage_key = (record.parameter, observation.series_identity, window.window_id)
+        coverage = coverage_cache.get(coverage_key)
+        if coverage is None:
+            try:
+                coverage = calculate_coverage(
+                    self._registry,
+                    capability,
+                    observation.provider,
+                    observation.channel,
+                    series_observations,
+                    window.time_range,
+                    collection_complete=complete,
+                )
+            except EvidencePolicyError:
+                coverage = _basic_coverage(window, count=1, complete=complete)
+            coverage_cache[coverage_key] = coverage
         flags = set(quality.flags)
         if conversion is None:
             flags.add(DataQualityFlag.UNIT_UNRESOLVED)
@@ -500,6 +582,30 @@ class EvidenceCollectionService:
                 if final_quality is EvidenceQualityClass.INVALID
                 else EvidenceResultEligibility.INFERRED_ONLY
             )
+        destination_point = (
+            scope.analysis_target_point
+            if scope.agent_comid == scope.topology.target_comid
+            else scope.target_node.point
+        )
+        mapped_distance = estimate_mapped_channel_distance_km(
+            scope.topology,
+            (scope.agent_comid,),
+            record.location.point,
+            destination_point,
+        )
+        if mapped_distance is not None:
+            location = record.location.model_copy(update={
+                "comid": scope.agent_comid,
+                "distance_to_target_km": mapped_distance,
+                "distance_basis": "mapped_channel_estimate",
+            })
+        elif record.location.point is not None:
+            location = record.location.model_copy(update={
+                "distance_to_target_km": None,
+                "distance_basis": None,
+            })
+        else:
+            location = record.location
         fragment = EvidenceFragment(
             evidence_id=_evidence_id(
                 "record",
@@ -512,7 +618,7 @@ class EvidenceCollectionService:
             source=record.provider,
             collection_status=CollectionStatus.AVAILABLE,
             target_comid=scope.agent_comid,
-            location=record.location,
+            location=location,
             time_range=window.time_range,
             parameter_refs=(record.parameter,),
             data_type=record.record_type,
@@ -556,7 +662,11 @@ class EvidenceCollectionService:
         applicability = EvidenceApplicability.CONTEXTUAL_ONLY
         relation_id = None
         if isinstance(record, UpstreamResultRecord):
-            if record.result_kind in {"quantified", "directional"}:
+            flags = (
+                record.cell_projection.quality_flags
+                if record.cell_projection is not None else ()
+            )
+            if record.result_kind in {"quantified", "range_estimate", "directional"}:
                 payload = UpstreamResultPayload(
                     upstream_session_id=record.upstream_session_id,
                     result_ref=record.result_ref,
@@ -576,6 +686,10 @@ class EvidenceCollectionService:
                 record_refs=(reference,),
             )
             source_refs = (reference,)
+        full_window_result = (
+            isinstance(record, UpstreamResultRecord)
+            and record.valid_time_range == window.time_range
+        )
         fragment = EvidenceFragment(
             evidence_id=_evidence_id(
                 "context",
@@ -596,7 +710,10 @@ class EvidenceCollectionService:
             series_identity=None,
             quality_class=quality,
             quality_flags=flags,
-            coverage=_basic_coverage(window, count=1, complete=complete),
+            coverage=_basic_coverage(
+                window, count=1, complete=complete,
+                full_window=full_window_result,
+            ),
             payload=payload,
             source_record_refs=source_refs,
             provenance=_fragment_provenance(
@@ -715,9 +832,16 @@ class EvidenceCollectionService:
                     for record in collection.batch.records
                     if _record_applies_to_window(record, window)
                     and (
-                        not isinstance(record, _OBSERVATION_TYPES)
+                        not isinstance(
+                            record, (*_OBSERVATION_TYPES, UpstreamResultRecord)
+                        )
                         or record.parameter == parameter
                     )
+                )
+                status = (
+                    CollectionStatus.EMPTY
+                    if completeness.complete and not matching
+                    else completeness.status
                 )
                 reason = (
                     completeness.reason
@@ -731,7 +855,7 @@ class EvidenceCollectionService:
                     manifest,
                     parameter,
                     window,
-                    status=completeness.status,
+                    status=status,
                     reason=reason,
                     record_refs=tuple(
                         sorted(set(matching), key=_source_ref_sort_key)
@@ -925,19 +1049,23 @@ def _window_seconds(window: EvidenceWindow) -> int:
     return delta.days * 86400 + delta.seconds
 
 
-def _basic_coverage(window, *, count, complete):
+def _basic_coverage(window, *, count, complete, full_window=False):
     return EvidenceCoverage(
         status=(
-            CoverageStatus.PARTIAL
+            CoverageStatus.UNKNOWN
+            if not complete
+            else CoverageStatus.COMPLETE
+            if count and full_window
+            else CoverageStatus.PARTIAL
             if count
             else CoverageStatus.INSUFFICIENT
-            if complete
-            else CoverageStatus.UNKNOWN
         ),
         observed_count=count,
         expected_count=None,
         ratio=None,
-        covered_duration_seconds=0,
+        covered_duration_seconds=(
+            _window_seconds(window) if count and complete and full_window else 0
+        ),
         window_duration_seconds=_window_seconds(window),
         largest_gap_seconds=None,
     )

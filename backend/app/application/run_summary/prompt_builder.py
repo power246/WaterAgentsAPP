@@ -5,7 +5,10 @@ from datetime import datetime
 from uuid import UUID
 
 from app.application.canonical_json import canonical_json_digest
-from app.application.run_summary.draft_models import run_summary_response_schema
+from app.application.run_summary.draft_models import (
+    SUMMARY_HIGHLIGHT_KINDS,
+    run_summary_response_schema,
+)
 from app.application.run_summary.models import (
     RunSummaryInput,
     RunSummaryMessageRole,
@@ -15,7 +18,6 @@ from app.application.run_summary.models import (
 from app.application.transcripts.models import TranscriptContentRef
 from app.domain import ModelSelection
 
-
 SUMMARY_SYSTEM_PROMPT = "\n".join(
     (
         "You explain only the already-determined analysis facts in RUN_SUMMARY_INPUT.",
@@ -23,7 +25,12 @@ SUMMARY_SYSTEM_PROMPT = "\n".join(
         "upstream flow.",
         "Use the query's primary language and plain, concise language for a "
         "non-specialist. Put the target conclusion first.",
-        "Keep risk, confidence, and data availability distinct.",
+        "Keep risk, confidence, and result availability distinct.",
+        (
+            "When every window has only a prediction, call availability complete for "
+            "the predicted results, not for measured observations. Do not imply "
+            "that measured data covers any window without saved readings."
+        ),
         "Never describe absent evidence as safe, normal, or numeric zero.",
         "State partial topology coverage and invalid branches as limitations "
         "without exposing technical failure details.",
@@ -32,16 +39,29 @@ SUMMARY_SYSTEM_PROMPT = "\n".join(
         "Do not change, rescore, review, or overturn any waterbody conclusion.",
         "Do not calculate, convert, average, extrapolate, reformat, or invent any "
         "numeric value.",
-        "Every notable numeric highlight must copy its exact value, unit, "
-        "window_id, and source_ref from the input.",
-        "Use digits or scientific-notation values only inside numeric highlights. "
-        "The plain-language summary may contain scoped COMIDs but no other digits.",
-        "Use only the allowed highlight kinds and source references from the input.",
+        "Describe inferred or aggregated window values as representative values, "
+        "not as single raw readings.",
+        "Every notable numeric highlight must copy its saved point or bounds, "
+        "unit, window_id, and source_ref from the input.",
+        "Range estimates must preserve value_lower and value_upper with display_value=null; "
+        "never replace a range with its midpoint. Use kind=range_estimate. "
+        "Preserve low-basis/model-estimate wording and do not call predictions measurements.",
+        "Use cited numeric values only inside numeric highlights. "
+        "The plain-language summary may name exact active COMIDs and window IDs "
+        "from the input, but must contain no other numbers.",
+        "Use only these highlight kinds: "
+        + ", ".join(sorted(SUMMARY_HIGHLIGHT_KINDS))
+        + ". Highlights are optional. Use only source references from the input.",
         "Do not emit URLs, provider details, credentials, prompts, logs, hidden "
         "reasoning, or chain-of-thought.",
         "Return only the strict JSON object required by the response schema. "
         "Include the exact target_comid, graph_coverage, and every active COMID "
         "in stable input order.",
+        "Include every top-level key: schema_version (integer 1), language, "
+        "target_comid, graph_coverage, covered_comids, plain_language_summary, "
+        "and highlights. Use an empty highlights array when there are none.",
+        "Each highlight must include kind, text, source_ref, display_value, "
+        "value_lower, value_upper, display_unit, and window_id. Use null for absent display fields.",
     )
 )
 

@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { BrowserRouter, Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api, ApiError, type Settings, type TranscriptItem } from '../api/http'
+import { api, ApiError, type AnchorDistanceEstimate, type Settings, type TranscriptItem } from '../api/http'
 import { AdminPage } from '../features/admin/AdminPage'
 import { subscribe } from '../api/sse'
 import { DetailPanel, type DetailTab } from '../features/analysis/DetailPanel'
 import { NewAnalysisForm } from '../features/analysis/NewAnalysisForm'
 import { TopologyMap } from '../features/analysis/TopologyMap'
 import { TimeSeries } from '../features/analysis/TimeSeries'
-import { graphFromDetail, graphFromText, inferenceFromText, summaryFromText,
+import { graphFromDetail, graphFromText, hasMissingAnchorDistances, inferenceFromText, summaryFromText,
+  withAnchorDistanceEstimates,
   type Graph, type InferenceResult, type RunSummaryResult } from '../features/analysis/models'
 import { emptyRun, emptyTranscript, runReducer, transcriptReducer } from '../features/analysis/state'
 import { DeleteRun } from '../features/history/DeleteRun'
@@ -31,14 +32,24 @@ function Workspace({ mode }: { mode: Mode }) {
   }, [])
   const [run, dispatchRun] = useReducer(runReducer, emptyRun)
   const [transcript, dispatchTranscript] = useReducer(transcriptReducer, emptyTranscript)
+  const [transcriptRead, setTranscriptRead] = useState<{
+    runId: string; sessionId: string; status: 'loading' | 'ready' | 'error'; error: string | null
+  } | null>(null)
   const [referencedItems, setReferencedItems] = useState<TranscriptItem[]>([])
-  const [result, setResult] = useState<InferenceResult | null>(null)
+  const [loadedResult, setLoadedResult] = useState<{
+    runId: string; sessionId: string; itemId: string; value: InferenceResult
+  } | null>(null)
+  const [anchorDistanceOverlay, setAnchorDistanceOverlay] = useState<{
+    key: string; estimates: AnchorDistanceEstimate[]
+  } | null>(null)
   const [summary, setSummary] = useState<RunSummaryResult | null>(null)
   const [tab, setTab] = useState<DetailTab>('overview')
   const [mobileTab, setMobileTab] = useState<'controls' | 'map' | 'detail'>('controls')
   const [runError, setRunError] = useState('')
   const [historyFallback, setHistoryFallback] = useState<{ runId: string; url: string } | null>(null)
   const runStream = useRef<AbortController | null>(null)
+  const timeSeriesRef = useRef<HTMLDetailsElement | null>(null)
+  const [timeSeriesOpen, setTimeSeriesOpen] = useState(false)
   const [selectedComid, setSelectedComid] = useState<string | null>(null)
   const [mapPoint, setMapPoint] = useState<{ latitude: number; longitude: number } | null>(null)
   const [loadedTopology, setLoadedTopology] = useState<{ key: string; graph: Graph | null; error: string | null } | null>(null)
@@ -47,6 +58,7 @@ function Workspace({ mode }: { mode: Mode }) {
   const historyUrl = historyFallback?.runId === runId ? historyFallback.url : null
   const historical = mode === 'history' || historyUrl !== null
   const sessionTabOpen = tab === 'agent' || tab === 'evidence'
+  const currentSnapshot = run.snapshot?.run_id === runId ? run.snapshot : null
   const currentDetail = run.detail?.run.run_id === runId ? run.detail : null
   const topologyItem = currentDetail?.items.find((item) => item.content_type === 'topology_ready')
   const topologyRef = topologyItem?.content.kind === 'reference' ? topologyItem.content_ref : null
@@ -138,7 +150,9 @@ function Workspace({ mode }: { mode: Mode }) {
   useEffect(() => {
     dispatchTranscript({ type: 'open', sessionId: sessionId ?? '' })
     setReferencedItems([])
-    setResult(null)
+    setLoadedResult(null)
+    setTranscriptRead(null)
+    setTimeSeriesOpen(false)
   }, [runId, sessionId, historical])
 
   const sessionStatus = run.snapshot?.sessions.find((item) => item.session_id === sessionId)?.status
@@ -148,24 +162,36 @@ function Workspace({ mode }: { mode: Mode }) {
     const terminal = ['completed', 'failed', 'cancelled'].includes(sessionStatus ?? '')
     const controller = new AbortController()
     if (historical || terminal) {
+      setTranscriptRead({ runId, sessionId, status: 'loading', error: null })
       void api.transcript(runId, sessionId, historical ? 'history' : 'auto', controller.signal)
         .then((data) => {
           if (controller.signal.aborted) return
           dispatchTranscript({ type: 'history', sessionId, items: data.items ?? [] })
           setReferencedItems(data.referenced_items ?? [])
+          setTranscriptRead({ runId, sessionId, status: 'ready', error: null })
         }).catch((cause: unknown) => {
-          if (!controller.signal.aborted) setRunError(cause instanceof ApiError ? cause.code : 'Transcript unavailable')
+          if (!controller.signal.aborted) {
+            const error = cause instanceof ApiError ? cause.code : 'Transcript unavailable'
+            setRunError(error)
+            setTranscriptRead({ runId, sessionId, status: 'error', error })
+          }
         })
     } else if (sessionStatus && sessionTabOpen) {
+      setTranscriptRead({ runId, sessionId, status: 'loading', error: null })
       void subscribe('session', runId, sessionId, (event) => {
         if (event.name !== 'stream_end' && event.name !== 'run_snapshot') {
           dispatchTranscript({ type: 'event', name: event.name, data: event.data })
         }
+        setTranscriptRead({ runId, sessionId, status: 'ready', error: null })
       }, controller.signal).catch((cause: unknown) => {
         if (controller.signal.aborted) return
         if (cause instanceof ApiError && cause.status === 410 && cause.historyUrl) {
           setHistoryFallback({ runId, url: `/api/analysis/runs/${encodeURIComponent(runId)}?view=history` })
-        } else setRunError(cause instanceof ApiError ? cause.code : 'Session stream unavailable')
+        } else {
+          const error = cause instanceof ApiError ? cause.code : 'Session stream unavailable'
+          setRunError(error)
+          setTranscriptRead({ runId, sessionId, status: 'error', error })
+        }
       })
     }
     return () => controller.abort()
@@ -173,17 +199,53 @@ function Workspace({ mode }: { mode: Mode }) {
 
   const selectedSession = run.snapshot?.sessions.find((item) => item.session_id === sessionId)
     ?? run.detail?.sessions?.find((item) => item.session_id === sessionId)
+  const selectedResultItemId = selectedSession?.result_ref?.item_id
+  const selectedResult = loadedResult?.runId === runId && loadedResult.sessionId === sessionId &&
+    loadedResult.itemId === selectedResultItemId ? loadedResult.value : null
+  const anchorDistanceKey = runId && sessionId && selectedResultItemId
+    ? `${runId}:${sessionId}:${selectedResultItemId}` : null
   useEffect(() => {
-    if (!runId || !sessionId || !selectedSession?.result_ref?.item_id) return
+    if (!runId || !sessionId || !selectedResultItemId) return
     let active = true
-    void api.content(runId, selectedSession.result_ref.item_id, historical ? 'history' : 'auto')
-      .then((content) => { if (active) setResult(inferenceFromText(content.text, runId, sessionId)) })
-      .catch(() => { if (active) setResult(null) })
+    void api.content(runId, selectedResultItemId, historical ? 'history' : 'auto')
+      .then((content) => {
+        if (!active) return
+        const value = inferenceFromText(content.text, runId, sessionId)
+        setLoadedResult(value ? { runId, sessionId, itemId: selectedResultItemId, value } : null)
+      })
+      .catch(() => { if (active) setLoadedResult(null) })
     return () => { active = false }
-  }, [runId, sessionId, selectedSession?.result_ref?.item_id, historical])
+  }, [runId, sessionId, selectedResultItemId, historical])
 
-  const summaryItemId = run.detail?.run.result_summary?.summary_result_ref?.item_id
-    ?? run.snapshot?.summary.result_ref?.item_id
+  useEffect(() => {
+    setAnchorDistanceOverlay(null)
+    if (!historical || !runId || !selectedResultItemId || !anchorDistanceKey || !selectedResult ||
+      !hasMissingAnchorDistances(selectedResult)) return
+    const controller = new AbortController()
+    void api.anchorDistanceEstimates(runId, selectedResultItemId, controller.signal)
+      .then((response) => {
+        if (!controller.signal.aborted && response.result_item_id === selectedResultItemId) {
+          setAnchorDistanceOverlay({ key: anchorDistanceKey, estimates: response.estimates })
+        }
+      }).catch(() => undefined)
+    return () => controller.abort()
+  }, [historical, runId, selectedResultItemId, anchorDistanceKey, selectedResult])
+
+  const displayedResult = useMemo(() =>
+    selectedResult && historical && anchorDistanceOverlay?.key === anchorDistanceKey
+      ? withAnchorDistanceEstimates(selectedResult, anchorDistanceOverlay.estimates) : selectedResult,
+  [selectedResult, historical, anchorDistanceOverlay, anchorDistanceKey])
+
+  function showTimeSeries() {
+    setTimeSeriesOpen(true)
+    setMobileTab('map')
+    window.setTimeout(() => timeSeriesRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }), 0)
+  }
+
+  const detailSummaryRef = currentDetail?.run.result_summary?.summary_result_ref
+  const snapshotSummaryRef = currentSnapshot?.summary.result_ref
+  const summaryItemId = detailSummaryRef?.run_id === runId ? detailSummaryRef.item_id
+    : snapshotSummaryRef?.run_id === runId ? snapshotSummaryRef.item_id : null
   useEffect(() => {
     setSummary(null)
     if (!runId || !summaryItemId) return
@@ -228,7 +290,9 @@ function Workspace({ mode }: { mode: Mode }) {
 
   return <div className="app-shell">
     <header className="app-header">
-      <Link to="/" className="brand">Water Agents</Link>
+      <Link to="/" className="brand" aria-label="Water Agents, University of Minnesota home">
+        <img src="/M_maroon.svg" alt="" /><span className="brand-text">Water Agents</span>
+      </Link>
       <nav><Link to="/">New</Link><Link to="/history">History</Link></nav>
       <button type="button" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
     </header>
@@ -259,12 +323,19 @@ function Workspace({ mode }: { mode: Mode }) {
           selectedSessionId={sessionId} onSelect={selectSession}
           onPick={mode === 'home' ? (latitude, longitude) => setMapPoint({ latitude, longitude }) : undefined} />
         {selectedComid && !sessionId && <p className="map-note">COMID {selectedComid}: session not started. Topology and scheduling status are shown on the map.</p>}
-        {sessionId && <details className="time-series-drawer"><summary>Saved time series</summary><TimeSeries result={result} /></details>}
+        {sessionId && <details ref={timeSeriesRef} className="time-series-drawer" open={timeSeriesOpen}
+          onToggle={(event) => setTimeSeriesOpen(event.currentTarget.open)}>
+          <summary>Saved time series</summary>{timeSeriesOpen && <TimeSeries result={displayedResult} />}
+        </details>}
       </div>
       <div className={`right-panel mobile-${mobileTab}`}>
-        <DetailPanel runId={runId} snapshot={run.snapshot} detail={run.detail}
+        <DetailPanel runId={runId} snapshot={run.snapshot} detail={run.detail} graph={graph}
           sessionId={sessionId} processItems={transcript.items} referencedItems={referencedItems}
-          result={result} summary={summary} readView={historical ? 'history' : 'auto'}
+          result={selectedResult} summary={summary?.run_id === runId ? summary : null}
+          readView={historical ? 'history' : 'auto'}
+          transcriptRead={transcriptRead?.runId === runId && transcriptRead.sessionId === sessionId
+            ? transcriptRead : { status: 'loading', error: null }}
+          onShowTimeSeries={displayedResult ? showTimeSeries : undefined}
           tab={tab} onTab={setTab} onRefresh={refresh} />
       </div>
     </main>

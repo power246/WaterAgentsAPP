@@ -11,10 +11,14 @@ from app.domain.hydrology._topology_validation import (
 from app.domain.hydrology.branch_outcome import BranchOutcome
 from app.domain.hydrology.branch_outcome_status import BranchOutcomeStatus
 from app.domain.hydrology.comid_layer import ComidLayer
+from app.domain.hydrology.coverage_unit import CoverageUnit
 from app.domain.hydrology.hydrology_edge import HydrologyEdge
 from app.domain.hydrology.hydrology_node import HydrologyNode
 from app.domain.hydrology.hydrology_participation import HydrologyParticipation
-from app.domain.hydrology.topology_coverage import TopologyCoverage
+from app.domain.hydrology.topology_coverage import (
+    TopologyCoverage,
+    derive_topology_coverage,
+)
 from app.domain.hydrology.topology_limits import TopologyLimits
 from app.domain.hydrology.topology_search_stats import TopologySearchStats
 from app.domain.hydrology.waterbody_geometry import WaterbodyGeometry
@@ -128,6 +132,22 @@ class HydrologyGraph(DomainModel):
                 active_comids.update(outcome.path_to_target)
                 active_edges.update(path_edges)
 
+        qualified_paths_by_unit: dict[CoverageUnit, set[tuple[str, ...]]] = {}
+        for outcome in self.branch_outcomes:
+            if outcome.outcome is BranchOutcomeStatus.QUALIFIED:
+                qualified_paths_by_unit.setdefault(outcome.coverage_unit, set()).add(
+                    outcome.path_to_target
+                )
+        for outcome in self.branch_outcomes:
+            if outcome.outcome is not BranchOutcomeStatus.BACKUP_SEARCH_ENDED:
+                continue
+            qualified_paths = qualified_paths_by_unit.get(outcome.coverage_unit, set())
+            if not any(
+                outcome.path_to_target[index:] in qualified_paths
+                for index in range(len(outcome.path_to_target))
+            ):
+                raise ValueError("backup search requires a downstream qualified path")
+
         for node in self.nodes:
             expected = (
                 HydrologyParticipation.ACTIVE
@@ -225,16 +245,7 @@ class HydrologyGraph(DomainModel):
                 raise ValueError("execution layer COMIDs must use stable node order")
 
     def _validate_coverage(self) -> None:
-        qualified = sum(
-            outcome.outcome is BranchOutcomeStatus.QUALIFIED
-            for outcome in self.branch_outcomes
-        )
-        if qualified == len(self.branch_outcomes):
-            expected = TopologyCoverage.COMPLETE
-        elif qualified:
-            expected = TopologyCoverage.PARTIAL
-        else:
-            expected = TopologyCoverage.NONE
+        expected = derive_topology_coverage(self.branch_outcomes)
         if self.coverage is not expected:
             raise ValueError("coverage must match branch outcomes")
 

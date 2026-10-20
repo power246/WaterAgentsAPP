@@ -173,8 +173,10 @@ class M8Runtime:
     desired_profile: EmbeddingProfile
     clock: ClockPort
     shutdown_grace_seconds: float
+    memory_enabled: bool = True
     run_embeddings: RunEmbeddingRegistry | None = None
     _task: asyncio.Task[None] | None = field(default=None, init=False, repr=False)
+    _started: bool = field(default=False, init=False, repr=False)
     _stopping: bool = field(default=False, init=False, repr=False)
 
     def bind_run_embedding(self, run_id: str, port: EmbeddingPort) -> None:
@@ -193,24 +195,29 @@ class M8Runtime:
             self.run_embeddings.release(run_id)
 
     async def start(self) -> None:
-        if self._task is not None:
+        if self._started:
             raise RuntimeError("M8 runtime is already started")
         await self.observe_health()
+        self._started = True
+        if not self.memory_enabled:
+            return
         self._task = asyncio.create_task(
             self.runner.run(self._reconcile_guarded),
             name="rag-index-worker",
         )
 
     def notify_run_terminal(self, _run_id: object) -> None:
-        if not self._stopping:
+        if self.memory_enabled and not self._stopping:
             self.signal.notify_run_terminal()
 
     def notify_admin_maintenance(self) -> None:
-        if not self._stopping:
+        if self.memory_enabled and not self._stopping:
             self.signal.notify_run_terminal()
 
     async def apply_profile_handoff(self, profile: EmbeddingProfile) -> str:
         """Use the existing M8 worker and activation gates for a desired profile."""
+        if not self.memory_enabled:
+            raise RuntimeError("historical memory is disabled")
         if self._stopping:
             raise RuntimeError("RAG runtime is shutting down")
         await self.operations.build_generation(profile)
@@ -523,6 +530,7 @@ async def build_m8_runtime(
             desired_profile=desired_profile,
             clock=clock,
             shutdown_grace_seconds=settings.rag_worker_shutdown_grace_seconds,
+            memory_enabled=settings.memory_enabled,
             run_embeddings=run_embeddings,
         )
         yield runtime

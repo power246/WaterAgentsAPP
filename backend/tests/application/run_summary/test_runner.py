@@ -10,13 +10,25 @@ from app.application.analysis_runs.topology_result_assembler import (
 )
 from app.application.reasoning.batch_planner import ModelFitCapability
 from app.application.reasoning.model_models import Terminal, WaterbodyFinishReason
-from app.application.run_summary.stage import RunSummaryStage
 from app.application.run_summary.errors import SummaryInputTooLargeError
 from app.application.run_summary.runner import (
-    RunSummaryRunStatus,
     RunSummaryRunner,
+    RunSummaryRunStatus,
 )
+from app.application.run_summary.stage import RunSummaryStage
 from app.application.transcripts.models import TranscriptContentRef
+from tests.application.analysis_runs._topology_scheduler_support import (
+    outcome as node_outcome,
+)
+from tests.application.analysis_runs._topology_scheduler_support import (
+    topology,
+)
+from tests.application.evidence_tools.test_upstream_result_store import (
+    RUN_ID as FIXTURE_RUN_ID,
+)
+from tests.application.evidence_tools.test_upstream_result_store import (
+    FakeResultReader,
+)
 from tests.application.run_summary.support import (
     INPUT_ITEM_ID,
     MODEL,
@@ -27,14 +39,6 @@ from tests.application.run_summary.support import (
     FakeSummaryModelPort,
     draft_payload,
     summary_input,
-)
-from tests.application.analysis_runs._topology_scheduler_support import (
-    outcome as node_outcome,
-    topology,
-)
-from tests.application.evidence_tools.test_upstream_result_store import (
-    FakeResultReader,
-    RUN_ID as FIXTURE_RUN_ID,
 )
 
 
@@ -86,6 +90,20 @@ def test_invalid_numeric_shape_repairs_once_with_same_model_and_scope() -> None:
     assert repair.input_digest == initial.input_digest
     assert repair.response_schema == initial.response_schema
     assert repair.system_prompt == initial.system_prompt
+
+
+@pytest.mark.parametrize("missing_field", ["schema_version", "highlights"])
+def test_missing_required_summary_field_uses_one_repair(missing_field: str) -> None:
+    invalid = draft_payload()
+    del invalid[missing_field]
+
+    outcome, port = run_runner([invalid, draft_payload()])
+
+    assert outcome.status is RunSummaryRunStatus.COMPLETED
+    assert outcome.model_calls == 2
+    assert outcome.repaired is True
+    assert len(port.requests) == 2
+    assert f"$.{missing_field}" in port.requests[1].messages[-1].text
 
 
 def test_bad_ref_or_url_after_the_only_repair_fails_without_fallback() -> None:

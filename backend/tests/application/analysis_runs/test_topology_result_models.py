@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from app.application.analysis_runs.models import (
     AgentSessionStatus,
     PublicError,
+    RunSummaryStatus,
     SessionResultReference,
     WaterbodySessionResultSummary,
 )
@@ -281,6 +282,43 @@ def test_topology_result_supports_partial_non_target_failure() -> None:
 
     assert partial.graph_coverage is GraphCoverage.PARTIAL
     assert partial.outcome_counts.invalid == 1
+
+
+def test_partial_topology_can_have_only_completed_waterbody_outcomes() -> None:
+    partial = _topology_result(
+        graph_coverage=GraphCoverage.PARTIAL,
+        summary=TopologySummaryResult(
+            status="failed",
+            session_id=TARGET_SESSION_ID,
+            public_error=PublicError(
+                error_id=UUID("8d40b92c-fffb-43a7-9ee4-28a0c73f9d50"),
+                code="run_summary_failed",
+                message="The run summary could not be generated.",
+                retryable=True,
+            ),
+        ),
+    )
+
+    assert partial.graph_coverage is GraphCoverage.PARTIAL
+    assert partial.outcome_counts == OutcomeCounts(usable=2)
+    assert partial.summary.status is RunSummaryStatus.FAILED
+
+
+def test_failed_waterbody_requires_partial_coverage() -> None:
+    complete = _topology_result()
+    failed = WaterbodyRunEntry(
+        graph_position=0,
+        target_comid="100",
+        session_id=UPSTREAM_SESSION_ID,
+        dependency_status="invalid",
+        session_status="failed",
+    )
+
+    with pytest.raises(ValidationError, match="graph_coverage"):
+        _topology_result(
+            node_outcomes=(failed, complete.node_outcomes[1]),
+            outcome_counts=OutcomeCounts(usable=1, invalid=1),
+        )
 
 
 def test_topology_result_rejects_missing_target_and_cross_run_refs() -> None:

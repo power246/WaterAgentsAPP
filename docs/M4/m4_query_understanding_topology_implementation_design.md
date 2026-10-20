@@ -321,23 +321,25 @@ StationAvailability
   comid
   provider
   covered_units[]
-  series_refs[]: (series_identity, ParameterKey, channel, covered_segment_indexes)
+  series_refs[]: (series_identity, ParameterKey, channel, covered_units[])
   checked_at
 ```
 
-`coverage_units` 必须由用户目标参数、自动支持参数与 evidence-rule 输入参数的去重并集生成，因此每个 time segment 都包含 discharge 以及基线规则所需的可执行输入。discharge 已是用户目标时仍只查询一次；支持参数和目标参数在图中共用同一个 `ParameterKey` 身份，但结果层保留角色来源。
+`coverage_units` 必须由用户目标参数、自动支持参数与 evidence-rule 输入参数的去重并集生成，因此每个历史结果时间窗、每个预测 time segment 都包含 discharge 以及基线规则所需的可执行输入。discharge 已是用户目标时仍只查询一次；支持参数和目标参数在图中共用同一个 `ParameterKey` 身份，但结果层保留角色来源。
 
-coverage unit 是“参数 × time segment”，不是只按参数。历史段只有在 metadata 的 earliest/latest envelope 覆盖请求段，或 capability 指定的 existence probe 在段内发现记录时才取得候选资格；预测段要求相同参数最近观测时间不早于预测起点前 48 小时。metadata envelope 只是“可能覆盖”，M5 必须读取真实记录并验证空洞、质量、单位和精度。
+历史 coverage unit 是“参数 × 最终结果时间窗”，该站、该参数、该窗内至少一条实际读数才取得候选资格；预测 coverage unit 仍按 time segment 判定，要求相同参数最近观测时间不早于预测起点前 48 小时。metadata 仅用于发现序列或样本来源，不能用时间包络代替历史读数。候选资格不代表整个时间窗有充分证据；M5 仍须读取记录并核对质量、单位和时间覆盖。
 
-保存进拓扑的 series reference 必须保留 ParameterKey、provider channel 与覆盖的 segment indexes；M5 只可为这些精确组合生成 provider 请求，不能把同一裸 series identity 与节点上的其他参数或 channel 做笛卡尔积。
+连续读数按 UTC `[start, end)` 归窗。daily 值和 Samples 样本若只有日期、缺少可换算 UTC 的时间与时区，不能据此断言其落入某个 6h/12h/24h 结果窗；查询返回但未完整扫描的窗口以技术错误结束，不当作空窗。逐窗探测对同一序列批量查询并受分页与记录上限约束，避免每个窗口各发一次请求。
+
+保存进拓扑的 series reference 必须保留 ParameterKey、provider channel、覆盖的 segment indexes 与历史 window IDs；M5 对新历史引用按 window ID 精确授权，对预测引用按 segment 授权。旧图若无 window IDs，读取时保留原 segment 授权语义。不能把同一裸 series identity 与节点上的其他参数、channel 或未授权窗口做笛卡尔积。请求的窗口确实无本站候选时，工具以零次 provider 调用正常返回空结果。
 
 站点与河段关联来自 NLDI 或同等级水文关联事实，不能只按坐标最近距离。成功空结果返回空 tuple；限流、超时、无效响应和 provider unavailable 抛出类型化 port error。topology builder 只把前者解释为没有合格站点。
 
 新实现使用：
 
 - [NLDI](https://api.water.usgs.gov/docs/nldi/) 的 NHDPlusV2 网络、position 与站点关联；
-- [USGS Water Data OGC API v1](https://api.waterdata.usgs.gov/docs/ogcapi) 的 monitoring/time-series metadata；
-- capability 明确指定时才使用 USGS Samples 等 existence probe。
+- [USGS Water Data OGC API v1](https://api.waterdata.usgs.gov/docs/ogcapi) 的 monitoring/time-series metadata 与有界分页的窗口批量观测查询；
+- USGS Samples 的 summary 发现与按站点、参数、时间限定的窗口批量实际读数查询。
 
 不新增旧 `waterservices.usgs.gov` 依赖。远端 API version、collection 和字段映射集中在 adapter，不泄漏到 domain。
 
@@ -378,7 +380,7 @@ HydrologyEdge
 BranchOutcome
   branch_root_comid
   coverage_unit
-  outcome: qualified | no_qualifying_source | search_limit_reached
+  outcome: qualified | no_qualifying_source | search_limit_reached | backup_search_ended
   stop_comid
   path_to_target[]
   reason
@@ -395,7 +397,7 @@ BranchOutcome
 - inlet 至少覆盖一个 unit，qualified outcome 必须引用 inlet；
 - excluded node 不得进入 execution layer；
 - `coverage=complete` 表示每条自然分支的每个 unit 都找到资格源；`partial` 表示至少一个 qualified 且至少一个自然缺失/上限；`none` 表示没有任何 qualified unit，但 target 仍保留给 M5 查询允许的本地/非站点 evidence；
-- `search_limit_reached` 与 `no_qualifying_source` 永不互换。
+- `search_limit_reached` 与 `no_qualifying_source` 永不互换；已找到历史候选之后的备选搜索终止用 `backup_search_ended`，不降低既有覆盖状态。
 
 ### 10.2 bounded deterministic BFS
 
@@ -404,14 +406,14 @@ BranchOutcome
 算法：
 
 1. 从 target 建立全部 coverage units，先查询 target 自身 station availability；
-2. 对未覆盖 unit 调用 `get_direct_upstreams()`；
+2. 对尚无合格候选的 unit 调用 `get_direct_upstreams()`；历史 unit 在第一个候选后继续有界寻找一个上游备选；
 3. frontier 按 `(depth, cumulative_distance_km, comid)` 排序；
 4. 同一 frontier 可并发读取 segment/availability，但结果按 frontier 顺序合并；
-5. 一个节点覆盖某 unit 后，该 unit 不再沿该分支继续；其他 unit 继续；
+5. 历史 unit 在同一路径找到第二个不同 COMID 的候选后停止该 unit 的上溯；预测 unit 在首个候选后停止；
 6. 汇流遇到同一 COMID 时合并待覆盖 unit，不重复计数或查询；
 7. 检测到环或不可能的 edge 时以 `topology_invalid` 失败，不删边继续；
-8. 自然到达无上游且仍未覆盖，记录 `no_qualifying_source`；
-9. 任一硬上限阻止 child 继续时，逐 child 记录 `search_limit_reached` 和 `blocked_upstream_comid`；
+8. 自然到达无上游且仍无候选，记录 `no_qualifying_source`；已有历史候选而无备选时，记录 `backup_search_ended`，不降低图覆盖状态；
+9. 任一硬上限阻止 child 继续时，逐 child 记录 `search_limit_reached` 和 `blocked_upstream_comid`；已有历史候选的备选搜索终止则记录 `backup_search_ended`；
 10. 搜索完成后回溯 qualified paths，生成 active union 和稳定 execution layers。
 
 因此 `coverage=none` 不等于最终 `insufficient_evidence`：M5 对 stationless target 不制造本地 observation 空查询，而是消费直接上游结果，并由 Agent 根据任务和缺口按需调用天气、设施或 capability 允许的其他来源。discharge 则始终是每个窗口的必需支持参数，必须由直接上游结果或已登记估算关系取得。每个待推理单元既要有目标参数的直接或允许侧面证据，也要有 discharge 的直接或允许侧面证据；任一必需部分完全无证据时，M6 gate 都以 0 次水体模型调用产生该单元的 `indeterminate`。若两者都有合格证据，也只会调度 gate 允许的 target/range。
@@ -487,8 +489,8 @@ ModelCatalogPort.require_selectable(selection, role) -> selected capability
 建议增加以下严格环境配置，均在 composition root 一次解析：
 
 ```text
-WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM=100
-WATERAGENTS_TOPOLOGY_MAX_HOPS=12
+WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM=500
+WATERAGENTS_TOPOLOGY_MAX_HOPS=48
 WATERAGENTS_TOPOLOGY_MAX_NODES=128
 WATERAGENTS_TOPOLOGY_MAX_CONCURRENCY=8
 WATERAGENTS_PREDICTION_BASELINE_HOURS=48
@@ -496,6 +498,8 @@ WATERAGENTS_MAX_TARGET_PARAMETERS=6
 WATERAGENTS_QUERY_PARSER_TIMEOUT_SECONDS=45
 WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS=120
 ```
+
+上游逐层搜索允许较长的传递路径，默认最多 500 公里、48 条河段，并继续保留 128 个节点和阶段时间预算。触及限制时保留 `search_limit_reached` 及具体原因，不把未完成搜索表述为没有监测数据；路径距离本身不禁止之后的模型估计。
 
 数字使用严格类型和合理范围，未知/非法值启动失败，不静默回默认。模型目录、参数 capability 和 provider API version 各自由唯一运行时来源构建；本次分析允许的 evidence relation 唯一来自已保存的 append-only `EvidenceRulePlan`。参数上限只计算用户目标，required support 不占用；discharge 必带规则不是可由前端或普通运行设置关闭的开关。M9 的设置接口可公开安全 metadata，但不能回显 secrets 或让前端修改 topology hard limits。
 
@@ -523,7 +527,7 @@ WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS=120
 
 - target station、单链、多支流、汇流、重复节点、环和无上游；
 - coverage unit 按参数 × segment 独立停止，同站部分覆盖时其他 unit 继续；
-- 每个 segment 的 coverage units 包含去重后的 discharge；缺少 discharge 直接/允许侧面证据时，对应推理单元不调用模型；
+- 每个历史窗口和预测 segment 的 coverage units 包含去重后的 discharge；缺少 discharge 直接/允许侧面证据时，对应推理单元不调用模型；
 - 48h prediction baseline 边界；metadata envelope 与 actual evidence 职责不混淆；
 - 100 km、12 hop、128 node 分别命中，reason 正确；
 - 外部完成顺序随机时 graph JSON、edge order、layers 完全稳定；

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from app.domain import GeoPoint, TimeRange, WeatherEvidenceRequest
 from app.infrastructure.adapters import NwsWeatherAdapter
 from app.infrastructure.http import ProviderHttpClient
@@ -60,6 +59,9 @@ def test_station_discovery_observations_pagination_missing_and_quality() -> None
             payload = fixture("nws_observations_page_2.json")
         else:
             payload = fixture("nws_observations_page_1.json")
+            payload["pagination"]["next"] = (
+                f"{request.url}&cursor=next-page"
+            )
         return httpx.Response(200, json=payload, request=request)
 
     async def exercise() -> None:
@@ -103,6 +105,137 @@ def test_station_discovery_observations_pagination_missing_and_quality() -> None
     assert "secret" not in " ".join(str(request.url) for request in requests)
 
 
+@pytest.mark.parametrize(
+    ("max_pages", "expected_stations"),
+    ((4, {"CLOSE", "MID"}), (3, {"CLOSE"})),
+)
+def test_bounded_station_sample_retains_records_without_claiming_full_discovery(
+    max_pages: int, expected_stations: set[str]
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.startswith("/points/"):
+            payload = fixture("nws_point.json")
+        elif request.url.path.endswith("/stations"):
+            payload = fixture("nws_stations.json")
+            payload["features"] = [
+                {
+                    "id": f"https://api.weather.gov/stations/{station_id}",
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [-77.0, latitude],
+                    },
+                    "properties": {"stationIdentifier": station_id},
+                }
+                for station_id, latitude in (
+                    ("FAR", 38.0),
+                    ("CLOSE", 38.89),
+                    ("MID", 38.8),
+                )
+            ]
+            payload["pagination"] = {
+                "next": (
+                    "https://api.weather.gov/stations"
+                    "?id[0]=FAR&cursor=next-page"
+                )
+            }
+        else:
+            station_id = request.url.path.split("/")[2]
+            payload = fixture("nws_observations_page_1.json")
+            payload["features"][0]["id"] = (
+                "https://api.weather.gov/stations/"
+                f"{station_id}/observations/2026-09-30T10:00:00+00:00"
+            )
+            payload.pop("pagination")
+        return httpx.Response(200, json=payload, request=request)
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await NwsWeatherAdapter(
+                http,
+                user_agent_project="WaterAgents",
+                user_agent_contact="maintainer@example.test",
+                max_stations=2,
+                max_pages=max_pages,
+                clock=lambda: NOW,
+            ).collect(weather_request("observation", ("temperature",)))
+        assert batch.completion_proof.complete is False
+        assert batch.incomplete_reason == "evidence_provider_response_too_large"
+        assert batch.completed_ranges == ()
+        assert batch.counts.requests == max_pages
+        assert {item.location.station_id for item in batch.records} == expected_stations
+        station_page = batch.page_or_chunk_manifests[1]
+        assert all(
+            item.provenance.discovery_identities == (station_page.page_identity,)
+            for item in batch.records
+        )
+
+    run(exercise())
+    assert requests[1].url.params["limit"] == "2"
+    assert len(requests) == max_pages
+
+
+def test_repeated_observation_next_returns_typed_incomplete_batch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.startswith("/points/"):
+            payload = fixture("nws_point.json")
+        elif request.url.path.endswith("/stations"):
+            payload = fixture("nws_stations.json")
+        else:
+            payload = fixture("nws_observations_page_1.json")
+            payload["pagination"]["next"] = str(request.url)
+        return httpx.Response(200, json=payload, request=request)
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await NwsWeatherAdapter(
+                http,
+                user_agent_project="WaterAgents",
+                user_agent_contact="maintainer@example.test",
+                clock=lambda: NOW,
+            ).collect(weather_request("observation", ("temperature",)))
+        assert batch.completion_proof.complete is False
+        assert batch.incomplete_reason == "evidence_provider_response_too_large"
+        assert batch.counts.requests == 3
+        assert batch.counts.records == 1
+        assert batch.page_or_chunk_manifests[-1].page_complete is False
+
+    run(exercise())
+
+
+def test_cursor_only_observation_next_keeps_bounded_record_and_stops() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.startswith("/points/"):
+            payload = fixture("nws_point.json")
+        elif request.url.path.endswith("/stations"):
+            payload = fixture("nws_stations.json")
+        else:
+            payload = fixture("nws_observations_page_1.json")
+        return httpx.Response(200, json=payload, request=request)
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await NwsWeatherAdapter(
+                http,
+                user_agent_project="WaterAgents",
+                user_agent_contact="maintainer@example.test",
+                clock=lambda: NOW,
+            ).collect(weather_request("observation", ("temperature",)))
+        assert batch.completion_proof.complete is False
+        assert batch.incomplete_reason == "evidence_provider_response_invalid"
+        assert batch.counts.requests == 3
+        assert batch.counts.records == 1
+
+    run(exercise())
+    assert len(requests) == 3
+
+
 def test_grid_forecast_preserves_issue_valid_interval_unit_and_duration() -> None:
     requests: list[httpx.Request] = []
 
@@ -141,6 +274,47 @@ def test_grid_forecast_preserves_issue_valid_interval_unit_and_duration() -> Non
 
     run(exercise())
     assert requests[1].url.path == "/gridpoints/LWX/96,70"
+
+
+def test_point_discovery_uses_nws_canonical_coordinate_precision() -> None:
+    requests: list[httpx.Request] = []
+    canonical_path = "/points/46.7096,-92.4188"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.startswith("/points/"):
+            if request.url.path != canonical_path:
+                return httpx.Response(
+                    301,
+                    headers={"Location": f"https://api.weather.gov{canonical_path}"},
+                    request=request,
+                )
+            payload = fixture("nws_point.json")
+        else:
+            payload = fixture("nws_grid_forecast.json")
+        return httpx.Response(200, json=payload, request=request)
+
+    request = weather_request("forecast", ("temperature",)).model_copy(
+        update={
+            "location": GeoPoint(
+                latitude=46.709564810393,
+                longitude=-92.418807116152,
+            )
+        }
+    )
+
+    async def exercise() -> None:
+        async with provider_client(handler) as http:
+            batch = await NwsWeatherAdapter(
+                http,
+                user_agent_project="WaterAgents",
+                user_agent_contact="maintainer@example.test",
+                clock=lambda: NOW,
+            ).collect(request)
+        assert batch.completion_proof.complete is True
+
+    run(exercise())
+    assert requests[0].url.path == canonical_path
 
 
 def test_cross_origin_discovery_link_is_never_requested() -> None:

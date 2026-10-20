@@ -7,6 +7,8 @@ import logging
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from math import isfinite
 
 import httpx
@@ -34,12 +36,18 @@ class ServerSentEvent:
     data: str
 
 
+class _SseFrameLimitError(Exception):
+    pass
+
+
 class _SseDecoder:
-    def __init__(self) -> None:
+    def __init__(self, *, max_frame_bytes: int) -> None:
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
         self._buffer = ""
         self._event: str | None = None
         self._data: list[str] = []
+        self._max_frame_bytes = max_frame_bytes
+        self._frame_bytes = 0
 
     def feed(self, chunk: bytes) -> tuple[ServerSentEvent, ...]:
         self._buffer += self._decoder.decode(chunk)
@@ -51,9 +59,16 @@ class _SseDecoder:
             index, separator_length = line_end
             line = self._buffer[:index]
             self._buffer = self._buffer[index + separator_length :]
+            self._frame_bytes += len(line.encode("utf-8")) + separator_length
+            if self._frame_bytes > self._max_frame_bytes:
+                raise _SseFrameLimitError
             event = self._process_line(line)
             if event is not None:
                 events.append(event)
+            if not line:
+                self._frame_bytes = 0
+        if self._frame_bytes + len(self._buffer.encode("utf-8")) > self._max_frame_bytes:
+            raise _SseFrameLimitError
         return tuple(events)
 
     def finish(self) -> None:
@@ -157,6 +172,8 @@ class ProviderHttpClient:
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
         on_attempt: Callable[[], None] | None = None,
+        on_rate_limit: Callable[[float | None], float | None] | None = None,
+        minimum_retry_delay_seconds: float = 0.0,
     ) -> object:
         content = await self.get_bytes(
             url,
@@ -166,6 +183,8 @@ class ProviderHttpClient:
             headers=headers,
             deadline=deadline,
             on_attempt=on_attempt,
+            on_rate_limit=on_rate_limit,
+            minimum_retry_delay_seconds=minimum_retry_delay_seconds,
         )
         try:
             return json.loads(content)
@@ -236,7 +255,12 @@ class ProviderHttpClient:
         operation: str,
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
+        max_stream_bytes: int | None = None,
     ) -> AsyncIterator[AsyncIterator[ServerSentEvent]]:
+        if max_stream_bytes is not None and (
+            type(max_stream_bytes) is not int or not 0 < max_stream_bytes <= 67_108_864
+        ):
+            raise ValueError("max_stream_bytes must be between 1 and 67108864")
         client = self._client
         if client is None:
             raise RuntimeError("provider HTTP client is not open")
@@ -250,6 +274,8 @@ class ProviderHttpClient:
                     json=body,
                     timeout=timeout,
                 ) as response:
+                    if response.status_code == 400:
+                        await self._log_bad_request(response, provider, operation)
                     self._raise_for_status(
                         response.status_code,
                         provider=provider,
@@ -267,6 +293,7 @@ class ProviderHttpClient:
                         response,
                         provider=provider,
                         operation=operation,
+                        max_stream_bytes=max_stream_bytes,
                     )
         except PortError as error:
             self._log_failure(error, 1)
@@ -279,6 +306,7 @@ class ProviderHttpClient:
             )
             self._log_failure(port_error, 1)
             raise port_error from error
+
         except (
             httpx.InvalidURL,
             httpx.UnsupportedProtocol,
@@ -303,6 +331,39 @@ class ProviderHttpClient:
             self._log_failure(port_error, 1)
             raise port_error from error
 
+    @staticmethod
+    async def _log_bad_request(
+        response: httpx.Response,
+        provider: str,
+        operation: str,
+    ) -> None:
+        content = bytearray()
+        async for chunk in response.aiter_bytes():
+            content.extend(chunk)
+            if len(content) > 8192:
+                return
+        try:
+            payload = json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return
+        if not isinstance(payload, dict) or not isinstance(payload.get("error"), dict):
+            return
+        error = payload["error"]
+        fields = {
+            key: value
+            for key, value in (
+                ("provider_error_type", error.get("type")),
+                ("provider_error_code", error.get("code")),
+                ("provider_error_param", error.get("param")),
+            )
+            if isinstance(value, str) and 0 < len(value) <= 128
+        }
+        if fields:
+            logger.warning(
+                "provider_bad_request",
+                extra={"provider": provider, "provider_operation": operation, **fields},
+            )
+
     async def get_bytes(
         self,
         url: str,
@@ -313,6 +374,8 @@ class ProviderHttpClient:
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
         on_attempt: Callable[[], None] | None = None,
+        on_rate_limit: Callable[[float | None], float | None] | None = None,
+        minimum_retry_delay_seconds: float = 0.0,
     ) -> bytes:
         return await self._request_bytes(
             url,
@@ -322,6 +385,8 @@ class ProviderHttpClient:
             headers=headers,
             deadline=deadline,
             on_attempt=on_attempt,
+            on_rate_limit=on_rate_limit,
+            minimum_retry_delay_seconds=minimum_retry_delay_seconds,
         )
 
     async def _iter_sse(
@@ -330,13 +395,15 @@ class ProviderHttpClient:
         *,
         provider: str,
         operation: str,
+        max_stream_bytes: int | None,
     ) -> AsyncIterator[ServerSentEvent]:
-        decoder = _SseDecoder()
+        decoder = _SseDecoder(max_frame_bytes=self._max_response_bytes)
+        stream_limit = self._max_response_bytes if max_stream_bytes is None else max_stream_bytes
         received = 0
         try:
             async for chunk in response.aiter_bytes():
                 received += len(chunk)
-                if received > self._max_response_bytes:
+                if received > stream_limit:
                     raise PortResponseLimitError(
                         "Provider response exceeded the configured size limit.",
                         provider=provider,
@@ -345,6 +412,12 @@ class ProviderHttpClient:
                 for event in decoder.feed(chunk):
                     yield event
             decoder.finish()
+        except _SseFrameLimitError:
+            raise PortResponseLimitError(
+                "Provider response exceeded the configured size limit.",
+                provider=provider,
+                operation=operation,
+            ) from None
         except (UnicodeDecodeError, ValueError) as error:
             raise InvalidPortResponseError(
                 "Provider returned an invalid event stream.",
@@ -362,7 +435,11 @@ class ProviderHttpClient:
         headers: Mapping[str, str] | None = None,
         deadline: float | None = None,
         on_attempt: Callable[[], None] | None = None,
+        on_rate_limit: Callable[[float | None], float | None] | None = None,
+        minimum_retry_delay_seconds: float = 0.0,
     ) -> bytes:
+        if not isfinite(minimum_retry_delay_seconds) or minimum_retry_delay_seconds < 0:
+            raise ValueError("minimum_retry_delay_seconds must be finite and non-negative")
         client = self._client
         if client is None:
             raise RuntimeError("provider HTTP client is not open")
@@ -371,6 +448,12 @@ class ProviderHttpClient:
             self._remaining_timeout(deadline, provider, operation)
             if on_attempt is not None:
                 on_attempt()
+            logger.info(
+                "Provider GET attempt started.",
+                extra={"event_name": "provider_get_attempt_started",
+                       "provider": provider, "provider_operation": operation,
+                       "attempt": attempt + 1},
+            )
             try:
                 return await self._request_once(
                     client,
@@ -384,14 +467,44 @@ class ProviderHttpClient:
                     deadline=deadline,
                 )
             except PortError as error:
+                cooldown_delay_seconds = 0.0
+                if isinstance(error, PortRateLimitError) and on_rate_limit is not None:
+                    cooldown_delay_seconds = on_rate_limit(error.retry_after_seconds) or 0.0
                 if attempt + 1 == self._attempts or not self._is_retryable(error):
                     self._log_failure(error, attempt + 1)
                     raise
-                await self._wait_before_retry(
-                    provider=provider,
-                    operation=operation,
-                    deadline=deadline,
+                retry_after_seconds = (
+                    error.retry_after_seconds
+                    if isinstance(error, PortRateLimitError)
+                    else None
                 )
+                if (
+                    isinstance(error, PortRateLimitError)
+                    and deadline is None
+                    and max(
+                        self._retry_delay_seconds,
+                        retry_after_seconds or 0.0,
+                        minimum_retry_delay_seconds,
+                        cooldown_delay_seconds,
+                    )
+                    > min(self._timeout_seconds, 30.0)
+                ):
+                    self._log_failure(error, attempt + 1)
+                    raise
+                try:
+                    await self._wait_before_retry(
+                        provider=provider,
+                        operation=operation,
+                        deadline=deadline,
+                        retry_after_seconds=retry_after_seconds,
+                        minimum_delay_seconds=max(
+                            minimum_retry_delay_seconds, cooldown_delay_seconds
+                        ),
+                    )
+                except PortTimeoutError:
+                    if isinstance(error, PortRateLimitError):
+                        self._log_failure(error, attempt + 1)
+                    raise
         raise AssertionError("bounded provider request loop did not terminate")
 
     async def _request_once(
@@ -408,6 +521,7 @@ class ProviderHttpClient:
         deadline: float | None,
     ) -> bytes:
         timeout = self._remaining_timeout(deadline, provider, operation)
+        started = asyncio.get_running_loop().time()
         try:
             async with asyncio.timeout(timeout):
                 async with client.stream(
@@ -418,10 +532,36 @@ class ProviderHttpClient:
                     json=body,
                     timeout=timeout,
                 ) as response:
+                    retry_after_seconds = (
+                        self._parse_retry_after(response.headers.get("retry-after"))
+                        if method == "GET" and response.status_code == 429
+                        else None
+                    )
+                    response_fields: dict[str, int | float] = {}
+                    if provider == "usgs_nldi":
+                        for header, field in (
+                            ("x-ratelimit-limit", "provider_rate_limit_limit"),
+                            ("x-ratelimit-remaining", "provider_rate_limit_remaining"),
+                            ("x-ratelimit-reset", "provider_rate_limit_reset"),
+                        ):
+                            value = self._bounded_header_integer(response.headers.get(header))
+                            if value is not None:
+                                response_fields[field] = value
+                        if retry_after_seconds is not None and isfinite(retry_after_seconds):
+                            response_fields["provider_retry_after_seconds"] = retry_after_seconds
+                    logger.info(
+                        "Provider response headers received.",
+                        extra={"event_name": "provider_response_headers_received",
+                               "provider": provider, "provider_operation": operation,
+                               "method": method, "status_code": response.status_code,
+                               "duration_ms": (asyncio.get_running_loop().time() - started) * 1000,
+                               **response_fields},
+                    )
                     self._raise_for_status(
                         response.status_code,
                         provider=provider,
                         operation=operation,
+                        retry_after_seconds=retry_after_seconds,
                     )
                     content = bytearray()
                     async for chunk in response.aiter_bytes():
@@ -432,6 +572,13 @@ class ProviderHttpClient:
                                 provider=provider,
                                 operation=operation,
                             )
+                    logger.info(
+                        "Provider response body received.",
+                        extra={"event_name": "provider_response_body_received",
+                               "provider": provider, "provider_operation": operation,
+                               "method": method, "response_bytes": len(content),
+                               "duration_ms": (asyncio.get_running_loop().time() - started) * 1000},
+                    )
                     return bytes(content)
         except PortError:
             raise
@@ -467,6 +614,7 @@ class ProviderHttpClient:
         *,
         provider: str,
         operation: str,
+        retry_after_seconds: float | None = None,
     ) -> None:
         if 200 <= status_code < 300:
             return
@@ -483,6 +631,7 @@ class ProviderHttpClient:
                 provider=provider,
                 operation=operation,
                 status_code=status_code,
+                retry_after_seconds=retry_after_seconds,
             )
         raise PortHttpError(
             "Provider returned an HTTP error.",
@@ -490,6 +639,33 @@ class ProviderHttpClient:
             operation=operation,
             status_code=status_code,
         )
+
+    @staticmethod
+    def _parse_retry_after(value: str | None) -> float | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if value.isascii() and value.isdigit():
+            try:
+                return float(int(value))
+            except (OverflowError, ValueError):
+                return float("inf")
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (IndexError, OverflowError, TypeError, ValueError):
+            return None
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        return max(0.0, (retry_at - datetime.now(timezone.utc)).total_seconds())
+
+    @staticmethod
+    def _bounded_header_integer(value: str | None) -> int | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value or len(value) > 13 or not value.isascii() or not value.isdigit():
+            return None
+        return int(value)
 
     @staticmethod
     def _is_retryable(error: PortError) -> bool:
@@ -525,17 +701,22 @@ class ProviderHttpClient:
         provider: str,
         operation: str,
         deadline: float | None,
+        retry_after_seconds: float | None = None,
+        minimum_delay_seconds: float = 0.0,
     ) -> None:
         await self._cancellation_checkpoint()
+        delay_seconds = max(
+            self._retry_delay_seconds, retry_after_seconds or 0.0, minimum_delay_seconds,
+        )
         if deadline is not None:
             remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= self._retry_delay_seconds:
+            if remaining <= delay_seconds:
                 raise PortTimeoutError(
                     "Provider request deadline was exhausted before retry.",
                     provider=provider,
                     operation=operation,
                 )
-        await asyncio.sleep(self._retry_delay_seconds)
+        await asyncio.sleep(delay_seconds)
 
     @staticmethod
     async def _cancellation_checkpoint() -> None:
@@ -545,6 +726,11 @@ class ProviderHttpClient:
 
     @staticmethod
     def _log_failure(error: PortError, attempts: int) -> None:
+        retry_after_seconds = (
+            error.retry_after_seconds
+            if isinstance(error, PortRateLimitError)
+            else None
+        )
         logger.warning(
             "provider_request_failed",
             extra={
@@ -553,5 +739,10 @@ class ProviderHttpClient:
                 "provider_status": error.status_code,
                 "provider_error": type(error).__name__,
                 "provider_attempts": attempts,
+                **(
+                    {"provider_retry_after_seconds": retry_after_seconds}
+                    if retry_after_seconds is not None and isfinite(retry_after_seconds)
+                    else {}
+                ),
             },
         )

@@ -103,6 +103,28 @@ def test_minimal_graph_round_trips_with_api_array_layers() -> None:
     assert restored.model_dump()["execution_layers"] == (("123",),)
 
 
+def test_topology_series_ref_accepts_legacy_graph_and_validates_window_ids() -> None:
+    original = target_node().station_refs[0].series_refs[0]
+    legacy_payload = original.model_dump(exclude={"covered_window_ids"})
+
+    assert TopologySeriesRef.model_validate(legacy_payload).covered_window_ids is None
+    assert TopologySeriesRef.model_validate(
+        {**legacy_payload, "covered_window_ids": ("window-000", "window-001")}
+    ).covered_window_ids == ("window-000", "window-001")
+    for invalid in (("window-000", "window-000"), ("window-001", "window-000")):
+        with pytest.raises(ValidationError, match="covered_window_ids"):
+            TopologySeriesRef.model_validate(
+                {**legacy_payload, "covered_window_ids": invalid}
+            )
+    assert TopologySeriesRef.model_validate(
+        {**legacy_payload, "covered_window_ids": ()}
+    ).covered_window_ids == ()
+    with pytest.raises(ValidationError, match="series coverage"):
+        TopologySeriesRef.model_validate(
+            {**legacy_payload, "covered_segment_indexes": (), "covered_window_ids": ()}
+        )
+
+
 def test_graph_rejects_missing_references_and_noncanonical_order() -> None:
     graph = valid_graph()
     upstream = HydrologyNode(

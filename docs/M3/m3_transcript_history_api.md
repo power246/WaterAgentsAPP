@@ -18,6 +18,7 @@
 | GET | /runs/{run_id}/sessions/{session_id} | 所选 Agent 详情。 |
 | GET | /runs/{run_id}/sessions/{session_id}/transcript | 所选 Agent 完整过程与显式公共引用。 |
 | GET | /runs/{run_id}/transcript/{item_id}/content | 原 item 全文。 |
+| GET | /runs/{run_id}/transcript/{item_id}/anchor-distance-estimates | 已保存结果的锚点距离只读派生视图，仅支持 `view=history`。 |
 | GET | /runs/{run_id}/events | run 状态通知 SSE。 |
 | GET | /runs/{run_id}/sessions/{session_id}/events | Agent 过程 SSE。 |
 | POST | /runs/{run_id}/cancel | 取消整次分析。 |
@@ -84,7 +85,7 @@ const response = await fetch("/api/analysis/runs", {
 
 ### 3.1 来源与保存情况
 
-除创建回执和历史分页外，GET 读取响应包含 `source`、`persistence`、`issues`。source 为 live 或 postgresql；persistence 只有 live 能提供，数据库读取为 null。issues 是已知记录解析/依赖装配问题的安全列表，正常为空；它不把数据库整体故障转成成功空响应。
+除创建回执、历史分页和后续增加的历史距离派生视图外，GET 读取响应包含 `source`、`persistence`、`issues`。source 为 live 或 postgresql；persistence 只有 live 能提供，数据库读取为 null。issues 是已知记录解析/依赖装配问题的安全列表，正常为空；它不把数据库整体故障转成成功空响应。
 
 ```json
 {
@@ -243,6 +244,10 @@ run 状态为 pending/running/completed/failed/cancelled/completed_with_persiste
 内联与外置使用同一入口。当前 live 数据库故障时仍可读内存全文并保留 warning；live 释放后相同身份自动读 PG。history 模式只返回已保存文本。引用与全文请求必须继续传原 view。`parse_status=corrupt` 表示 typed schema 或存储字节完整性校验失败，不等于正文不可读：原正文只要是合法 JSON，接口仍返回递归脱敏、规范序列化后的 200 文本，issues 保留原 corrupt 问题，`content_bytes` 按该安全文本的实际 UTF-8 长度返回。
 
 auto 的全文和引用同样屏蔽取消后审计，回退 PG 不放宽；history 才能读取已提交的 `late_message_output` 和 `suppressed_transcript_item`。隐藏或不属于 run 的 item 返回 404；外置正文缺失或正文不是可安全解析的 JSON 返回明确 500/transcript_content_unreadable，不返回空字符串。未知类型仍只有严格 history 可以读取原安全 JSON，不能借全文入口绕过 auto 可见性。
+
+### 4.5 历史锚点距离派生视图
+
+`GET /api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates?view=history` 只接受同一 run 已保存的 `inference_result` item，按需使用该结果引用的已保存原始记录、拓扑和用户目标坐标估算沿河距离。响应以 `cell_id` 和 `anchor_index` 对应原结果中的锚点，提供 `distance_km` 和 `distance_basis=mapped_channel_estimate`；无法核实来源水体、坐标或连通几何时省略该条，空数组不表示零距离。它不调用外部数据源或模型，不修改原 transcript 或结果正文。该端点是 M5 之后增加的公共读取能力，具体字段见 [M5 Evidence Tools API](../M5/m5_evidence_tools_api.md#1-production-run-与-transcript-路由)。
 
 ## 5. 两层 SSE
 
@@ -513,4 +518,4 @@ uv run --project backend --extra dev python backend/scripts/run_history_smoke.py
 
 测试环境提前创建独立数据库（例如 wateragents_test），通过 `WATERAGENTS_TEST_DB_NAME` 显式指定；host/port/user/password/SSL 复用测试环境提供的 WATERAGENTS_DB_* 连接参数。fixture 和 smoke 构造测试 AppSettings 时将 db_name 替换成该值，要求它与配置中的业务 DB_NAME 不同；缺少测试库名或连接失败就拒绝执行数据库集成。每组测试使用独立临时 schema，并使表查询、Alembic version 表和子进程使用同一 schema；清理只删除本组创建的 schema，不删除数据库或生产表。该变量不是正式服务的隐式数据库覆盖开关。
 
-OpenAPI 必须覆盖十路由、view/分页参数、create/cancel/retry 成功与错误；SSE 文档及可执行 fixture 覆盖 run_snapshot、transcript_item、三个消息事件、stream_end、400/409/410。`test_m3_documented_protocol.py` 直接读取实际 OpenAPI，并用 production registry 与 SSE encoder 核对本文的错误状态、状态枚举、完整 item 字节数、UTC 时间和 raw frame。每个 Milestone 的实际命令、平台、结果和未完成项记录在 [实施清单](m3_implementation_todo.md)，本文不预填测试通过数量。
+OpenAPI 必须覆盖 M3 原有十路由及后续增加的历史距离只读端点、view/分页参数、create/cancel/retry 成功与错误；SSE 文档及可执行 fixture 覆盖 run_snapshot、transcript_item、三个消息事件、stream_end、400/409/410。`test_m3_documented_protocol.py` 直接读取实际 OpenAPI，并用 production registry 与 SSE encoder 核对本文的错误状态、状态枚举、完整 item 字节数、UTC 时间和 raw frame。每个 Milestone 的实际命令、平台、结果和未完成项记录在 [实施清单](m3_implementation_todo.md)，本文不预填测试通过数量。

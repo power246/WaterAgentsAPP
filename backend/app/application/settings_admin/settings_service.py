@@ -47,8 +47,10 @@ class SettingsService:
         self, store: SettingsStorePort, catalog: ModelCatalogSnapshot,
         defaults: MutableDefaults, clock: ClockPort,
         unit_registry: ParameterCapabilityRegistry | None = None,
+        memory_enabled: bool = True,
     ) -> None:
-        validate_mutable_defaults(defaults, catalog)
+        validate_mutable_defaults(defaults, catalog, memory_enabled=memory_enabled)
+        self._memory_enabled = memory_enabled
         self._store = store
         self._model_catalog = catalog
         self._defaults = defaults
@@ -56,6 +58,7 @@ class SettingsService:
         self.catalog: SettingsCatalogProjection = safe_settings_catalog(
             catalog, iana_timezones=tuple(sorted(available_timezones())),
             unit_registry=unit_registry,
+            memory_enabled=memory_enabled,
         )
 
     async def get_snapshot(self) -> SettingsSnapshot:
@@ -75,7 +78,9 @@ class SettingsService:
         self, *, expected_revision: int, defaults: MutableDefaults,
     ) -> SettingsSnapshot:
         try:
-            validate_mutable_defaults(defaults, self._model_catalog)
+            validate_mutable_defaults(
+                defaults, self._model_catalog, memory_enabled=self._memory_enabled,
+            )
         except ValueError as error:
             raise SettingsInvalidDefaultsError() from error
         current = await self.get_snapshot()

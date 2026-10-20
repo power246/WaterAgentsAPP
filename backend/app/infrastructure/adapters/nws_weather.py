@@ -22,6 +22,7 @@ from app.domain import (
     WeatherEvidenceRequest,
     WeatherForecastRecord,
     WeatherObservationRecord,
+    geodesic_distance_km,
 )
 from app.infrastructure.adapters._evidence_collection import (
     build_batch,
@@ -108,9 +109,10 @@ class NwsWeatherAdapter:
         retrieved_at = self._retrieved_at()
         point_url = (
             f"{self._base_url}/points/"
-            f"{request.location.latitude},{request.location.longitude}"
+            f"{request.location.latitude:.4f},{request.location.longitude:.4f}"
         )
         root_identity = request_identity(point_url)
+        collection_incomplete_reason: str | None = None
 
         def count_attempt() -> None:
             nonlocal request_count
@@ -156,7 +158,7 @@ class NwsWeatherAdapter:
                 )
             else:
                 stations_url = discovered_links["observationStations"]
-                await self._collect_observations(
+                collection_incomplete_reason = await self._collect_observations(
                     request,
                     stations_url=stations_url,
                     root_identity=root_identity,
@@ -169,10 +171,8 @@ class NwsWeatherAdapter:
         except PortError as error:
             if not pages:
                 raise
-            failed_identity = request_identity(point_url)
-            if pages and pages[-1].next_page_identity is not None:
-                failed_identity = pages[-1].next_page_identity
-            if pages[-1].page_identity == failed_identity:
+            failed_identity = pages[-1].next_page_identity
+            if failed_identity is None:
                 pages[-1] = pages[-1].model_copy(
                     update={"page_complete": False, "next_page_identity": None}
                 )
@@ -194,9 +194,12 @@ class NwsWeatherAdapter:
             records=records,
             pages=pages,
             request_count=request_count,
-            complete=True,
-            completed_ranges=(request.request_range,),
+            complete=collection_incomplete_reason is None,
+            completed_ranges=(request.request_range,)
+            if collection_incomplete_reason is None
+            else (),
             contract=CollectionCompletionContract.OFFICIAL_NEXT_CHAIN,
+            incomplete_reason=collection_incomplete_reason,
         )
 
     async def _collect_forecast(
@@ -307,48 +310,61 @@ class NwsWeatherAdapter:
         pages: list[CollectionPageManifest],
         deadline: float | None,
         on_attempt,
-    ) -> None:
+    ) -> str | None:
+        # The provider does not document a global distance order for station pages.
+        # Select nearest stations within one explicitly bounded page, and retain a
+        # partial result when additional candidate pages remain.
+        station_limit = min(self._max_stations, 500)
+        station_params = {"limit": station_limit}
+        self._reserve_page(pages, stations_url, station_params, request.operation_id)
+        root, size = await self._get(
+            stations_url,
+            params=station_params,
+            operation=request.operation_id,
+            deadline=deadline,
+            on_attempt=on_attempt,
+        )
+        station_page_identity = request_identity(stations_url, station_params)
+        features = require_list(
+            root.get("features"), provider=PROVIDER, operation=request.operation_id
+        )
         stations: list[tuple[str, str, GeoPoint]] = []
-        next_url: str | None = stations_url
-        while next_url is not None:
-            self._reserve_page(pages, next_url, None, request.operation_id)
-            root, size = await self._get(
-                next_url,
+        for raw_feature in features:
+            feature = require_mapping(
+                raw_feature, provider=PROVIDER, operation=request.operation_id
+            )
+            station_url = self._linked_url(feature.get("id"), request.operation_id)
+            properties = require_mapping(
+                feature.get("properties"),
+                provider=PROVIDER,
                 operation=request.operation_id,
-                deadline=deadline,
-                on_attempt=on_attempt,
             )
-            current_identity = request_identity(next_url)
-            features = require_list(
-                root.get("features"), provider=PROVIDER, operation=request.operation_id
+            station_id = require_string(
+                properties.get("stationIdentifier"),
+                provider=PROVIDER,
+                operation=request.operation_id,
             )
-            for raw_feature in features:
-                feature = require_mapping(
-                    raw_feature, provider=PROVIDER, operation=request.operation_id
-                )
-                station_url = self._linked_url(feature.get("id"), request.operation_id)
-                properties = require_mapping(
-                    feature.get("properties"),
-                    provider=PROVIDER,
-                    operation=request.operation_id,
-                )
-                station_id = require_string(
-                    properties.get("stationIdentifier"),
-                    provider=PROVIDER,
-                    operation=request.operation_id,
-                )
-                point = self._point(feature.get("geometry"), request.operation_id)
-                candidate = (station_url, station_id, point)
-                if candidate not in stations:
-                    stations.append(candidate)
-            if len(stations) > self._max_stations:
-                raise PortResponseLimitError(
-                    "NWS station discovery exceeded the configured limit.",
-                    provider=PROVIDER,
-                    operation=request.operation_id,
-                )
-            next_url = self._pagination_next(root, next_url, request.operation_id)
-            self._append_page(pages, current_identity, 0, size)
+            point = self._point(feature.get("geometry"), request.operation_id)
+            candidate = (station_url, station_id, point)
+            if candidate not in stations:
+                stations.append(candidate)
+        more_candidates = self._pagination_next(
+            root, stations_url, request.operation_id, station_ids=True
+        ) is not None
+        self._append_page(pages, station_page_identity, 0, size)
+        stations.sort(
+            key=lambda candidate: (
+                geodesic_distance_km(
+                    (request.location.longitude, request.location.latitude),
+                    (candidate[2].longitude, candidate[2].latitude),
+                ),
+                candidate[1],
+            )
+        )
+        candidates_truncated = len(stations) > station_limit
+        stations = stations[: min(station_limit, self._max_pages - len(pages))]
+        candidates_truncated |= len(stations) < min(len(features), station_limit)
+        pagination_incomplete = False
 
         for station_url, station_id, station_point in stations:
             params: Mapping[str, object] | None = {
@@ -373,6 +389,7 @@ class NwsWeatherAdapter:
                     station_id=station_id,
                     station_point=station_point,
                     root_identity=root_identity,
+                    station_page_identity=station_page_identity,
                     page_identity=page_identity,
                     source_uri=self._canonical_uri(next_url, params),
                     retrieved_at=retrieved_at,
@@ -384,8 +401,26 @@ class NwsWeatherAdapter:
                 provider_next = self._pagination_next(
                     root, next_url, request.operation_id
                 )
+                if provider_next is not None:
+                    next_query = dict(parse_qsl(urlsplit(provider_next).query))
+                    if (
+                        next_query.get("start")
+                        != self._iso(request.request_range.start)
+                        or next_query.get("end")
+                        != self._iso(request.request_range.end)
+                    ):
+                        # NWS has returned cursor-only links that drop the time
+                        # filter and page into observations outside this request.
+                        pagination_incomplete = True
+                        break
                 next_url = provider_next
                 params = None
+
+        if pagination_incomplete:
+            return "evidence_provider_response_invalid"
+        if more_candidates or candidates_truncated:
+            return "evidence_provider_response_too_large"
+        return None
 
     def _observation_records(
         self,
@@ -395,6 +430,7 @@ class NwsWeatherAdapter:
         station_id: str,
         station_point: GeoPoint,
         root_identity: str,
+        station_page_identity: str,
         page_identity: str,
         source_uri: str,
         retrieved_at: datetime,
@@ -469,6 +505,7 @@ class NwsWeatherAdapter:
                                 operation_id=request.operation_id,
                                 request_identity=root_identity,
                                 page_identity=page_identity,
+                                discovery_identities=(station_page_identity,),
                                 provider_series_id=f"{station_id}:{variable}",
                                 provider_record_id=self._provider_id(
                                     observation_id, variable
@@ -520,6 +557,8 @@ class NwsWeatherAdapter:
         root: Mapping[str, object],
         current_url: str,
         operation: str,
+        *,
+        station_ids: bool = False,
     ) -> str | None:
         pagination = root.get("pagination")
         if pagination is None:
@@ -529,10 +568,21 @@ class NwsWeatherAdapter:
         if next_value is None:
             return None
         next_url = self._linked_url(next_value, operation)
-        if urlsplit(next_url).path != urlsplit(current_url).path:
+        current_path = urlsplit(current_url).path
+        next_path = urlsplit(next_url).path
+        if next_path != current_path and not (
+            station_ids
+            and current_path.startswith("/gridpoints/")
+            and current_path.endswith("/stations")
+            and next_path == "/stations"
+        ):
             raise invalid_response(PROVIDER, operation)
         allowed = {"start", "end", "limit", "cursor"}
-        if any(name not in allowed for name, _ in parse_qsl(urlsplit(next_url).query)):
+        if any(
+            name not in allowed
+            and not (station_ids and re.fullmatch(r"id\[\d+\]", name))
+            for name, _ in parse_qsl(urlsplit(next_url).query)
+        ):
             raise invalid_response(PROVIDER, operation)
         return next_url
 

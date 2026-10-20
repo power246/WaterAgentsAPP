@@ -1,11 +1,11 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-
 from app.application.analysis_runs.models import (
     AgentRole,
     AgentSessionStatus,
@@ -46,11 +46,13 @@ from app.application.analysis_runs.zero_model_result import (
 from app.application.evidence_tools import (
     RunLocalUpstreamResultRegistry,
     RunLocalUpstreamResultStore,
+    with_intermediate_parameters,
 )
 from app.application.transcripts.models import TranscriptContentRef
 from app.domain import (
     EvidenceCellRole,
     OutcomeStatus,
+    ParameterKey,
     TimeResolutionPreference,
     TimeResolutionPreferenceSource,
 )
@@ -71,7 +73,6 @@ from tests.m4_support import (
     create_request_bytes,
     create_test_app,
 )
-
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
 TARGET = "12345678"
@@ -326,8 +327,19 @@ class NodeRunnerSessionReader:
 class RunnableAcquisition:
     def __init__(self) -> None:
         self.scopes = []
+        self.prepared_scope = None
+        self.events = []
+
+    def prepare_scope(self, scope):
+        self.events.append("prepare")
+        self.prepared_scope = with_intermediate_parameters(
+            scope,
+            (ParameterKey(code_system="usgs", code="00010"),),
+        )
+        return self.prepared_scope
 
     async def start(self, scope):
+        self.events.append("start")
         self.scopes.append(scope)
         return SimpleNamespace(
             run_id=scope.run_id,
@@ -340,8 +352,10 @@ class RunnableAcquisition:
                 ),
             ),
             usable_upstream_comids=(),
+            validated_inputs=SimpleNamespace(fragments=()),
             block_facts=(),
             stop_before_model=False,
+            numeric_estimation_allowed=False,
             has_valid_bundle_binding=lambda: True,
         )
 
@@ -676,6 +690,7 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
             committed_status,
             stop_requested if cancel_wins else None,
         )
+        acquisition = RunnableAcquisition()
         runner = ProductionTopologyNodeRunner(
             context=WorkflowContext(
                 run=run,
@@ -693,7 +708,7 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
             topology_ref=topology_ref,
             outcome_store=store,
             operations=operations,
-            acquisition=RunnableAcquisition(),
+            acquisition=acquisition,
             session_reader=NodeRunnerSessionReader(operations),
             waterbody_runner=waterbody_runner,
             result_assembler=result_assembler,
@@ -722,6 +737,12 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
         outcome = await runner.run(request)
         assert len(waterbody_runner.calls) == 1
         task = waterbody_runner.calls[0]
+        assert acquisition.events == ["prepare", "start"]
+        assert task.task.evidence_scope is acquisition.prepared_scope
+        assert acquisition.scopes == [acquisition.prepared_scope]
+        assert task.task.evidence_scope.intermediate_parameters == (
+            ParameterKey(code_system="usgs", code="00010"),
+        )
         assert task.context is saved_context
         assert task.task.waterbody_model == saved_context.waterbody_model
         assert task.task.memory_mode is saved_context.memory_mode
@@ -755,3 +776,46 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
     assert failed.status is DependencyStatus.INVALID
     assert cancelled.status is DependencyStatus.CANCELLED
     assert suppressed is None
+
+
+def test_unhandled_waterbody_error_records_correlated_exception(caplog) -> None:
+    async def exercise():
+        operations = NodeRunnerOperations()
+        session = await operations.prepare_agent_session(
+            RUN_ID,
+            agent_role=AgentRole.WATERBODY,
+            target_comid=TARGET,
+        )
+        await operations.mark_agent_session_running(RUN_ID, session.session_id)
+        runner = object.__new__(ProductionTopologyNodeRunner)
+        runner._context = SimpleNamespace(
+            run=SimpleNamespace(run_id=RUN_ID),
+            cancellation=CancellationToken(asyncio.Event()),
+        )
+        runner._operations = operations
+        runner._session_ids = {TARGET: session.session_id}
+        runner._result_assembler = TopologyResultAssembler(FakeResultReader())
+        runner._error_id_factory = uuid4
+        request = SimpleNamespace(
+            run_id=RUN_ID,
+            node=SimpleNamespace(comid=TARGET),
+        )
+        outcome = await runner.settle_failure(
+            request,
+            ValueError("failed result status mismatch"),
+        )
+        return session.session_id, outcome
+
+    with caplog.at_level(logging.ERROR, logger="wateragents.analysis_runs"):
+        session_id, outcome = asyncio.run(exercise())
+
+    assert outcome.status is DependencyStatus.INVALID
+    records = [
+        record for record in caplog.records
+        if getattr(record, "event_name", None) == "waterbody_node_execution_failed"
+    ]
+    assert len(records) == 1
+    assert records[0].run_id == RUN_ID
+    assert records[0].session_id == session_id
+    assert records[0].target_comid == TARGET
+    assert isinstance(records[0].exc_info[1], ValueError)

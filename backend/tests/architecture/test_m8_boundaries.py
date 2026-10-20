@@ -5,10 +5,8 @@ from pathlib import Path
 import pytest
 
 from app.application.evidence_tools import create_evidence_tool_registry
-from app.infrastructure.config import AppSettings
-from app.infrastructure.config import load_parameter_capability_registry
+from app.infrastructure.config import AppSettings, load_parameter_capability_registry
 from app.main import create_app
-
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = BACKEND_ROOT / "app"
@@ -295,7 +293,7 @@ def test_m8_does_not_add_a_direct_route_or_third_sse() -> None:
     )
 
 
-def test_m8_keeps_one_v1_read_union_tool_and_no_feature_toggle() -> None:
+def test_m8_keeps_one_v1_read_union_tool_and_only_memory_runtime_switch() -> None:
     type_paths = [
         *(APP_ROOT / "domain" / "memory_rag").glob("*.py"),
         *(APP_ROOT / "domain" / "evidence").glob("historical_*.py"),
@@ -321,11 +319,11 @@ def test_m8_keeps_one_v1_read_union_tool_and_no_feature_toggle() -> None:
         if "historical" in descriptor.name or "transcript" in descriptor.name
     }
     assert historical_tools == {"search_transcript_evidence"}
-    assert not {
+    assert {
         name
         for name in AppSettings.model_fields
         if "enable" in name and ("rag" in name or "memory" in name)
-    }
+    } == {"memory_enabled"}
 
 
 def test_production_composes_one_m8_owner_before_m5_m6_m7_and_worker_start() -> None:

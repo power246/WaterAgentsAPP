@@ -1,12 +1,18 @@
 import asyncio
 import json
-from types import SimpleNamespace
+from collections import Counter
 from datetime import timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
 
-from app.application.analysis_runs.models import RunStatus
+from app.application.analysis_runs.models import (
+    AgentRole,
+    AgentSessionStatus,
+    RunStatus,
+    SessionSummary,
+)
 from app.application.run_summary.models import (
     RunSummaryAgentMessage,
     RunSummaryFinishReason,
@@ -19,20 +25,25 @@ from app.application.transcripts.models import (
     GenerationStatus,
     MessageEndReason,
     ParseStatus,
+    StoredTranscriptContent,
     StoredTranscriptItem,
-    TranscriptItem,
     TranscriptContentRef,
-)
-from app.application.transcripts.registry import (
-    UnsupportedTranscriptContentError,
-    create_production_registry,
+    TranscriptItem,
+    WorkflowQuiescedFact,
 )
 from app.application.transcripts.read_models import (
     ReadView,
     StoredRunHeader,
     StoredRunRead,
 )
-from app.application.transcripts.reader import TranscriptReader
+from app.application.transcripts.reader import (
+    TranscriptItemNotFoundError,
+    TranscriptReader,
+)
+from app.application.transcripts.registry import (
+    UnsupportedTranscriptContentError,
+    create_production_registry,
+)
 from tests.application.analysis_runs.test_topology_result_models import (
     _manifest,
     _topology_result,
@@ -219,6 +230,14 @@ def test_full_content_reader_applies_summary_request_projection() -> None:
                 items=(stored_item,),
             )
 
+        async def read_run_items(self, run_id, item_ids):
+            stored = await self.read_run(run_id)
+            return stored.model_copy(update={
+                "items": tuple(
+                    item for item in stored.items if item.item_id in item_ids
+                ),
+            })
+
     reader = TranscriptReader(
         object(),
         Store(),
@@ -235,6 +254,256 @@ def test_full_content_reader_applies_summary_request_projection() -> None:
     assert request.messages[0].text not in content.text
     assert "response_schema" not in content.text
     assert content.content_bytes == len(content.text.encode("utf-8"))
+
+
+def test_history_content_and_session_reads_are_bounded_to_referenced_items(
+    monkeypatch,
+) -> None:
+    async def exercise() -> None:
+        registry = create_production_registry()
+        input_id = UUID("c5a64a52-c1e2-4725-88ee-6c83f105e635")
+        unrelated_id = UUID("d5a64a52-c1e2-4725-88ee-6c83f105e636")
+        other_session_id = UUID("e5a64a52-c1e2-4725-88ee-6c83f105e637")
+        request = RunSummaryPromptBuilder().build(
+            summary_input(),
+            model=MODEL,
+            input_ref=TranscriptContentRef(run_id=RUN_ID, item_id=input_id),
+            operation_id=UUID("a5a64a52-c1e2-4725-88ee-6c83f105e633"),
+            deadline=NOW + timedelta(minutes=1),
+        )
+        request_item = _stored(
+            "run_summary_model_request",
+            registry.encode("run_summary_model_request", 1, request).safe_body,
+        )
+        input_body = registry.encode(
+            "run_summary_input", 1, summary_input()
+        ).safe_body
+        input_item = _stored("run_summary_input", input_body).model_copy(update={
+            "item_id": input_id,
+            "session_id": other_session_id,
+            "transcript_sequence": 2,
+            "inline_body": None,
+            "preview_head": "Input preview",
+            "preview_tail": "Input preview",
+        })
+        unrelated = _stored("runtime_fact", '{"blob":"' + "x" * 100_000 + '"}').model_copy(
+            update={
+                "item_id": unrelated_id,
+                "session_id": other_session_id,
+                "transcript_sequence": 3,
+            }
+        )
+        header = StoredRunHeader(
+            run_id=RUN_ID,
+            status=RunStatus.COMPLETED,
+            created_at=NOW,
+            updated_at=NOW,
+            query="Summarize COMID 300.",
+            request_item_id=INPUT_ITEM_ID,
+            created_item_id=INPUT_ITEM_ID,
+        )
+        sessions = (
+            SessionSummary(
+                session_id=SUMMARY_SESSION_ID,
+                agent_role=AgentRole.RUN_SUMMARIZER,
+                status=AgentSessionStatus.RUNNING,
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+            SessionSummary(
+                session_id=other_session_id,
+                agent_role=AgentRole.WATERBODY,
+                target_comid="12345678",
+                status=AgentSessionStatus.RUNNING,
+                created_at=NOW,
+                updated_at=NOW,
+            ),
+        )
+        all_items = (request_item, input_item, unrelated)
+        read_batches: list[tuple[UUID, ...]] = []
+
+        class Store:
+            async def read_run(self, run_id):
+                raise AssertionError(f"full-run read attempted for {run_id}")
+
+            async def read_run_detail_roots(self, run_id):
+                return StoredRunRead(run=header, sessions=sessions) if run_id == RUN_ID else None
+
+            async def list_session_item_ids(self, run_id, session_id, content_type):
+                assert run_id == RUN_ID and content_type is None
+                return tuple(
+                    item.item_id for item in all_items
+                    if item.session_id == session_id
+                )
+
+            async def read_run_items(self, run_id, item_ids):
+                assert run_id == RUN_ID
+                read_batches.append(item_ids)
+                return StoredRunRead(
+                    run=header,
+                    items=tuple(
+                        item for item in all_items if item.item_id in item_ids
+                    ),
+                    contents=(
+                        StoredTranscriptContent(
+                            item_id=input_id, body=input_body, created_at=NOW,
+                        ),
+                    ) if input_id in item_ids else (),
+                )
+
+        class Live:
+            async def get_live_read(self, run_id):
+                del run_id
+
+        reader = TranscriptReader(
+            Live(), Store(), registry,
+            error_id_factory=lambda: RUN_ID,
+            inline_content_bytes=200_000,
+            preview_bytes=1_024,
+        )
+        session = await reader.get_session(
+            RUN_ID, SUMMARY_SESSION_ID, ReadView.HISTORY
+        )
+        assert session.session.session_id == SUMMARY_SESSION_ID
+        assert read_batches == []
+        content = await reader.get_content(
+            RUN_ID, request_item.item_id, ReadView.HISTORY
+        )
+        assert content.item_id == request_item.item_id
+        assert read_batches == [(request_item.item_id,)]
+        read_batches.clear()
+        parse_calls: Counter[UUID] = Counter()
+        original_parse = reader._parse_item
+
+        def count_parse(stored, item):
+            parse_calls[item.item_id] += 1
+            return original_parse(stored, item)
+
+        monkeypatch.setattr(reader, "_parse_item", count_parse)
+        transcript = await reader.get_session_transcript(
+            RUN_ID, SUMMARY_SESSION_ID, ReadView.HISTORY
+        )
+        assert tuple(item.item_id for item in transcript.items) == (
+            request_item.item_id,
+        )
+        assert tuple(item.item_id for item in transcript.referenced_items) == (
+            input_id,
+        )
+        assert transcript.referenced_items[0].parse_status is ParseStatus.OK
+        assert parse_calls == Counter({request_item.item_id: 1, input_id: 1})
+        assert read_batches[:2] == [(request_item.item_id,), (input_id,)]
+        assert unrelated_id not in {
+            item_id for batch in read_batches for item_id in batch
+        }
+        read_batches.clear()
+        with pytest.raises(TranscriptItemNotFoundError):
+            await reader.get_content(
+                RUN_ID, request_item.item_id, ReadView.AUTO
+            )
+        auto_transcript = await reader.get_session_transcript(
+            RUN_ID, SUMMARY_SESSION_ID, ReadView.AUTO
+        )
+        assert auto_transcript.items == ()
+        assert auto_transcript.referenced_items == ()
+        assert read_batches == [
+            (request_item.item_id,), (request_item.item_id,)
+        ]
+
+    asyncio.run(exercise())
+
+
+def test_run_detail_parses_each_item_once_across_large_reference_waves(
+    monkeypatch,
+) -> None:
+    async def exercise() -> None:
+        registry = create_production_registry()
+        body = registry.encode("runtime_fact", 1, WorkflowQuiescedFact()).safe_body
+        item_ids = tuple(UUID(int=index + 1) for index in range(1_000))
+        items = tuple(
+            _stored("runtime_fact", body).model_copy(update={
+                "item_id": item_id,
+                "session_id": None if index == 0 else SUMMARY_SESSION_ID,
+                "transcript_sequence": index + 1,
+            })
+            for index, item_id in enumerate(item_ids)
+        )
+        by_id = {item.item_id: item for item in items}
+        references = {
+            item_ids[0]: (item_ids[1],),
+            item_ids[1]: (item_ids[2],),
+            item_ids[2]: item_ids[3:],
+        }
+        original_references = registry.references_from_read
+
+        def item_references(item):
+            if item.item.item_id in references:
+                return references[item.item.item_id]
+            return original_references(item)
+
+        monkeypatch.setattr(registry, "references_from_read", item_references)
+        header = StoredRunHeader(
+            run_id=RUN_ID,
+            status=RunStatus.RUNNING,
+            created_at=NOW,
+            updated_at=NOW,
+            query="Analyze the waterbody.",
+            request_item_id=item_ids[0],
+            created_item_id=item_ids[0],
+        )
+        session = SessionSummary(
+            session_id=SUMMARY_SESSION_ID,
+            agent_role=AgentRole.WATERBODY,
+            target_comid="12345678",
+            status=AgentSessionStatus.RUNNING,
+            created_at=NOW,
+            updated_at=NOW,
+        )
+        read_batches: list[tuple[UUID, ...]] = []
+
+        class Store:
+            async def read_run_detail_roots(self, run_id):
+                return (
+                    StoredRunRead(run=header, sessions=(session,), items=(items[0],))
+                    if run_id == RUN_ID else None
+                )
+
+            async def read_run_items(self, run_id, requested):
+                assert run_id == RUN_ID
+                read_batches.append(requested)
+                return StoredRunRead(
+                    run=header,
+                    items=tuple(by_id[item_id] for item_id in requested),
+                )
+
+        class Live:
+            async def get_live_read(self, run_id):
+                del run_id
+
+        reader = TranscriptReader(
+            Live(), Store(), registry,
+            error_id_factory=lambda: RUN_ID,
+            inline_content_bytes=65_536,
+            preview_bytes=2_048,
+        )
+        parse_calls: Counter[UUID] = Counter()
+        original_parse = reader._parse_item
+
+        def count_parse(stored, item):
+            parse_calls[item.item_id] += 1
+            return original_parse(stored, item)
+
+        monkeypatch.setattr(reader, "_parse_item", count_parse)
+        for view in (ReadView.AUTO, ReadView.HISTORY):
+            detail = await reader.get_run(RUN_ID, view)
+            assert tuple(item.item_id for item in detail.items) == item_ids[:1]
+            assert {item.item_id for item in detail.referenced_items} == set(item_ids[1:])
+            assert len(detail.referenced_items) == 999
+            assert parse_calls == Counter({item_id: 1 for item_id in item_ids})
+            assert tuple(len(batch) for batch in read_batches) == (1, 1, 997)
+            parse_calls.clear()
+            read_batches.clear()
+
+    asyncio.run(exercise())
 
 
 def test_live_http_long_preview_uses_public_projection() -> None:
@@ -335,15 +604,15 @@ def test_registered_item_only_parses_the_requested_item(monkeypatch) -> None:
                 items=(unrelated, requested),
             )
 
-    safe_read_body = registry.safe_read_body
-    safe_read_calls = 0
+    original_parse = registry.parse
+    parse_calls = 0
 
-    def count_safe_read(content_type, content_schema_version, body):
-        nonlocal safe_read_calls
-        safe_read_calls += 1
-        return safe_read_body(content_type, content_schema_version, body)
+    def count_parse(item, body, **kwargs):
+        nonlocal parse_calls
+        parse_calls += 1
+        return original_parse(item, body, **kwargs)
 
-    monkeypatch.setattr(registry, "safe_read_body", count_safe_read)
+    monkeypatch.setattr(registry, "parse", count_parse)
     reader = TranscriptReader(
         object(),
         Store(),
@@ -359,4 +628,4 @@ def test_registered_item_only_parses_the_requested_item(monkeypatch) -> None:
 
     assert item.item.item_id == requested.item_id
     assert item.body == request
-    assert safe_read_calls == 1
+    assert parse_calls == 1

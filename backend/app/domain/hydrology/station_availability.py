@@ -52,6 +52,7 @@ class StationAvailability(DomainModel):
                 },
                 key=lambda unit: (
                     unit.segment_index,
+                    -1 if unit.window_index is None else unit.window_index,
                     unit.parameter.code_system,
                     unit.parameter.code,
                 ),

@@ -10,8 +10,10 @@ from app.domain.evidence.direct_record_payload import DirectRecordPayload
 from app.domain.evidence.historical_inference_payload import (
     HistoricalInferencePayload,
 )
-from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
+from app.domain.evidence.numeric_derived_payload import NumericDerivedPayload
 from app.domain.evidence.relation_support_payload import RelationSupportPayload
+from app.domain.evidence.temporal_estimate_payload import TemporalEstimatePayload
+from app.domain.evidence.upstream_result_payload import UpstreamResultPayload
 
 EvidencePayload: TypeAlias = Annotated[
     DirectRecordPayload
@@ -21,6 +23,8 @@ EvidencePayload: TypeAlias = Annotated[
     | CollectionFactPayload
     | UpstreamResultPayload
     | RelationSupportPayload
-    | HistoricalInferencePayload,
+    | HistoricalInferencePayload
+    | TemporalEstimatePayload
+    | NumericDerivedPayload,
     Field(discriminator="payload_type"),
 ]

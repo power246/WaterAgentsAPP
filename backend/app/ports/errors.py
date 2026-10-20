@@ -42,6 +42,23 @@ class PortHttpError(PortUnavailableError):
 class PortRateLimitError(PortUnavailableError):
     """Raised when a provider rejects a request because of rate limiting."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str | None = None,
+        operation: str | None = None,
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            provider=provider,
+            operation=operation,
+            status_code=status_code,
+        )
+        self.retry_after_seconds = retry_after_seconds
+
 
 class PortResponseLimitError(InvalidPortResponseError):
     """Raised when a bounded provider response or pagination limit is exceeded."""

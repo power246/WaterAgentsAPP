@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import asyncio
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from math import isfinite
 from urllib.parse import quote
 
@@ -17,7 +19,9 @@ from app.infrastructure.adapters._parsing import (
     require_number,
     require_string,
 )
+from app.infrastructure.adapters.nldi_request_state import NldiRequestState
 from app.infrastructure.http import ProviderHttpClient
+from app.ports import PortRateLimitError, PortTimeoutError
 
 PROVIDER = "usgs_nldi"
 DEFAULT_BASE_URL = "https://api.water.usgs.gov/nldi/linked-data"
@@ -30,21 +34,43 @@ class NldiAdapter:
         *,
         base_url: str = DEFAULT_BASE_URL,
         site_association_distance_km: float = 0.001,
+        request_interval_seconds: float = 0.0,
+        shared_state: NldiRequestState | None = None,
     ) -> None:
         if (
             not isfinite(site_association_distance_km)
             or site_association_distance_km <= 0
         ):
             raise ValueError("site_association_distance_km must be finite and positive")
+        if (
+            isinstance(request_interval_seconds, bool)
+            or not isinstance(request_interval_seconds, (int, float))
+            or not isfinite(request_interval_seconds)
+            or request_interval_seconds < 0
+        ):
+            raise ValueError("request_interval_seconds must be finite and nonnegative")
         self._http = http
         self._base_url = base_url.rstrip("/")
         self._site_association_distance_km = site_association_distance_km
+        self._request_interval_seconds = float(request_interval_seconds)
+        self._request_state = shared_state or NldiRequestState()
 
     async def lookup_position(
         self,
         point: GeoPoint,
         *,
         deadline: float | None = None,
+    ) -> str | None:
+        return await self._request_state.cached(
+            (self._base_url, "lookup_position", point.longitude, point.latitude),
+            lambda: self._lookup_position(point, deadline=deadline),
+        )
+
+    async def _lookup_position(
+        self,
+        point: GeoPoint,
+        *,
+        deadline: float | None,
     ) -> str | None:
         operation = "lookup_position"
         features = await self._features(
@@ -71,6 +97,18 @@ class NldiAdapter:
         comid: str,
         *,
         deadline: float | None = None,
+    ) -> RiverSegment | None:
+        self._require_comid(comid)
+        return await self._request_state.cached(
+            (self._base_url, "get_segment", comid),
+            lambda: self._get_segment(comid, deadline=deadline),
+        )
+
+    async def _get_segment(
+        self,
+        comid: str,
+        *,
+        deadline: float | None,
     ) -> RiverSegment | None:
         operation = "get_segment"
         features = await self._segment_features(
@@ -110,6 +148,20 @@ class NldiAdapter:
             or max_distance_km <= 0
         ):
             raise ValueError("max_distance_km must be finite and positive")
+        return await self._request_state.cached(
+            (self._base_url, "get_direct_upstreams", comid, max_distance_km),
+            lambda: self._get_direct_upstreams(
+                comid, max_distance_km, deadline=deadline
+            ),
+        )
+
+    async def _get_direct_upstreams(
+        self,
+        comid: str,
+        max_distance_km: float,
+        *,
+        deadline: float | None,
+    ) -> tuple[RiverSegment, ...]:
         operation = "get_direct_upstreams"
         origin_features = await self._segment_features(
             comid,
@@ -123,31 +175,41 @@ class NldiAdapter:
         if self._feature_comid(origin_features[0], operation) != comid:
             raise invalid_response(PROVIDER, operation)
         origin_coordinates = self._line_coordinates(origin_features[0], operation)
-        self._waterbody_geometry(comid, origin_coordinates, operation)
+        origin_geometry = self._waterbody_geometry(comid, origin_coordinates, operation)
         origin_endpoints = self._endpoint_keys(origin_coordinates)
-        navigation = await self._features(
-            f"/comid/{quote(comid, safe='')}/navigation/UT/flowlines",
-            operation=operation,
-            params={
-                "distance": max_distance_km,
-                "excludeGeometry": False,
-                "f": "json",
-            },
-            deadline=deadline,
+        origin_length_km = float(origin_geometry.length_km)
+        # Reach length is an estimate of where adjacent upstream lines begin.
+        distance = min(
+            max_distance_km,
+            origin_length_km + max(0.25, origin_length_km * 0.1),
         )
+        distances = (distance,) if distance == max_distance_km else (distance, max_distance_km)
+        for distance in distances:
+            navigation = await self._features(
+                f"/comid/{quote(comid, safe='')}/navigation/UT/flowlines",
+                operation=operation,
+                params={
+                    "distance": distance,
+                    "excludeGeometry": False,
+                    "f": "json",
+                },
+                deadline=deadline,
+            )
 
-        candidates: dict[str, tuple[tuple[float, float], ...]] = {}
-        for feature in navigation:
-            candidate_comid = self._feature_comid(feature, operation)
-            coordinates = self._line_coordinates(feature, operation)
-            if candidate_comid == comid:
-                continue
-            if not (origin_endpoints & self._endpoint_keys(coordinates)):
-                continue
-            previous = candidates.get(candidate_comid)
-            if previous is not None and previous != coordinates:
-                raise invalid_response(PROVIDER, operation)
-            candidates[candidate_comid] = coordinates
+            candidates: dict[str, tuple[tuple[float, float], ...]] = {}
+            for feature in navigation:
+                candidate_comid = self._feature_comid(feature, operation)
+                coordinates = self._line_coordinates(feature, operation)
+                if candidate_comid == comid:
+                    continue
+                if not (origin_endpoints & self._endpoint_keys(coordinates)):
+                    continue
+                previous = candidates.get(candidate_comid)
+                if previous is not None and previous != coordinates:
+                    raise invalid_response(PROVIDER, operation)
+                candidates[candidate_comid] = coordinates
+            if candidates or distance == max_distance_km:
+                break
 
         return tuple(
             self._upstream_segment(
@@ -169,6 +231,22 @@ class NldiAdapter:
         deadline: float | None = None,
     ) -> tuple[MonitoringStation, ...]:
         self._require_comid(comid)
+        return await self._request_state.cached(
+            (
+                self._base_url,
+                "get_monitoring_sites",
+                comid,
+                self._site_association_distance_km,
+            ),
+            lambda: self._get_monitoring_sites(comid, deadline=deadline),
+        )
+
+    async def _get_monitoring_sites(
+        self,
+        comid: str,
+        *,
+        deadline: float | None,
+    ) -> tuple[MonitoringStation, ...]:
         operation = "get_monitoring_sites"
         features = await self._features(
             f"/comid/{quote(comid, safe='')}/navigation/UT/nwissite",
@@ -272,13 +350,21 @@ class NldiAdapter:
         params: Mapping[str, str | int | float | bool],
         deadline: float | None,
     ) -> list[Mapping[str, object]]:
-        payload = await self._http.get_json(
-            f"{self._base_url}{path}",
-            provider=PROVIDER,
-            operation=operation,
-            params=params,
-            deadline=deadline,
-        )
+        async with self._request_slot(operation=operation, deadline=deadline):
+            payload = await self._http.get_json(
+                f"{self._base_url}{path}",
+                provider=PROVIDER,
+                operation=operation,
+                params=params,
+                deadline=deadline,
+                on_attempt=(
+                    self._mark_request_attempt
+                    if self._request_interval_seconds
+                    else None
+                ),
+                on_rate_limit=self._request_state.record_rate_limit,
+                minimum_retry_delay_seconds=self._request_interval_seconds,
+            )
         root = require_mapping(payload, provider=PROVIDER, operation=operation)
         if root.get("type") != "FeatureCollection":
             raise invalid_response(PROVIDER, operation)
@@ -291,6 +377,72 @@ class NldiAdapter:
             require_mapping(value, provider=PROVIDER, operation=operation)
             for value in values
         ]
+
+    @asynccontextmanager
+    async def _request_slot(
+        self,
+        *,
+        operation: str,
+        deadline: float | None,
+    ) -> AsyncIterator[None]:
+        self._check_rate_limit_deadline(operation=operation, deadline=deadline)
+        try:
+            async with asyncio.timeout_at(deadline):
+                async with self._request_state.request_lock:
+                    loop = asyncio.get_running_loop()
+                    self._check_rate_limit_deadline(
+                        operation=operation, deadline=deadline
+                    )
+                    while True:
+                        wait = (
+                            max(
+                                self._request_state.next_request_time,
+                                self._request_state.rate_limited_until,
+                            )
+                            - loop.time()
+                        )
+                        if wait <= 0:
+                            break
+                        await asyncio.sleep(wait)
+                    await asyncio.sleep(0)
+                    now = loop.time()
+                    if deadline is not None and now >= deadline:
+                        raise PortTimeoutError(
+                            "NLDI request deadline was exhausted while waiting.",
+                            provider=PROVIDER,
+                            operation=operation,
+                        )
+                    yield
+        except TimeoutError:
+            raise PortTimeoutError(
+                "NLDI request deadline was exhausted.",
+                provider=PROVIDER,
+                operation=operation,
+            ) from None
+
+    def _check_rate_limit_deadline(
+        self,
+        *,
+        operation: str,
+        deadline: float | None,
+    ) -> None:
+        if deadline is None:
+            return
+        now = asyncio.get_running_loop().time()
+        until = self._request_state.rate_limited_until
+        if until > now and until >= deadline:
+            raise PortRateLimitError(
+                "NLDI rate limit cooldown exceeds the request deadline.",
+                provider=PROVIDER,
+                operation=operation,
+                status_code=429,
+                retry_after_seconds=until - now,
+            )
+
+    def _mark_request_attempt(self) -> None:
+        self._request_state.next_request_time = (
+            asyncio.get_running_loop().time() + self._request_interval_seconds
+        )
 
     def _feature_comid(
         self,

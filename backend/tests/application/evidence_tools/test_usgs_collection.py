@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
-
 from app.application.evidence_tools import EvidenceWindow, build_collection_manifest
 from app.domain import (
     CollectionStatus,
@@ -41,6 +40,7 @@ def request() -> WaterObservationRequest:
         series_refs=("series-continuous-00300",),
         parameter_keys=(ParameterKey(code_system="usgs", code="00300"),),
         request_range=TimeRange(start=START, end=END),
+        analysis_timezone="UTC",
         affected_window_ids=("window-1", "window-2"),
     )
 
@@ -133,6 +133,53 @@ def test_complete_empty_usgs_chain_marks_each_covered_window_empty() -> None:
         windows=WINDOWS,
         batch=batch,
     )
+    assert manifest.collection_status is CollectionStatus.EMPTY
+    assert manifest.completion_proof.complete is True
+    assert all(item.complete for item in manifest.window_completeness)
+    assert all(
+        item.status is CollectionStatus.EMPTY for item in manifest.window_completeness
+    )
+
+
+def test_complete_usgs_chain_with_only_null_values_has_no_numeric_coverage() -> None:
+    first = payload("usgs_continuous_page_1.json")
+    second = payload("usgs_continuous_page_2.json")
+    first["features"][0]["properties"]["value"] = None
+    first["features"][0]["properties"]["qualifier"] = ["BACKWATER"]
+    second["features"][0]["properties"]["value"] = None
+    second["features"][0]["properties"]["time"] = "2024-01-02T12:00:00Z"
+
+    def handler(http_request: httpx.Request) -> httpx.Response:
+        page = second if http_request.url.params.get("cursor") else first
+        return httpx.Response(200, json=page, request=http_request)
+
+    async def collect():
+        async with ProviderHttpClient(
+            timeout_seconds=1,
+            max_response_bytes=200_000,
+            retry_delay_seconds=0,
+            transport=httpx.MockTransport(handler),
+        ) as http:
+            return await UsgsObservationAdapter(
+                http,
+                ogc_base_url=OGC_BASE,
+                samples_base_url=SAMPLES_BASE,
+            ).collect(request())
+
+    batch = run(collect())
+    manifest = build_collection_manifest(
+        manifest_id="manifest-only-null-usgs",
+        provider="usgs_waterdata",
+        channel="continuous",
+        request_range=request().request_range,
+        requested_series=request().series_refs,
+        windows=WINDOWS,
+        batch=batch,
+    )
+    assert batch.records == ()
+    assert batch.counts.pages == 2
+    assert batch.counts.records == 0
+    assert [page.record_count for page in batch.page_or_chunk_manifests] == [0, 0]
     assert manifest.collection_status is CollectionStatus.EMPTY
     assert manifest.completion_proof.complete is True
     assert all(item.complete for item in manifest.window_completeness)

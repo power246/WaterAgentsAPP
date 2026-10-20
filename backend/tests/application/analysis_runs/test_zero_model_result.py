@@ -1,5 +1,6 @@
 import asyncio
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import UTC, datetime
 from uuid import UUID
 
 from app.application.analysis_runs.models import (
@@ -22,10 +23,10 @@ from app.application.analysis_runs.topology_result_models import (
     WaterbodyDependency,
     WaterbodyDependencyManifest,
 )
+from app.application.analysis_runs.workflow import CancellationToken
 from app.application.analysis_runs.zero_model_result import (
     DeterministicInsufficientResultAssembler,
 )
-from app.application.analysis_runs.workflow import CancellationToken
 from app.application.canonical_json import canonical_json_digest
 from app.application.evidence_tools import assemble_evidence_session_scope
 from app.application.reasoning.task import (
@@ -44,7 +45,9 @@ from app.domain import (
 )
 from app.infrastructure.config import load_parameter_capability_registry
 from tests.application.evidence_tools.conftest import (
-    make_context, make_discharge_context, make_graph,
+    make_context,
+    make_discharge_context,
+    make_graph,
 )
 from tests.application.evidence_tools.fakes import MemoryEvidenceStore
 from tests.application.evidence_tools.test_acquisition_workflow import (
@@ -53,10 +56,9 @@ from tests.application.evidence_tools.test_acquisition_workflow import (
     _water_port,
 )
 
-
 RUN_ID = UUID("00000000-0000-0000-0000-000000000100")
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000500")
-NOW = datetime(2026, 10, 3, 8, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 3, 8, tzinfo=UTC)
 
 
 class FixedClock:
@@ -199,7 +201,7 @@ def test_explicit_discharge_target_is_usable_for_node_launch() -> None:
     asyncio.run(exercise())
 
 
-def test_stationless_all_unusable_commits_zero_model_result() -> None:
+def test_stationless_all_unusable_can_estimate_or_commit_zero_model_result() -> None:
     async def exercise() -> None:
         context = make_context()
         graph = make_graph(with_station=False, with_upstream=True)
@@ -240,6 +242,19 @@ def test_stationless_all_unusable_commits_zero_model_result() -> None:
         handoff = await acquisition.start(scope)
         transcript = RecordingTranscriptStore()
         task = validated_task(scope, context, graph)
+        assert handoff.numeric_estimation_allowed is True
+        assert handoff.stop_before_model is False
+        assert NodeLaunchPolicy().decide(
+            build_node_launch_facts(task, handoff),
+            task.task.dependency_manifest,
+        ).action is NodeLaunchAction.RUN_AGENT
+
+        # Exercise the deterministic branch when numeric estimation is unavailable.
+        handoff = replace(
+            handoff,
+            numeric_estimation_allowed=False,
+            stop_before_model=True,
+        )
         decision = NodeLaunchPolicy().decide(
             build_node_launch_facts(task, handoff),
             task.task.dependency_manifest,

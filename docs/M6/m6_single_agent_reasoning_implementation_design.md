@@ -4,7 +4,7 @@
 
 > 状态：当前唯一 V1 已完成 M6 Milestone 0–13 本机实现与集成审计。本文描述已落地的代码结构与可执行契约；分阶段提交、验证证据、外部 `not run` 项和剩余风险见 [M6 Implementation TODO](m6_implementation_todo.md)。
 
-> M7 接力说明：本文 2026-10-03 只在第 16 节登记 dependency manifest、stationless 0-model 调度和 `run_summarizer` 接缝；前文仍描述已实现的 M6 单水体 runtime，新增目标由 M7 后续阶段实现和验证。
+> M7 接力说明：dependency manifest、waterbody DAG 和 `run_summarizer` 由 M7 承接；当前无站点路径允许 M6 统一数值流程执行范围估计，实际验证证据见本轮 TODO。
 
 ## 1. 核心结论与范围
 
@@ -130,8 +130,10 @@ TimeWindowResult
   cell_id: str
   start_time: UTC datetime
   end_time: UTC datetime
-  outcome_status: quantified | directional | indeterminate
+  outcome_status: quantified | range_estimate | directional | indeterminate
   representative_value: Decimal-string | null
+  value_lower: Decimal-string | null
+  value_upper: Decimal-string | null
   unit_id: str | null
   assessment: RiskOrTrendAssessment
   source: observed | inferred | predicted | null
@@ -140,6 +142,9 @@ TimeWindowResult
   aggregation_method: method | null
   evidence_refs[]
   quality_flags[]
+  inference_method: explicit_calculation | model_estimate | null
+  inference_basis: same_parameter_measurement | related_evidence | general_knowledge | null
+  measured_anchors[]
 ```
 
 使用规范 decimal string 保存模型/业务值，避免模型 JSON float 在后续组装中重复舍入。Interface 可以按 schema 输出 JSON string；如果最终产品必须输出 number，需要在 M9 明确精度和序列化边界，不能在 M6 隐式转二进制 float。
@@ -147,12 +152,14 @@ TimeWindowResult
 机械不变量：
 
 - quantified 要求 value、unit、非空 evidence refs 和非空 confidence rationale；
+- range_estimate 要求有序的上下界和 unit，禁止单点值；模型估计必须带可能范围与依据分类；
+- model_estimate 的单点必须有服务端从保存证据追溯的原始同指标实测；其他指标读数仅构成 related_evidence；
 - directional 禁止 value，要求明确 trend 或 risk；
 - indeterminate 禁止 value/unit/aggregation，要求 reason codes；
 - indeterminate 的 `source=null`；
 - fixed insufficient result confidence=0；
 - observed 资格按 M5 direct record 一对一闭包验证；
-- prediction quantified/directional source=predicted；gap-filling 不允许 predicted；
+- prediction 的数字、范围或方向判断 source=predicted；gap-filling 不允许 predicted；模型估计不能为 observed；
 - cell identity 唯一并与 ParameterKey/window plan 对应。
 
 ### 4.3 RiskOrTrendAssessment
@@ -475,7 +482,7 @@ validator 验证：
 
 - cell 属于 batch 且恰好出现一次；
 - refs 是 gate allowlist 子集；contextual refs 不能单独满足输出；
-- quantified/directional/indeterminate shape；
+- quantified/range_estimate/directional/indeterminate shape；
 - unit、value、aggregation/source eligibility；
 - observed 一对一 direct record closure；
 - allowed-indirect-only 不 quantified；
@@ -646,7 +653,7 @@ production app 不增加 M6 direct route。test composition 可以直接注入 f
 ### 15.1 Domain
 
 - RiskLevel `none` 与 assessment availability；
-- quantified/directional/indeterminate 全 shape；
+- quantified/range_estimate/directional/indeterminate 全 shape；
 - indeterminate source null/confidence 0；
 - observed 一对一、aggregate inferred、prediction predicted；
 - planned windows/parameters 完整；
@@ -662,7 +669,7 @@ production app 不增加 M6 direct route。test composition 可以直接注入 f
 
 ### 15.3 Agent loop
 
-- station-backed full empty 0 model calls；
+- station-backed full empty 继续执行适用的模型估计；无实测时只允许范围，无法给有用范围时保留信息不足，计数包含实际模型调用；
 - station-backed partial evidence 进入 optional planning；
 - stationless 无上游时仍可 planning weather/facility；
 - required-rule attempt 在 Agent 前执行；
@@ -707,7 +714,7 @@ M7 只需：
 - 实现 `UpstreamResultPort` 与直接上游 dependency manifest；
 - 传入相同 `RunSingleWaterbodyAgent`；
 - 等待 dependency outcome 并决定下游调度；
-- 在 stationless 无 usable upstream 时复用现有 M6 skeleton/assembler 生成 0-model 不足结果；
+- 在 stationless 无 usable upstream 时继续同一数值依赖流程中的范围估计，任务结束后仍无可用结果才由 skeleton/assembler 固定为不足；
 - 保存 target/run-level result refs，并执行独立 `run_summarizer` session。
 
 M8 实现 `TranscriptEvidencePort`；M6 prompt/policy 不因 memory mode 改写历史 evidence 的 contextual eligibility。

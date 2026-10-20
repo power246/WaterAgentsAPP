@@ -11,5 +11,10 @@ def comid_key(comid: str) -> tuple[int, str]:
     return int(comid), comid
 
 
-def coverage_key(unit: CoverageUnit) -> tuple[int, str, str]:
-    return unit.segment_index, unit.parameter.code_system, unit.parameter.code
+def coverage_key(unit: CoverageUnit) -> tuple[int, int, str, str]:
+    return (
+        unit.segment_index,
+        -1 if unit.window_index is None else unit.window_index,
+        unit.parameter.code_system,
+        unit.parameter.code,
+    )

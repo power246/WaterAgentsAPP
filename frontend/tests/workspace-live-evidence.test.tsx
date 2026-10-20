@@ -61,6 +61,22 @@ it('keeps one selected session stream while switching from Agent to Evidence', a
   expect(sessionEvents).toHaveLength(1)
 })
 
+it('shows a transcript read failure instead of an empty evidence message', async () => {
+  window.history.replaceState({}, '', `/runs/${runId}/waterbodies/${sessionId}`)
+  vi.spyOn(api, 'settings').mockResolvedValue({} as never)
+  const completed: RunSnapshot = { ...snapshot, status: 'completed', analysis_phase: 'terminal',
+    sessions: [{ ...snapshot.sessions[0]!, status: 'completed' }] }
+  vi.mocked(subscribe).mockImplementation(async (kind, _run, _session, onEvent) => {
+    if (kind === 'run') onEvent({ name: 'run_snapshot', data: completed })
+  })
+  vi.spyOn(api, 'transcript').mockRejectedValue(new ApiError(503, 'transcript_database_unavailable', null))
+
+  render(<App />)
+  fireEvent.click(screen.getByRole('tab', { name: 'Evidence' }))
+  expect(await screen.findByText('Current evidence could not be loaded: transcript_database_unavailable')).toBeInTheDocument()
+  expect(screen.queryByText('No current evidence records.')).not.toBeInTheDocument()
+})
+
 it('does not apply run A history fallback to a newly selected run B', async () => {
   const runB = '00000000-0000-4000-8000-000000000004'
   const historyUrl = `/api/analysis/runs/${runId}?view=history`
@@ -88,6 +104,31 @@ it('does not apply run A history fallback to a newly selected run B', async () =
   expect(window.location.pathname).toBe(`/runs/${runB}`)
   expect(bSignals[0]?.aborted).toBe(false)
   expect(history).toHaveBeenCalledTimes(1)
+})
+
+it('does not request run A summary under run B after switching runs', async () => {
+  const runB = '00000000-0000-4000-8000-000000000004'
+  const summaryItemId = '00000000-0000-4000-8000-000000000005'
+  window.history.replaceState({}, '', `/runs/${runId}`)
+  vi.spyOn(api, 'settings').mockResolvedValue({} as never)
+  const content = vi.spyOn(api, 'content').mockResolvedValue({
+    run_id: runId, item_id: summaryItemId, text: '{}',
+  } as never)
+  const runASnapshot: RunSnapshot = { ...snapshot, summary: {
+    status: 'completed', session_id: sessionId,
+    result_ref: { run_id: runId, item_id: summaryItemId }, error: null,
+  } }
+  vi.mocked(subscribe).mockImplementation(async (kind, id, _session, onEvent, signal) => {
+    if (kind !== 'run') return
+    onEvent({ name: 'run_snapshot', data: id === runId ? runASnapshot : { ...snapshot, run_id: runB } })
+    await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }))
+  })
+  render(<App />)
+  await waitFor(() => expect(content).toHaveBeenCalledWith(runId, summaryItemId, 'auto'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Go to run B' }))
+  await waitFor(() => expect(window.location.pathname).toBe(`/runs/${runB}`))
+  expect(content).not.toHaveBeenCalledWith(runB, summaryItemId, 'auto')
 })
 
 it('uses run history and historical transcript after a session stream returns 410', async () => {

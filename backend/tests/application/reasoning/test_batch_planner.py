@@ -1,14 +1,12 @@
 import asyncio
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from math import ceil
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import pytest
-from pydantic import ValidationError
-
 from app.application.reasoning import (
     FixedSkeletonCell,
     ModelFitCapability,
@@ -16,15 +14,19 @@ from app.application.reasoning import (
     ReasoningBatchPlanner,
     ReasoningGateDecision,
     ReasoningPlanError,
-    ReasoningPlanTooLargeError,
     ReasoningPlannerLimits,
+    ReasoningPlanTooLargeError,
     ResultSkeleton,
     ResultSkeletonWindow,
     SupportedCellScope,
     build_result_skeleton,
     seal_evidence_input,
 )
+from app.application.reasoning.batch_planner import _synthesis_context
 from app.application.reasoning.model_models import WaterbodyJsonSchema
+from app.application.reasoning.planning_loop import (
+    _working_context as m5_working_context,
+)
 from app.application.reasoning.prompt_builder import (
     PromptBuilder,
     ValidatedCellPromptSummary,
@@ -33,9 +35,6 @@ from app.application.reasoning.prompt_policy import (
     DEFAULT_REASONING_PROMPT_POLICY,
     canonical_json_digest,
     canonical_json_text,
-)
-from app.application.reasoning.planning_loop import (
-    _working_context as m5_working_context,
 )
 from app.application.reasoning.working_context import (
     BoundedEvidenceSummary,
@@ -64,17 +63,17 @@ from app.domain import (
     TimeWindowResult,
     build_time_windows,
 )
+from pydantic import ValidationError
 from tests.application.reasoning.test_task_and_skeleton import (
     NOW,
     _validated_fixture,
 )
 from tests.m4_support import EMBEDDING_CAPABILITY
 
-
 RUN_ID = UUID("10000000-0000-4000-8000-000000000001")
 SESSION_ID = UUID("20000000-0000-4000-8000-000000000001")
 MODEL = ModelSelection(provider="test-provider", model="waterbody-model")
-DEADLINE = datetime(2026, 10, 2, 12, tzinfo=timezone.utc)
+DEADLINE = datetime(2026, 10, 2, 12, tzinfo=UTC)
 CATALOG = ModelCatalogSnapshot(
     capabilities=(
         ModelCapability(
@@ -306,7 +305,7 @@ def _make_skeleton(
         "fixed_cell_count": len(fixed_cells),
         "supported_cell_count": len(supported_scopes),
         "blocked_cell_count": blocked_count,
-        "generated_at": datetime(2026, 10, 2, tzinfo=timezone.utc),
+        "generated_at": datetime(2026, 10, 2, tzinfo=UTC),
     }
     return ResultSkeleton(
         **values,
@@ -366,6 +365,48 @@ def _working_context(
     )
 
 
+def test_topology_gap_reaches_only_matching_batch_and_full_synthesis() -> None:
+    skeleton = _make_skeleton(parameter_count=2)
+    base = _working_context(skeleton)
+    parameter = skeleton.requested_parameters[0]
+    gap = WorkingContextFact(
+        fact_id=(
+            f"topology_gap:{parameter.code_system}:{parameter.code}:"
+            "segment-000:windows:window-000"
+        ),
+        kind=WorkingContextFactKind.COVERAGE,
+        summary="Saved topology topology-1: branch 1776712 has no qualifying source.",
+    )
+    context = build_working_context_projection(
+        run_id=base.run_id,
+        session_id=base.session_id,
+        target_comid=base.target_comid,
+        scope_digest=base.scope_digest,
+        bundle_ref=base.bundle_ref,
+        bundle_digest=base.bundle_digest,
+        rule_plan_digest=base.rule_plan_digest,
+        capability_registry_digest=base.capability_registry_digest,
+        reference_allowlist=base.reference_allowlist,
+        recent_messages=base.recent_messages,
+        facts=(*base.facts, gap),
+        evidence_summaries=base.evidence_summaries,
+        dependency_context=base.dependency_context,
+    )
+
+    plan = _plan(skeleton, context=context, planner=_planner(max_cells=1))
+    for batch in plan.batch_plan.batches:
+        expected = (
+            batch.parameter == parameter
+            and batch.cells[0].window_id == "window-000"
+        )
+        assert (gap in batch.context.facts) is expected
+        request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_reasoning_batch(
+            batch.prompt_input()
+        )
+        assert (gap.summary in request.model_dump_json()) is expected
+    assert gap in plan.synthesis_plan.context.facts
+
+
 def _model_fit(
     *,
     context_tokens: int = 10_000_000,
@@ -384,8 +425,10 @@ def _planner(
     max_batches: int = 24,
     max_input_bytes: int = 10_000_000,
     max_output_bytes: int = 10_000_000,
-    estimator=ExactByteEstimator(),
+    estimator=None,
 ) -> ReasoningBatchPlanner:
+    if estimator is None:
+        estimator = ExactByteEstimator()
     return ReasoningBatchPlanner(
         prompt_builder=PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY),
         model_catalog=CATALOG,
@@ -539,6 +582,58 @@ def test_batch_includes_upstream_content_behind_relation_evidence() -> None:
     assert "upstream trend rising and risk medium" in request.model_dump_json()
 
 
+def test_batch_reads_numeric_dependencies_without_extra_result_cells() -> None:
+    original = _make_skeleton()
+    derived = original.supported_scopes[0].allowed_evidence_refs[0]
+    intermediate = "e:intermediate:0"
+    input_ref = "e:input:0"
+    values = original.model_dump(mode="json", exclude={"skeleton_digest"})
+    values["evidence_allowlist"] = tuple(sorted((
+        *original.evidence_allowlist, intermediate, input_ref
+    )))
+    skeleton = ResultSkeleton(
+        **values, skeleton_digest=canonical_json_digest(values)
+    )
+    summaries = tuple(
+        BoundedEvidenceSummary(
+            evidence_ref=reference,
+            summary="target value 8 from registered method"
+            if reference == derived else "local evidence",
+            dependency_evidence_refs=(intermediate,) if reference == derived else (),
+            truncated=False,
+        )
+        for reference in original.evidence_allowlist
+    ) + (
+        BoundedEvidenceSummary(
+            evidence_ref=intermediate,
+            summary="saved intermediate value 6",
+            dependency_evidence_refs=(input_ref,),
+            truncated=False,
+        ),
+        BoundedEvidenceSummary(
+            evidence_ref=input_ref,
+            summary="saved input value 4",
+            truncated=False,
+        ),
+    )
+    plan = _plan(
+        skeleton,
+        context=_working_context(original),
+        evidence_summaries=summaries,
+    )
+    request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_reasoning_batch(
+        plan.batch_plan.batches[0].prompt_input()
+    )
+    serialized = request.model_dump_json()
+
+    assert "saved intermediate value 6" in serialized
+    assert "saved input value 4" in serialized
+    assert intermediate not in plan.batch_plan.supported_cell_order
+    assert plan.batch_plan.supported_cell_order == tuple(
+        cell.cell_id for cell in original.supported_scopes
+    )
+
+
 def test_real_m5_sealed_handoff_plans_every_supported_cell_once() -> None:
     async def arrange():
         validated, handoff, registry = await _validated_fixture(mode="full")
@@ -680,6 +775,68 @@ def test_all_unsupported_has_no_batch_or_synthesis_model_call() -> None:
     assert plan.synthesis_plan.coverage.unsupported_cells == skeleton.planned_cell_count
 
 
+def test_all_fixed_synthesis_projects_large_sealed_evidence_without_losing_blockers():
+    skeleton = _make_skeleton(
+        supported=lambda _parameter, _window: False,
+        blocked=lambda _parameter, window: window == 0,
+        segment_specs=((_range_for_windows(2), InferenceMode.GAP_FILLING),),
+    )
+    contextual_refs = tuple(
+        f"context-{index:04d}-{'c' * 64}" for index in range(860)
+    )
+    values = skeleton.model_dump(mode="python", exclude={"skeleton_digest"})
+    values["evidence_allowlist"] = tuple(sorted((
+        *skeleton.evidence_allowlist,
+        *contextual_refs,
+    )))
+    large_skeleton = ResultSkeleton(
+        **values,
+        skeleton_digest=canonical_json_digest(values),
+    )
+    summaries = tuple(
+        BoundedEvidenceSummary(
+            evidence_ref=reference,
+            summary="Bounded context. " + "q" * 1580,
+            truncated=True,
+        )
+        for reference in contextual_refs[:64]
+    )
+    blocker_refs = tuple(
+        reference
+        for cell in large_skeleton.fixed_cells
+        for reference in cell.blocker_refs
+    )
+    base = build_working_context_projection(
+        run_id=large_skeleton.run_id,
+        session_id=large_skeleton.session_id,
+        target_comid=large_skeleton.target_comid,
+        scope_digest="sha256:pre-skeleton-scope",
+        bundle_ref=large_skeleton.bundle_ref,
+        bundle_digest=large_skeleton.bundle_digest,
+        rule_plan_digest=large_skeleton.rule_plan_digest,
+        capability_registry_digest=large_skeleton.capability_registry_digest,
+        reference_allowlist=tuple(sorted({
+            *blocker_refs,
+            *(summary.evidence_ref for summary in summaries),
+        })),
+        recent_messages=(),
+        facts=(),
+        evidence_summaries=summaries,
+    )
+
+    projected = _synthesis_context(
+        large_skeleton, base, scope_digest=base.scope_digest,
+    )
+    assert len(large_skeleton.evidence_allowlist) == 862
+    assert projected.reference_allowlist == blocker_refs
+    assert projected.evidence_summaries == ()
+    assert large_skeleton.fixed_cells[1].result.evidence_refs
+    assert large_skeleton.fixed_cells[0].blocker_refs == blocker_refs
+    plan = _plan(large_skeleton, context=base)
+    assert plan.synthesis_plan.requires_model_call is False
+    assert plan.synthesis_plan.context.reference_allowlist == blocker_refs
+
+
 @pytest.mark.parametrize(
     ("cell_count", "expected_batches"),
     ((32, 1), (33, 2)),
@@ -815,6 +972,8 @@ def test_synthesis_plan_is_bounded_scoped_and_has_no_draft_or_raw_records() -> N
     serialized = json.dumps(payload, sort_keys=True)
 
     assert synthesis.validated_cell_order == skeleton.cell_order[:2]
+    assert synthesis.requested_parameters == skeleton.requested_parameters
+    assert synthesis.window_ids == tuple(window.window_id for window in skeleton.windows)
     assert tuple(cell.cell_id for cell in synthesis.fixed_cells) == (
         skeleton.cell_order[2:]
     )
@@ -841,6 +1000,8 @@ def test_synthesis_plan_is_bounded_scoped_and_has_no_draft_or_raw_records() -> N
         for cell in batch.cells
     )
     prompt = synthesis.prompt_input(validated)
+    assert prompt.requested_parameters == skeleton.requested_parameters
+    assert prompt.window_ids == tuple(window.window_id for window in skeleton.windows)
     assert tuple(cell.cell_id for cell in prompt.validated_cells) == (
         synthesis.validated_cell_order
     )
@@ -897,5 +1058,5 @@ def test_hash_seed_audit_has_a_fixed_plan_digest() -> None:
     skeleton = _make_skeleton(parameter_count=2)
     plan = _plan(skeleton)
     assert plan.plan_digest == (
-        "sha256:883b60a1e492a5d3a9e66c06d35dc7139185fdbd11b8ef16b31105c3d0bada1f"
+        "sha256:7ba8275a3fed5833941e82597a814886b2f66fa90436136cd853e0293b29f2f9"
     )

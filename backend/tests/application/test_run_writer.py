@@ -1,5 +1,7 @@
 import asyncio
 import json
+from threading import Event as ThreadEvent
+from time import monotonic
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -18,10 +20,13 @@ from app.application.analysis_runs.persistence import (
     BatchVerification,
     PersistenceState,
     PersistenceWriteBatch,
+    PersistenceWriteConflictError,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
 from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.domain import EvidenceSourceRecords, SourceRecordReference
+from tests.domain.test_evidence import sample_fragments, valid_manifest, valid_source_records
 from tests.m4_support import (
     MODEL_CATALOG,
     NoOpWorkflow,
@@ -246,12 +251,9 @@ async def wait_for_state(
     run_id,
     state: PersistenceState,
 ) -> None:
-    await wait_until(
-        lambda: coordinator._transcript_writer.info_locked(
-            coordinator._runs[run_id]
-        ).state
-        is state
-    )
+    runtime = coordinator._runs[run_id]
+    await coordinator._transcript_writer.drain(runtime)
+    assert coordinator._transcript_writer.info_locked(runtime).state is state
 
 
 def run(exercise) -> None:
@@ -328,6 +330,173 @@ def test_same_run_never_overlaps_writes_and_respects_batch_item_target() -> None
             assert store.maximum_active == 1
         finally:
             store.release.set()
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_large_source_encoding_and_freeze_keep_run_reads_responsive(monkeypatch) -> None:
+    async def exercise() -> None:
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(InMemoryTranscriptStore(), workflow)
+        entered = ThreadEvent()
+        release = ThreadEvent()
+        freeze_entered = ThreadEvent()
+        freeze_release = ThreadEvent()
+        finalize = None
+        try:
+            created = await coordinator.create_run(create_request_bytes())
+            await workflow.calls.get()
+            identity = await coordinator.reserve_transcript_item(created.run_id)
+            manifest = valid_manifest()
+            body = EvidenceSourceRecords(
+                operation_id=manifest.operation_id,
+                batch_id=manifest.manifest_id,
+                manifest=manifest,
+                records=valid_source_records()[:2],
+            )
+            encode = coordinator._registry.encode
+
+            def delayed_encode(*args, **kwargs):
+                if args[0] == "evidence_source_records":
+                    entered.set()
+                    release.wait(timeout=2)
+                return encode(*args, **kwargs)
+
+            recheck = coordinator._registry.recheck
+
+            def delayed_recheck(content, *args, **kwargs):
+                if content.content_type == "evidence_source_records":
+                    freeze_entered.set()
+                    freeze_release.wait(timeout=2)
+                return recheck(content, *args, **kwargs)
+
+            monkeypatch.setattr(coordinator._registry, "encode", delayed_encode)
+            monkeypatch.setattr(coordinator._registry, "recheck", delayed_recheck)
+            started = monotonic()
+            finalize = asyncio.create_task(
+                coordinator.finalize_transcript_item(
+                    created.run_id, identity.item_id,
+                    "evidence_source_records", 1, body,
+                )
+            )
+            assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 2), 2.5)
+            assert (await asyncio.wait_for(
+                coordinator.get_snapshot(created.run_id), 0.5
+            )).run_id == created.run_id
+            assert monotonic() - started < 1
+            release.set()
+            await finalize
+            assert await asyncio.wait_for(
+                asyncio.to_thread(freeze_entered.wait, 2), 2.5
+            )
+            started = monotonic()
+            assert (await asyncio.wait_for(
+                coordinator.get_snapshot(created.run_id), 0.5
+            )).run_id == created.run_id
+            assert monotonic() - started < 1
+            cancelled = await asyncio.wait_for(
+                coordinator.cancel_run(created.run_id), 0.5
+            )
+            assert cancelled.status is RunStatus.CANCELLED
+        finally:
+            release.set()
+            freeze_release.set()
+            if finalize is not None:
+                await asyncio.gather(finalize, return_exceptions=True)
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_fragment_encoding_keeps_run_reads_responsive(monkeypatch) -> None:
+    async def exercise() -> None:
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(InMemoryTranscriptStore(), workflow)
+        entered = ThreadEvent()
+        release = ThreadEvent()
+        finalize = None
+        try:
+            created = await coordinator.create_run(create_request_bytes())
+            await workflow.calls.get()
+            identity = await coordinator.reserve_transcript_item(created.run_id)
+            encode = coordinator._registry.encode
+
+            def delayed_encode(*args, **kwargs):
+                if args[0] == "evidence_fragment":
+                    entered.set()
+                    release.wait(timeout=2)
+                return encode(*args, **kwargs)
+
+            monkeypatch.setattr(coordinator._registry, "encode", delayed_encode)
+            finalize = asyncio.create_task(coordinator.finalize_transcript_item(
+                created.run_id, identity.item_id,
+                "evidence_fragment", 1, sample_fragments()[4],
+            ))
+            assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 2), 2.5)
+            assert (await asyncio.wait_for(
+                coordinator.get_snapshot(created.run_id), 0.5
+            )).run_id == created.run_id
+            release.set()
+            await finalize
+            assert (await asyncio.wait_for(
+                coordinator.cancel_run(created.run_id), 0.5
+            )).status is RunStatus.CANCELLED
+        finally:
+            release.set()
+            if finalize is not None:
+                await asyncio.gather(finalize, return_exceptions=True)
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_fragment_references_accept_same_run_and_reject_foreign_or_unknown() -> None:
+    async def exercise() -> None:
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(InMemoryTranscriptStore(), workflow)
+        try:
+            first = await coordinator.create_run(create_request_bytes("first"))
+            second = await coordinator.create_run(create_request_bytes("second"))
+            await workflow.calls.get()
+            await workflow.calls.get()
+            target = await coordinator.reserve_transcript_item(first.run_id)
+            await coordinator.finalize_transcript_item(
+                first.run_id, target.item_id, "analysis_request", 1,
+                create_request("target"),
+            )
+
+            for run_id, referenced_id, error in (
+                (first.run_id, target.item_id, None),
+                (second.run_id, target.item_id, "same run"),
+                (second.run_id, UUID(int=999), "does not exist"),
+            ):
+                reference = SourceRecordReference(
+                    item_id=str(referenced_id), record_id="provider-record-1",
+                )
+                template = sample_fragments()[0]
+                fragment = template.model_copy(update={
+                    "source_record_refs": (reference,),
+                    "payload": template.payload.model_copy(update={
+                        "record_ref": reference,
+                    }),
+                })
+                item = await coordinator.reserve_transcript_item(run_id)
+                if error is not None:
+                    with pytest.raises(ValueError, match=error):
+                        await coordinator.finalize_transcript_item(
+                            run_id, item.item_id, "evidence_fragment", 1, fragment,
+                        )
+                else:
+                    await coordinator.finalize_transcript_item(
+                        run_id, item.item_id, "evidence_fragment", 1, fragment,
+                    )
+                    stored = coordinator._runs[run_id].transcript_buffer.items[-1]
+                    assert stored.content.references == (target.item_id,)
+        finally:
             workflow.release.set()
             await coordinator.shutdown()
 
@@ -840,9 +1009,80 @@ def test_persistence_failure_logs_use_warning_error_id_and_actual_attempts(
                 if json.loads(line)["event_name"] == "persistence_write_failed"
             ]
             assert [row["attempt"] for row in rows] == [1, 2, 3, 4, 5, 6]
+            assert [row["level"] for row in rows] == [
+                "WARNING", "WARNING", "WARNING", "WARNING", "WARNING", "ERROR"
+            ]
             assert {
                 row["error_id"] for row in rows
             } == {str(info.warning.error_id)}
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_retryable_persistence_failure_logs_original_cause_and_recovery(
+    application_logs: list[str],
+) -> None:
+    async def exercise() -> None:
+        store = FailingStore(failures=1)
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(store, workflow)
+        try:
+            created = await coordinator.create_run(create_request_bytes())
+            await workflow.calls.get()
+            await wait_for_state(coordinator, created.run_id, PersistenceState.UP_TO_DATE)
+            rows = [
+                json.loads(line)
+                for line in application_logs
+                if json.loads(line)["event_name"] in {
+                    "persistence_write_failed",
+                    "persistence_write_recovered",
+                }
+            ]
+            assert [row["event_name"] for row in rows] == [
+                "persistence_write_failed",
+                "persistence_write_recovered",
+            ]
+            failed, recovered = rows
+            assert failed["level"] == "WARNING"
+            assert failed["attempt"] == 1
+            assert "OSError: database unavailable" in failed["stack_trace"]
+            assert recovered["level"] == "INFO"
+            assert recovered["error_id"] == failed["error_id"]
+        finally:
+            workflow.release.set()
+            await coordinator.shutdown()
+
+    run(exercise)
+
+
+def test_persistence_conflict_still_logs_error(application_logs: list[str]) -> None:
+    class ConflictStore(InMemoryTranscriptStore):
+        async def write_batch(self, batch: PersistenceWriteBatch) -> None:
+            raise PersistenceWriteConflictError("conflicting stored history")
+
+    async def exercise() -> None:
+        workflow = HoldingWorkflow()
+        coordinator = coordinator_for(ConflictStore(), workflow)
+        try:
+            created = await coordinator.create_run(create_request_bytes())
+            await workflow.calls.get()
+            await wait_for_state(
+                coordinator,
+                created.run_id,
+                PersistenceState.RETRY_EXHAUSTED,
+            )
+            rows = [
+                json.loads(line)
+                for line in application_logs
+                if json.loads(line)["event_name"] == "persistence_write_failed"
+            ]
+            assert len(rows) == 1
+            assert rows[0]["level"] == "ERROR"
+            assert rows[0]["attempt"] == 1
+            assert rows[0]["exception_type"] == "PersistenceWriteConflictError"
         finally:
             workflow.release.set()
             await coordinator.shutdown()

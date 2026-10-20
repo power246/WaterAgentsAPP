@@ -1,0 +1,28 @@
+
+> frontend@1.0.0 test:e2e
+> playwright test --reporter=line
+
+
+Running 8 tests using 3 workers
+
+
+
+(node:159596) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:186964) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:22440) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+[1/8] e2e\production.spec.ts:3:1 › backend-served build uses same-origin API and safe assets
+[2/8] e2e\workspace.spec.ts:22:1 › workspace routes and form use the current API surface
+[3/8] e2e\settings-admin.spec.ts:3:1 › Settings, keys and Admin use server revisions, previews and resumable operations
+[4/8] e2e\workspace.spec.ts:56:1 › map renders saved topology status, labels and a frozen running halo
+[5/8] e2e\workspace.spec.ts:113:1 › map loads referenced topology in live and history views
+[6/8] e2e\workspace.spec.ts:157:1 › create, live run, selected agent, cancel and saved history share the public surface
+[7/8] e2e\workspace.spec.ts:250:1 › running Evidence receives the selected session event after switching tabs
+[8/8] e2e\workspace.spec.ts:296:1 › history process content stays on the saved history view
+  8 passed (7.7s)

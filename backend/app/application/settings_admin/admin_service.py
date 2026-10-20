@@ -180,7 +180,7 @@ class AdminService:
             )
             confirmation = await self._confirmations.issue(
                 action=command.kind.value,
-                phrase=f"DELETE {len(plan.delete_run_ids)} RUNS",
+                phrase=f"DELETE {len(plan.delete_run_ids)} {'RUN' if len(plan.delete_run_ids) == 1 else 'RUNS'}",
                 payload=command, now=self._clock.now(),
             )
         return HistoryPreview(plan, storage, cascade_consumers, confirmation)

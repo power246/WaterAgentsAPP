@@ -35,6 +35,7 @@ class InMemoryTranscriptStore:
         self._keys: dict[UUID, UUID] = {}
         self._run_snapshots: dict[UUID, AnalysisRunSnapshot] = {}
         self._sessions: dict[UUID, SessionSummary] = {}
+        self._session_run_ids: dict[UUID, UUID] = {}
         self._items: dict[UUID, StoredTranscriptItem] = {}
         self._contents: dict[UUID, StoredTranscriptContent] = {}
         self.write_batches: list[PersistenceWriteBatch] = []
@@ -90,6 +91,10 @@ class InMemoryTranscriptStore:
             self._apply_batch(batch, snapshots, sessions, items, contents)
             self._run_snapshots = snapshots
             self._sessions = sessions
+            self._session_run_ids.update(
+                {mutation.summary.session_id: batch.run_id
+                 for mutation in batch.session_mutations}
+            )
             self._items = items
             self._contents = contents
             self.write_batches.append(batch)
@@ -159,6 +164,86 @@ class InMemoryTranscriptStore:
             if run_id not in self._run_snapshots:
                 return None
             return self._read_run(run_id, summary_only=False)
+
+    async def read_run_detail_roots(self, run_id: UUID) -> StoredRunRead | None:
+        async with self._lock:
+            if run_id not in self._run_snapshots:
+                return None
+            stored = self._read_run(run_id, summary_only=False)
+            selected = {
+                item.item_id for item in stored.items
+                if item.session_id is None
+                or item.content_type == "query_understood"
+            }
+            return stored.model_copy(update={
+                "items": tuple(item for item in stored.items if item.item_id in selected),
+                "contents": tuple(
+                    content for content in stored.contents
+                    if content.item_id in selected
+                ),
+            })
+
+    async def run_exists(self, run_id: UUID) -> bool:
+        async with self._lock:
+            return run_id in self._run_snapshots
+
+    async def session_exists(self, run_id: UUID, session_id: UUID) -> bool:
+        async with self._lock:
+            return (
+                session_id in self._sessions
+                and self._session_run_ids.get(session_id) == run_id
+            )
+
+    async def read_run_items(
+        self,
+        run_id: UUID,
+        item_ids: tuple[UUID, ...],
+    ) -> StoredRunRead | None:
+        async with self._lock:
+            if run_id not in self._run_snapshots:
+                return None
+            stored = self._read_run(run_id, summary_only=False)
+            requested = set(item_ids)
+            return stored.model_copy(update={
+                "items": tuple(
+                    item for item in stored.items if item.item_id in requested
+                ),
+                "contents": tuple(
+                    content for content in stored.contents
+                    if content.item_id in requested
+                ),
+            })
+
+    async def list_session_item_ids(
+        self,
+        run_id: UUID,
+        session_id: UUID,
+        content_type: str | None,
+    ) -> tuple[UUID, ...]:
+        async with self._lock:
+            if run_id not in self._run_snapshots:
+                return ()
+            stored = self._read_run(run_id, summary_only=False)
+            return tuple(
+                item.item_id
+                for item in stored.items
+                if item.session_id == session_id
+                and (content_type is None or item.content_type == content_type)
+            )
+
+    async def list_run_item_ids(
+        self,
+        run_id: UUID,
+        content_type: str,
+    ) -> tuple[UUID, ...]:
+        async with self._lock:
+            if run_id not in self._run_snapshots:
+                return ()
+            stored = self._read_run(run_id, summary_only=False)
+            return tuple(
+                item.item_id for item in stored.items
+                if item.content_type == content_type
+            )
 
     async def list_interrupted_run_ids(self) -> tuple[UUID, ...]:
         async with self._lock:

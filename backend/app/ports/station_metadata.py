@@ -1,6 +1,7 @@
 from typing import Protocol
 
 from app.domain.hydrology import (
+    AvailabilityTimeRange,
     MonitoringLocationMetadata,
     ParameterKey,
     SamplePeriodOfRecord,
@@ -40,3 +41,20 @@ class StationMetadataPort(Protocol):
         *,
         deadline: float | None = None,
     ) -> tuple[SamplePeriodOfRecord, ...]: ...
+
+    async def get_time_series_observation_windows(
+        self,
+        series: TimeSeriesMetadata,
+        requested: tuple[AvailabilityTimeRange, ...],
+        *,
+        deadline: float | None = None,
+    ) -> tuple[int, ...]: ...
+
+    async def get_sample_observation_windows(
+        self,
+        period: SamplePeriodOfRecord,
+        parameter: ParameterKey,
+        requested: tuple[AvailabilityTimeRange, ...],
+        *,
+        deadline: float | None = None,
+    ) -> tuple[int, ...]: ...

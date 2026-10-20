@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
@@ -11,6 +12,7 @@ from app.application.analysis_runs.models import (
     PublicError,
     SessionSummary,
 )
+from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning.batch_planner import (
     ModelFitCapability,
     ReasoningBatchPlanner,
@@ -39,7 +41,6 @@ from app.application.reasoning.planning_loop import (
     build_reasoning_evidence_summaries,
     build_reasoning_working_context,
 )
-from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning.prompt_builder import PromptBuilder
 from app.application.reasoning.result_assembler import (
     assemble_inference_result,
@@ -64,6 +65,8 @@ from app.ports.waterbody_model import WaterbodyModelPort
 
 if TYPE_CHECKING:
     from app.application.reasoning.transcript_store import ReasoningTranscriptStore
+
+logger = logging.getLogger("wateragents.reasoning")
 
 
 class WaterbodyAgentRunStatus(str, Enum):
@@ -216,6 +219,7 @@ class RunSingleWaterbodyAgent:
 
             reasoning = None
             synthesis = None
+            catalog = None
             if plan.batch_plan.batches:
                 fragments = tuple(
                     [
@@ -313,6 +317,7 @@ class RunSingleWaterbodyAgent:
                     planning.sealed_input
                 ),
                 model_execution_summary=execution,
+                evidence_catalog=catalog,
             )
             self._checkpoint(task, deadline, stage=stage)
             return WaterbodyAgentRunOutcome(
@@ -352,6 +357,18 @@ class RunSingleWaterbodyAgent:
                 "evidence_prompt_projection_invalid",
                 "evidence_prompt_projection_too_large",
             }:
+                logger.warning(
+                    "Waterbody evidence projection failed for COMID %s: %s",
+                    task.task.target_comid,
+                    error.code,
+                    extra={
+                        "event_name": "reasoning_evidence_projection_failed",
+                        "failure_code": error.code,
+                        "run_id": task.task.run_id,
+                        "session_id": task.task.session_id,
+                        "comid": task.task.target_comid,
+                    },
+                )
                 return self._failed(
                     code="reasoning_evidence_projection_failed",
                     message="The evidence could not be prepared for model reasoning.",
@@ -522,6 +539,8 @@ def _execution_summary(task, planning, audits, plan) -> ModelExecutionSummary:
     return ModelExecutionSummary(
         model=task.task.waterbody_model,
         planning_calls=planning.counts.planning_model_calls,
+        numeric_estimation_calls=planning.counts.numeric_estimation_calls,
+        numeric_failure_codes=planning.counts.numeric_failure_codes,
         tool_calls=(
             planning.counts.preflight_tool_calls
             + planning.counts.agent_tool_calls

@@ -413,12 +413,10 @@ class TopologyRunResult(DomainModel):
         )
         if self.outcome_counts != actual_counts:
             raise ValueError("outcome_counts must match node_outcomes")
-        expected_coverage = (
-            {GraphCoverage.PARTIAL}
-            if actual_counts.invalid or actual_counts.cancelled
-            else {GraphCoverage.NONE, GraphCoverage.COMPLETE}
-        )
-        if self.graph_coverage not in expected_coverage:
+        if (
+            (actual_counts.invalid or actual_counts.cancelled)
+            and self.graph_coverage is not GraphCoverage.PARTIAL
+        ):
             raise ValueError("graph_coverage must match terminal node outcomes")
         if self.summary.result_ref is not None and (
             self.summary.result_ref.run_id != self.run_id

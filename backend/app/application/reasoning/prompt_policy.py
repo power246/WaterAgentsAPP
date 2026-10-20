@@ -4,13 +4,14 @@ from typing import Self
 
 from pydantic import StrictBool, field_validator, model_validator
 
-from app.application.canonical_json import canonical_json_digest, canonical_json_text
+from app.application.canonical_json import canonical_json_digest, canonical_json_text  # noqa: F401
 from app.application.reasoning.model_models import (
     ModelItemName,
     NonBlankText,
     WaterbodyModelPhase,
 )
 from app.domain import DomainModel, NonEmptyString, ensure_unique_tuple
+
 
 class PromptPolicyRule(DomainModel):
     rule_id: ModelItemName
@@ -164,6 +165,7 @@ def audit_prompt_policy(policy: ReasoningPromptPolicy) -> PromptPolicyAuditRepor
         "absence_is_not_none": ("no evidence", "indeterminate", "none"),
         "outcome_semantics": (
             "quantified",
+            "range_estimate",
             "directional",
             "indeterminate",
             "availability",
@@ -180,8 +182,9 @@ def audit_prompt_policy(policy: ReasoningPromptPolicy) -> PromptPolicyAuditRepor
             "upstream-waterbody",
             "inferred evidence",
             "local discharge",
-            "directional",
             "registered deterministic",
+            "model_estimate",
+            "original measurement",
             "never invent",
         ),
     }
@@ -275,19 +278,19 @@ def _build_default_policy() -> ReasoningPromptPolicy:
     rules = (
         _rule(
             "evidence_eligibility",
-            "Honor every server evidence gate. Use only allowed evidence references; contextual and collection facts explain coverage but are not measurement evidence.",
+            "Honor every server evidence gate. Use only allowed evidence references; contextual and collection facts explain coverage but are not measurement evidence. Other parameter readings can be related evidence when their relevance is explained. In compact numeric_derived summaries, param is the parameter, range is the time interval, flags is a comma-separated quality flag list, and each inputs pair is [evidence_id, window_id]. method_kind distinguishes explicit_calculation from model_estimate. Cite available selected discharge support alongside target evidence. Missing discharge does not block an otherwise eligible target estimate; explain the missing support. For each result cell, quality_flags are exactly the union of flags on its cited evidence_refs; do not add flags from uncited context.",
         ),
         _rule(
             "source_eligibility",
-            "Use observed only for one direct current source record. Mark aggregates, cross-series selection, upstream interpretation, and gap fill inferred; forecasts are predicted and indeterminate has no source.",
+            "Use observed only for one direct current source record. A single observed value is a point reading within its result window, not evidence of full-window coverage or a window average. A server-computed mean of available readings is an inferred window estimate even if there is only one reading; state that the estimate summarizes available readings rather than continuous measurement of every moment; do not infer partial_coverage solely from unknown cadence or time gaps. Mark aggregates, cross-series selection, upstream interpretation, and gap fill inferred; forecasts are predicted and indeterminate has no source.",
         ),
         _rule(
             "cross_waterbody_sources",
-            "Treat a current-waterbody same-parameter station reading as a direct observation. Treat an upstream-waterbody result as cross-waterbody inferred evidence, and local discharge, weather, or facility facts as supporting indirect evidence. Ordinary upstream and supporting evidence may support only directional trend or risk; a quantified inferred value requires an executed registered deterministic formula or tool. Never invent a formula, weight, coefficient, or specific value.",
+            "Treat a current-waterbody same-parameter station reading as a direct observation. Treat an upstream-waterbody result as cross-waterbody inferred evidence, and local discharge, other parameter readings, weather, or facility facts as supporting indirect evidence. Use an applicable registered deterministic calculation with sufficient inputs first; otherwise the scheduled numeric_estimation phase may produce a model_estimate. A model point estimate requires a server-traceable original measurement of that same parameter. Without an original measurement, an upstream estimate remains range-only through every downstream step. Never invent observations, validated formulas, or measurement lineage. Final reasoning must reproduce the saved numeric result and possible range exactly.",
         ),
         _rule(
             "outcome_semantics",
-            "Choose quantified only for an eligible supported value, directional only for an eligible supported trend, and indeterminate otherwise. Outcome, availability, confidence, and risk are separate meanings.",
+            "Choose quantified for an eligible saved point value, range_estimate for an eligible saved useful range without a point, directional for an eligible supported trend, and indeterminate when no useful result is available. A range-only result has representative_value=null and ordered value_lower/value_upper; never manufacture a midpoint. Outcome, availability, confidence, and risk are separate meanings. Low confidence alone does not make a prediction unavailable.",
         ),
         _rule(
             "risk_levels",
@@ -295,7 +298,7 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         ),
         _rule(
             "absence_is_not_none",
-            "No evidence, unavailable evidence, or insufficient coverage is indeterminate; it never establishes a none risk level.",
+            "No evidence never establishes a none risk level. In numeric_estimation, related readings, local information, or clearly labelled general knowledge may support a useful low-basis range; unavailable local information must remain unknown, not be asserted absent. An uninformative full physical range is not a prediction and should produce indeterminate. Final reasoning uses only saved eligible values or ranges: insufficient or unknown measured coverage does not invalidate a saved temporal_estimate or numeric_derived result. Do not choose indeterminate solely because observed_count=0, flow is missing, the transfer path is long, or confidence is low. Keep estimate quality flags and explain uncertainty. A server-eligible aggregate with partial coverage may support a quantified inferred mean of the available readings; retain the partial_coverage quality flag and state the coverage limit without claiming a complete-window mean.",
         ),
         _rule(
             "risk_rationale",
@@ -303,7 +306,7 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         ),
         _rule(
             "confidence_semantics",
-            "Confidence is separate from risk, outcome, and availability. At every applicable cell, series, window, and range layer, explain confidence using source directness, quality, coverage, consistency, matching, inference span, and blockers.",
+            "Confidence is separate from risk, outcome, and availability. At every applicable cell, series, window, and range layer, explain confidence using source directness, quality, coverage, consistency, matching, inference span, and blockers. For temporal estimates, name the interpolation or nearest-value method and farthest anchor distance in plain language; retain the saved method confidence cap. For numeric_derived results, do not exceed the saved method confidence cap. In numeric_estimation, assess the complete original measurement path once, including known confluences, facilities, reservoirs and unknown effects; do not multiply confidence penalties at every downstream waterbody. Lower confidence may accompany a useful prediction without suppressing its number or range. Model confidence is an uncalibrated judgment and the possible range is not a calibrated confidence interval.",
         ),
         _rule(
             "series_review",
@@ -319,7 +322,7 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         ),
         _rule(
             "attribution_eligibility",
-            "Attribution basis is observed only for a direct record, correlated only for a registered allowed-indirect relation, inferred for supported derivation, and hypothesized for contextual explanation. Every factor cites eligible evidence and hypothesized factors are not proven causes.",
+            "Attribution basis is observed only when every cited result cell has observed source and its evidence refs belong to those observed cells; an inferred aggregate is never observed attribution. Correlated requires an allowed-indirect relation; inferred requires eligible evidence and complete dependency refs; hypothesized requires only contextual-only evidence. Every factor cites eligible evidence; omit a factor when no valid basis and refs exist, and use an empty primary_factors array if none qualify. Hypothesized factors are not proven causes.",
         ),
         _rule(
             "scope_integrity",
@@ -335,22 +338,27 @@ def _build_default_policy() -> ReasoningPromptPolicy:
         ),
         _rule(
             "planning_contract",
-            "Select only from the server-authorized tool roster and bounded options. You may plan evidence collection but may not choose provider, COMID, station, URL, credential, or arbitrary identifiers.",
+            "This phase decides only the next evidence action; do not calculate or emit cell results. If evidence is ready, return exactly {\"decision\":\"evidence_ready\"}. For a rule proposal, return an object with exactly two top-level keys: decision set to evidence_rules_proposed and rules set to an array of 1-4 rule objects. Each rule object must match response_schema in the user input. For authorized tools, emit only function calls and no assistant JSON message. Every function call must contain all three top-level arguments: nonempty window_ids and parameter_keys arrays selected from that tool's input_schema, and an options object (use {} when no option is needed). Never omit a required argument or guess an unlisted value. If no authorized action can improve the evidence, return evidence_ready and let the server report insufficiency. Never add phase, scope, plan, cell_assessments, attribution_notes, integrity, or extra keys to final JSON. Select only from the server-authorized tool roster and bounded options; never choose provider, COMID, station, URL, credential, or arbitrary identifiers.",
             phases=(WaterbodyModelPhase.EVIDENCE_PLANNING,),
         ),
         _rule(
+            "numeric_estimation_contract",
+            "Complete only the scheduled numeric task after applicable explicit calculations have been attempted. Return the exact supplied response schema with value, value_lower and value_upper as decimal strings or null. The server supplies measured anchors and sets method_kind=model_estimate; never create or upgrade them. With a traceable same-parameter original measurement, normally give a defensible point prediction plus a useful possible range. Give range-only instead only when concrete supplied counterevidence makes a point indefensible; identify it in the rationale. Lack of a local station or flow, ordinary provider_flagged, long transfer distance, and usual pH chemistry uncertainty alone are not such counterevidence; express those limits through range and confidence. Without an original measurement, provide only a useful range from related readings, local information or general knowledge, explaining the basis. General knowledge without local information must be named explicitly. If no useful estimate exists, all three values are null and the rationale explains why. Missing flow, long distances, or unquantified intervening changes do not by themselves require abstention. Never present regulatory standards or the complete physical domain as a location prediction. The result will be saved before any downstream task uses it.",
+            phases=(WaterbodyModelPhase.NUMERIC_ESTIMATION,),
+        ),
+        _rule(
             "batch_contract",
-            "Reason only over the supplied batch cells and their allowed evidence references. Produce the exact response schema without tools or external facts.",
+            "Reason only over the supplied batch cells and their allowed evidence references. Return one JSON object matching response_schema.schema exactly, without tools or external facts; write each JSON key only once. Use only the schema's field names and enum values. Write representative_value, value_lower and value_upper as a decimal string or null, never a JSON number. A quantified or range_estimate cell has an empty reason_codes array and a non-null target_unit_id matching its allowed_unit_ids and cited eligible value unit (direct record, aggregate, typed temporal_estimate, or executed numeric_derived); if there is exactly one allowed unit, use that unit. For temporal_estimate or numeric_derived, copy its saved point, bounds and unit exactly; never invent bounds or a midpoint. Range-only means outcome_status=range_estimate and representative_value=null. Use source=inferred for historical gap_filling windows and source=predicted for prediction windows, with aggregation_method=null. Cite the target result and available relevant discharge support, leaving cross-window input refs in the validated derivation rather than cell evidence_refs. Missing discharge does not invalidate an eligible saved model estimate. A separately cited estimate does not change the source of a selected direct value. An indeterminate cell has null representative_value, target_unit_id, source, and aggregation_method, plus null value_lower and value_upper. A server-eligible inferred_only aggregate with suspicious_input_count above zero still contains readings when valid_input_count is zero; its value may support an inferred mean of available readings, retaining only the quality flags actually present on the cited evidence, without claiming continuous measurement of every moment.",
             phases=(WaterbodyModelPhase.REASONING_BATCH,),
         ),
         _rule(
             "synthesis_contract",
-            "Synthesize all validated and fixed cells, coverage facts, and bounded references across windows. Preserve four-layer confidence and explicit AnalysisDetail and AttributionSummary-compatible rationales without raw records.",
+            "Synthesize all validated and fixed cells, coverage facts, and bounded references across windows. Return one JSON object matching response_schema.schema exactly. series_assessments must contain exactly requested_parameters in the given order, excluding supporting parameters. window_assessments must contain exactly window_ids in the given order; overall.contributing_window_refs must equal overall_window_refs, including the overall-window: prefix. For series_assessments, window_assessments, and overall, evidence_refs may cite only evidence_refs of their contributing validated_cells or blocker_refs of fixed cells in that series or window; other bounded references may appear only in analysis_detail or a valid attribution factor. Preserve four-layer confidence and explicit AnalysisDetail and AttributionSummary-compatible rationales without raw records.",
             phases=(WaterbodyModelPhase.OVERALL_SYNTHESIS,),
         ),
         _rule(
             "repair_contract",
-            "Mechanically repair only the listed validation issues against the original schema and unchanged scope. Use the configured model identity; add no tools, evidence, facts, or open-ended analysis.",
+            "Mechanically repair only the listed validation issues against response_schema.schema and unchanged scope. Return one JSON object with only fields and enum values allowed by that schema; write each JSON key only once. For a reasoning batch, use batch_cells for the original allowed references and units. Write representative_value, value_lower and value_upper as a decimal string or null, never a JSON number; a quantified or range_estimate cell has an empty reason_codes array and a non-null target_unit_id matching its allowed_unit_ids and cited eligible value unit (direct record, aggregate, typed temporal_estimate, or executed numeric_derived); if there is exactly one allowed unit, use that unit. For temporal_estimate or numeric_derived, copy its saved point, bounds and unit exactly; never invent bounds or a midpoint. Range-only means outcome_status=range_estimate and representative_value=null. Use source=inferred for historical gap_filling windows and source=predicted for prediction windows, with aggregation_method=null. Cite the target result and available relevant discharge support, leaving cross-window input refs in the validated derivation rather than cell evidence_refs. Set quality_flags to the exact union of flags on cited evidence_refs, without adding flags from uncited context. Missing discharge does not invalidate an eligible saved model estimate. A separately cited estimate does not change the source of a selected direct value. An indeterminate cell has null representative_value, target_unit_id, source, and aggregation_method, plus null value_lower and value_upper. A server-eligible inferred_only aggregate with suspicious_input_count above zero still contains readings when valid_input_count is zero; its value may support an inferred mean of available readings, retaining only the quality flags actually present on the cited evidence, without claiming continuous measurement of every moment. Use the configured model identity; add no tools, evidence, facts, or open-ended analysis.",
             phases=(WaterbodyModelPhase.SCHEMA_REPAIR,),
         ),
     )
@@ -360,6 +368,12 @@ def _build_default_policy() -> ReasoningPromptPolicy:
             tools_allowed=True,
             allowed_actions=("select_authorized_tools", "declare_evidence_ready"),
             forbidden_actions=("select_provider", "invent_scope_identity"),
+        ),
+        PromptPhasePermission(
+            phase=WaterbodyModelPhase.NUMERIC_ESTIMATION,
+            tools_allowed=False,
+            allowed_actions=("estimate_scheduled_numeric_task", "explain_estimate_basis", "abstain_if_uninformative"),
+            forbidden_actions=("call_tools", "invent_measurement_lineage", "change_scope"),
         ),
         PromptPhasePermission(
             phase=WaterbodyModelPhase.REASONING_BATCH,
@@ -394,6 +408,8 @@ def _build_default_policy() -> ReasoningPromptPolicy:
             "tool_roster",
             "deadlines",
             "budgets",
+            "method_kind",
+            "measured_anchors",
         ),
         agent_owned_fields=(
             "tool_intent",
@@ -418,3 +434,17 @@ def _build_default_policy() -> ReasoningPromptPolicy:
     )
 
 DEFAULT_REASONING_PROMPT_POLICY = _build_default_policy()
+
+
+def render_numeric_estimation_system_prompt() -> str:
+    phase = WaterbodyModelPhase.NUMERIC_ESTIMATION
+    policy = DEFAULT_REASONING_PROMPT_POLICY
+    permission = next(item for item in policy.phase_permissions if item.phase is phase)
+    return "\n".join((
+        "Waterbody reasoning contract. Follow every bracketed rule exactly.",
+        f"[phase] {phase.value}",
+        *(f"[{rule.rule_id}] {rule.instruction}" for rule in policy.rules if phase in rule.phases),
+        f"[allowed_actions] {', '.join(permission.allowed_actions)}",
+        f"[forbidden_actions] {', '.join(permission.forbidden_actions)}",
+        "[tools_allowed] false",
+    ))

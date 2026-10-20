@@ -28,6 +28,7 @@ from app.application.transcripts.models import (
 )
 from app.domain import (
     DomainModel,
+    EvidenceFragmentReference,
     MemoryMode,
     ModelSelection,
     NonEmptyString,
@@ -107,6 +108,8 @@ class WaterbodyModelRequestV1(_VersionOneContent):
     scope_digest: NonEmptyString
     prompt_policy_digest: NonEmptyString
     evidence_bundle_ref: TranscriptContentRef
+    numeric_plan_ref: TranscriptContentRef | None = None
+    numeric_input_refs: tuple[EvidenceFragmentReference, ...] = ()
     batch_id: NonEmptyString | None = None
     system_prompt: NonEmptyString
     messages: Annotated[tuple[WaterbodyModelMessage, ...], Field(min_length=1)]
@@ -117,9 +120,12 @@ class WaterbodyModelRequestV1(_VersionOneContent):
 
     @model_validator(mode="after")
     def validate_request_digest(self) -> Self:
-        expected = canonical_json_digest(
-            self.model_dump(mode="json", exclude={"request_digest"})
-        )
+        values = self.model_dump(mode="json", exclude={"request_digest"})
+        if self.numeric_plan_ref is None:
+            values.pop("numeric_plan_ref")
+        if not self.numeric_input_refs:
+            values.pop("numeric_input_refs")
+        expected = canonical_json_digest(values)
         if self.request_digest != expected:
             raise ValueError("request_digest must match the canonical request")
         return self
@@ -222,7 +228,10 @@ class WaterbodyModelResponseV1(_VersionOneContent):
         ):
             raise ValueError("stored refusal must match operation and model")
         if (
-            self.finish_reason is not StoredModelFinishReason.ERROR
+            self.finish_reason not in {
+                StoredModelFinishReason.ERROR,
+                StoredModelFinishReason.CANCELLED,
+            }
             and self.provider_response_id is None
         ):
             raise ValueError("terminal stored responses require provider identity")

@@ -2,6 +2,7 @@ from typing import Self
 
 from pydantic import StrictBool, field_validator, model_validator
 
+from app.application.query_understanding import EvidenceRule
 from app.domain.common import (
     CanonicalDecimal,
     DomainModel,
@@ -15,9 +16,9 @@ from app.domain.evidence.evidence_coverage import EvidenceCoverage
 from app.domain.evidence.evidence_derivation import EvidenceDerivation
 from app.domain.evidence.evidence_quality_class import EvidenceQualityClass
 from app.domain.evidence.source_record_reference import SourceRecordReference
+from app.domain.hydrology.location import GeoPoint
 from app.domain.hydrology.parameter_key import ParameterKey
 from app.domain.hydrology.parameter_provider import ParameterProvider
-from app.application.query_understanding import EvidenceRule
 from app.domain.hydrology.value_semantics import ValueSemantics
 from app.domain.time.time_range import TimeRange
 from app.domain.time.timezone import get_iana_timezone
@@ -54,6 +55,7 @@ class PolicyObservation(DomainModel):
     channel: NonEmptyString
     location_comid: NonEmptyString | None = None
     station_id: NonEmptyString
+    location_point: GeoPoint | None = None
     medium: NonEmptyString | None
     fraction: NonEmptyString | None
     method: NonEmptyString

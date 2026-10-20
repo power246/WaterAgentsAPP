@@ -102,7 +102,11 @@ class TopologyResultAssembler:
             for series in result.series
             for point in series.points
             if point.outcome_status
-            in {OutcomeStatus.QUANTIFIED, OutcomeStatus.DIRECTIONAL}
+            in {
+                OutcomeStatus.QUANTIFIED,
+                OutcomeStatus.RANGE_ESTIMATE,
+                OutcomeStatus.DIRECTIONAL,
+            }
         )
         references = tuple(
             StableSourceReference(

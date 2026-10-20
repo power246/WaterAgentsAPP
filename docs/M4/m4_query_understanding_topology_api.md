@@ -334,14 +334,16 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
             "code_system": "usgs",
             "code": "00060"
           },
-          "segment_index": 0
+          "segment_index": 0,
+          "window_index": null
         },
         {
           "parameter": {
             "code_system": "usgs",
             "code": "00300"
           },
-          "segment_index": 0
+          "segment_index": 0,
+          "window_index": null
         }
       ],
       "station_refs": [
@@ -353,7 +355,8 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
               "series_identity": "series-safe-identifier",
               "parameter": {"code_system": "usgs", "code": "00060"},
               "channel": "continuous",
-              "covered_segment_indexes": [0]
+              "covered_segment_indexes": [0],
+              "covered_window_ids": null
             }
           ]
         }
@@ -394,7 +397,8 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
           "code_system": "usgs",
           "code": "00060"
         },
-        "segment_index": 0
+        "segment_index": 0,
+        "window_index": null
       },
       "outcome": "qualified",
       "stop_comid": "12345678",
@@ -409,7 +413,8 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
           "code_system": "usgs",
           "code": "00300"
         },
-        "segment_index": 0
+        "segment_index": 0,
+        "window_index": null
       },
       "outcome": "qualified",
       "stop_comid": "12345678",
@@ -438,6 +443,8 @@ run-owned，正文是唯一 `HydrologyGraph`。以下是 target 本身已有合�
 ```
 
 大图按 M3 64 KiB 规则返回 preview/reference，前端再用全文 endpoint 获取。地图只依据 graph 原事实绘制；不能从 session 数量反推节点或排除原因。距离或全图节点上限在 child 进入图前阻止扩展时，`stop_comid/path_to_target` 仍描述已发现的 parent 路径，`blocked_upstream_comid` 单独记录该 child；因此多个同时受限的支流不会被集合去重合并。
+
+上例为纯预测段，`qualified_units` 和 `branch_outcomes[].coverage_unit` 的 `window_index`、`station_refs[].series_refs[].covered_window_ids` 均为 `null`，与实际序列化结果一致。历史段按最终结果时间窗逐窗探测；历史 unit 包含全局 `window_index`，对应 series reference 另包含 `covered_window_ids`（例如 `"window-000"`），M5 仅按这些窗口授权。历史首个候选的上游备选搜索若自然结束或触及上限，`branch_outcomes` 使用 `backup_search_ended`，不降低已找到候选的 coverage。
 
 ## 5. History 与 detail 投影
 

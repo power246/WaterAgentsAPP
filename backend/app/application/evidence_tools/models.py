@@ -14,10 +14,12 @@ from app.domain import (
     EvidenceFragmentReference,
     EvidenceToolRequest,
     EvidenceToolResult,
+    GeoPoint,
     InferenceMode,
     ItemReference,
-    ProviderCollectionBatch,
+    NumericDependencyPlan,
     ParameterKey,
+    ProviderCollectionBatch,
     ReferenceScope,
     SourceRecord,
     SourceRecordReference,
@@ -40,7 +42,7 @@ class EvidenceProducerStatus(str, Enum):
 @dataclass(frozen=True, slots=True)
 class EvidenceToolLimits:
     provider_timeout_seconds: float = 20
-    total_deadline_seconds: float = 90
+    total_deadline_seconds: float = 180
     collection_calls: int = 12
     transform_calls: int = 24
     pages_per_operation: int = 10
@@ -161,7 +163,9 @@ class EvidenceCollectionInput:
 class StoredPolicyObservations:
     observations: tuple[PolicyObservation, ...]
     collection_complete: bool
+    selection_complete: bool
     expected_cadence_seconds: int | None = None
+    station_point: GeoPoint | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +180,12 @@ class EvidenceInspectionPage:
 
 
 class EvidenceToolWriter(Protocol):
+    async def write_numeric_plan(
+        self,
+        scope: EvidenceSessionScope,
+        plan: NumericDependencyPlan,
+    ) -> ItemReference: ...
+
     async def write_call(
         self,
         scope: EvidenceSessionScope,
@@ -216,6 +226,12 @@ class EvidenceToolWriter(Protocol):
 
 
 class EvidenceToolReader(Protocol):
+    async def read_numeric_plan(
+        self,
+        scope: EvidenceSessionScope,
+        reference: ItemReference,
+    ) -> NumericDependencyPlan: ...
+
     async def read_agent_session(
         self,
         scope: EvidenceSessionScope,
@@ -228,10 +244,17 @@ class EvidenceToolReader(Protocol):
         reference: EvidenceFragmentReference,
     ) -> EvidenceFragment: ...
 
+    async def read_fragments(
+        self,
+        scope: EvidenceSessionScope,
+        references: tuple[EvidenceFragmentReference, ...],
+    ) -> tuple[EvidenceFragment, ...]: ...
+
     async def read_policy_observations(
         self,
         scope: EvidenceSessionScope,
         references: tuple[SourceRecordReference, ...],
+        window: TimeRange,
     ) -> StoredPolicyObservations: ...
 
     async def read_source_records(

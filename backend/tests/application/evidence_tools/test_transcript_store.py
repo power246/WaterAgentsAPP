@@ -5,6 +5,7 @@ from functools import wraps
 from uuid import UUID, uuid4
 
 from app.api.sse.response import create_session_event_response
+from app.application.analysis_runs.coordinator import RunCoordinator
 from app.application.analysis_runs.models import AgentRole, TranscriptItemIdentity
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.analysis_runs.workflow import WorkflowContext
@@ -26,6 +27,7 @@ from app.domain import (
     EvidenceToolExecutionStatus,
     EvidenceToolRequest,
     EvidenceToolResult,
+    EvidenceFragmentReference,
     ReferenceScope,
     HistoricalCaseRef,
     HistoricalTranscriptRecord,
@@ -40,7 +42,7 @@ from tests.application.evidence_tools.test_collection_service import (
 )
 from tests.m4_support import MODEL_CATALOG, create_request_bytes, create_test_app
 from tests.application.evidence_tools.conftest import make_context, make_scope
-from tests.domain.test_evidence import valid_source_records
+from tests.domain.test_evidence import sample_fragments, valid_source_records
 
 
 def run_async(function):
@@ -70,6 +72,27 @@ class HoldingWorkflow:
         self.calls.put_nowait(context)
         await self.release.wait()
         context.cancellation.checkpoint()
+
+
+class GatedFragmentStore(InMemoryTranscriptStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fragment_write_started = asyncio.Event()
+        self.release_fragment_write = asyncio.Event()
+        self.item_reads = 0
+
+    async def write_batch(self, batch) -> None:
+        if any(
+            item.content_type == "evidence_fragment"
+            for item in batch.transcript.items
+        ):
+            self.fragment_write_started.set()
+            await self.release_fragment_write.wait()
+        await super().write_batch(batch)
+
+    async def read_run_items(self, run_id, item_ids):
+        self.item_reads += 1
+        return await super().read_run_items(run_id, item_ids)
 
 
 class RecordingOperations:
@@ -120,6 +143,89 @@ async def wait_until(predicate, timeout: float = 2) -> None:
     async with asyncio.timeout(timeout):
         while not predicate():
             await asyncio.sleep(0)
+
+
+@run_async
+async def test_evidence_read_waits_for_commit_and_reads_selected_stored_item(
+    monkeypatch,
+):
+    store = GatedFragmentStore()
+    workflow = HoldingWorkflow()
+    coordinator = RunCoordinator(
+        StepClock(),
+        model_catalog=MODEL_CATALOG,
+        transcript_store=store,
+        workflow=workflow,
+        shutdown_grace_period=0,
+        shutdown_save_grace_period=0,
+    )
+
+    class NoLiveReads:
+        async def get_live_read(self, run_id):
+            raise AssertionError("evidence read used the live run")
+
+    read_task = None
+    try:
+        created = await coordinator.create_run(create_request_bytes())
+        await workflow.calls.get()
+        session = await coordinator.prepare_agent_session(
+            created.run_id,
+            agent_role=AgentRole.WATERBODY,
+            target_comid="123",
+        )
+        await coordinator.mark_agent_session_running(
+            created.run_id, session.session_id
+        )
+        await wait_until(
+            lambda: coordinator._transcript_writer.info_locked(
+                coordinator._runs[created.run_id]
+            ).state is PersistenceState.UP_TO_DATE
+        )
+        scope = make_scope(
+            run_id=str(created.run_id), session_id=str(session.session_id)
+        )
+        registry = create_production_registry()
+
+        def reject_read_redaction(*_):
+            raise AssertionError("persisted evidence was redacted again")
+
+        monkeypatch.setattr(registry, "safe_read_body", reject_read_redaction)
+        reader = TranscriptReader(
+            NoLiveReads(), store, registry,
+            error_id_factory=uuid4,
+            inline_content_bytes=65536, preview_bytes=2048,
+        )
+        transcript = EvidenceTranscriptStore(
+            operations=coordinator,
+            reader=reader,
+            capability_registry=load_parameter_capability_registry(),
+        )
+        fragment = sample_fragments()[4].model_copy(
+            update={"target_comid": "123"}
+        )
+        identity = await coordinator.reserve_transcript_item(
+            created.run_id, session_id=session.session_id,
+        )
+        await coordinator.finalize_transcript_item(
+            created.run_id, identity.item_id, "evidence_fragment", 1, fragment,
+        )
+        reference = EvidenceFragmentReference(
+            item_id=str(identity.item_id), evidence_id=fragment.evidence_id,
+        )
+        read_task = asyncio.create_task(transcript.read_fragment(scope, reference))
+        await asyncio.wait_for(store.fragment_write_started.wait(), 2)
+        await asyncio.sleep(0)
+        assert not read_task.done()
+        assert store.item_reads == 0
+        store.release_fragment_write.set()
+        assert await asyncio.wait_for(read_task, 2) == fragment
+        assert store.item_reads == 1
+    finally:
+        store.release_fragment_write.set()
+        workflow.release.set()
+        if read_task is not None:
+            await asyncio.gather(read_task, return_exceptions=True)
+        await coordinator.shutdown()
 
 
 async def collect_response(response):

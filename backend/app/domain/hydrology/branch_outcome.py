@@ -60,13 +60,26 @@ class BranchOutcome(DomainModel):
         elif self.outcome is BranchOutcomeStatus.NO_QUALIFYING_SOURCE:
             if self.reason is not BranchOutcomeReason.NATURAL_HEADWATER:
                 raise ValueError("natural exhaustion requires natural_headwater")
+        elif self.outcome is BranchOutcomeStatus.BACKUP_SEARCH_ENDED:
+            if self.reason not in limit_reasons | {
+                BranchOutcomeReason.NATURAL_HEADWATER
+            }:
+                raise ValueError("backup search requires a terminal reason")
         elif self.reason not in limit_reasons:
             raise ValueError("limit outcome requires a limit reason")
         if (
             self.blocked_upstream_comid is not None
-            and self.outcome is not BranchOutcomeStatus.SEARCH_LIMIT_REACHED
+            and self.outcome not in {
+                BranchOutcomeStatus.SEARCH_LIMIT_REACHED,
+                BranchOutcomeStatus.BACKUP_SEARCH_ENDED,
+            }
         ):
             raise ValueError("only a limit outcome may identify a blocked upstream")
+        if (
+            self.blocked_upstream_comid is not None
+            and self.reason is BranchOutcomeReason.NATURAL_HEADWATER
+        ):
+            raise ValueError("natural exhaustion cannot identify a blocked upstream")
         if self.blocked_upstream_comid == self.stop_comid:
             raise ValueError("blocked upstream must differ from stop_comid")
         return self

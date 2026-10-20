@@ -4,7 +4,7 @@
 
 > 状态：设计方向、实施模式和 Milestone 0–13 已完成本机实现与集成审计。固定 fake、official provider fixtures、现有两层 SSE、专用 PostgreSQL 和完整 backend regression 已通过；真实 OpenAI waterbody provider 请求与 Ubuntu/macOS/Windows 同提交 CI 仍为 `not run` / `partial`。精确实现证据和剩余风险见同目录 Implementation TODO。
 
-> M7 接力说明：本文 2026-10-03 只在第 3 节阶段责任中登记 M7 的 dependency gate、stationless 0-model 路径和最终汇总接缝；M6 既有单水体启动/验收语义保持历史事实，不把 M7 待实现行为写成 M6 已完成证据。
+> M7 接力说明：M7 负责直接上游收敛和最终汇总，M6 负责当前水体内统一数值流程与最终推理；无站点缺数时可继续范围估计。旧阶段完成证据和本轮新行为验证在 TODO 中分别记录。
 
 本文承接：
 
@@ -50,10 +50,10 @@ station-backed 水体先由确定性 policy 执行 M5 `collect_water_observation
 若 preflight 成功完成，但全部适用窗口都没有 usable local direct evidence：
 
 - 保存真实 tool calls/results、collection facts、fragments 和 bundle；
-- 不进入 waterbody model tool loop；
-- 后端为全部计划 cells 装配 `indeterminate/insufficient_evidence`；
-- 模型调用数严格为 0；
-- session 以真实 completed result 收敛，不伪造模型消息或 quantified value。
+- 在同一数值依赖计划中尝试适用明确计算，缺少适用方法时进入有界模型估计；
+- 其他指标读数、当地资料和一般规律可作为依据，但不变成目标指标实测；
+- 无同指标实测时最多保存范围，模型无法提供有用范围时保存不足原因；
+- 记录真实模型调用数，最终推理只消费已经保存并验证的估计。
 
 stationless 水体没有本地观测是正常起点，不得套用上述停止策略。它不注册、不调用本地 observation tool，而是先读取 M7 producer slot 的直接上游结果；无论上游证据是否已经足够，M6 单水体 runner 都允许在有界 Agent loop 中按需调用 weather、facility、inspection、aggregation 和 unit tools。M7 尚未接入 producer 时，M6 fake/contract 验收使用显式 unavailable producer，不用 hidden fake 冒充真实上游；M7 production workflow 之后会在调用该 planning 路径前执行自己的 dependency gate。
 
@@ -82,11 +82,15 @@ append rule 只能引用本次 capability registry 中的 ParameterKey，经过 
 Agent 声明 evidence ready、达到 planning 上限或没有合法后续动作时，M6 执行最终 gate：
 
 - identity 为 target `ParameterKey × final TimeWindow`；
-- 同时检查 target cell 与同窗 discharge cell；
+- 先等待数值依赖任务收敛；目标模型估计可在同窗 discharge 仍缺失或失败时继续，明确计算按方法声明核验必需输入；
 - direct 或当前 rule plan 允许的 allowed-indirect 才是 supported；
-- contextual-only 不能解锁；
-- unavailable/invalid/technical incomplete 为 blocked，不得冒充 empty；
+- contextual-only 不能直接解锁；基于它形成并保存的模型估计通过校验后可以解锁；
+- provider unavailable、采集不完整及非 `unit_unresolved` 的 invalid blocker 不得冒充 empty；个别 `unit_unresolved` 原始项不阻断同序列其他有效读数，若该窗只有 `unit_unresolved` 且采集完整，可用其他窗口的同序列原始锚点补值；
 - unsupported/blocked cells 不进入 reasoning batch。
+
+对于历史空窗，优先按同水体、同序列的原始窗口代表值生成时间补值。WDFN continuous 代表值按 `mean` 形成，USGS Samples `discrete_samples` 按登记默认的 `latest` 形成；明确计算保留各自采集、单位和质量要求。个别 `unit_unresolved` 原始项保留审计，其余可转换读数仍可使用。无适用明确方法时，由同一依赖调度调用模型估计；流量先尝试，仍缺失时目标可继续。模型估计与时间补值都保存方法和引用，不伪装成本窗直接观测。技术失败与分页不完整不成为“已查空”，其事实可以与带限制说明的模型预测同时存在。
+
+每个目标值由时间补出的窗口，结果来源为 `inferred`，质量标明系统时间补值，置信度随最近原始锚点的时间距离下降，单侧保持值的上限低于双侧插值。结果中另记录仅属于目标值的补值方法；质量标记可能同时来自流量支持证据，因此不能仅凭质量标记判断 pH 等目标值是否补出。结果可用窗口数和实际观测覆盖分别呈现；补出所有窗口不意味着整段时间连续实测。
 
 如果全部 cells unsupported 且没有 technical blocker，后端以 0 次 final reasoning 调用装配完整 indeterminate result。stationless 在此之前可能发生 evidence-planning 模型调用；这些调用必须如实计数，不能被描述成整个 session 0 次模型调用。
 
@@ -102,7 +106,7 @@ Agent 声明 evidence ready、达到 planning 上限或没有合法后续动作�
 - supported cell 可引用的 evidence allowlist；
 - source、unit、aggregation 和 applicability 的机械资格。
 
-Agent 只为 supported cells 输出 `ReasoningDraft`。draft 可以判断 quantified、directional 或 indeterminate，给出风险、confidence、理由、evidence refs、analysis steps 和 attribution proposal，但不能改变 cell identity、创建额外窗口、引用 scope 外 evidence 或覆盖后端固定结果。
+Agent 只为 supported cells 输出 `ReasoningDraft`。draft 可以判断 quantified、range_estimate、directional 或 indeterminate，给出风险、confidence、理由、evidence refs、analysis steps 和 attribution proposal，但不能改变 cell identity、创建额外窗口、引用 scope 外 evidence 或覆盖后端固定结果。数字和可能范围必须对应已保存的数值证据。
 
 validator 通过后由 assembler 生成正式 `InferenceResult`。模型从不直接拥有 result/session identity、generated_at、固定 blockers、引用闭包或 lifecycle terminal event 的构造权。
 
@@ -120,17 +124,18 @@ validator 通过后由 assembler 生成正式 `InferenceResult`。模型从不�
 
 如果没有 supported cell，则不存在 reasoning batch 或 synthesis 调用；全部总体对象由后端按固定 indeterminate 语义装配。
 
-### D07：每个计划窗口完整输出三态结果
+### D07：每个计划窗口完整输出四类结果
 
 每个 requested parameter 的每个 final window 必须有且只有一个 point：
 
 - `quantified`：有 representative value、合法 unit、source、confidence、理由和 evidence refs；
+- `range_estimate`：只有 `value_lower`、`value_upper` 和合法单位，没有单点值；来源为 inferred 或 predicted，模型估计标明依据类型；
 - `directional`：没有 representative value，必须有明确 trend 或 risk、confidence、理由和 evidence refs；
 - `indeterminate`：没有 representative value，必须有 reason code、缺失/blocker refs 和固定或 Agent 理由。
 
-仅 allowed-indirect evidence 的 cell 最多输出 directional，不能输出具体目标值。完全没有 direct/allowed-indirect evidence 的 cell 由后端装配 indeterminate。direct evidence 已通过 gate 也不强迫 Agent quantified：跨 series 差异、coverage 或任务语义仍可令 Agent 选择 directional/indeterminate。
+普通方向性关联只能支持 directional。已执行且保存的明确计算或模型估计可以支持数字；模型单点必须有服务端追溯到的同指标原始实测，模型范围可使用相关读数、侧面资料或常识。模型只能给出几乎无参考意义的全范围时，不把它记为预测。最终仍没有可用数值或判断依据的 cell 装配 indeterminate。
 
-`ResultSource` 只描述真实产生的判断来源：gap-filling quantified/directional 为 observed 或 inferred，prediction quantified/directional 为 predicted；indeterminate 不伪造 observed/inferred/predicted source。现有 domain 必须原子收敛该不变量。
+`ResultSource` 只描述真实产生的判断来源：历史模型估计为 inferred，未来模型估计为 predicted；模型估计和范围不得标为 observed。只有一对一直接读数具备 observed 资格；indeterminate 的 source 为空。
 
 ### D08：风险等级由 Agent 判断，并必须给出推理简述
 
@@ -222,7 +227,7 @@ raw model output 只指 provider 实际交给应用的可见消息、tool calls 
 
 自然无证据是已完整执行 evidence acquisition 后的业务事实，可以完成 session 并返回 indeterminate。技术失败不能伪装为自然无证据：
 
-- optional tool 失败但其他 target + discharge refs 足够时，可以继续；结果保留 unavailable fact；
+- optional tool 失败但其他目标证据或已保存模型估计可用时，可以继续；结果保留 unavailable fact，流量缺失单列说明；
 - 某些 windows blocked、另有 supported windows 时，只推理 supported cells，blocked cells 以明确技术 reason indeterminate，overall availability 为 partial；
 - required path 技术失败导致所有 cells blocked 时，不调用 reasoning model，session failed；
 - waterbody model unavailable、timeout、content filter、invalid response after repair 均为 session failed；
@@ -242,13 +247,23 @@ M6 不公开 direct reasoning、prompt、tool invocation 或 result assembly HTT
 
 完整 `InferenceResult` 只保存一份并通过 transcript item/reference 读取；lifecycle、run snapshot 和 history summary 使用轻量 projection，不复制完整 series。
 
+### D17：最终推理只消费已保存的数值依赖结果
+
+M6 的目标与流量门禁在 M5 完成数值依赖计划、计算、校验和数据库写入后再封存。前置任务尚未运行时，不能把目标永久定为“证据不足”。每个后续步骤按引用取得已保存的中间值、方法、来源和质量限制；方向性关联证据没有数值，不能单独支持具体数字。明确计算保留方法和输入的可信上限；模型估计由完整原始来源、距离、时间差和已知变化共同判断，不按水体跳数反复扣减可信度。
+
+最终 `InferenceResult` 只含用户请求指标；内部 `method_input` cell 与派生片段通过证据详情、transcript 引用和历史读取说明计算链。明确计算和模型估计共用计划、保存与下游引用流程，分别记录 `inference_method=explicit_calculation/model_estimate`。模型不得把估计解释成已验证公式；最终数字和范围须对应已保存证据。
+
+模型估计的 `inference_basis` 为 `same_parameter_measurement`、`related_evidence` 或 `general_knowledge`。相关依据包括其他指标读数。`measured_anchors` 由服务端追溯原始记录；从上游传来的范围若没有原始同指标实测，下游仍只能给范围。结果显示原始测站距离、路径水体数与可能范围；未知的中途变化明确为未知。低可信度不自动取消估计，模型给出的可信度与可能范围也不冒充已回测校准的概率或置信区间。
+
+上游搜索缺口按指标、时间窗和分支路径传给真正受影响的水体推理与最终摘要。自然到达源头但没有合格测站，应说明该分支缺少来源；因硬上限中止时只能说更远处是否有来源未知。已有合格来源之后停止的备选搜索不算必需来源缺口。`graph_coverage=partial` 可以与所有参与水体结果均可用同时成立；缺口既不是零读数，也不自动扣固定可信度或禁止模型给出有依据的估计。
+
 ## 3. 已冻结的阶段责任
 
 | 阶段 | 责任 |
 |---|---|
 | M5 | 提供 scope-safe evidence acquisition、tools、bundle、cell gates、unit/aggregation 和引用闭包；不作最终判断。 |
 | M6 | 执行一个 waterbody session 的 Agent loop、最终 gate、分批 reasoning、风险/confidence、结果验证与装配，并复用 session SSE。 |
-| M7 | 按 active DAG 创建/调度多个 waterbody sessions；在调用 M6 planning 前执行 dependency gate，stationless 无 usable upstream 时复用 M6 skeleton/assembler 生成 0-model 不足结果；注入真实直接上游结果，并形成 target/run-level result 与独立 `run_summarizer` session。 |
+| M7 | 按 active DAG 创建/调度多个 waterbody sessions；等待直接上游终态并注入真实结果，stationless 无 usable upstream 时仍允许同一数值流程的低依据范围估计；形成 target/run-level result 与独立 `run_summarizer` session。 |
 | M8 | 接入 transcript RAG producer；历史 evidence 保持 contextual，不自动解锁 gate。 |
 | M9 | 实现最终前端、settings/keys/admin 和端到端联调；消费 M6 已冻结结果与 session context。 |
 

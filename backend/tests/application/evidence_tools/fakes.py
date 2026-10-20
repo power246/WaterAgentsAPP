@@ -3,24 +3,27 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import NAMESPACE_URL, uuid5
 
+from app.application.analysis_runs.models import SessionSummary
 from app.application.evidence_tools import (
     EvidenceCollectionArtifacts,
     EvidenceScopeViolationError,
     StoredPolicyObservations,
 )
-from app.application.analysis_runs.models import SessionSummary
+from app.application.evidence_tools.collection_service import build_policy_observation
 from app.domain import (
     CollectionCompletionProof,
     CollectionCounts,
     CollectionPageManifest,
     EvidenceFragment,
     EvidenceFragmentReference,
-    ReferenceScope,
     ItemReference,
+    NumericDependencyPlan,
     ProviderCollectionBatch,
+    ReferenceScope,
     SourceRecord,
     SourceRecordReference,
 )
+from app.infrastructure.config import load_parameter_capability_registry
 
 
 class FixedClock:
@@ -54,6 +57,7 @@ class MemoryEvidenceStore:
             tuple[SourceRecordReference, ...], StoredPolicyObservations
         ] = {}
         self.sessions: dict[str, SessionSummary] = {}
+        self.numeric_plans: dict[str, NumericDependencyPlan] = {}
 
     async def read_agent_session(self, scope, session_id):
         try:
@@ -106,6 +110,26 @@ class MemoryEvidenceStore:
             evidence_id=fragment.evidence_id,
         )
 
+    async def write_numeric_plan(self, scope, plan):
+        item_id = str(uuid5(
+            NAMESPACE_URL,
+            f"numeric-plan:{scope.run_id}:{scope.session_id}:{plan.plan_digest}",
+        ))
+        self.numeric_plans[item_id] = plan
+        self._remember_scope(scope, item_id)
+        return ItemReference(item_id=item_id)
+
+    async def read_numeric_plan(self, scope, reference):
+        plan = self.numeric_plans.get(reference.item_id)
+        if (
+            plan is None
+            or plan.run_id != scope.run_id
+            or plan.session_id != scope.session_id
+            or plan.target_comid != scope.agent_comid
+        ):
+            raise EvidenceScopeViolationError()
+        return plan
+
     async def write_result(self, scope, result):
         self.results.append((scope.run_id, result))
         reference = ItemReference(item_id=f"result-item-{len(self.results):03d}")
@@ -126,11 +150,63 @@ class MemoryEvidenceStore:
             raise EvidenceScopeViolationError()
         return fragment
 
-    async def read_policy_observations(self, scope, references):
+    async def read_fragments(self, scope, references):
+        return tuple([
+            await self.read_fragment(scope, reference)
+            for reference in references
+        ])
+
+    async def read_policy_observations(self, scope, references, window):
         stored = self.observations.get(references)
-        if stored is None:
+        if stored is not None:
+            return stored
+        records = {
+            (item_id, record.record_id): record
+            for (run_id, session_id, item_id), items in self.records.items()
+            if run_id == scope.run_id and session_id == scope.session_id
+            for record in items
+        }
+        try:
+            selected = tuple(
+                records[(reference.item_id, reference.record_id)]
+                for reference in references
+            )
+            window_id = next(
+                item.window_id for item in scope.time_windows
+                if item.time_range == window
+            )
+            manifests = tuple(
+                next(
+                    manifest for manifest in self.manifests.values()
+                    if record.provenance.page_identity in {
+                        page.page_identity
+                        for page in manifest.page_or_chunk_manifests
+                    }
+                )
+                for record in selected
+            )
+        except (KeyError, StopIteration) as error:
+            raise EvidenceScopeViolationError() from error
+        registry = load_parameter_capability_registry()
+        observations = tuple(
+            build_policy_observation(registry, record, reference)
+            for reference, record in zip(references, selected, strict=True)
+        )
+        if not observations or any(item is None for item in observations):
             raise EvidenceScopeViolationError()
-        return stored
+        return StoredPolicyObservations(
+            observations=observations,
+            collection_complete=all(
+                manifest.completion_proof.complete
+                and any(
+                    item.window_id == window_id and item.complete
+                    for item in manifest.window_completeness
+                )
+                for manifest in manifests
+            ),
+            selection_complete=True,
+            expected_cadence_seconds=None,
+        )
 
     async def read_source_records(self, scope, source_item_id):
         records = self.records.get((scope.run_id, scope.session_id, source_item_id))
@@ -164,11 +240,16 @@ class MemoryEvidenceStore:
     def seed_session(self, session):
         self.sessions[str(session.session_id)] = session
 
-    def seed_observations(self, references, observations, *, complete=True, cadence=3600):
+    def seed_observations(
+        self, references, observations, *, complete=True, selection_complete=True,
+        cadence=3600, station_point=None,
+    ):
         self.observations[tuple(references)] = StoredPolicyObservations(
             observations=tuple(observations),
             collection_complete=complete,
+            selection_complete=selection_complete,
             expected_cadence_seconds=cadence,
+            station_point=station_point,
         )
 
     def _remember_scope(self, scope, item_id):

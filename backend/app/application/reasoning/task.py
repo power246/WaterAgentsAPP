@@ -169,6 +169,10 @@ def _validate_scope_facts(
     _require(node is not None and node == scope.target_node, "task_scope_node_mismatch")
     _require(scope.query == context.query, "task_scope_query_mismatch")
     _require(
+        scope.analysis_target_point == context.target.point,
+        "task_scope_target_point_mismatch",
+    )
+    _require(
         scope.requested_parameters == tuple(item.key for item in context.params_used),
         "task_scope_requested_parameters_mismatch",
     )

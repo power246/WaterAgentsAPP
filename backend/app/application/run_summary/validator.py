@@ -20,14 +20,18 @@ from app.application.run_summary.models import (
 )
 from app.domain import ModelSelection, ModelUsageSummary
 
-
 _URL = re.compile(
     r"(?i)(?:https?://|www\.|\b[a-z0-9][a-z0-9.-]*\.(?:com|org|net|io|gov|edu)(?:/|\b))"
 )
-_COMID = re.compile(r"(?i)\bCOMID\s*[:#]?\s*([A-Za-z0-9._-]+)")
+_COMID = re.compile(r"(?i)\bCOMID\b\s*[:#]?\s*([A-Za-z0-9._-]+)")
 _NUMBER = re.compile(
-    r"(?<![A-Za-z0-9_.])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
-    r"(?![A-Za-z0-9_.])"
+    r"(?<![A-Za-z0-9_.])[-+]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?"
+    r"(?![A-Za-z0-9_])"
+)
+_WINDOW_ID_TOKEN = re.compile(
+    r"(?i)(?<![A-Za-z0-9_.-])"
+    r"(?:window[-_][A-Za-z0-9_-]*\d[A-Za-z0-9_-]*|w\d+[A-Za-z0-9_-]*)"
+    r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])"
 )
 _RISK_CLAIM = re.compile(
     r"(?i)(?:\b(none|low|medium|high|indeterminate)[ -]risk\b|"
@@ -112,7 +116,25 @@ class RunSummaryValidator:
 
         allowed_refs = set(summary_input.allowed_source_refs)
         numeric_facts = _numeric_fact_catalog(summary_input)
-        if _numbers_without_comids(draft.plain_language_summary):
+        allowed_window_ids = {
+            window.window_id
+            for projection in (
+                summary_input.target_result_projection,
+                *summary_input.report_cards,
+            )
+            for window in projection.window_summaries
+        }
+        allowed_window_ids.update(
+            reference.window_id
+            for reference in allowed_refs
+            if reference.window_id is not None
+        )
+        known_window_pattern = _known_window_pattern(allowed_window_ids)
+        if _unsupported_numeric_tokens(
+            draft.plain_language_summary,
+            allowed_comids=allowed_comids,
+            known_window_pattern=known_window_pattern,
+        ):
             issues.append(
                 ("unsupported_numeric_assertion", "$.plain_language_summary")
             )
@@ -121,14 +143,23 @@ class RunSummaryValidator:
             if item.source_ref not in allowed_refs:
                 issues.append(("source_ref_outside_input", path + ".source_ref"))
                 continue
-            numeric = item.display_value is not None
-            numeric_tokens = _numbers_without_comids(item.text)
+            numeric = item.display_value is not None or item.value_lower is not None
+            numeric_tokens = _unsupported_numeric_tokens(
+                item.text,
+                allowed_comids=allowed_comids,
+                known_window_pattern=known_window_pattern,
+            )
             if numeric:
                 expected = numeric_facts.get(item.source_ref)
-                actual = (item.display_value, item.display_unit, item.window_id)
+                actual = (
+                    item.display_value, item.value_lower, item.value_upper,
+                    item.display_unit, item.window_id,
+                )
                 if expected is None or actual != expected:
                     issues.append(("numeric_fact_mismatch", path))
-                if any(token != item.display_value for token in numeric_tokens):
+                if any(token not in {
+                    item.display_value, item.value_lower, item.value_upper
+                } for token in numeric_tokens):
                     issues.append(("unsupported_numeric_assertion", path + ".text"))
             elif numeric_tokens:
                 issues.append(("unsupported_numeric_assertion", path + ".text"))
@@ -153,6 +184,8 @@ class RunSummaryValidator:
                     text=item.text,
                     source_ref=item.source_ref,
                     display_value=item.display_value,
+                    value_lower=item.value_lower,
+                    value_upper=item.value_upper,
                     display_unit=item.display_unit,
                     window_id=item.window_id,
                 )
@@ -184,14 +217,42 @@ def query_language(query: str) -> str:
     return "zh-CN" if _CJK.search(query) else "en"
 
 
-def _numbers_without_comids(text: str) -> tuple[str, ...]:
-    return tuple(_NUMBER.findall(_COMID.sub("", text)))
+def _unsupported_numeric_tokens(
+    text: str,
+    *,
+    allowed_comids: set[str],
+    known_window_pattern: re.Pattern[str] | None,
+) -> tuple[str, ...]:
+    without_known_windows = (
+        known_window_pattern.sub(" ", text)
+        if known_window_pattern is not None
+        else text
+    )
+    unknown_windows = _WINDOW_ID_TOKEN.findall(without_known_windows)
+    other_numbers = tuple(
+        token
+        for token in _NUMBER.findall(without_known_windows)
+        if token not in allowed_comids
+    )
+    return (*unknown_windows, *other_numbers)
+
+
+def _known_window_pattern(window_ids: set[str]) -> re.Pattern[str] | None:
+    if not window_ids:
+        return None
+    alternatives = "|".join(
+        re.escape(window_id) for window_id in sorted(window_ids, key=len, reverse=True)
+    )
+    return re.compile(
+        rf"(?<![A-Za-z0-9_.-])(?:{alternatives})"
+        r"(?![A-Za-z0-9_-]|\.[A-Za-z0-9_])"
+    )
 
 
 def _numeric_fact_catalog(
     summary_input: RunSummaryInput,
-) -> dict[object, tuple[str, str, str]]:
-    result: dict[object, tuple[str, str, str]] = {}
+) -> dict[object, tuple[str | None, str | None, str | None, str, str]]:
+    result: dict[object, tuple[str | None, str | None, str | None, str, str]] = {}
     target = summary_input.target_result_projection
     if target.full_result is not None:
         points = {
@@ -203,24 +264,28 @@ def _numeric_fact_catalog(
             point = points.get(reference.cell_id)
             if (
                 point is not None
-                and point.representative_value is not None
+                and (point.representative_value is not None or point.value_lower is not None)
                 and point.unit_id is not None
                 and reference.window_id is not None
             ):
                 result[reference] = (
                     point.representative_value,
+                    point.value_lower,
+                    point.value_upper,
                     point.unit_id,
                     reference.window_id,
                 )
     for projection in (target, *summary_input.report_cards):
         for finding in projection.notable_findings:
             if (
-                finding.display_value is not None
+                (finding.display_value is not None or finding.value_lower is not None)
                 and finding.display_unit is not None
                 and finding.window_id is not None
             ):
                 result[finding.source_ref] = (
                     finding.display_value,
+                    finding.value_lower,
+                    finding.value_upper,
                     finding.display_unit,
                     finding.window_id,
                 )

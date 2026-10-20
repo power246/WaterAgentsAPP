@@ -7,6 +7,7 @@ from app.application.analysis_runs.models import (
     AgentSessionStatus,
     RunStatus,
 )
+from app.application.analysis_runs.persistence import PersistenceState
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from tests.application.analysis_runs._m7_projection_support import coordinator_for
 from tests.m4_support import create_request_bytes
@@ -85,8 +86,13 @@ def test_cancel_acceptance_precedes_quiescence_stream_close_and_cleanup() -> Non
             assert completed.status is AgentSessionStatus.COMPLETED
             assert in_flight.status is AgentSessionStatus.CANCELLED
 
+            await asyncio.wait_for(
+                coordinator._transcript_writer.drain(runtime), timeout=1
+            )
             stream = await coordinator.subscribe_run(created.run_id)
-            assert (await anext(stream)).status is RunStatus.CANCELLED
+            initial = await anext(stream)
+            assert initial.status is RunStatus.CANCELLED
+            assert initial.persistence.state is PersistenceState.UP_TO_DATE
             waiting_for_end = asyncio.create_task(anext(stream))
             await asyncio.sleep(0)
             assert waiting_for_end.done() is False

@@ -4,7 +4,7 @@
 
 > 状态：设计已冻结，当前唯一 V1 已完成 M5 Milestone 0–13 本机实现与验收。真实 USGS/NWS/EPA 请求和 Ubuntu/macOS/Windows 三平台 CI 仍为 `not run`；实施步骤、验证证据和剩余风险见 [Milestone 0–13 Implementation TODO](m5_implementation_todo.md)。
 
-> M7 接力说明：本文 2026-10-03 新增的 dependency manifest、usable upstream启动门禁和stationless 0-model路径已由M7 production workflow承接；它们仍不表示M5 Milestone 0–13自身完成了DAG producer。
+> M7 接力说明：dependency manifest 和直接上游结果由 M7 production workflow 注入；当前无站点／无可用上游路径仍可进入模型范围估计，验证边界见本轮 TODO。
 
 > M8 接力说明：当前 `HistoricalTranscriptRecord`/`HistoricalInferencePayload` 是 producer slot占位；M8目标类型与读取协议见 [M8 实施设计](../M8/m8_memory_rag_implementation_design.md)、[M8 API](../M8/m8_memory_rag_api.md) 和全部待办的 [M8 Implementation TODO](../M8/m8_implementation_todo.md)，不属于既有M5完成证据。
 
@@ -75,7 +75,7 @@ scope 从已保存的 `query_understood v1` 与 `topology_ready v1` 装配，调
 5. policy layer 形成 direct fragments、derived fragments 与逐窗口 collection facts；
 6. 写入 `evidence_fragment v1` 和 `evidence_tool_result v1`；
 7. 读取 M7 已收敛的直接上游 dependency manifest/result；若本地目标参数无 usable direct evidence，但 upstream 仍有与目标参数相关的 usable result，不提前停止；
-8. 只要至少一个目标参数有 usable local direct cell，或有与目标参数相关的 usable upstream result，Agent 可继续按需调用天气、设施、inspection、conversion 或 aggregation 工具；只有本地 discharge 等 supporting cell 不能单独启动模型。没有目标 evidence 起点时形成完整 bundle 后交给 M6 以 0 model calls 产生全 indeterminate；
+8. Agent 按预算补充天气、设施、inspection、conversion 或 aggregation；目标缺少读数时，相关其他指标读数、具体资料或一般规律可供同一数值计划的模型估计使用。没有同指标实测时只允许范围，模型仍无法给出有用范围时才收敛为不足；
 9. 完成取证后写入唯一 `evidence_bundle v1`，M6 只从该 bundle 读取门禁输入。
 
 provider unavailable、认证失败、超时、分页不完整或协议损坏不走自然 empty 分支，而是保留已确认事实并产生技术失败。
@@ -84,12 +84,12 @@ provider unavailable、认证失败、超时、分页不完整或协议损坏不
 
 无合格本地站点的当前水体不调用 `collect_water_observations`。执行顺序为：
 
-1. 由 M7 注入已收敛的直接上游 dependency manifest，并只为 usable quantified/directional points 提供结果引用；M7 尚未接入时 `get_upstream_results` 明确返回 producer unavailable；
-2. 至少一个直接上游 usable 时，Agent 根据任务和缺口决定是否调用天气、设施等 optional tools；全部上游 insufficient/invalid 时不进入 Agent planning，直接走 M6 零模型不足结果；
+1. 由 M7 注入已收敛的直接上游 dependency manifest，并为 usable quantified/range_estimate/directional points 提供结果引用和原始测量来源；producer 不可用时明确返回 unavailable；
+2. Agent 根据任务、缺口和预算决定 optional tools；全部上游 insufficient/invalid 时仍可尝试低依据范围估计，保留不足或失败事实；
 3. 逐窗口建立 target 与 discharge cells；
-4. discharge 必须来自直接上游传递或 capability registry 允许的估算关系；
+4. 优先从直接上游或适用方法取得 discharge，仍缺失时可继续目标模型估计；
 5. contextual-only evidence 可以进入 bundle 和说明，但不能让 cell 通过门禁；
-6. 最终没有 target 或 discharge allowed evidence 的窗口保持 indeterminate input。
+6. 最终没有可用 target 数值或判断依据的窗口保持 indeterminate input；模型估计是否继续不由流量缺失或低可信度阈值单独决定。
 
 ### 2.4 时间边界
 
@@ -446,7 +446,9 @@ geometry 缺失时，observation station 查询仍可按 M4 refs 运行；facili
 
 Agent 只能从 registry 给出的 aggregation methods 中选择；executor 再校验 series identity、value semantics、coverage 和单位。`suspicious` 可参与聚合，但 derived fragment 必须继承 flags、输入计数和 suspicious 计数；`invalid` 只供审计。
 
-M5 不进行插值、缺失值填补、异常值替换、跨 series 合并或预测。多记录聚合产生 inferred 候选；只有一对一具体 local direct record（允许可逆单位展示转换）具备 M6 标为 observed 的资格。
+M5 的原始聚合不进行插值。明确的时间补值方法只使用已完整采集的同序列历史窗口代表值，生成带原始引用的 `temporal_estimate`；WDFN continuous 默认 `mean`，USGS Samples `discrete_samples` 默认 `latest`。个别 `unit_unresolved` 原始项保留审计，其余可转换读数仍可使用。provider 技术失败或分页不完整不能当作查空。同一数值依赖计划可在明确方法不适用时执行模型估计，由 M6 调用模型，M5 保存 `numeric_derived` 的数值／范围和方法来源。模型估计不修改原始读数；只有一对一具体 local direct record（允许可逆单位展示转换）具备 observed 资格。
+
+封存模型估计时验证 `method_kind`、计划引用、指标、单位、水体、时间窗和输入引用。输入只能来自保存的计划源片段或声明的同计划前置任务；必需前置项不得省略，选填流量前置项失败后可以省略。服务端从原始 direct/aggregate、明确计算的输入链和上游已有测量来源重新推导 `measured_anchors`，不得接受模型新增的实测身份。模型单点需要原始同指标实测，范围没有实测也可保存；上下界、估计理由、模型名称、调用标识和提示摘要一并保存。技术失败事实与有效模型估计可以同窗存在，bundle 保留失败原因，同时将估计作为可用的间接结果。
 
 ## 9. 完整性、分页与 dedup
 
@@ -571,7 +573,7 @@ checked-in fixtures 至少覆盖：
 - EPA CWA facility 单点、多采样圆、重复 facility、边界内外和缺坐标；
 - geometry 空/非法/长河段/弯曲河段/简化误差；
 - direct/suspicious/invalid、unit conversion、禁止聚合、coverage 边界；
-- station-backed 全空停止、部分继续、stationless upstream、逐窗口 discharge 缺失；
+- station-backed 全空后模型范围估计、部分继续、stationless upstream、逐窗口 discharge 缺失后继续目标估计与失败事实保留；
 - single-flight、取消、budget、持久化失败、unknown typed content。
 
 ### 12.4 opt-in smoke

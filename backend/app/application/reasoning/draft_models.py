@@ -32,6 +32,7 @@ from app.domain import (
     TrendDirection,
     ensure_unique_tuple,
 )
+from app.domain.inference.value_range import validate_result_range
 
 
 class DraftValidationIssue(DomainModel):
@@ -43,6 +44,8 @@ class ReasoningCellDraft(DomainModel):
     cell_id: NonEmptyString
     outcome_status: OutcomeStatus
     representative_value: CanonicalDecimal | None
+    value_lower: CanonicalDecimal | None = None
+    value_upper: CanonicalDecimal | None = None
     target_unit_id: NonEmptyString | None
     source: ResultSource | None
     trend: TrendDirection | None
@@ -57,11 +60,11 @@ class ReasoningCellDraft(DomainModel):
     quality_flags: tuple[DataQualityFlag, ...]
     explanation: NonBlankText
 
-    @field_validator("representative_value", mode="before")
+    @field_validator("representative_value", "value_lower", "value_upper", mode="before")
     @classmethod
     def require_decimal_string(cls, value: object) -> object:
         if value is not None and not isinstance(value, str):
-            raise ValueError("representative_value must be a decimal string")
+            raise ValueError("result values must be decimal strings")
         return value
 
     @field_validator(
@@ -89,6 +92,10 @@ class ReasoningCellDraft(DomainModel):
     def validate_outcome_shape(self) -> Self:
         if not self.evidence_refs:
             raise ValueError("supported reasoning draft requires evidence_refs")
+        validate_result_range(
+            self.outcome_status, self.representative_value,
+            self.value_lower, self.value_upper,
+        )
         if self.outcome_status is OutcomeStatus.QUANTIFIED:
             if (
                 self.representative_value is None
@@ -98,6 +105,13 @@ class ReasoningCellDraft(DomainModel):
                 raise ValueError("quantified draft requires value, unit, and source")
             if self.reason_codes:
                 raise ValueError("quantified draft cannot contain reason_codes")
+        elif self.outcome_status is OutcomeStatus.RANGE_ESTIMATE:
+            if self.representative_value is not None or self.target_unit_id is None:
+                raise ValueError("range estimate draft requires a unit and no point value")
+            if self.source not in (ResultSource.INFERRED, ResultSource.PREDICTED):
+                raise ValueError("range estimate draft requires inferred or predicted source")
+            if self.aggregation_method is not None or self.reason_codes:
+                raise ValueError("range estimate draft cannot contain aggregation or reason codes")
         elif self.outcome_status is OutcomeStatus.DIRECTIONAL:
             if self.representative_value is not None or self.target_unit_id is not None:
                 raise ValueError("directional draft cannot contain value or unit")

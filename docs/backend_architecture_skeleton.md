@@ -327,6 +327,8 @@ POST /api/analysis/runs/{run_id}/cancel
 POST /api/analysis/runs/{run_id}/persistence/retry
 ```
 
+后续另增加历史结果的按需只读距离视图：`GET /api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates?view=history`。它只用已保存证据和拓扑派生显示值，原结果正文保持不变；字段与限制见 [M5 Evidence Tools API](M5/m5_evidence_tools_api.md)。
+
 创建 run 按 D02 确认创建事务提交后才启动分析，幂等重试按 D11–D15 返回原创建回执。D69 保留 run 通知 SSE，并新增所属 session 的过程 SSE，后者校验 run_id + session_id 归属。取消与补写属于 run；手动补写沿用 D41 的无请求体协议和受理语义，不重新执行分析。
 
 历史列表按 D47–D50 只读 PostgreSQL：limit 默认 50、允许整数 1–200，按 created_at DESC/run_id DESC 游标分页，返回 items/next_cursor，不返回总条数。首版参数只有 limit/cursor；游标按 D48 编码原版本与末条 created_at/run_id，前端原样传回。状态更新不改变列表位置，数据库错误不返回假空列表，非法参数或游标返回 422。

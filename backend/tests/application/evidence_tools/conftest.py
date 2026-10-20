@@ -49,6 +49,7 @@ from app.infrastructure.config import load_parameter_capability_registry
 
 TARGET_PARAMETER = ParameterKey(code_system="usgs", code="00300")
 SUPPORT_PARAMETER = ParameterKey(code_system="usgs", code="00060")
+WEATHER_PARAMETER = ParameterKey(code_system="usgs", code="00045")
 MODEL = ModelSelection(provider="openai", model="test-model")
 
 
@@ -131,6 +132,23 @@ def make_context(
         memory_mode=memory_mode,
         evidence_rule_plan=evidence_rule_plan or empty_evidence_rule_plan(),
     )
+
+
+def make_weather_context(*, memory_mode: MemoryMode = MemoryMode.STATELESS) -> AnalysisContext:
+    context = make_context(memory_mode=memory_mode)
+    capability = load_parameter_capability_registry().get(WEATHER_PARAMETER)
+    assert capability is not None
+    precipitation = ResolvedParameterIntent(
+        key=capability.key,
+        canonical_name=capability.canonical_name,
+        canonical_unit=capability.canonical_unit,
+        source=ParameterIntentSource.EXPLICIT,
+        rationale="Requested precipitation context.",
+    )
+    return AnalysisContext.model_validate(context.model_copy(update={
+        "query": "Analyze dissolved oxygen and precipitation.",
+        "params_used": (*context.params_used, precipitation),
+    }).model_dump(mode="python"))
 
 
 def make_discharge_context(*, include_oxygen: bool = False) -> AnalysisContext:

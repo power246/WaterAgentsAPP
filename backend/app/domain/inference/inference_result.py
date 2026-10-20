@@ -152,12 +152,20 @@ class InferenceResult(DomainModel):
                 raise ValueError("series points must exactly match planned windows")
             for point in item.points:
                 all_cell_ids.append(point.cell_id)
+                if any(
+                    anchor.parameter != item.parameter.key
+                    or anchor.path_comids[-1] != self.target_comid
+                    for anchor in point.measured_anchors
+                ):
+                    raise ValueError("measured anchors must match result parameter and target")
                 if (
-                    point.outcome_status is OutcomeStatus.QUANTIFIED
+                    point.outcome_status in (
+                        OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE,
+                    )
                     and point.unit_id != item.parameter.canonical_unit
                 ):
                     raise ValueError(
-                        "quantified unit_id must match parameter canonical_unit"
+                        "numeric unit_id must match parameter canonical_unit"
                     )
                 segment = next(
                     (

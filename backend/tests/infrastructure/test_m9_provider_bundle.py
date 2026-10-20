@@ -13,15 +13,17 @@ from app.application.transcripts.models import AnalysisRequestV1
 from app.domain import ModelSelection
 from app.domain.settings_admin import CredentialName
 from app.infrastructure.config import ModelCatalog, load_parameter_capability_registry
-from app.infrastructure.credentials.memory_key_store import InMemoryKeyStore, OfflineCredentialTester
+from app.infrastructure.credentials.memory_key_store import (
+    InMemoryKeyStore,
+    OfflineCredentialTester,
+)
 from app.infrastructure.http import ProviderHttpClient
-from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
+from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
 from app.main import create_app
-from tests.m4_support import FakeM8Runtime
-from tests.infrastructure.test_m4_runtime import FixedClock, settings
 from tests.infrastructure.embeddings.support import canonical_text
-
+from tests.infrastructure.test_m4_runtime import FixedClock, settings
+from tests.m4_support import FakeM8Runtime
 
 OPENAI_OLD = "old-openai-private-0001"
 OPENAI_NEW = "new-openai-private-0002"
@@ -98,7 +100,10 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             first_workflow = first.workflow
             assert first_workflow.execution_bound
             first_parser = first_workflow._query_understanding._parser
-            first_google = first_workflow._query_understanding._context_resolver._location_resolver._geocoding
+            first_location = first_workflow._query_understanding._context_resolver._location_resolver
+            first_google = first_location._geocoding
+            first_nldi = first_location._comid_lookup
+            assert first_nldi._request_state is factory._nldi_request_state
             assert first_parser._api_key == OPENAI_OLD
             assert first_google._api_key == GOOGLE_OLD
             first_stage = first_workflow._execution_stage
@@ -117,7 +122,11 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             second_id = uuid4()
             second.bind_run(second_id)
             assert second.workflow._query_understanding._parser._api_key == OPENAI_NEW
-            assert second.workflow._query_understanding._context_resolver._location_resolver._geocoding._api_key == GOOGLE_NEW
+            second_location = second.workflow._query_understanding._context_resolver._location_resolver
+            assert second_location._geocoding._api_key == GOOGLE_NEW
+            second_nldi = second_location._comid_lookup
+            assert second_nldi is not first_nldi
+            assert second_nldi._request_state is first_nldi._request_state
             await m8.ports[str(second_id)].embed(profile, (canonical_text(),), None, None)
             await credentials.delete(CredentialName.OPENAI)
             await credentials.delete(CredentialName.GOOGLE_GEOCODING)

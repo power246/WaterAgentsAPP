@@ -201,12 +201,17 @@ def _result_cells(result, window_ids: tuple[str, ...]) -> tuple[HistoricalResult
             time_range={"start": point.start_time, "end": point.end_time},
             outcome_status=point.outcome_status,
             representative_value=point.representative_value,
+            value_lower=point.value_lower,
+            value_upper=point.value_upper,
             unit_id=point.unit_id,
             trend=point.assessment.trend,
             risk_level=point.assessment.risk_level,
             confidence=point.confidence,
             source=point.source,
             quality_flags=point.quality_flags,
+            inference_method=point.inference_method,
+            inference_basis=point.inference_basis,
+            measured_anchors=point.measured_anchors,
         )
         for series in result.series
         for index, point in enumerate(series.points)

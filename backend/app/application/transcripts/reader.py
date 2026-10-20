@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import binascii
 import json
@@ -17,8 +18,8 @@ from app.application.analysis_runs.models import (
     SessionSummary,
     TopologyRunResultSummary,
 )
-from app.application.analysis_runs.topology_result_models import TopologyRunResult
 from app.application.analysis_runs.persistence import PersistenceInfo
+from app.application.analysis_runs.topology_result_models import TopologyRunResult
 from app.application.query_understanding.context_models import AnalysisContext
 from app.application.transcripts.buffer import locate_content
 from app.application.transcripts.models import (
@@ -27,8 +28,8 @@ from app.application.transcripts.models import (
     ReadTranscriptItem,
     StoredTranscriptContent,
     StoredTranscriptItem,
-    TranscriptItem,
     TranscriptContentRef,
+    TranscriptItem,
 )
 from app.application.transcripts.read_models import (
     AnalysisContextSummary,
@@ -43,8 +44,8 @@ from app.application.transcripts.read_models import (
     ReadSession,
     ReadSource,
     ReadView,
-    RegisteredRunRead,
     ReferencedTranscriptContent,
+    RegisteredRunRead,
     RunDetailResponse,
     RunHistoryItem,
     RunHistoryResponse,
@@ -183,8 +184,19 @@ class TranscriptReader:
         return RunHistoryResponse(items=items, next_cursor=next_cursor)
 
     async def get_run(self, run_id: UUID, view: ReadView) -> RunDetailResponse:
-        selected = await self._select(run_id, view)
-        parsed = self._parse_items(selected.stored)
+        parsed_cache: dict[UUID, ReadTranscriptItem] = {}
+        selected = await self._select_run_detail(run_id, view, parsed_cache)
+        return await asyncio.to_thread(
+            self._render_run_detail, selected, view, parsed_cache
+        )
+
+    def _render_run_detail(
+        self,
+        selected: _SelectedRun,
+        view: ReadView,
+        parsed_cache: dict[UUID, ReadTranscriptItem],
+    ) -> RunDetailResponse:
+        parsed = self._parse_items(selected.stored, cache=parsed_cache)
         visible = self._visible_items(parsed, view)
         run_items = tuple(
             item for item in visible if item.item.session_id is None
@@ -227,13 +239,118 @@ class TranscriptReader:
             issues=issues,
         )
 
+    async def _select_run_detail(
+        self,
+        run_id: UUID,
+        view: ReadView,
+        parsed_cache: dict[UUID, ReadTranscriptItem],
+    ) -> _SelectedRun:
+        if view is ReadView.AUTO:
+            live = await self._live.get_live_read(run_id)
+            if live is not None:
+                return await asyncio.to_thread(
+                    self._select_live_run_detail, live, view, parsed_cache
+                )
+        try:
+            stored = await self._store.read_run_detail_roots(run_id)
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+        if stored is None:
+            raise TranscriptRunNotFoundError(run_id)
+        attempted: set[UUID] = set()
+        while True:
+            pending = await asyncio.to_thread(
+                self._detail_missing_references,
+                stored, view, attempted, None, parsed_cache,
+            )
+            if not pending:
+                break
+            attempted.update(pending)
+            try:
+                extra = await self._store.read_run_items(run_id, pending)
+            except (PortError, OSError, TimeoutError) as error:
+                raise TranscriptDatabaseUnavailableError() from error
+            if extra is None:
+                break
+            stored = stored.model_copy(update={
+                "items": (*stored.items, *extra.items),
+                "contents": (*stored.contents, *extra.contents),
+            })
+        return _SelectedRun(
+            stored=stored,
+            source=ReadSource.POSTGRESQL,
+            persistence=None,
+        )
+
+    def _select_live_run_detail(
+        self,
+        live: LiveRunRead,
+        view: ReadView,
+        parsed_cache: dict[UUID, ReadTranscriptItem],
+    ) -> _SelectedRun:
+        available = {item.item_id for item in live.items}
+        selected_ids = {
+            item.item_id for item in live.items
+            if item.session_id is None or item.content.content_type == "query_understood"
+        }
+        while True:
+            stored = self._stored_live(live, item_ids=selected_ids)
+            pending = self._detail_missing_references(
+                stored, view, selected_ids, parsed_cache=parsed_cache
+            )
+            found = available.intersection(pending)
+            if not found:
+                break
+            selected_ids.update(found)
+        return _SelectedRun(
+            stored=stored,
+            source=ReadSource.LIVE,
+            persistence=live.persistence,
+        )
+
+    def _detail_missing_references(
+        self,
+        stored: StoredRunRead,
+        view: ReadView,
+        attempted: set[UUID],
+        session_id: UUID | None = None,
+        parsed_cache: dict[UUID, ReadTranscriptItem] | None = None,
+    ) -> tuple[UUID, ...]:
+        parsed = self._parse_items(stored, cache=parsed_cache)
+        visible = self._visible_items(parsed, view)
+        roots = tuple(
+            item for item in visible if item.item.session_id == session_id
+        )
+        referenced, _ = self._reference_closure(roots, parsed, view)
+        known = {item.item_id for item in stored.items}
+        return tuple(sorted({
+            item_id
+            for item in (*roots, *referenced)
+            for item_id in self._registry.references_from_read(item)
+            if item_id not in known and item_id not in attempted
+        }))
+
+    async def persisted_run_exists(self, run_id: UUID) -> bool:
+        try:
+            return await self._store.run_exists(run_id)
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+
+    async def persisted_session_exists(self, run_id: UUID, session_id: UUID) -> bool:
+        try:
+            return await self._store.session_exists(run_id, session_id)
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+
     async def get_session(
         self,
         run_id: UUID,
         session_id: UUID,
         view: ReadView,
     ) -> SessionDetailResponse:
-        selected = await self._select(run_id, view)
+        selected, item_ids = await self._select_session_roots(
+            run_id, session_id, view
+        )
         session = self._session(selected.stored, session_id)
         return SessionDetailResponse(
             run_id=run_id,
@@ -244,7 +361,7 @@ class TranscriptReader:
             ),
             source=selected.source,
             persistence=selected.persistence,
-            issues=self._session_issues(selected.stored, session_id),
+            issues=self._session_issues(selected.stored, session_id, item_ids),
         )
 
     async def get_session_transcript(
@@ -253,9 +370,15 @@ class TranscriptReader:
         session_id: UUID,
         view: ReadView,
     ) -> SessionTranscriptResponse:
-        selected = await self._select(run_id, view)
-        self._session(selected.stored, session_id)
-        parsed = self._parse_items(selected.stored)
+        parsed_cache: dict[UUID, ReadTranscriptItem] = {}
+        selected, item_ids = await self._select_session_roots(
+            run_id, session_id, view
+        )
+        if selected.source is ReadSource.POSTGRESQL:
+            selected = await self._hydrate_session_transcript(
+                selected, run_id, session_id, item_ids, view, parsed_cache
+            )
+        parsed = self._parse_items(selected.stored, cache=parsed_cache)
         visible = self._visible_items(parsed, view)
         session_items = tuple(
             item for item in visible if item.item.session_id == session_id
@@ -291,7 +414,7 @@ class TranscriptReader:
         item_id: UUID,
         view: ReadView,
     ) -> TranscriptContentResponse:
-        selected = await self._select(run_id, view)
+        selected = await self._select_item(run_id, item_id, view)
         parsed = self._parse_items(selected.stored)
         item = next(
             (candidate for candidate in parsed if candidate.item.item_id == item_id),
@@ -364,6 +487,87 @@ class TranscriptReader:
         if item.body is None:
             raise TranscriptContentUnreadableError(run_id, item_id)
         return item
+
+    async def read_registered_items_persisted(
+        self,
+        run_id: UUID,
+        item_ids: tuple[UUID, ...],
+        view: ReadView,
+    ) -> tuple[ReadTranscriptItem, ...]:
+        if len(item_ids) != len(set(item_ids)):
+            raise ValueError("transcript item identities must be unique")
+        if not item_ids:
+            return ()
+        try:
+            stored = await self._store.read_run_items(run_id, item_ids)
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+        if stored is None:
+            raise TranscriptRunNotFoundError(run_id)
+        return await asyncio.to_thread(
+            self._parse_visible_persisted_items, stored, view
+        )
+
+    async def list_registered_session_item_ids(
+        self,
+        run_id: UUID,
+        session_id: UUID,
+        content_type: str,
+    ) -> tuple[UUID, ...]:
+        try:
+            return await self._store.list_session_item_ids(
+                run_id, session_id, content_type
+            )
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+
+    async def list_registered_run_item_ids(
+        self,
+        run_id: UUID,
+        content_type: str,
+    ) -> tuple[UUID, ...]:
+        try:
+            return await self._store.list_run_item_ids(run_id, content_type)
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+
+    def _parse_visible_persisted_items(
+        self,
+        stored: StoredRunRead,
+        view: ReadView,
+    ) -> tuple[ReadTranscriptItem, ...]:
+        content_by_id = {content.item_id: content.body for content in stored.contents}
+        parsed = []
+        for item in sorted(
+            stored.items, key=lambda candidate: candidate.transcript_sequence
+        ):
+            if item.content_type not in {
+                "evidence_bundle", "evidence_fragment", "evidence_source_records"
+            }:
+                parsed.append(self._parse_item(stored, item))
+                continue
+            body = (
+                item.inline_body
+                if item.inline_body is not None
+                else content_by_id.get(item.item_id)
+            )
+            if body is None:
+                parsed.append(ReadTranscriptItem(
+                    item=item,
+                    content_ref={"run_id": item.run_id, "item_id": item.item_id},
+                    parse_status=ParseStatus.CORRUPT,
+                    parse_error=self._read_error(
+                        "transcript_content_corrupt",
+                        "This transcript item's full content is unavailable.",
+                    ),
+                ))
+                continue
+            # Evidence was redacted and validated before persistence. This
+            # internal read still checks its stored byte count and schema.
+            parsed.append(self._registry.parse(
+                item, body, error_id_factory=self._error_id_factory
+            ))
+        return self._visible_items(tuple(parsed), view)
 
     async def read_registered_run(
         self,
@@ -450,10 +654,119 @@ class TranscriptReader:
             persistence=None,
         )
 
-    def _stored_live(self, live: LiveRunRead) -> StoredRunRead:
+    async def _select_item(
+        self, run_id: UUID, item_id: UUID, view: ReadView
+    ) -> _SelectedRun:
+        if view is ReadView.AUTO:
+            live = await self._live.get_live_read(run_id)
+            if live is not None:
+                return _SelectedRun(
+                    stored=self._stored_live(live, item_ids={item_id}),
+                    source=ReadSource.LIVE,
+                    persistence=live.persistence,
+                )
+        try:
+            stored = await self._store.read_run_items(run_id, (item_id,))
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+        if stored is None:
+            raise TranscriptRunNotFoundError(run_id)
+        return _SelectedRun(
+            stored=stored,
+            source=ReadSource.POSTGRESQL,
+            persistence=None,
+        )
+
+    async def _select_session_roots(
+        self, run_id: UUID, session_id: UUID, view: ReadView
+    ) -> tuple[_SelectedRun, tuple[UUID, ...]]:
+        if view is ReadView.AUTO:
+            live = await self._live.get_live_read(run_id)
+            if live is not None:
+                stored = self._stored_live(live)
+                self._session(stored, session_id)
+                return (
+                    _SelectedRun(
+                        stored=stored,
+                        source=ReadSource.LIVE,
+                        persistence=live.persistence,
+                    ),
+                    tuple(
+                        item.item_id for item in stored.items
+                        if item.session_id == session_id
+                    ),
+                )
+        try:
+            stored = await self._store.read_run_detail_roots(run_id)
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+        if stored is None:
+            raise TranscriptRunNotFoundError(run_id)
+        self._session(stored, session_id)
+        try:
+            item_ids = await self._store.list_session_item_ids(
+                run_id, session_id, None
+            )
+        except (PortError, OSError, TimeoutError) as error:
+            raise TranscriptDatabaseUnavailableError() from error
+        return (
+            _SelectedRun(
+                stored=stored,
+                source=ReadSource.POSTGRESQL,
+                persistence=None,
+            ),
+            item_ids,
+        )
+
+    async def _hydrate_session_transcript(
+        self,
+        selected: _SelectedRun,
+        run_id: UUID,
+        session_id: UUID,
+        item_ids: tuple[UUID, ...],
+        view: ReadView,
+        parsed_cache: dict[UUID, ReadTranscriptItem],
+    ) -> _SelectedRun:
+        stored = selected.stored
+        attempted: set[UUID] = set()
+        known = {item.item_id for item in stored.items}
+        pending = tuple(item_id for item_id in item_ids if item_id not in known)
+        while True:
+            if pending:
+                attempted.update(pending)
+                try:
+                    extra = await self._store.read_run_items(run_id, pending)
+                except (PortError, OSError, TimeoutError) as error:
+                    raise TranscriptDatabaseUnavailableError() from error
+                if extra is None:
+                    raise TranscriptRunNotFoundError(run_id)
+                stored = stored.model_copy(update={
+                    "items": (*stored.items, *extra.items),
+                    "contents": (*stored.contents, *extra.contents),
+                })
+            pending = await asyncio.to_thread(
+                self._detail_missing_references,
+                stored, view, attempted, session_id, parsed_cache,
+            )
+            if not pending:
+                break
+        return _SelectedRun(
+            stored=stored,
+            source=selected.source,
+            persistence=selected.persistence,
+        )
+
+    def _stored_live(
+        self,
+        live: LiveRunRead,
+        *,
+        item_ids: set[UUID] | None = None,
+    ) -> StoredRunRead:
         stored_items: list[StoredTranscriptItem] = []
         contents: list[StoredTranscriptContent] = []
         for item in live.items:
+            if item_ids is not None and item.item_id not in item_ids:
+                continue
             preview_body = (
                 self._registry.public_safe_body(
                     item.content.content_type,
@@ -494,19 +807,19 @@ class TranscriptReader:
                 ))
         request_item = next(
             item
-            for item in stored_items
+            for item in live.items
             if item.session_id is None and item.transcript_sequence == 1
         )
         created_item = next(
             item
-            for item in stored_items
+            for item in live.items
             if item.session_id is None and item.transcript_sequence == 2
         )
         terminal_items = tuple(
             item
-            for item in stored_items
+            for item in live.items
             if item.session_id is None
-            and item.content_type == "lifecycle_event"
+            and item.content.content_type == "lifecycle_event"
             and item.transcript_sequence > 2
         )
         return StoredRunRead(
@@ -768,14 +1081,24 @@ class TranscriptReader:
             ),
         ), ()
 
-    def _parse_items(self, stored: StoredRunRead) -> tuple[ReadTranscriptItem, ...]:
-        return tuple(
-            self._parse_item(stored, item)
-            for item in sorted(
-                stored.items,
-                key=lambda candidate: candidate.transcript_sequence,
-            )
-        )
+    def _parse_items(
+        self,
+        stored: StoredRunRead,
+        *,
+        cache: dict[UUID, ReadTranscriptItem] | None = None,
+    ) -> tuple[ReadTranscriptItem, ...]:
+        parsed: list[ReadTranscriptItem] = []
+        for item in sorted(
+            stored.items,
+            key=lambda candidate: candidate.transcript_sequence,
+        ):
+            read = cache.get(item.item_id) if cache is not None else None
+            if read is None:
+                read = self._parse_item(stored, item)
+                if cache is not None:
+                    cache[item.item_id] = read
+            parsed.append(read)
+        return tuple(parsed)
 
     def _parse_item(
         self,
@@ -819,59 +1142,10 @@ class TranscriptReader:
         if body is None:
             return None
         try:
-            safe_body = self._registry.safe_read_body(
-                item.content_type,
-                item.content_schema_version,
-                body,
-            )
+            json.loads(body)
         except (TypeError, ValueError):
             return None
-        return (
-            self._safe_item(item, body, safe_body),
-            safe_body,
-            len(body.encode("utf-8")) == item.content_bytes,
-        )
-
-    def _safe_item(
-        self,
-        item: StoredTranscriptItem,
-        original_body: str,
-        safe_body: str,
-    ) -> StoredTranscriptItem:
-        safe_content_bytes = len(safe_body.encode("utf-8"))
-        if safe_body == original_body and safe_content_bytes == item.content_bytes:
-            return item
-        try:
-            preview_body = self._registry.public_safe_body(
-                item.content_type,
-                item.content_schema_version,
-                safe_body,
-            )
-        except (ValidationError, TypeError, ValueError):
-            preview_body = ""
-        location = locate_content(
-            safe_body,
-            preview_body=preview_body,
-            inline_content_bytes=self._inline_content_bytes,
-            preview_bytes=self._preview_bytes,
-        )
-        return StoredTranscriptItem(
-            item_id=item.item_id,
-            run_id=item.run_id,
-            session_id=item.session_id,
-            transcript_sequence=item.transcript_sequence,
-            created_at=item.created_at,
-            content_type=item.content_type,
-            content_schema_version=item.content_schema_version,
-            request_id=item.request_id,
-            operation_id=item.operation_id,
-            tags=item.tags,
-            rag_eligible=item.rag_eligible,
-            inline_body=location.inline_body,
-            preview_head=location.preview_head,
-            preview_tail=location.preview_tail,
-            content_bytes=safe_content_bytes,
-        )
+        return item, body, len(body.encode("utf-8")) == item.content_bytes
 
     @staticmethod
     def _body(stored: StoredRunRead, item: StoredTranscriptItem) -> str | None:
@@ -1002,11 +1276,15 @@ class TranscriptReader:
 
     @staticmethod
     def _session_issues(
-        stored: StoredRunRead, session_id: UUID
+        stored: StoredRunRead,
+        session_id: UUID,
+        session_item_ids: tuple[UUID, ...] | None = None,
     ) -> tuple[ReadIssue, ...]:
-        item_ids = {
-            item.item_id for item in stored.items if item.session_id == session_id
-        }
+        item_ids = (
+            set(session_item_ids)
+            if session_item_ids is not None
+            else {item.item_id for item in stored.items if item.session_id == session_id}
+        )
         return tuple(
             issue for issue in stored.session_issues
             if issue.item_id in item_ids or issue.item_id == session_id

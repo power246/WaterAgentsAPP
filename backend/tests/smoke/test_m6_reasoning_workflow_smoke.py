@@ -2,8 +2,6 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-import httpx
-
 from app.application.analysis_runs.models import AgentSessionStatus
 from app.application.analysis_runs.persistence import PersistenceState
 from app.application.reasoning import WaterbodyAgentRunStatus
@@ -23,7 +21,6 @@ from tests.m6_reasoning_support import (
     prepare_waterbody,
     run_prepared,
 )
-
 
 M6_CONTENT_TYPES = {
     "waterbody_agent_input",
@@ -73,11 +70,11 @@ async def _wait_persisted(application, run_id) -> None:
     coordinator = application.state.run_coordinator
     runtime = coordinator._runs[run_id]
     async with asyncio.timeout(5):
-        while (
-            coordinator._transcript_writer.info_locked(runtime).state
-            is not PersistenceState.UP_TO_DATE
-        ):
-            await asyncio.sleep(0)
+        await coordinator._transcript_writer.drain(runtime)
+    assert (
+        coordinator._transcript_writer.info_locked(runtime).state
+        is PersistenceState.UP_TO_DATE
+    )
 
 
 async def _collect_session_events(client, path, *, last_event_id=None):
@@ -229,18 +226,29 @@ def test_station_empty_and_late_model_failure_never_publish_partial_result(
             return outcome, transcript, session
 
     async def scenarios() -> None:
+        empty_model = VisibleAdaptiveWaterbodyModelPort()
         empty, empty_transcript, empty_session = await exercise(
             "empty",
-            VisibleAdaptiveWaterbodyModelPort(),
+            empty_model,
         )
         assert empty.status is WaterbodyAgentRunStatus.COMPLETED
         assert empty.result is not None
         assert empty.result.overall_assessment.availability.value == "indeterminate"
-        assert empty.result.model_execution_summary.planning_calls == 0
+        assert empty.result.model_execution_summary.planning_calls == 1
+        assert empty.result.model_execution_summary.numeric_estimation_calls == 8
         assert empty.result.model_execution_summary.reasoning_batches == 0
         assert empty.result.model_execution_summary.synthesis_calls == 0
         assert empty.result.model_execution_summary.repair_calls == 0
-        assert empty.result.model_execution_summary.usage is None
+        assert empty.result.model_execution_summary.usage.input_tokens == 90
+        assert empty.result.model_execution_summary.usage.output_tokens == 45
+        assert [call.phase for call in empty_model.calls] == [
+            WaterbodyModelPhase.EVIDENCE_PLANNING,
+            *([WaterbodyModelPhase.NUMERIC_ESTIMATION] * 8),
+        ]
+        assert sum(
+            item.content_type == "waterbody_model_request"
+            for item in empty_transcript.items
+        ) == 9
         assert empty_session.result_ref is not None
 
         failed, failed_transcript, failed_session = await exercise(

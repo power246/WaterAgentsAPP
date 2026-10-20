@@ -9,6 +9,7 @@ from app.application.transcripts.models import (
     ReferenceResolutionStatus,
     StoredTranscriptContent,
     StoredTranscriptItem,
+    RegisteredContent,
     TranscriptContentRef,
     TranscriptItem,
     TranscriptMetadata,
@@ -67,6 +68,11 @@ class TranscriptBuffer:
     def items(self) -> tuple[TranscriptItem, ...]:
         return tuple(self._items)
 
+    def snapshot_for_storage(self) -> "TranscriptBuffer":
+        snapshot = TranscriptBuffer(self._registry)
+        snapshot._items = self._items.copy()
+        return snapshot
+
     def append(
         self,
         identity: TranscriptItemIdentity,
@@ -77,18 +83,27 @@ class TranscriptBuffer:
         private_values: tuple[str, ...] = (),
         metadata: TranscriptMetadata | None = None,
         reserved_references: tuple[TranscriptContentRef, ...] | None = None,
+        encoded_content: RegisteredContent | None = None,
     ) -> TranscriptItem:
         if identity.item_id in self._item_ids:
             raise ValueError("transcript item identity already exists")
         sequence_key = (identity.run_id, identity.transcript_sequence)
         if sequence_key in self._sequences:
             raise ValueError("transcript sequence already exists in this run")
-        content = self._registry.encode(
-            content_type,
-            content_schema_version,
-            body,
-            private_values=private_values,
-        )
+        if encoded_content is None:
+            content = self._registry.encode(
+                content_type,
+                content_schema_version,
+                body,
+                private_values=private_values,
+            )
+        else:
+            if (
+                encoded_content.content_type != content_type
+                or encoded_content.content_schema_version != content_schema_version
+            ):
+                raise ValueError("encoded transcript content type does not match")
+            content = encoded_content
         if metadata is not None:
             metadata = TranscriptMetadata.model_validate(metadata)
             content = content.model_copy(

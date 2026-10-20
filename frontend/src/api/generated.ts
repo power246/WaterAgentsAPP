@@ -347,6 +347,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Anchor Distance Estimates */
+        get: operations["get_anchor_distance_estimates_api_analysis_runs__run_id__transcript__item_id__anchor_distance_estimates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/analysis/runs/{run_id}/transcript/{item_id}/content": {
         parameters: {
             query?: never;
@@ -800,6 +817,34 @@ export interface components {
             segment_index: number;
             time_range: components["schemas"]["TimeRange"];
         };
+        /** AnchorDistanceEstimate */
+        AnchorDistanceEstimate: {
+            /** Anchor Index */
+            anchor_index: number;
+            /** Cell Id */
+            cell_id: string;
+            /**
+             * Distance Basis
+             * @default mapped_channel_estimate
+             * @constant
+             */
+            distance_basis: "mapped_channel_estimate";
+            /** Distance Km */
+            distance_km: number;
+        };
+        /** AnchorDistanceEstimatesResponse */
+        AnchorDistanceEstimatesResponse: {
+            /**
+             * Estimates
+             * @default []
+             */
+            estimates: components["schemas"]["AnchorDistanceEstimate"][];
+            /**
+             * Result Item Id
+             * Format: uuid
+             */
+            result_item_id: string;
+        };
         /**
          * AssessmentAvailability
          * @enum {string}
@@ -873,7 +918,7 @@ export interface components {
          * BranchOutcomeStatus
          * @enum {string}
          */
-        BranchOutcomeStatus: "qualified" | "no_qualifying_source" | "search_limit_reached";
+        BranchOutcomeStatus: "qualified" | "no_qualifying_source" | "search_limit_reached" | "backup_search_ended";
         /** ComidLayer */
         ComidLayer: string[];
         /** CompositeRiskAssessment */
@@ -966,6 +1011,11 @@ export interface components {
             parameter: components["schemas"]["ParameterKey"];
             /** Segment Index */
             segment_index: number;
+            /**
+             * Window Index
+             * @default null
+             */
+            window_index: number | null;
         };
         /** CreateAnalysisRunRequest */
         CreateAnalysisRunRequest: {
@@ -1010,7 +1060,7 @@ export interface components {
          * DataQualityFlag
          * @enum {string}
          */
-        DataQualityFlag: "missing" | "partial_coverage" | "possible_freezing" | "anomalous" | "estimated" | "historical_inference" | "stale" | "provider_flagged" | "unit_unresolved" | "censored" | "counter_reset" | "invalid_protocol";
+        DataQualityFlag: "missing" | "partial_coverage" | "possible_freezing" | "anomalous" | "estimated" | "temporal_estimate" | "historical_inference" | "stale" | "provider_flagged" | "unit_unresolved" | "censored" | "counter_reset" | "invalid_protocol";
         /**
          * DependencyStatus
          * @enum {string}
@@ -1104,7 +1154,7 @@ export interface components {
          * ExclusionReasonCode
          * @enum {string}
          */
-        ExclusionReasonCode: "no_qualifying_source" | "search_limit_reached";
+        ExclusionReasonCode: "no_qualifying_source" | "search_limit_reached" | "backup_search_ended";
         /** GenerationDeletionResult */
         GenerationDeletionResult: {
             /** Deleted Generation Id */
@@ -1458,6 +1508,34 @@ export interface components {
              */
             start_date: string;
         };
+        /** MeasuredAnchor */
+        MeasuredAnchor: {
+            /**
+             * Distance Basis
+             * @default null
+             */
+            distance_basis: "mapped_channel_estimate" | null;
+            /**
+             * Distance Km
+             * @default null
+             */
+            distance_km: number | null;
+            evidence_time_range: components["schemas"]["TimeRange"];
+            /** Origin Comid */
+            origin_comid: string;
+            /** @default null */
+            origin_point: components["schemas"]["GeoPoint"] | null;
+            parameter: components["schemas"]["ParameterKey"];
+            /** Path Comids */
+            path_comids: string[];
+            /** Source Record Refs */
+            source_record_refs: components["schemas"]["SourceRecordReference"][];
+            /**
+             * Station Id
+             * @default null
+             */
+            station_id: string | null;
+        };
         /**
          * MemoryMode
          * @enum {string}
@@ -1485,6 +1563,16 @@ export interface components {
         /** ModelExecutionSummary */
         ModelExecutionSummary: {
             model: components["schemas"]["ModelSelection"];
+            /**
+             * Numeric Estimation Calls
+             * @default 0
+             */
+            numeric_estimation_calls: number;
+            /**
+             * Numeric Failure Codes
+             * @default []
+             */
+            numeric_failure_codes: string[];
             /** Planning Calls */
             planning_calls: number;
             /** Reasoning Batches */
@@ -1578,7 +1666,7 @@ export interface components {
          * OutcomeStatus
          * @enum {string}
          */
-        OutcomeStatus: "quantified" | "directional" | "indeterminate";
+        OutcomeStatus: "quantified" | "range_estimate" | "directional" | "indeterminate";
         /** OverallWaterbodyAssessment */
         OverallWaterbodyAssessment: {
             /** Assessed Cell Count */
@@ -2176,6 +2264,16 @@ export interface components {
             /** Text */
             text: string;
             /**
+             * Value Lower
+             * @default null
+             */
+            value_lower: string | null;
+            /**
+             * Value Upper
+             * @default null
+             */
+            value_upper: string | null;
+            /**
              * Window Id
              * @default null
              */
@@ -2443,6 +2541,13 @@ export interface components {
             /** Updated At */
             updated_at: string | null;
         };
+        /** SourceRecordReference */
+        SourceRecordReference: {
+            /** Item Id */
+            item_id: string;
+            /** Record Id */
+            record_id: string;
+        };
         /** StableSourceReference */
         StableSourceReference: {
             /**
@@ -2595,6 +2700,21 @@ export interface components {
             end_time: string;
             /** Evidence Refs */
             evidence_refs: string[];
+            /**
+             * Inference Basis
+             * @default null
+             */
+            inference_basis: ("same_parameter_measurement" | "related_evidence" | "general_knowledge") | null;
+            /**
+             * Inference Method
+             * @default null
+             */
+            inference_method: ("explicit_calculation" | "model_estimate") | null;
+            /**
+             * Measured Anchors
+             * @default []
+             */
+            measured_anchors: components["schemas"]["MeasuredAnchor"][];
             outcome_status: components["schemas"]["OutcomeStatus"];
             /**
              * Quality Flags
@@ -2609,8 +2729,23 @@ export interface components {
              * Format: date-time
              */
             start_time: string;
+            /**
+             * Temporal Estimate Method
+             * @default null
+             */
+            temporal_estimate_method: ("linear_interpolation" | "nearest_hold") | null;
             /** Unit Id */
             unit_id: string | null;
+            /**
+             * Value Lower
+             * @default null
+             */
+            value_lower: string | null;
+            /**
+             * Value Upper
+             * @default null
+             */
+            value_upper: string | null;
         };
         /**
          * TopologyCoverage
@@ -2662,6 +2797,11 @@ export interface components {
             channel: string;
             /** Covered Segment Indexes */
             covered_segment_indexes: number[];
+            /**
+             * Covered Window Ids
+             * @default null
+             */
+            covered_window_ids: string[] | null;
             parameter: components["schemas"]["ParameterKey"];
             /** Series Identity */
             series_identity: string;
@@ -4952,6 +5092,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionTranscriptResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    get_anchor_distance_estimates_api_analysis_runs__run_id__transcript__item_id__anchor_distance_estimates_get: {
+        parameters: {
+            query?: {
+                view?: "history";
+            };
+            header?: never;
+            path: {
+                run_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnchorDistanceEstimatesResponse"];
                 };
             };
             /** @description Not Found */

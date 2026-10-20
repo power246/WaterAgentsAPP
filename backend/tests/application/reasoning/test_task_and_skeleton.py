@@ -293,6 +293,15 @@ async def test_task_validator_rejects_identity_scope_model_and_session_drift():
         scope_mutator=lambda scope: _scope_copy(scope, requested_parameters=()),
     )
     await rejected(
+        "task_scope_target_point_mismatch",
+        scope_mutator=lambda scope: _scope_copy(
+            scope,
+            analysis_target_point=scope.analysis_target_point.model_copy(
+                update={"latitude": scope.analysis_target_point.latitude + 1}
+            ),
+        ),
+    )
+    await rejected(
         "task_scope_topology_mismatch",
         supplied_topology=make_graph(with_station=False),
     )

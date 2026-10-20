@@ -16,10 +16,11 @@ from app.domain import (
     DomainModel,
     EvidenceCellRole,
     NonEmptyString,
+    NumericDerivedPayload,
     ParameterKey,
+    TemporalEstimatePayload,
     ensure_unique_tuple,
 )
-
 
 _DISCHARGE = ParameterKey(code_system="usgs", code="00060")
 
@@ -44,6 +45,7 @@ class NodeLaunchFacts(DomainModel):
     preflight_blocked: StrictBool
     preflight_cancelled: StrictBool
     stop_before_model: StrictBool
+    numeric_estimation_allowed: StrictBool = False
 
     @field_validator(
         "direct_upstream_comids",
@@ -124,9 +126,17 @@ class NodeLaunchPolicy:
                 else "local_discharge_and_upstream_usable"
             )
         else:
-            runnable = bool(usable_upstreams)
-            reason = "stationless_upstream_usable"
+            runnable = bool(usable_upstreams) or facts.local_target_usable
+            reason = (
+                "stationless_upstream_usable"
+                if usable_upstreams
+                else "local_target_usable"
+            )
 
+        if facts.numeric_estimation_allowed:
+            if not runnable:
+                reason = "numeric_estimation_available"
+            runnable = True
         expected_stop = not runnable and not facts.preflight_blocked
         if facts.stop_before_model is not expected_stop:
             return _decision(NodeLaunchAction.INVALID, "preflight_launch_gate_mismatch")
@@ -167,6 +177,21 @@ def build_node_launch_facts(
         for cell in handoff.cells
         if cell.parameter == _DISCHARGE
     )
+    numeric_ids = {
+        fragment.evidence_id
+        for _reference, fragment in handoff.validated_inputs.fragments
+        if isinstance(
+            fragment.payload,
+            (NumericDerivedPayload, TemporalEstimatePayload),
+        )
+    }
+
+    def locally_usable(cell) -> bool:
+        return bool(
+            cell.direct_fragment_refs
+            or numeric_ids.intersection(cell.allowed_indirect_fragment_refs)
+        )
+
     return NodeLaunchFacts(
         run_id=task.task.run_id,
         session_id=task.task.session_id,
@@ -175,13 +200,12 @@ def build_node_launch_facts(
         station_backed=bool(scope.station_refs),
         direct_upstream_comids=scope.direct_upstream_comids,
         collected_usable_upstream_comids=handoff.usable_upstream_comids,
-        local_target_usable=any(cell.direct_fragment_refs for cell in target_cells),
-        local_discharge_usable=any(
-            cell.direct_fragment_refs for cell in discharge_cells
-        ),
+        local_target_usable=any(locally_usable(cell) for cell in target_cells),
+        local_discharge_usable=any(locally_usable(cell) for cell in discharge_cells),
         preflight_blocked=bool(handoff.block_facts),
         preflight_cancelled=task.task.cancellation_token.is_requested(),
         stop_before_model=handoff.stop_before_model,
+        numeric_estimation_allowed=handoff.numeric_estimation_allowed,
     )
 
 

@@ -116,6 +116,10 @@ class ReasoningTranscriptStore:
             "response_schema": request.response_schema,
             "deadline": request.deadline,
         }
+        if request.numeric_plan_ref is not None:
+            values["numeric_plan_ref"] = self._run_ref(request.numeric_plan_ref)
+        if request.numeric_input_refs:
+            values["numeric_input_refs"] = request.numeric_input_refs
         original = WaterbodyModelRequestV1(
             **values,
             request_digest=canonical_json_digest(values),
@@ -126,6 +130,10 @@ class ReasoningTranscriptStore:
         )
         if not isinstance(safe_values, dict):
             raise TypeError("redacted model request must remain an object")
+        if safe_values.get("numeric_plan_ref") is None:
+            safe_values.pop("numeric_plan_ref", None)
+        if not safe_values.get("numeric_input_refs"):
+            safe_values.pop("numeric_input_refs", None)
         body = WaterbodyModelRequestV1(
             **safe_values,
             request_digest=canonical_json_digest(safe_values),

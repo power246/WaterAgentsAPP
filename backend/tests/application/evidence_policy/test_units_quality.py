@@ -30,6 +30,7 @@ def capability(code: str):
     [
         ("00010", "32", "  °Ｆ  ", "degree_celsius", "0"),
         ("00060", "1", "m3/s", "cubic_foot_per_second", "35.314667"),
+        ("00060", "1", "ft^3/s", "cubic_foot_per_second", "1"),
         ("00300", "1000", "μg/L", "milligram_per_liter", "1"),
         ("00065", "1", "metre", "foot", "3.28084"),
         ("00045", "25.4", "mm", "inch", "1"),

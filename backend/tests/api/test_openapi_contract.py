@@ -14,6 +14,7 @@ def test_m7_schemas_remain_with_m9_settings_route() -> None:
         "/api/analysis/runs/{run_id}/sessions/{session_id}/events",
         "/api/analysis/runs/{run_id}/sessions/{session_id}/transcript",
         "/api/analysis/runs/{run_id}/transcript/{item_id}/content",
+        "/api/analysis/runs/{run_id}/transcript/{item_id}/anchor-distance-estimates",
         "/api/settings",
         "/api/settings/unit-policies/preview",
         "/api/settings/unit-policies",

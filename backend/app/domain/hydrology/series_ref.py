@@ -28,22 +28,33 @@ class SeriesRef(DomainModel):
         if any(unit.parameter != self.parameter for unit in self.covered_units):
             raise ValueError("series reference units must use its parameter")
         expected_order = tuple(
-            sorted(self.covered_units, key=lambda unit: unit.segment_index)
+            sorted(
+                self.covered_units,
+                key=lambda unit: (
+                    unit.segment_index,
+                    -1 if unit.window_index is None else unit.window_index,
+                ),
+            )
         )
         if self.covered_units != expected_order:
             raise ValueError("series reference units must be sorted")
         time_series_source = self.coverage_source in {
             AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_ENVELOPE,
+            AvailabilityCoverageSource.HISTORICAL_TIME_SERIES_OBSERVATION,
             AvailabilityCoverageSource.PREDICTION_TIME_SERIES_BASELINE,
         }
         if time_series_source != (
             self.provider is ParameterProvider.WDFN_TIME_SERIES
         ):
             raise ValueError("coverage source must match the series provider")
-        if self.provider is ParameterProvider.WDFN_TIME_SERIES:
-            if self.channel not in {"continuous", "daily"}:
-                raise ValueError("time-series channel must match provider metadata")
-        elif self.provider is ParameterProvider.USGS_SAMPLES:
-            if self.channel != "discrete_samples":
-                raise ValueError("sample channel must be discrete_samples")
+        if (
+            self.provider is ParameterProvider.WDFN_TIME_SERIES
+            and self.channel not in {"continuous", "daily"}
+        ):
+            raise ValueError("time-series channel must match provider metadata")
+        if (
+            self.provider is ParameterProvider.USGS_SAMPLES
+            and self.channel != "discrete_samples"
+        ):
+            raise ValueError("sample channel must be discrete_samples")
         return self

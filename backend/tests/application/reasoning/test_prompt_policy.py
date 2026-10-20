@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timezone
 from uuid import UUID
@@ -8,6 +9,7 @@ from pydantic import ValidationError
 from app.application.analysis_runs.models import SessionResultReference
 from app.application.analysis_runs.topology_result_models import DependencyStatus
 from app.application.evidence_tools import create_evidence_tool_registry
+from app.application.reasoning.draft_models import reasoning_batch_response_schema
 from app.application.reasoning.model_models import (
     WaterbodyJsonSchema,
     WaterbodyModelPhase,
@@ -57,6 +59,11 @@ from app.domain import (
     RiskLevel,
 )
 from app.infrastructure.config import load_parameter_capability_registry
+from tests.application.reasoning.test_numeric_estimation import (
+    EstimatePort,
+    _estimator,
+    _request,
+)
 
 OPERATION_IDS = {
     WaterbodyModelPhase.EVIDENCE_PLANNING: UUID(
@@ -209,16 +216,17 @@ def build_all_requests():
             authorized_tools=project_authorized_tool_roster(selected),
         )
     )
-    batch = builder.build_reasoning_batch(
-        ReasoningBatchPromptInput(
-            **common(WaterbodyModelPhase.REASONING_BATCH, "reasoning_cell_batch"),
-            batch_id="batch-1",
-            cells=(batch_cell(),),
-        )
+    batch_prompt = ReasoningBatchPromptInput(
+        **common(WaterbodyModelPhase.REASONING_BATCH, "reasoning_cell_batch"),
+        batch_id="batch-1",
+        cells=(batch_cell(),),
     )
+    batch = builder.build_reasoning_batch(batch_prompt)
     synthesis = builder.build_overall_synthesis(
         OverallSynthesisPromptInput(
             **common(WaterbodyModelPhase.OVERALL_SYNTHESIS, "overall_synthesis"),
+            requested_parameters=(PARAMETER,),
+            window_ids=("window-1", "window-2"),
             validated_cells=(
                 ValidatedCellPromptSummary(
                     cell_id="cell-1",
@@ -249,6 +257,7 @@ def build_all_requests():
             ],
             original_phase=WaterbodyModelPhase.REASONING_BATCH,
             batch_id="batch-1",
+            batch_prompt=batch_prompt,
             original_visible_response='{"decision_type":"batch","items":[]}',
             issues=(
                 PromptValidationIssue(code="missing_cell", path="items[0].cell_id"),
@@ -256,6 +265,12 @@ def build_all_requests():
         )
     )
     return planning, batch, synthesis, repair
+
+
+def build_numeric_request():
+    port = EstimatePort()
+    asyncio.run(_estimator(port)(_request()))
+    return port.calls[0]
 
 
 def test_policy_source_is_typed_immutable_complete_and_conflict_free() -> None:
@@ -298,9 +313,10 @@ def test_policy_audit_rejects_semantically_incomplete_required_rule() -> None:
     }
 
 
-def test_four_phase_prompts_share_policy_and_enforce_permissions() -> None:
-    requests = build_all_requests()
-    planning, batch, synthesis, repair = requests
+def test_all_phase_prompts_share_policy_and_enforce_permissions() -> None:
+    planning, batch, synthesis, repair = build_all_requests()
+    numeric = build_numeric_request()
+    requests = (planning, numeric, batch, synthesis, repair)
 
     assert {request.phase for request in requests} == set(WaterbodyModelPhase)
     assert {request.prompt_policy_digest for request in requests} == {
@@ -315,6 +331,7 @@ def test_four_phase_prompts_share_policy_and_enforce_permissions() -> None:
     assert batch.tool_descriptors == ()
     assert synthesis.tool_descriptors == ()
     assert repair.tool_descriptors == ()
+    assert numeric.tool_descriptors == ()
     assert batch.batch_id == "batch-1"
     assert repair.batch_id == "batch-1"
 
@@ -327,6 +344,16 @@ def test_four_phase_prompts_share_policy_and_enforce_permissions() -> None:
         assert all(f"[{rule_id}]" in request.system_prompt for rule_id in base_rule_ids)
 
 
+def test_coverage_fact_survives_planning_batch_synthesis_and_schema_repair() -> None:
+    planning, batch, synthesis, repair = build_all_requests()
+    for request in (planning, batch, synthesis, repair):
+        body = json.loads(request.messages[-1].text)
+        assert any(
+            fact["summary"] == "Coverage is partial because one source is unavailable."
+            for fact in body["coverage_facts"]
+        )
+
+
 def test_planning_schema_is_exactly_projected_from_authorized_registry_roster() -> None:
     planning = build_all_requests()[0]
     rendered = "\n".join(
@@ -337,6 +364,15 @@ def test_planning_schema_is_exactly_projected_from_authorized_registry_roster() 
     assert '"bundle_digest":"bundle:sha256:bundle"' in rendered
     assert '"planning_turns":2' in rendered
     assert '"decision":"supported"' in rendered
+    prompt_body = json.loads(planning.messages[-1].text)
+    assert prompt_body["response_schema"] == {
+        "name": planning.response_schema.name,
+        "schema": json.loads(planning.response_schema.schema_text),
+    }
+    assert '{"decision":"evidence_ready"}' in planning.system_prompt
+    assert "decision set to evidence_rules_proposed" in planning.system_prompt
+    assert "emit only function calls and no assistant JSON message" in planning.system_prompt
+    assert "cell_assessments" in planning.system_prompt
     for tool in planning.tool_descriptors:
         schema_body = json.loads(tool.input_schema.schema_text)
         assert schema_body["additionalProperties"] is False
@@ -399,14 +435,70 @@ def test_batch_synthesis_and_repair_inputs_are_phase_bounded() -> None:
     assert '"evidence_ref":"evidence-1"' in batch_text
     assert "cell-fixed" not in batch_text
     assert '"validated_cells"' in synthesis_text
+    assert '"requested_parameters"' in synthesis_text
+    assert '"overall_window_refs":["overall-window:window-1","overall-window:window-2"]' in synthesis_text
     assert '"fixed_cells"' in synthesis_text
     assert '"coverage_facts"' in synthesis_text
     assert "source_records" not in synthesis_text
     assert '"original_visible_response"' in repair_text
     assert '"code":"missing_cell"' in repair_text
-    assert "evidence_summaries" not in repair_text
+    assert '"evidence_summaries"' in repair_text
+    assert '"series-1"' in repair_text
+    assert json.loads(repair_text)["batch_cells"] == json.loads(batch_text)["cells"]
     assert "validated_cells" not in repair_text
     assert "switch model" not in repair.system_prompt.lower()
+    for request in (batch, synthesis, repair):
+        body = json.loads(request.messages[-1].text)
+        assert body["response_schema"] == {
+            "name": request.response_schema.name,
+            "schema": json.loads(request.response_schema.schema_text),
+        }
+
+
+def test_deepseek_batch_and_repair_prompts_expose_real_field_constraints() -> None:
+    schema = reasoning_batch_response_schema()
+    builder = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY)
+    batch_prompt = ReasoningBatchPromptInput(
+        **{
+            **common(WaterbodyModelPhase.REASONING_BATCH, schema.name),
+            "response_schema": schema,
+        },
+        batch_id="batch-1",
+        cells=(batch_cell(),),
+    )
+    batch = builder.build_reasoning_batch(batch_prompt)
+    repair = builder.build_schema_repair(
+        SchemaRepairPromptInput(
+            **{
+                **common(WaterbodyModelPhase.SCHEMA_REPAIR, schema.name),
+                "response_schema": schema,
+            },
+            repair_of_operation_id=OPERATION_IDS[
+                WaterbodyModelPhase.REASONING_BATCH
+            ],
+            original_phase=WaterbodyModelPhase.REASONING_BATCH,
+            batch_id="batch-1",
+            batch_prompt=batch_prompt,
+            original_visible_response='{"decision_type":"reasoning_batch","cells":[]}',
+            issues=(PromptValidationIssue(code="missing_cell", path="$.cells"),),
+        )
+    )
+
+    for request in (batch, repair):
+        body = json.loads(request.messages[-1].text)
+        assert body["response_schema"]["schema"] == json.loads(schema.schema_text)
+        assert (
+            "representative_value"
+            in body["response_schema"]["schema"]["$defs"]["ReasoningCellDraft"]["properties"]
+        )
+        assert "decimal string" in request.system_prompt
+        assert "empty reason_codes array" in request.system_prompt
+        assert "a non-null target_unit_id" in request.system_prompt
+        assert "valid_input_count is zero" in request.system_prompt
+        assert "null representative_value, target_unit_id, source, and aggregation_method" in request.system_prompt
+    assert json.loads(repair.messages[-1].text)["batch_cells"] == json.loads(
+        batch.messages[-1].text
+    )["cells"]
 
 
 def test_synthesis_keeps_server_bounded_contextual_summary_for_attribution() -> None:
@@ -415,6 +507,8 @@ def test_synthesis_keeps_server_bounded_contextual_summary_for_attribution() -> 
     request = PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY).build_overall_synthesis(
         OverallSynthesisPromptInput(
             **payload,
+            requested_parameters=(PARAMETER,),
+            window_ids=("window-1",),
             validated_cells=(
                 ValidatedCellPromptSummary(
                     cell_id="cell-1",
@@ -435,6 +529,10 @@ def test_synthesis_keeps_server_bounded_contextual_summary_for_attribution() -> 
     assert body["bounded_reference_summaries"][0]["evidence_ref"] == (
         "outside-evidence"
     )
+    assert body["requested_parameters"] == [PARAMETER.model_dump(mode="json")]
+    assert body["window_ids"] == ["window-1"]
+    assert "series_assessments must contain exactly requested_parameters" in request.system_prompt
+    assert "hypothesized requires only contextual-only evidence" in request.system_prompt
 
 
 def test_dependency_prompt_locks_source_roles_numeric_boundary_and_windows() -> None:
@@ -494,7 +592,7 @@ def test_dependency_prompt_locks_source_roles_numeric_boundary_and_windows() -> 
     assert block["local_same_parameter_role"] == "direct_observation"
     assert block["local_supporting_role"] == "supporting_indirect_evidence"
     assert block["upstream_role"] == "cross_waterbody_inferred_evidence"
-    assert block["quantified_value_policy"] == "registered_deterministic_tool_only"
+    assert block["quantified_value_policy"] == "explicit_calculation_then_saved_model_estimate"
     assert block["dependencies"][0]["result_ref"] == {
         "run_id": str(RUN_ID),
         "item_id": "40000000-0000-0000-0000-000000000100",
@@ -512,8 +610,9 @@ def test_dependency_prompt_locks_source_roles_numeric_boundary_and_windows() -> 
         "upstream-waterbody",
         "inferred evidence",
         "local discharge",
-        "directional",
         "registered deterministic",
+        "model_estimate",
+        "original measurement",
         "never invent",
     ):
         assert phrase in rendered
@@ -549,7 +648,8 @@ def test_schema_key_order_does_not_change_request_or_canonical_digests() -> None
 
 
 def test_prompt_audit_records_phase_rosters_schema_digests_and_failure_sample() -> None:
-    requests = build_all_requests()
+    planning, batch, synthesis, repair = build_all_requests()
+    requests = (planning, build_numeric_request(), batch, synthesis, repair)
     report = audit_prompt_contract(DEFAULT_REASONING_PROMPT_POLICY, requests)
 
     assert report.failures == ()
@@ -563,7 +663,7 @@ def test_prompt_audit_records_phase_rosters_schema_digests_and_failure_sample() 
     bad_request = requests[1].model_copy(update={"prompt_policy_digest": "sha256:bad"})
     failed = audit_prompt_contract(
         DEFAULT_REASONING_PROMPT_POLICY,
-        (requests[0], bad_request, requests[2], requests[3]),
+        (requests[0], bad_request, *requests[2:]),
     )
     assert "prompt_policy_digest_mismatch" in {
         failure.code for failure in failed.failures
@@ -594,6 +694,47 @@ def test_policy_requires_five_risks_rationales_series_units_gates_and_safety() -
         marker in "\n".join(instructions.values()).lower()
         for marker in ("0-100 score", "take the maximum risk", "average risk levels")
     )
+
+
+def test_batch_prompt_distinguishes_eligible_partial_mean_from_insufficient_coverage() -> None:
+    batch = build_all_requests()[1]
+
+    assert "server-eligible aggregate with partial coverage" in batch.system_prompt
+    assert "quantified inferred mean of the available readings" in batch.system_prompt
+    assert "partial_coverage quality flag" in batch.system_prompt
+    assert "without claiming a complete-window mean" in batch.system_prompt
+    assert "insufficient or unknown measured coverage does not invalidate a saved" in batch.system_prompt
+
+
+def test_batch_and_repair_prompts_allow_only_saved_numeric_estimates_in_empty_windows() -> None:
+    batch = build_all_requests()[1]
+    repair = build_all_requests()[3]
+
+    for request in (batch, repair):
+        prompt = request.system_prompt
+        assert "insufficient or unknown measured coverage does not invalidate a saved" in prompt
+        assert "Do not choose indeterminate solely because observed_count=0" in prompt
+        assert "flow is missing, the transfer path is long, or confidence is low" in prompt
+        assert "copy its saved point, bounds and unit exactly" in prompt
+        assert "never invent bounds or a midpoint" in prompt
+        assert "cited eligible value unit (direct record, aggregate, typed temporal_estimate, or executed numeric_derived)" in prompt
+        assert "source=inferred for historical gap_filling windows and source=predicted for prediction windows" in prompt
+        assert "Cite the target result and available relevant discharge support" in prompt
+        assert "leaving cross-window input refs in the validated derivation" in prompt
+        assert "do not exceed the saved method confidence cap" in prompt
+
+
+def test_numeric_phase_explains_evidence_fallback_without_losing_original_lineage() -> None:
+    prompt = build_numeric_request().system_prompt
+    assert "applicable explicit calculations have been attempted" in prompt
+    assert "related readings, local information or general knowledge" in prompt
+    assert "normally give a defensible point prediction" in prompt
+    assert "concrete supplied counterevidence makes a point indefensible" in prompt
+    assert "Lack of a local station or flow, ordinary provider_flagged" in prompt
+    assert "Without an original measurement, an upstream estimate remains range-only" in prompt
+    assert "do not multiply confidence penalties at every downstream waterbody" in prompt
+    assert "complete physical domain" in prompt
+    assert "method_kind=model_estimate" in prompt
 
 
 def test_rendered_prompts_contain_no_secret_archive_raw_provider_or_outside_scope() -> None:

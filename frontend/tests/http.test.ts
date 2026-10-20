@@ -81,4 +81,26 @@ describe('typed HTTP policy', () => {
     const client = new ApiClient(async () => json(200, { items: [] }, 'text/html'))
     await expect(client.history()).rejects.toEqual(new ApiError(200, 'invalid_content_type', 'safe-request-id'))
   })
+
+  it('reads a saved result distance overlay and rejects malformed estimate indexes', async () => {
+    const fetcher = vi.fn(async () => json(200, { result_item_id: 'result-item', estimates: [
+      { cell_id: 'cell:ph:1', anchor_index: 0, distance_km: 2.94,
+        distance_basis: 'mapped_channel_estimate' },
+    ] }))
+    const client = new ApiClient(fetcher)
+    await expect(client.anchorDistanceEstimates('run-id', 'result-item')).resolves.toMatchObject({
+      estimates: [{ cell_id: 'cell:ph:1', distance_km: 2.94 }],
+    })
+    expect(fetcher).toHaveBeenCalledWith(
+      '/api/analysis/runs/run-id/transcript/result-item/anchor-distance-estimates?view=history',
+      expect.objectContaining({ method: 'GET' }),
+    )
+    const malformed = new ApiClient(async () => json(200, { result_item_id: 'result-item', estimates: [
+      { cell_id: 'cell:ph:1', anchor_index: -1, distance_km: 2.94,
+        distance_basis: 'mapped_channel_estimate' },
+    ] }))
+    await expect(malformed.anchorDistanceEstimates('run-id', 'result-item')).rejects.toMatchObject({
+      code: 'invalid_response',
+    })
+  })
 })

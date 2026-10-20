@@ -8,7 +8,7 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from pydantic import ValidationError
-from sqlalchemy import delete, inspect, select, text, update
+from sqlalchemy import delete, event, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -34,7 +34,7 @@ from app.application.analysis_runs.persistence import (
     PersistenceWriteConflictError,
 )
 from app.application.analysis_runs.workflow import WorkflowContext
-from app.application.transcripts.registry import create_production_registry
+from app.application.transcripts.models import WorkflowQuiescedFact
 from app.application.transcripts.read_models import (
     ReadView,
     RunDetailResponse,
@@ -44,6 +44,7 @@ from app.application.transcripts.reader import (
     TranscriptContentUnreadableError,
     TranscriptReader,
 )
+from app.application.transcripts.registry import create_production_registry
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import (
     check_database_schema,
@@ -51,34 +52,37 @@ from app.infrastructure.persistence.database import (
     upgrade_database,
 )
 from app.infrastructure.persistence.records import (
-    PersistenceBatch,
     PersistedRunRecord,
     PersistedSessionRecord,
     PersistedTranscriptContentRecord,
     PersistedTranscriptItemRecord,
+    PersistenceBatch,
 )
-from app.infrastructure.persistence.schema import metadata, transcript_items
 from app.infrastructure.persistence.schema import (
     analysis_runs,
     analysis_sessions,
+    metadata,
     transcript_contents,
+    transcript_items,
 )
 from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.runtime.system_clock import SystemClock
-from tests.m4_support import (
-    MODEL_CATALOG,
-    analysis_context,
-    create_request,
-    create_request_bytes,
-    create_test_app as create_app,
-)
+from scripts.test_database import temporary_migrated_schema
 from tests.application.evidence_tools.fakes import FixedClock
 from tests.application.reasoning.test_planning_loop import _fixture
 from tests.application.reasoning.test_runner import (
     AdaptiveWaterbodyModelPort,
     _runner,
 )
-from scripts.test_database import temporary_migrated_schema
+from tests.m4_support import (
+    MODEL_CATALOG,
+    analysis_context,
+    create_request,
+    create_request_bytes,
+)
+from tests.m4_support import (
+    create_test_app as create_app,
+)
 
 
 @pytest.fixture(scope="module")
@@ -135,7 +139,6 @@ class RollbackOncePostgresStore(PostgresTranscriptStore):
 class NoLiveTranscript:
     async def get_live_read(self, run_id: UUID | str):
         del run_id
-        return None
 
 
 def _item(
@@ -226,11 +229,253 @@ async def _wait_persistence(
         raise AssertionError(info)
 
 
+def test_read_run_items_selects_only_requested_persisted_content(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, batch = _run_batch()
+        await _commit(postgres_settings, batch)
+        external_id = uuid4()
+        now = datetime.now(UTC)
+        body = '{"message":"selected"}'
+        await _commit(postgres_settings, PersistenceBatch(
+            items=(PersistedTranscriptItemRecord(
+                item_id=external_id,
+                run_id=run_id,
+                transcript_sequence=3,
+                created_at=now,
+                content_type="fixture_message",
+                content_schema_version=1,
+                preview_head="head",
+                preview_tail="tail",
+                content_bytes=len(body.encode()),
+            ),),
+            contents=(PersistedTranscriptContentRecord(
+                item_id=external_id,
+                body=body,
+                created_at=now,
+            ),),
+        ))
+        engine = create_database_engine(postgres_settings)
+        try:
+            store = PostgresTranscriptStore(
+                engine,
+                operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+            )
+            selected = await store.read_run_items(
+                run_id, (external_id, batch.items[0].item_id)
+            )
+            assert selected is not None
+            assert tuple(item.item_id for item in selected.items) == (
+                batch.items[0].item_id, external_id,
+            )
+            assert tuple(content.item_id for content in selected.contents) == (
+                external_id,
+            )
+            assert selected.contents[0].body == body
+            assert await store.read_run_items(uuid4(), (external_id,)) is None
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_history_content_and_session_reads_skip_unrelated_external_body(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, creation = _run_batch()
+        await _commit(postgres_settings, creation)
+        session_id, other_session_id = uuid4(), uuid4()
+        created_id, other_created_id = uuid4(), uuid4()
+        requested_id, unrelated_id = uuid4(), uuid4()
+        now = datetime.now(UTC)
+        requested_body = create_production_registry().encode(
+            "runtime_fact", 1, WorkflowQuiescedFact()
+        ).safe_body
+        unrelated_body = json.dumps({"blob": "x" * 100_000})
+
+        def created_body(item_session_id: UUID) -> str:
+            return json.dumps({
+                "schema_version": 2,
+                "run_id": str(run_id),
+                "session_id": str(item_session_id),
+                "sequence": 1,
+                "occurred_at": now.isoformat(),
+                "type": "session_created",
+                "payload": {"status": "pending", "created_at": now.isoformat()},
+            })
+
+        await _commit(postgres_settings, PersistenceBatch(
+            sessions=(
+                PersistedSessionRecord(
+                    session_id=session_id, run_id=run_id,
+                    agent_role="waterbody", target_comid="12345678",
+                    status="pending", created_at=now, updated_at=now,
+                    created_item_id=created_id,
+                ),
+                PersistedSessionRecord(
+                    session_id=other_session_id, run_id=run_id,
+                    agent_role="waterbody", target_comid="87654321",
+                    status="pending", created_at=now, updated_at=now,
+                    created_item_id=other_created_id,
+                ),
+            ),
+            items=(
+                _item(
+                    run_id=run_id, session_id=session_id,
+                    item_id=created_id, sequence=3,
+                    body=created_body(session_id), content_type="lifecycle_event",
+                ).model_copy(update={"content_schema_version": 2}),
+                PersistedTranscriptItemRecord(
+                    item_id=requested_id, run_id=run_id, session_id=session_id,
+                    transcript_sequence=4, created_at=now,
+                    content_type="runtime_fact", content_schema_version=1,
+                    preview_head="head", preview_tail="tail",
+                    content_bytes=len(requested_body.encode()),
+                ),
+                _item(
+                    run_id=run_id, session_id=other_session_id,
+                    item_id=other_created_id, sequence=5,
+                    body=created_body(other_session_id),
+                    content_type="lifecycle_event",
+                ).model_copy(update={"content_schema_version": 2}),
+                PersistedTranscriptItemRecord(
+                    item_id=unrelated_id, run_id=run_id,
+                    session_id=other_session_id,
+                    transcript_sequence=6, created_at=now,
+                    content_type="fixture_message", content_schema_version=1,
+                    preview_head="head", preview_tail="tail",
+                    content_bytes=len(unrelated_body.encode()),
+                ),
+            ),
+            contents=(
+                PersistedTranscriptContentRecord(
+                    item_id=requested_id, body=requested_body, created_at=now,
+                ),
+                PersistedTranscriptContentRecord(
+                    item_id=unrelated_id, body=unrelated_body, created_at=now,
+                ),
+            ),
+        ))
+
+        engine = create_database_engine(postgres_settings)
+        content_select_parameters: list[object] = []
+
+        def capture_content_select(_conn, _cursor, statement, parameters, _context, _many):
+            if "transcript_contents" in statement and "SELECT" in statement:
+                content_select_parameters.append(parameters)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", capture_content_select)
+        try:
+            class BoundedStore(PostgresTranscriptStore):
+                async def read_run(self, run_id):
+                    raise AssertionError(f"full-run read attempted for {run_id}")
+
+            reader = TranscriptReader(
+                NoLiveTranscript(),
+                BoundedStore(
+                    engine,
+                    operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+                ),
+                create_production_registry(),
+                error_id_factory=uuid4,
+                inline_content_bytes=256,
+                preview_bytes=16,
+            )
+            content = await reader.get_content(run_id, requested_id, ReadView.HISTORY)
+            assert content.item_id == requested_id
+            session = await reader.get_session(run_id, session_id, ReadView.HISTORY)
+            assert session.session.session_id == session_id
+            transcript = await reader.get_session_transcript(
+                run_id, session_id, ReadView.HISTORY
+            )
+            assert {item.item_id for item in transcript.items} == {
+                created_id, requested_id,
+            }
+            assert content_select_parameters
+            assert any(
+                str(requested_id) in str(params)
+                for params in content_select_parameters
+            )
+            assert all(
+                str(unrelated_id) not in str(params)
+                for params in content_select_parameters
+            )
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", capture_content_select)
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
+def test_list_session_item_ids_selects_only_requested_type(
+    postgres_settings: AppSettings,
+) -> None:
+    async def exercise() -> None:
+        run_id, batch = _run_batch()
+        await _commit(postgres_settings, batch)
+        session_id = uuid4()
+        created_id, first_bundle_id, fragment_id, last_bundle_id = (
+            uuid4() for _ in range(4)
+        )
+        now = datetime.now(UTC)
+        await _commit(postgres_settings, PersistenceBatch(
+            sessions=(PersistedSessionRecord(
+                session_id=session_id,
+                run_id=run_id,
+                agent_role="waterbody",
+                target_comid="12345",
+                status="pending",
+                created_at=now,
+                updated_at=now,
+                created_item_id=created_id,
+            ),),
+            items=(
+                _item(run_id=run_id, session_id=session_id, item_id=created_id,
+                      sequence=3, content_type="lifecycle_event"),
+                _item(run_id=run_id, session_id=session_id, item_id=first_bundle_id,
+                      sequence=4, content_type="evidence_bundle"),
+                _item(run_id=run_id, session_id=session_id, item_id=fragment_id,
+                      sequence=5, content_type="evidence_fragment"),
+                _item(run_id=run_id, session_id=session_id, item_id=last_bundle_id,
+                      sequence=6, content_type="evidence_bundle"),
+            ),
+        ))
+        engine = create_database_engine(postgres_settings)
+        try:
+            store = PostgresTranscriptStore(
+                engine,
+                operation_timeout_seconds=postgres_settings.db_operation_timeout_seconds,
+            )
+            assert await store.run_exists(run_id)
+            assert not await store.run_exists(uuid4())
+            assert await store.session_exists(run_id, session_id)
+            assert not await store.session_exists(run_id, uuid4())
+            assert not await store.session_exists(uuid4(), session_id)
+            assert await store.list_session_item_ids(
+                run_id, session_id, "evidence_bundle"
+            ) == (first_bundle_id, last_bundle_id)
+            assert await store.list_session_item_ids(
+                run_id, session_id, None
+            ) == (created_id, first_bundle_id, fragment_id, last_bundle_id)
+            assert await store.list_session_item_ids(
+                run_id, uuid4(), "evidence_bundle"
+            ) == ()
+            assert await store.list_session_item_ids(
+                uuid4(), session_id, "evidence_bundle"
+            ) == ()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(exercise())
+
+
 def test_upgrade_check_and_repeated_upgrade_on_real_postgres(
     postgres_settings: AppSettings,
 ) -> None:
-    assert asyncio.run(check_database_schema(postgres_settings)) == "20261008_03"
-    assert upgrade_database(postgres_settings) == "20261008_03"
+    assert asyncio.run(check_database_schema(postgres_settings)) == "20261020_01"
+    assert upgrade_database(postgres_settings) == "20261020_01"
 
     async def inspect_schema() -> tuple[set[str], set[str], list[object]]:
         engine = create_database_engine(postgres_settings)
@@ -1240,7 +1485,7 @@ def test_external_content_is_committed_atomically(postgres_settings: AppSettings
 
 
 @pytest.mark.parametrize("external", [False, True], ids=["inline", "external"])
-def test_real_postgres_corrupt_json_has_safe_fulltext_when_readable(
+def test_real_postgres_invalid_schema_preserves_stored_fulltext_when_readable(
     postgres_settings: AppSettings,
     external: bool,
 ) -> None:
@@ -1316,17 +1561,17 @@ def test_real_postgres_corrupt_json_has_safe_fulltext_when_readable(
                 request_item.item_id,
                 ReadView.HISTORY,
             )
+            assert content.text == unsafe_body
             assert json.loads(content.text) == {
                 "query": 7,
                 "nested": {
-                    "api_key": "[REDACTED]",
-                    "note": "Authorization: [REDACTED]",
+                    "api_key": unsafe_values[0],
+                    "note": f"Authorization: Basic {unsafe_values[1]}",
                 },
-                "private_key": "[REDACTED]",
+                "private_key": unsafe_values[2],
             }
             assert content.content_bytes == len(content.text.encode("utf-8"))
             assert content.issues[0].error.code == "transcript_content_corrupt"
-            assert all(secret not in content.text for secret in unsafe_values)
 
             if external:
                 valid_body = create_request_bytes("byte mismatch").decode()
@@ -1413,6 +1658,7 @@ def test_corrupt_completed_session_terminal_keeps_postgres_history_readable(
         session_id = uuid4()
         created_id = uuid4()
         terminal_id = uuid4()
+        unrelated_id = uuid4()
         now = datetime.now(UTC)
         created_body = json.dumps({
             "schema_version": 2,
@@ -1447,6 +1693,11 @@ def test_corrupt_completed_session_terminal_keeps_postgres_history_readable(
                     session_id=session_id, body=damaged_body,
                     content_type="lifecycle_event",
                 ).model_copy(update={"content_schema_version": 2}),
+                _item(
+                    run_id=run_id, item_id=unrelated_id, sequence=5,
+                    session_id=session_id, body='{"unrelated": true}',
+                    content_type="runtime_fact",
+                ),
             ),
         ))
 
@@ -1470,8 +1721,13 @@ def test_corrupt_completed_session_terminal_keeps_postgres_history_readable(
             assert stored.sessions[0].status is AgentSessionStatus.COMPLETED
             assert stored.sessions[0].result_ref is None
             assert stored.session_issues[0].item_id == terminal_id
+            roots = await store.read_run_detail_roots(run_id)
+            assert roots is not None
+            assert roots.session_issues[0].item_id == terminal_id
+            assert unrelated_id not in {item.item_id for item in roots.items}
             detail = await reader.get_run(run_id, ReadView.HISTORY)
             assert any(issue.item_id == terminal_id for issue in detail.issues)
+            assert not any(issue.item_id == unrelated_id for issue in detail.issues)
             assert any(item.item_id == request_item.item_id for item in detail.items)
             session = await reader.get_session(run_id, session_id, ReadView.HISTORY)
             assert session.session.status is AgentSessionStatus.COMPLETED

@@ -13,6 +13,10 @@ from app.domain import (
     EvidenceToolRequest,
 )
 from app.infrastructure.config import load_parameter_capability_registry
+from tests.application.evidence_tools.conftest import (
+    WEATHER_PARAMETER,
+    make_weather_context,
+)
 from tests.application.evidence_tools.fakes import (
     FakeCollectionPort,
     FixedClock,
@@ -29,7 +33,7 @@ def weather_request(scope, call_id, *, include_forecast=None):
         tool_name="collect_weather_evidence",
         purpose="bounded weather context",
         window_ids=(scope.time_windows[0].window_id,),
-        parameter_keys=(scope.requested_parameters[0],),
+        parameter_keys=(WEATHER_PARAMETER,),
         options=EvidenceToolOptions(include_forecast=include_forecast),
     )
 
@@ -49,9 +53,10 @@ def runtime(store, port, *, single_flight=None):
 
 
 def test_concurrent_exact_request_runs_provider_once_but_writes_two_results(
-    evidence_scope,
+    scope_factory,
 ) -> None:
     async def exercise() -> None:
+        evidence_scope = scope_factory(context=make_weather_context())
         store = MemoryEvidenceStore()
         port = FakeCollectionPort(
             lambda provider_request: complete_batch(provider_request),
@@ -92,9 +97,12 @@ def test_options_run_and_manifest_digest_do_not_cross_dedup_boundaries(
         store = MemoryEvidenceStore()
         port = FakeCollectionPort(lambda provider_request: complete_batch(provider_request))
         executor = runtime(store, port)
-        first_scope = scope_factory(run_id="run-a", session_id="session-a")
-        other_session = scope_factory(run_id="run-a", session_id="session-other")
-        second_scope = scope_factory(run_id="run-b", session_id="session-b")
+        context = make_weather_context()
+        first_scope = scope_factory(run_id="run-a", session_id="session-a", context=context)
+        other_session = scope_factory(
+            run_id="run-a", session_id="session-other", context=context,
+        )
+        second_scope = scope_factory(run_id="run-b", session_id="session-b", context=context)
 
         await executor.execute(first_scope, weather_request(first_scope, "call-a1"))
         await executor.execute(
@@ -130,7 +138,8 @@ def test_failed_and_cancelled_work_is_retryable_and_never_cached(
     scope_factory,
 ) -> None:
     async def exercise() -> None:
-        scope = scope_factory()
+        context = make_weather_context()
+        scope = scope_factory(context=context)
         failed_store = MemoryEvidenceStore()
         failed_port = FakeCollectionPort(
             lambda provider_request: complete_batch(provider_request, complete=False)
@@ -147,7 +156,7 @@ def test_failed_and_cancelled_work_is_retryable_and_never_cached(
         assert failed_runtime.live_dedup_counts(scope.run_id) == (0, 0)
 
         cancel_event = asyncio.Event()
-        cancelled_scope = scope_factory(cancel_event=cancel_event)
+        cancelled_scope = scope_factory(cancel_event=cancel_event, context=context)
         cancelled_store = MemoryEvidenceStore()
         cancelled_port = FakeCollectionPort(
             lambda provider_request: complete_batch(provider_request),
@@ -168,7 +177,7 @@ def test_failed_and_cancelled_work_is_retryable_and_never_cached(
         assert cancelled.execution_status is EvidenceToolExecutionStatus.CANCELLED
         assert cancelled.safe_error.code == "evidence_cancelled"
         assert cancelled_store.records == {}
-        retry_scope = scope_factory()
+        retry_scope = scope_factory(context=context)
         retried = await cancelled_runtime.execute(
             retry_scope,
             weather_request(retry_scope, "cancelled-2"),

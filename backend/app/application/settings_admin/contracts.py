@@ -32,6 +32,7 @@ _CREDENTIAL_METADATA = {
 def safe_settings_catalog(
     catalog: ModelCatalogSnapshot, *, iana_timezones: tuple[str, ...],
     unit_registry: ParameterCapabilityRegistry | None = None,
+    memory_enabled: bool = True,
 ) -> SettingsCatalogProjection:
     options = tuple(
         ModelOption(
@@ -47,7 +48,8 @@ def safe_settings_catalog(
         EmbeddingProfileOption(
             profile_id=item.embedding_profile.profile_id,
             label=f"{item.provider} / {item.model}",
-            available=True,
+            available=memory_enabled,
+            unavailable_reason=None if memory_enabled else "Historical memory is disabled.",
         )
         for item in catalog.capabilities
         if item.embedding_profile is not None
@@ -79,7 +81,7 @@ def safe_settings_catalog(
     return SettingsCatalogProjection(
         models=options,
         embedding_profiles=embedding,
-        memory_modes=tuple(MemoryMode),
+        memory_modes=tuple(MemoryMode) if memory_enabled else (MemoryMode.STATELESS,),
         time_resolutions=tuple(TimeResolutionPreference),
         iana_timezones=iana_timezones,
         unit_options=unit_options,
@@ -88,7 +90,10 @@ def safe_settings_catalog(
 
 def validate_mutable_defaults(
     defaults: MutableDefaults, catalog: ModelCatalogSnapshot,
+    *, memory_enabled: bool = True,
 ) -> None:
+    if not memory_enabled and defaults.memory_mode is not MemoryMode.STATELESS:
+        raise ValueError("historical memory is disabled")
     for field_name, role in (
         ("parser_model", ModelRole.QUERY_PARSER),
         ("waterbody_model", ModelRole.WATERBODY),

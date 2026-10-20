@@ -21,7 +21,6 @@ from app.infrastructure.config import (
 from app.infrastructure.runtime import build_m4_runtime
 from app.main import create_app
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -90,6 +89,7 @@ def settings(**overrides: object) -> AppSettings:
         "topology_max_hops": 9,
         "topology_max_nodes": 55,
         "topology_max_concurrency": 3,
+        "nldi_request_interval_seconds": 0.7,
         "query_parser_timeout_seconds": 12.0,
         "geocoding_timeout_seconds": 7.0,
         "metadata_timeout_seconds": 8.0,
@@ -151,12 +151,14 @@ def test_runtime_factory_wires_real_m4_components_and_configured_limits() -> Non
             location = resolver._location_resolver
             assert location._geocoding._http._timeout_seconds == 7.0
             assert location._comid_lookup._http._timeout_seconds == 8.0
+            assert location._comid_lookup._request_interval_seconds == 0.7
+            assert location._comid_lookup is topology._topology
             assert resolver._parameter_resolver._catalog._http._timeout_seconds == 8.0
             assert topology._limits.max_distance_km == 77.0
             assert topology._limits.max_hops == 9
             assert topology._limits.max_nodes == 55
             assert topology._max_concurrency == 3
-            assert topology._stage_timeout_seconds == 120.0
+            assert topology._stage_timeout_seconds == 1200.0
 
     run(exercise())
 

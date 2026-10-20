@@ -89,6 +89,12 @@ class EvidenceProviderOutputInvalidError(EvidenceToolError):
     public_message = "The evidence provider response was invalid."
 
 
+class EvidencePersistenceUnavailableError(EvidenceToolError):
+    code = "evidence_persistence_unavailable"
+    public_message = "The evidence records could not be saved."
+    retryable = True
+
+
 def map_evidence_error(error: BaseException) -> SafeEvidenceError:
     if isinstance(error, (asyncio.CancelledError, WorkflowStopped)):
         raise error

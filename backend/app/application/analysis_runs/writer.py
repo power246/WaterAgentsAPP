@@ -1,5 +1,7 @@
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from math import isfinite
 from typing import Protocol
 from uuid import UUID
@@ -32,6 +34,19 @@ from app.application.transcripts.models import TranscriptContentRef
 from app.ports.transcript_store import TranscriptStorePort
 
 
+@dataclass(frozen=True)
+class _BatchFreezePlan:
+    run_id: UUID
+    groups: tuple[PersistenceGroup, ...]
+    transcript_buffer: TranscriptBuffer
+    item_ids: tuple[UUID, ...]
+    persisted: tuple[TranscriptContentRef, ...]
+    generating: tuple[TranscriptContentRef, ...]
+    run_mutations: tuple[RunStateMutation, ...]
+    session_mutations: tuple[SessionStateMutation, ...]
+    rag_consumption_links: tuple[RAGConsumptionLink, ...]
+
+
 class WriterRuntime(Protocol):
     snapshot: AnalysisRunSnapshot
     transcript_buffer: TranscriptBuffer
@@ -61,6 +76,7 @@ class ActivityLogger(Protocol):
         *,
         exception: BaseException | None = None,
         error_id: UUID | None = None,
+        level: int | None = None,
         **fields: object,
     ) -> None: ...
 
@@ -148,9 +164,19 @@ class TranscriptWriter:
                         async with runtime.condition:
                             if runtime.writer_stop.is_set():
                                 return
-                            batch = self._freeze_batch_locked(runtime)
-                            if batch is None:
+                            plan = self._freeze_batch_locked(runtime)
+                            if plan is None:
                                 break
+                        if isinstance(plan, _BatchFreezePlan):
+                            batch = await asyncio.to_thread(
+                                self._build_batch_from_plan, plan
+                            )
+                            async with runtime.condition:
+                                if runtime.writer_stop.is_set():
+                                    return
+                                runtime.persistence_active_batch = batch
+                        else:
+                            batch = plan
                         succeeded = await self._attempt_batch(runtime, batch)
                         if succeeded:
                             continue
@@ -299,7 +325,7 @@ class TranscriptWriter:
     def _freeze_batch_locked(
         self,
         runtime: WriterRuntime,
-    ) -> PersistenceWriteBatch | None:
+    ) -> PersistenceWriteBatch | _BatchFreezePlan | None:
         if runtime.persistence_exhausted:
             return None
         if runtime.persistence_active_batch is not None:
@@ -343,15 +369,13 @@ class TranscriptWriter:
                 break
         if not selected:
             return None
-        batch = self._build_batch_locked(runtime, tuple(selected))
-        runtime.persistence_active_batch = batch
-        return batch
+        return self._prepare_batch_locked(runtime, tuple(selected))
 
-    def _build_batch_locked(
+    def _prepare_batch_locked(
         self,
         runtime: WriterRuntime,
         groups: tuple[PersistenceGroup, ...],
-    ) -> PersistenceWriteBatch:
+    ) -> _BatchFreezePlan:
         item_ids = tuple(item_id for group in groups for item_id in group.item_ids)
         mutation_ids = {
             mutation_id for group in groups for mutation_id in group.mutation_ids
@@ -370,13 +394,6 @@ class TranscriptWriter:
             if item.item_id not in runtime.persisted_item_ids
             and item.item_id not in selected_item_ids
         )
-        transcript = runtime.transcript_buffer.to_storage_batch(
-            inline_content_bytes=self._inline_content_bytes,
-            preview_bytes=self._preview_bytes,
-            persisted=persisted,
-            generating=generating,
-            item_ids=item_ids,
-        )
         run_mutations = tuple(
             mutation
             for mutation in runtime.state_mutations
@@ -389,10 +406,13 @@ class TranscriptWriter:
             if isinstance(mutation, SessionStateMutation)
             and mutation.mutation_id in mutation_ids
         )
-        return PersistenceWriteBatch(
+        return _BatchFreezePlan(
             run_id=runtime.snapshot.run_id,
             groups=groups,
-            transcript=transcript,
+            transcript_buffer=runtime.transcript_buffer.snapshot_for_storage(),
+            item_ids=item_ids,
+            persisted=persisted,
+            generating=generating,
             run_mutations=run_mutations,
             session_mutations=session_mutations,
             rag_consumption_links=tuple(
@@ -400,6 +420,26 @@ class TranscriptWriter:
                 for item_id in item_ids
                 for link in runtime.rag_consumption_links.get(item_id, ())
             ),
+        )
+
+    def _build_batch_from_plan(
+        self,
+        plan: _BatchFreezePlan,
+    ) -> PersistenceWriteBatch:
+        transcript = plan.transcript_buffer.to_storage_batch(
+            inline_content_bytes=self._inline_content_bytes,
+            preview_bytes=self._preview_bytes,
+            persisted=plan.persisted,
+            generating=plan.generating,
+            item_ids=plan.item_ids,
+        )
+        return PersistenceWriteBatch(
+            run_id=plan.run_id,
+            groups=plan.groups,
+            transcript=transcript,
+            run_mutations=plan.run_mutations,
+            session_mutations=plan.session_mutations,
+            rag_consumption_links=plan.rag_consumption_links,
         )
 
     async def _attempt_batch(
@@ -422,7 +462,7 @@ class TranscriptWriter:
                         await self._store.write_batch(batch)
                     except PersistenceWriteConflictError:
                         raise
-                    except Exception:
+                    except Exception as error:
                         async with runtime.condition:
                             runtime.persistence_unknown = True
                         verification = await self._store.verify_batch(batch)
@@ -431,7 +471,7 @@ class TranscriptWriter:
                                 runtime.persistence_unknown = False
                             raise RuntimeError(
                                 "the persistence attempt did not commit"
-                            ) from None
+                            ) from error
         except asyncio.CancelledError:
             raise
         except TimeoutError as error:
@@ -503,6 +543,11 @@ class TranscriptWriter:
             runtime,
             exception=error,
             error_id=runtime.persistence_warning.error_id,
+            level=(
+                logging.ERROR
+                if runtime.persistence_exhausted or not retryable
+                else logging.WARNING
+            ),
             attempt=runtime.persistence_failures,
         )
 
@@ -525,6 +570,11 @@ class TranscriptWriter:
         runtime.third_retry_failed_at = None
         if warning is not None and not batch.is_recovery_fact:
             self._recovered(runtime, warning.error_id)
+            self._log_activity(
+                "persistence_write_recovered",
+                runtime,
+                error_id=warning.error_id,
+            )
         runtime.persistence_warning = None
         if runtime.persistence_groups:
             runtime.writer_wakeup.set()

@@ -12,6 +12,18 @@ from scripts.m4_workflow_smoke import run_smoke
 FIXTURES = Path(__file__).with_name("fixtures")
 
 
+def omit_new_optional_fields(value):
+    if isinstance(value, dict):
+        return {
+            key: omit_new_optional_fields(item)
+            for key, item in value.items()
+            if not (key in {"window_index", "covered_window_ids"} and item is None)
+        }
+    if isinstance(value, list):
+        return [omit_new_optional_fields(item) for item in value]
+    return value
+
+
 def test_fixed_m4_workflow_smoke() -> None:
     result = asyncio.run(run_smoke())
 
@@ -38,7 +50,7 @@ def test_topology_ready_geometry_round_trip_and_corridor_planning() -> None:
     )
 
     assert reloaded == restored
-    assert json.loads(exported) == json.loads(fixture_text)
+    assert omit_new_optional_fields(json.loads(exported)) == json.loads(fixture_text)
     assert exported.count('"full_coordinates"') == 1
     assert restored.nodes[0].geometry_ref == descriptor.geometry_ref
     assert plan.geometry_ref == descriptor.geometry_ref

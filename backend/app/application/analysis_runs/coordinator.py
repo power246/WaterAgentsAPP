@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from math import isfinite
 from typing import Coroutine, TypeVar
 from uuid import UUID, uuid4
@@ -86,6 +86,8 @@ from app.application.analysis_runs.writer import TranscriptWriter
 from app.application.analysis_runs.workflow import (
     AnalysisWorkflow,
     CancellationToken,
+    InvalidAgentSessionTransitionError,
+    InvalidRunTransitionError,
     WorkflowContext,
     WorkflowFailed,
     WorkflowStopped,
@@ -222,24 +224,6 @@ class AgentSessionNotFoundError(LookupError):
         self.run_id = run_id
         self.session_id = session_id
         super().__init__("The Agent session was not found in the run.")
-
-
-class InvalidRunTransitionError(Exception):
-    def __init__(self, run: AnalysisRunSnapshot, target_status: RunStatus) -> None:
-        self.run = run
-        self.target_status = target_status
-        super().__init__("The run cannot enter the requested state.")
-
-
-class InvalidAgentSessionTransitionError(Exception):
-    def __init__(
-        self,
-        session: SessionSummary,
-        target_status: AgentSessionStatus,
-    ) -> None:
-        self.session = session
-        self.target_status = target_status
-        super().__init__("The Agent session cannot enter the requested state.")
 
 
 class ServiceShuttingDownError(Exception):
@@ -1356,11 +1340,14 @@ class RunCoordinator:
         timestamp: datetime | None = None,
         exception: BaseException | None = None,
         error_id: UUID | None = None,
+        level: int | None = None,
         **fields: object,
     ) -> None:
         try:
             self._logger.log(
-                logging.ERROR if exception is not None else logging.INFO,
+                level if level is not None else (
+                    logging.ERROR if exception is not None else logging.INFO
+                ),
                 "Analysis workflow lifecycle.",
                 exc_info=(type(exception), exception, exception.__traceback__)
                 if exception is not None
@@ -1370,7 +1357,7 @@ class RunCoordinator:
                     "timestamp": (
                         timestamp
                         if timestamp is not None
-                        else normalize_utc_datetime(self._clock.now())
+                        else datetime.now(timezone.utc)
                     ),
                     "correlation": CorrelationContext(
                         request_id=request_id_context.get(),
@@ -1908,6 +1895,30 @@ class RunCoordinator:
     ) -> TranscriptItemIdentity:
         runtime = await self._lookup(run_id)
         key = _UUID.validate_python(item_id)
+        encoded_content = None
+        if content_type in {"evidence_source_records", "evidence_fragment"}:
+            try:
+                # Evidence content is validated and serialized off the event
+                # loop before entering the run's mutation lock.
+                encoded_content = await asyncio.to_thread(
+                    self._registry.encode,
+                    content_type,
+                    content_schema_version,
+                    body,
+                    private_values=private_values,
+                )
+            except (Exception, asyncio.CancelledError):
+                async with runtime.condition:
+                    reserved = next(
+                        (item for item in runtime.transcript_items if item.item_id == key),
+                        None,
+                    )
+                    if reserved is not None and key not in {
+                        item.item_id for item in runtime.transcript_buffer.items
+                    }:
+                        runtime.transcript_items.remove(reserved)
+                        runtime.condition.notify_all()
+                raise
         async with runtime.condition:
             suppressed = runtime.suppressed_transcript_items.get(key)
             if suppressed is not None:
@@ -1932,14 +1943,43 @@ class RunCoordinator:
                 content_type,
                 content_schema_version,
             )
-            reserved_references = tuple(
-                TranscriptContentRef(
-                    run_id=candidate.snapshot.run_id,
-                    item_id=item.item_id,
+            if encoded_content is None:
+                reserved_references = tuple(
+                    TranscriptContentRef(
+                        run_id=candidate.snapshot.run_id,
+                        item_id=item.item_id,
+                    )
+                    for candidate in self._runs.values()
+                    for item in candidate.transcript_items
                 )
-                for candidate in self._runs.values()
-                for item in candidate.transcript_items
-            )
+            else:
+                needed = set(encoded_content.references)
+                matching = []
+                for item in runtime.transcript_items:
+                    if item.item_id in needed:
+                        matching.append(TranscriptContentRef(
+                            run_id=runtime.snapshot.run_id,
+                            item_id=item.item_id,
+                        ))
+                        needed.remove(item.item_id)
+                        if not needed:
+                            break
+                if needed:
+                    for candidate in self._runs.values():
+                        if candidate is runtime:
+                            continue
+                        for item in candidate.transcript_items:
+                            if item.item_id in needed:
+                                matching.append(TranscriptContentRef(
+                                    run_id=candidate.snapshot.run_id,
+                                    item_id=item.item_id,
+                                ))
+                                needed.remove(item.item_id)
+                                if not needed:
+                                    break
+                        if not needed:
+                            break
+                reserved_references = tuple(matching)
             try:
                 finalized = runtime.transcript_buffer.append(
                     identity,
@@ -1948,6 +1988,7 @@ class RunCoordinator:
                     body,
                     private_values=private_values,
                     reserved_references=reserved_references,
+                    encoded_content=encoded_content,
                 )
             except (TypeError, ValueError):
                 finalized_ids = {
@@ -2498,6 +2539,21 @@ class RunCoordinator:
         async with runtime.condition:
             return self._transcript_writer.info_locked(runtime)
 
+    async def wait_for_transcript_items_persisted(
+        self,
+        run_id: UUID | str,
+        item_ids: tuple[UUID | str, ...],
+    ) -> PublicError | None:
+        runtime = await self._lookup(run_id)
+        required = {_UUID.validate_python(item_id) for item_id in item_ids}
+        async with runtime.condition:
+            finalized = {item.item_id for item in runtime.transcript_buffer.items}
+            if not required <= finalized:
+                raise ValueError("required transcript item is not finalized")
+        return await self._transcript_writer.wait_for_required(
+            runtime, required, set()
+        )
+
     async def retry_persistence(
         self,
         run_id: UUID | str,
@@ -2625,7 +2681,9 @@ class RunCoordinator:
 
     async def cancel_run(self, run_id: UUID | str) -> AnalysisRunSnapshot:
         runtime = await self._lookup(run_id)
+        self._log_activity("cancel_gate_wait_started", runtime)
         async with runtime.workflow_commit_gate:
+            self._log_activity("cancel_gate_acquired", runtime)
             runtime.cancel_requested.set()
             runtime.stop_requested.set()
         try:

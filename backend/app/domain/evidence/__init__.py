@@ -58,12 +58,18 @@ from app.domain.evidence.historical_supporting_fragment_reference import (
 )
 from app.domain.evidence.historical_transcript_record import HistoricalTranscriptRecord
 from app.domain.evidence.item_reference import ItemReference
+from app.domain.evidence.numeric_dependency_plan import NumericDependencyPlan
+from app.domain.evidence.numeric_plan_input import NumericPlanInput
+from app.domain.evidence.numeric_plan_task import NumericPlanTask
+from app.domain.evidence.numeric_derived_payload import NumericDerivedPayload
+from app.domain.evidence.measured_anchor import MeasuredAnchor
 from app.domain.evidence.provenance import Provenance
 from app.domain.evidence.provider_quality import ProviderQuality
 from app.domain.evidence.provider_collection_batch import ProviderCollectionBatch
 from app.domain.evidence.quality_summary import QualitySummary
 from app.domain.evidence.reference_scope import ReferenceScope
 from app.domain.evidence.relation_support_payload import RelationSupportPayload
+from app.domain.evidence.temporal_estimate_payload import TemporalEstimatePayload
 from app.domain.evidence.safe_evidence_error import SafeEvidenceError
 from app.domain.evidence.serialization import (
     canonical_model_bytes,
@@ -137,12 +143,18 @@ __all__ = [
     "HistoricalSupportingFragmentReference",
     "HistoricalTranscriptRecord",
     "ItemReference",
+    "NumericDependencyPlan",
+    "NumericPlanInput",
+    "NumericPlanTask",
+    "NumericDerivedPayload",
+    "MeasuredAnchor",
     "Provenance",
     "ProviderQuality",
     "ProviderCollectionBatch",
     "QualitySummary",
     "ReferenceScope",
     "RelationSupportPayload",
+    "TemporalEstimatePayload",
     "SafeEvidenceError",
     "SourceRecord",
     "SourceRecordReference",

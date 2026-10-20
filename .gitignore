@@ -49,3 +49,12 @@ pnpm-debug.log*
 
 # Project runtime data
 backend/data/
+
+# Local test and browser artifacts
+/target/
+/backend/target/
+/ui-audit-*/
+/.playwright-cli/
+/runtime-test-*/
+!/runtime-test-1019/
+!/runtime-test-1019/verification/*.log

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Annotated, Literal, Protocol, Self
 from uuid import NAMESPACE_URL, UUID, uuid5
 
-from pydantic import Field, StrictBool, StrictInt, ValidationError, model_validator
+from pydantic import Field, StrictBool, ValidationError, model_validator
 
 from app.application.reasoning.errors import (
     ReasoningPlanError,
@@ -29,6 +29,7 @@ from app.application.reasoning.result_models import (
     ResultSkeleton,
     validate_result_skeleton,
 )
+from app.application.reasoning.topology_coverage import topology_fact_applies_to_cell
 from app.application.reasoning.working_context import (
     BoundedEvidenceSummary,
     WorkingContextFact,
@@ -50,7 +51,6 @@ from app.domain import (
     UtcDatetime,
     ensure_unique_tuple,
 )
-
 
 _HARD_MAX_CELLS_PER_BATCH = 32
 _HARD_MAX_BATCHES = 24
@@ -313,6 +313,8 @@ class SynthesisInputPlan(DomainModel):
     deadline: UtcDatetime
     response_schema: WaterbodyJsonSchema
     context: WorkingContextProjection
+    requested_parameters: tuple[ParameterKey, ...]
+    window_ids: tuple[NonEmptyString, ...]
     validated_cell_order: tuple[NonEmptyString, ...]
     validated_cell_scopes: tuple[AgentReasoningCellScope, ...]
     fixed_cells: tuple[FixedCellPromptSummary, ...]
@@ -327,6 +329,10 @@ class SynthesisInputPlan(DomainModel):
 
     @model_validator(mode="after")
     def validate_plan(self) -> Self:
+        if not self.requested_parameters or not self.window_ids:
+            raise ValueError("synthesis plan requires requested parameters and windows")
+        ensure_unique_tuple(self.requested_parameters, field_name="synthesis parameters")
+        ensure_unique_tuple(self.window_ids, field_name="synthesis windows")
         ensure_unique_tuple(
             self.validated_cell_order,
             field_name="synthesis validated-cell order",
@@ -403,6 +409,8 @@ class SynthesisInputPlan(DomainModel):
             deadline=self.deadline,
             context=self.context,
             response_schema=self.response_schema,
+            requested_parameters=self.requested_parameters,
+            window_ids=self.window_ids,
             validated_cells=validated_cells,
             fixed_cells=self.fixed_cells,
         )
@@ -740,6 +748,8 @@ class ReasoningBatchPlanner:
                 deadline=deadline,
                 context=context,
                 response_schema=response_schema,
+                requested_parameters=skeleton.requested_parameters,
+                window_ids=tuple(window.window_id for window in skeleton.windows),
                 validated_cells=placeholders,
                 fixed_cells=fixed_cells,
             )
@@ -790,6 +800,8 @@ class ReasoningBatchPlanner:
             "deadline": deadline,
             "response_schema": response_schema,
             "context": context,
+            "requested_parameters": skeleton.requested_parameters,
+            "window_ids": tuple(window.window_id for window in skeleton.windows),
             "validated_cell_order": supported_order,
             "validated_cell_scopes": tuple(
                 cell for batch in batch_plan.batches for cell in batch.cells
@@ -925,6 +937,20 @@ def _batch_context(
             }
         )
     )
+    windows_by_id = {window.window_id: window for window in skeleton.windows}
+    topology_facts = tuple(
+        fact
+        for fact in base.facts
+        if any(
+            topology_fact_applies_to_cell(
+                fact,
+                parameter=cell.parameter,
+                segment_index=windows_by_id[cell.window_id].segment_index,
+                window_id=cell.window_id,
+            )
+            for cell in cells
+        )
+    )
     try:
         return build_working_context_projection(
             run_id=skeleton.run_id,
@@ -937,7 +963,7 @@ def _batch_context(
             capability_registry_digest=skeleton.capability_registry_digest,
             reference_allowlist=refs,
             recent_messages=base.recent_messages,
-            facts=(),
+            facts=topology_facts,
             evidence_summaries=summaries,
             dependency_context=base.dependency_context,
         )
@@ -956,15 +982,30 @@ def _synthesis_context(
     *,
     scope_digest: str,
 ) -> WorkingContextProjection:
-    allowlist = tuple(
-        sorted({*skeleton.evidence_allowlist, *skeleton.source_record_allowlist})
-    )
-    allowed = set(allowlist)
-    summaries = tuple(
+    required_refs = {
+        *(
+            reference
+            for cell in skeleton.fixed_cells
+            for reference in cell.blocker_refs
+        ),
+        *(
+            reference
+            for cell in skeleton.supported_scopes
+            for reference in cell.allowed_evidence_refs
+        ),
+    }
+    allowed = {*skeleton.evidence_allowlist, *skeleton.source_record_allowlist}
+    candidates = tuple(
         summary
         for summary in base.evidence_summaries
         if summary.evidence_ref in allowed
         and set(summary.source_record_item_refs) <= allowed
+    ) if skeleton.supported_scopes else ()
+    required_summaries = tuple(
+        summary for summary in candidates if summary.evidence_ref in required_refs
+    )
+    optional_summaries = tuple(
+        summary for summary in candidates if summary.evidence_ref not in required_refs
     )
     allowed_kinds = {
         WorkingContextFactKind.COVERAGE,
@@ -973,7 +1014,11 @@ def _synthesis_context(
         WorkingContextFactKind.FIXED_CELL,
     }
     base_facts = tuple(
-        fact
+        fact.model_copy(update={
+            "refs": tuple(
+                reference for reference in fact.refs if reference in required_refs
+            ),
+        })
         for fact in base.facts
         if fact.kind in allowed_kinds and set(fact.refs) <= allowed
     )[:_MAX_SYNTHESIS_BASE_FACTS]
@@ -1009,21 +1054,44 @@ def _synthesis_context(
     facts = tuple(
         fact for fact in base_facts if fact.fact_id not in generated_ids
     ) + tuple(generated)
-    return build_working_context_projection(
-        run_id=skeleton.run_id,
-        session_id=skeleton.session_id,
-        target_comid=skeleton.target_comid,
-        scope_digest=scope_digest,
-        bundle_ref=skeleton.bundle_ref,
-        bundle_digest=skeleton.bundle_digest,
-        rule_plan_digest=skeleton.rule_plan_digest,
-        capability_registry_digest=skeleton.capability_registry_digest,
-        reference_allowlist=allowlist,
-        recent_messages=(),
-        facts=facts,
-        evidence_summaries=summaries,
-        dependency_context=base.dependency_context,
-    )
+    for count in range(len(optional_summaries), -1, -1):
+        summaries = (*required_summaries, *optional_summaries[:count])
+        allowlist = tuple(sorted({
+            *required_refs,
+            *(summary.evidence_ref for summary in summaries),
+            *(
+                reference
+                for summary in summaries
+                for reference in (
+                    *summary.source_record_item_refs,
+                    *summary.dependency_evidence_refs,
+                )
+            ),
+        }))
+        try:
+            return build_working_context_projection(
+                run_id=skeleton.run_id,
+                session_id=skeleton.session_id,
+                target_comid=skeleton.target_comid,
+                scope_digest=scope_digest,
+                bundle_ref=skeleton.bundle_ref,
+                bundle_digest=skeleton.bundle_digest,
+                rule_plan_digest=skeleton.rule_plan_digest,
+                capability_registry_digest=skeleton.capability_registry_digest,
+                reference_allowlist=allowlist,
+                recent_messages=(),
+                facts=facts,
+                evidence_summaries=summaries,
+                dependency_context=base.dependency_context,
+            )
+        except ValidationError as error:
+            issues = error.errors()
+            if not issues or not all(
+                "working context exceeds the bounded byte limit" in item["msg"]
+                for item in issues
+            ):
+                raise
+    raise ReasoningPlanTooLargeError()
 
 
 def _batch_id(

@@ -8,6 +8,7 @@ import pytest
 from app.application.analysis_runs.workflow import CancellationToken
 from app.application.reasoning import (
     DraftValidationError,
+    DraftValidator,
     ValidationExchange,
     ValidationRepairFailedError,
 )
@@ -20,18 +21,25 @@ from app.application.reasoning.model_models import (
 )
 from app.application.reasoning.prompt_builder import PromptBuilder
 from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POLICY
-from app.ports import WaterbodyModelTimeoutError
+from app.domain import (
+    DataQualityFlag,
+    EvidenceApplicability,
+    EvidenceResultEligibility,
+)
 from app.domain.settings_admin import UnitPreference
 from app.infrastructure.config import load_parameter_capability_registry
+from app.ports import WaterbodyModelTimeoutError
 from tests.application.reasoning.fakes import DeterministicWaterbodyModelPort
 from tests.application.reasoning.m7_support import (
     batch_payload,
     m7_fixture,
+    rebuild_catalog,
     synthesis_payload,
     validated_reasoning,
 )
-
-
+from tests.application.reasoning.test_draft_validator import (
+    _mixed_model_estimate_fixture,
+)
 
 
 def _repair_id(operation_id):
@@ -98,12 +106,187 @@ def test_initial_invalid_repair_valid_is_correlated_and_scoped_once() -> None:
     assert repair_request.tool_descriptors == ()
     assert len(repair_request.messages) == 1
     repair_body = json.loads(repair_request.messages[0].text)
-    assert "evidence_summaries" not in repair_body
+    initial_body = json.loads(initial_request.messages[-1].text)
+    assert repair_body["evidence_summaries"] == initial_body["evidence_summaries"]
+    assert repair_body["batch_cells"] == initial_body["cells"]
+    assert "only the listed issues" in repair_body["repair_instruction"]
+    assert "preserve every other already valid field" in repair_body["repair_instruction"]
+    assert "range_estimate" in repair_body["range_estimate_instruction"]
+    assert "value_lower and value_upper" in repair_body["range_estimate_instruction"]
+    assert "non-null decimal strings" in repair_body["range_estimate_instruction"]
     assert "bounded_reference_summaries" not in repair_body
     assert repair_body["repair_of_operation_id"] == str(batch.operation_id)
     assert outcome.audit.initial_issues[0].code == "scope_digest_mismatch"
     assert outcome.audit.accepted_operation_id == repair_request.operation_id
     assert outcome.audit.validated_digest == outcome.validated.validation_digest
+
+
+def test_quantified_point_with_missing_bounds_needs_no_paid_repair() -> None:
+    batch, catalog, payload, _refs = _mixed_model_estimate_fixture()
+    validator = DraftValidator(catalog)
+    baseline = validator.validate_batch(batch, payload)
+    initial = copy.deepcopy(payload)
+    for index in (0, 2, 3):
+        initial["cells"][index]["value_lower"] = None
+        initial["cells"][index]["value_upper"] = None
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, initial),
+    )
+
+    outcome = asyncio.run(
+        _exchange(fake, validator).run_batch(batch, cancellation=_token())
+    )
+
+    assert len(fake.calls) == 1
+    assert outcome.audit.repair_request is None
+    assert outcome.audit.initial_issues == ()
+    assert outcome.validated.validation_digest == baseline.validation_digest
+    raw = outcome.audit.initial_response.events[0].value
+    assert validator.validate_batch(batch, raw).validation_digest == baseline.validation_digest
+    assert [cell.representative_value for cell in outcome.validated.cells] == [
+        "7", None, "7", "7",
+    ]
+
+
+def test_quantified_value_repair_prompt_preserves_saved_point() -> None:
+    batch, catalog, payload, _refs = _mixed_model_estimate_fixture()
+    initial = copy.deepcopy(payload)
+    initial["cells"][0]["representative_value"] = "8"
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, initial),
+        _completed_script(_repair_id(batch.operation_id), batch.model, payload),
+    )
+
+    outcome = asyncio.run(
+        _exchange(fake, DraftValidator(catalog)).run_batch(
+            batch, cancellation=_token()
+        )
+    )
+
+    assert len(fake.calls) == 2
+    assert any(issue.code == "quantified_value_not_backed"
+               for issue in outcome.audit.initial_issues)
+    instruction = json.loads(fake.calls[1].messages[0].text)[
+        "quantified_value_instruction"
+    ]
+    assert "keep its representative_value" in instruction
+    assert "copy both saved value_lower and value_upper exactly" in instruction
+    assert "only when the cited saved result has no point" in instruction
+
+
+def test_repair_missing_range_bounds_replays_from_cited_sealed_fact() -> None:
+    _skeleton, plan, catalog, _validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    range_cell = batch.cells[1]
+    range_ref = range_cell.allowed_evidence_refs[0]
+    source_fact = next(fact for fact in catalog.facts if fact.evidence_ref == range_ref)
+    range_fact = source_fact.model_copy(update={
+        "payload_type": "numeric_derived",
+        "applicability": EvidenceApplicability.ALLOWED_INDIRECT,
+        "result_eligibility": EvidenceResultEligibility.INFERRED_ONLY,
+        "value": None,
+        "value_lower": "5",
+        "value_upper": "9",
+        "method_kind": "model_estimate",
+        "inference_basis": "general_knowledge",
+        "aggregation_method": None,
+        "source_record_refs": (),
+        "dependency_evidence_refs": (),
+        "quality_flags": (DataQualityFlag.ESTIMATED,),
+        "numeric_method_id": "test:range_estimate",
+        "numeric_method_version": 1,
+        "numeric_task_id": "task:test:range",
+        "numeric_plan_digest": "sha256:test-plan",
+        "numeric_plan_item_id": "item:test-plan",
+        "numeric_method_registry_digest": "sha256:test-registry",
+        "numeric_confidence_cap": 0.1,
+    })
+    catalog = rebuild_catalog(
+        catalog,
+        facts=tuple(
+            range_fact if fact.evidence_ref == range_ref else fact
+            for fact in catalog.facts
+        ),
+        cell_scopes=tuple(
+            scope.model_copy(update={
+                "target_direct_refs": (),
+                "target_indirect_refs": (range_ref,),
+            }) if scope.cell_id == range_cell.cell_id else scope
+            for scope in catalog.cell_scopes
+        ),
+    )
+    repair = batch_payload(batch, catalog)
+    repair["cells"][1].update(
+        outcome_status="range_estimate",
+        representative_value=None,
+        value_lower="5",
+        value_upper="9",
+        source="inferred",
+        confidence=0.1,
+        aggregation_method=None,
+        quality_flags=["estimated"],
+    )
+    initial = copy.deepcopy(repair)
+    initial["cells"][1]["evidence_refs"].append(
+        batch.cells[0].allowed_evidence_refs[0]
+    )
+    del repair["cells"][1]["value_lower"]
+    del repair["cells"][1]["value_upper"]
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, initial),
+        _completed_script(_repair_id(batch.operation_id), batch.model, repair),
+    )
+
+    outcome = asyncio.run(
+        _exchange(fake, DraftValidator(catalog)).run_batch(
+            batch, cancellation=_token()
+        )
+    )
+
+    assert len(fake.calls) == 2
+    assert [(issue.code, issue.path) for issue in outcome.audit.initial_issues] == [
+        ("evidence_out_of_scope", "$.cells[1].evidence_refs")
+    ]
+    assert outcome.audit.repair_issues == ()
+    assert outcome.audit.accepted_operation_id == _repair_id(batch.operation_id)
+    raw_repair = outcome.audit.repair_response.events[0].value
+    assert "value_lower" not in json.loads(raw_repair)["cells"][1]
+    assert "value_upper" not in json.loads(raw_repair)["cells"][1]
+    assert outcome.validated.cells[1].value_lower == "5"
+    assert outcome.validated.cells[1].value_upper == "9"
+    assert outcome.audit.validated_digest == DraftValidator(catalog).validate_batch(
+        batch, raw_repair
+    ).validation_digest
+
+
+def test_uncited_known_evidence_in_rationale_repairs_by_removing_claim() -> None:
+    _skeleton, plan, catalog, validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    initial = batch_payload(batch, catalog)
+    foreign_ref = batch.cells[1].allowed_evidence_refs[0]
+    initial["cells"][0]["risk_rationale"] = (
+        f"The other cell's evidence {foreign_ref} supports this risk judgment."
+    )
+    repaired = batch_payload(batch, catalog)
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, initial),
+        _completed_script(_repair_id(batch.operation_id), batch.model, repaired),
+    )
+
+    outcome = asyncio.run(
+        _exchange(fake, validator).run_batch(batch, cancellation=_token())
+    )
+
+    assert len(fake.calls) == 2
+    assert any(
+        issue.code == "text_evidence_ref_missing"
+        and issue.path == "$.cells[0].risk_rationale"
+        for issue in outcome.audit.initial_issues
+    )
+    assert json.loads(fake.calls[1].messages[0].text)["issues"] == [
+        {"code": "text_evidence_ref_missing", "path": "$.cells[0].risk_rationale"}
+    ]
+    assert foreign_ref not in outcome.validated.cells[0].risk_rationale
 
 
 def test_validated_batch_decision_records_applied_unit_source() -> None:
@@ -124,6 +307,113 @@ def test_validated_batch_decision_records_applied_unit_source() -> None:
         _exchange(fake, validator).run_batch(batch, cancellation=_token())
     )
     assert outcome.audit.unit_decisions == (preference,)
+
+
+def test_single_allowed_unit_fills_explicit_null_without_model_repair(caplog) -> None:
+    _skeleton, plan, catalog, validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    payload = batch_payload(batch, catalog)
+    payload["cells"][0]["target_unit_id"] = None
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, payload),
+    )
+
+    with caplog.at_level("INFO", logger="wateragents.reasoning"):
+        outcome = asyncio.run(
+            _exchange(fake, validator).run_batch(batch, cancellation=_token())
+        )
+
+    assert len(fake.calls) == 1
+    assert outcome.audit.repair_request is None
+    assert outcome.validated.cells[0].target_unit_id == batch.cells[0].allowed_unit_ids[0]
+    assert json.loads(outcome.audit.initial_response.events[0].value)["cells"][0][
+        "target_unit_id"
+    ] is None
+    assert any(
+        record.event_name == "reasoning_draft_single_unit_filled"
+        and record.schema_path == "$.cells[0].target_unit_id"
+        for record in caplog.records
+    )
+
+
+def test_flag_only_mismatch_does_not_call_model_repair(caplog) -> None:
+    _skeleton, plan, catalog, validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    payload = batch_payload(batch, catalog)
+    payload["cells"][0]["quality_flags"] = ["partial_coverage"]
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, payload),
+    )
+
+    with caplog.at_level("INFO", logger="wateragents.reasoning"):
+        outcome = asyncio.run(
+            _exchange(fake, validator).run_batch(batch, cancellation=_token())
+        )
+
+    assert len(fake.calls) == 1
+    assert outcome.audit.repair_request is None
+    assert outcome.audit.initial_issues == ()
+    assert outcome.validated.cells[0].quality_flags == ()
+    assert json.loads(outcome.audit.initial_response.events[0].value)["cells"][0][
+        "quality_flags"
+    ] == ["partial_coverage"]
+    assert any(
+        getattr(record, "event_name", None)
+        == "reasoning_draft_quality_flags_normalized"
+        and record.schema_path == "$.cells[0].quality_flags"
+        for record in caplog.records
+    )
+
+
+def test_repair_response_with_only_extra_quality_flag_is_accepted() -> None:
+    _skeleton, plan, catalog, validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    initial = batch_payload(batch, catalog)
+    initial["cells"][0]["representative_value"] = 7
+    repaired = batch_payload(batch, catalog)
+    repaired["cells"][0]["quality_flags"] = ["partial_coverage"]
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, initial),
+        _completed_script(_repair_id(batch.operation_id), batch.model, repaired),
+    )
+
+    outcome = asyncio.run(
+        _exchange(fake, validator).run_batch(batch, cancellation=_token())
+    )
+
+    assert len(fake.calls) == 2
+    assert outcome.audit.initial_issues
+    assert outcome.audit.repair_issues == ()
+    assert outcome.audit.accepted_operation_id == _repair_id(batch.operation_id)
+    assert outcome.validated.cells[0].quality_flags == ()
+    assert json.loads(outcome.audit.repair_response.events[0].value)["cells"][0][
+        "quality_flags"
+    ] == ["partial_coverage"]
+
+
+def test_single_unit_fill_still_requires_evidence_backed_value() -> None:
+    _skeleton, plan, catalog, validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    invalid = batch_payload(batch, catalog)
+    invalid["cells"][0]["target_unit_id"] = None
+    invalid["cells"][0]["representative_value"] = "9999"
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, invalid),
+        _completed_script(
+            _repair_id(batch.operation_id), batch.model, batch_payload(batch, catalog)
+        ),
+    )
+
+    outcome = asyncio.run(
+        _exchange(fake, validator).run_batch(batch, cancellation=_token())
+    )
+
+    assert len(fake.calls) == 2
+    assert any(
+        issue.code == "quantified_value_not_backed"
+        and issue.path == "$.cells[0].representative_value"
+        for issue in outcome.audit.initial_issues
+    )
 
 
 def test_missing_structured_output_repairs_once_with_bounded_visible_text() -> None:
@@ -204,7 +494,7 @@ def test_legal_risk_and_confidence_never_trigger_semantic_repair(
     assert outcome.audit.repair_request is None
 
 
-def test_invalid_repair_fails_whole_exchange_without_copying_private_body() -> None:
+def test_invalid_repair_fails_whole_exchange_without_copying_private_body(caplog) -> None:
     _skeleton, plan, catalog, validator = m7_fixture()
     batch = plan.batch_plan.batches[0]
     invalid = batch_payload(batch, catalog)
@@ -212,6 +502,7 @@ def test_invalid_repair_fails_whole_exchange_without_copying_private_body() -> N
     invalid["cells"][0]["explanation"] = "See https://private.invalid/raw-body"
     repair_invalid = batch_payload(batch, catalog)
     repair_invalid["cells"][0]["target_unit_id"] = "unknown-unit"
+    repair_invalid["cells"][0]["privateSecretField"] = "bad"
     fake = DeterministicWaterbodyModelPort(
         _completed_script(batch.operation_id, batch.model, invalid, output_id="initial"),
         _completed_script(
@@ -222,7 +513,10 @@ def test_invalid_repair_fails_whole_exchange_without_copying_private_body() -> N
         ),
     )
 
-    with pytest.raises(ValidationRepairFailedError) as raised:
+    with (
+        caplog.at_level("WARNING", logger="wateragents.reasoning"),
+        pytest.raises(ValidationRepairFailedError) as raised,
+    ):
         asyncio.run(
             _exchange(fake, validator).run_batch(batch, cancellation=_token())
         )
@@ -234,11 +528,37 @@ def test_invalid_repair_fails_whole_exchange_without_copying_private_body() -> N
     assert "https://private.invalid" in error.audit.initial_response.events[0].value
     assert "https://private.invalid" not in fake.calls[1].messages[0].text
     assert error.audit.repair_issues
+    records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None)
+        == "waterbody_model_validation_repair_failed"
+    ]
+    assert len(records) == 1
+    record = records[0]
+    assert record.run_id == batch.run_id
+    assert record.session_id == batch.session_id
+    assert record.initial_operation_id == batch.operation_id
+    assert record.repair_operation_id == _repair_id(batch.operation_id)
+    assert record.failure_code == "reasoning_draft_invalid"
+    assert record.initial_issue_count == len(error.audit.initial_issues)
+    assert record.repair_issue_count == len(error.audit.repair_issues)
+    assert {issue["code"] for issue in record.initial_issues} >= {
+        "invalid_value"
+    }
+    assert {issue["code"] for issue in record.repair_issues} == {"extra_field"}
+    assert any(issue["path"] == "[redacted]" for issue in record.repair_issues)
+    assert record.initial_output_chars > 0
+    assert record.repair_output_chars > 0
+    assert "https://private.invalid" not in json.dumps(
+        (record.initial_issues, record.repair_issues, record.getMessage())
+    )
+    assert "privateSecretField" not in json.dumps(record.repair_issues)
 
 
 @pytest.mark.parametrize("failure_kind", ("protocol", "timeout", "content_filter"))
 def test_repair_protocol_timeout_and_content_filter_are_typed_whole_failures(
-    failure_kind: str,
+    failure_kind: str, caplog,
 ) -> None:
     _skeleton, plan, catalog, validator = m7_fixture()
     batch = plan.batch_plan.batches[0]
@@ -286,7 +606,10 @@ def test_repair_protocol_timeout_and_content_filter_are_typed_whole_failures(
         repair_script,
     )
 
-    with pytest.raises(ValidationRepairFailedError) as raised:
+    with (
+        caplog.at_level("WARNING", logger="wateragents.reasoning"),
+        pytest.raises(ValidationRepairFailedError) as raised,
+    ):
         asyncio.run(
             _exchange(fake, validator).run_batch(batch, cancellation=_token())
         )
@@ -295,6 +618,18 @@ def test_repair_protocol_timeout_and_content_filter_are_typed_whole_failures(
     assert raised.value.audit.repair_error_code == expected_code
     assert raised.value.audit.accepted_operation_id is None
     assert len(fake.calls) == 2
+    records = [
+        record
+        for record in caplog.records
+        if getattr(record, "event_name", None)
+        == "waterbody_model_validation_repair_failed"
+    ]
+    assert len(records) == 1
+    assert records[0].failure_code == expected_code
+    assert records[0].initial_issue_count == 1
+    assert records[0].repair_issue_count == 0
+    assert records[0].repair_issues == []
+    assert records[0].repair_output_chars == 0
 
 
 def test_synthesis_has_the_same_single_repair_boundary() -> None:
@@ -327,6 +662,19 @@ def test_synthesis_has_the_same_single_repair_boundary() -> None:
 
     assert len(fake.calls) == 2
     assert fake.calls[1].tool_descriptors == ()
+    initial_body = json.loads(fake.calls[0].messages[-1].text)
+    repair_body = json.loads(fake.calls[1].messages[-1].text)
+    assert repair_body["synthesis_scope"] == {
+        key: initial_body[key]
+        for key in (
+            "requested_parameters",
+            "window_ids",
+            "overall_window_refs",
+            "validated_cells",
+            "fixed_cells",
+        )
+    }
+    assert "bounded_reference_summaries" not in repair_body
     assert outcome.audit.accepted_operation_id == _repair_id(operation)
     assert outcome.validated.scope_digest == plan.synthesis_plan.scope_digest
 

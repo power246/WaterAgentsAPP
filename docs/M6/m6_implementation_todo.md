@@ -1,6 +1,20 @@
 # M6 Single-Agent Reasoning Implementation TODO
 
-更新日期：2026-10-02
+更新日期：2026-10-19
+
+## 上游来源缺口解释追加验收（2026-10-19）
+
+- [x] 按水体路径、指标及窗口把真实上游来源缺口送入规划、数值估计、逐窗推理、合成和修复提示；备选搜索结束不算必需来源缺口，不把缺读数当作零或固定扣分。
+- [x] 摘要区分参与水体结果可用数量和拓扑来源覆盖，并说明自然源头缺站与真实搜索上限。保存 run `56f8c8dd-042e-4d2f-a8c5-2e25d79ebe07` 的目标 1777642 与汇入处 1777628 各得到 pH、流量两条缺口事实；不受影响的 1777630 没有此事实。专项 **115 passed**，没有模型或供应商请求。完整后端验证结果见 [M5 追加验收](../M5/m5_implementation_todo.md#河道距离与旧运行只读展示追加验收2026-10-19)。
+
+## 模型估计与范围结果追加验收（2026-10-17）
+
+- [x] 当前结果结构支持 `range_estimate` 与 `value_lower/value_upper`；模型估计保留 `inference_method`、`inference_basis`、`measured_anchors`，禁止把模型结果标为 observed。
+- [x] 输入明确计算或模型估计的结果须先保存并校验；相关其他指标读数属于可用依据，但没有原始同指标实测时最多给范围。
+- [x] 来源与 bundle 专项 **42 passed**，命令和完整范围见 [M5 本轮追加验收](../M5/m5_implementation_todo.md#统一数值流程与模型估计追加验收2026-10-17)。这项验证覆盖流量选填项失败后估计的计划／保存／bundle 链，不代替 M6 最终推理验收。
+- [ ] 本轮 M6 最终草稿、汇总、运行计数、真实模型与完整后端回归证据待最终集成填写。
+
+新规则以设计 D02、D04、D07、D17 为准；下方旧阶段和真实运行记录仍表示当时版本的事实，不能用于宣称本轮新预测准确或端到端已通过。
 
 > 当前状态：Milestone 0–13 已完成本机实现、集成回归与契约审计。M6 是 M1–M9 同一最终系统中的内部实施切片，不形成独立发布版本；真实 OpenAI waterbody provider 请求和 Ubuntu/macOS/Windows 同提交 CI 没有实际运行证据，继续记录为 `not run` / `partial`。
 
@@ -28,7 +42,7 @@
 | [Milestone 5：evidence-planning Agent loop](#milestone-5evidence-planning-agent-loop) | [设计 D02–D04](m6_single_agent_reasoning_design.md#d02station-backed-与-stationless-使用不同启动策略)；[实施设计 §7](m6_single_agent_reasoning_implementation_design.md#7-evidence-planning-agent-loop) | station 分流、M5 iterative seam、tool/rule loop、rebuild/seal、调用计数 |
 | [Milestone 6：确定性 reasoning batch planner](#milestone-6确定性-reasoning-batch-planner) | [设计 D06](m6_single_agent_reasoning_design.md#d06一个-agent-session-内分批推理最后做一次总体汇总)；[实施设计 §8.3](m6_single_agent_reasoning_implementation_design.md#83-batch-planner) | 稳定 batches、size/token fit、无漏无重、同 session identity |
 | [Milestone 7：draft validation 与一次 repair](#milestone-7draft-validation-与一次-repair) | [设计 D12–D13](m6_single_agent_reasoning_design.md#d12单位聚合和-scope-权限继续由确定性工具执行)；[实施设计 §9.1–9.2](m6_single_agent_reasoning_implementation_design.md#91-cell-draft) | strict drafts、机械 validator、一次同 scope repair、whole-session failure |
-| [Milestone 8：runner、overall synthesis 与结果装配](#milestone-8runneroverall-synthesis-与结果装配) | [设计 D07–D10/D15](m6_single_agent_reasoning_design.md#d07每个计划窗口完整输出三态结果)；[实施设计 §9.3–§10/§12](m6_single_agent_reasoning_implementation_design.md#93-skeleton-assembler) | 完整 runner、四层判断、deterministic assembler、技术/自然/取消收敛 |
+| [Milestone 8：runner、overall synthesis 与结果装配](#milestone-8runneroverall-synthesis-与结果装配) | [设计 D07–D10/D15](m6_single_agent_reasoning_design.md#d07每个计划窗口完整输出四类结果)；[实施设计 §9.3–§10/§12](m6_single_agent_reasoning_implementation_design.md#93-skeleton-assembler) | 完整 runner、四层判断、deterministic assembler、技术/自然/取消收敛 |
 | [Milestone 9：typed transcript、session SSE 与 history](#milestone-9typed-transcriptsession-sse-与-history) | [设计 D14/D16](m6_single_agent_reasoning_design.md#d14推理过程就是-session-sse-中的真实会话上下文)；[API §2–12](m6_single_agent_reasoning_api.md#2-统一-transcript-envelope-不变) | 六类内容、真实消息增量、result/completed 原子边界、summary/history projection |
 | [Milestone 10：OpenAI Responses waterbody adapter](#milestone-10openai-responses-waterbody-adapter) | [实施设计 §5.4](m6_single_agent_reasoning_implementation_design.md#54-openai-responses-adapter) | tool-capable streaming adapter、checked-in provider fixtures、无 hidden reasoning/failover |
 | [Milestone 11：settings 与 production/test composition](#milestone-11settings-与-productiontest-composition) | [实施设计 §13–14](m6_single_agent_reasoning_implementation_design.md#13-budget-与配置)；[API §14](m6_single_agent_reasoning_api.md#14-test-only-composition) | hard limits、M6 runtime、内部 production service、无新公开 route、direct test harness |
@@ -45,9 +59,9 @@
 - [x] 继续复用 M3 的 run/session identity、四表、writer/reader、typed-content registry、全文引用、两层 SSE、取消、补写、启动修复和 live cleanup。不得建立第二套 transcript、历史、重试队列、session 状态或第三条 SSE。
 - [x] M6 只运行一个已经存在的 waterbody session。不得遍历 DAG、等待多个上游、创建多个水体 session 或形成 run-level result；这些由 M7 实现。M8 RAG producer、M9 frontend/settings/admin 也不得提前实现。
 - [x] query parser 一次性 `generate()` port 继续禁止 tools。waterbody streaming port 独立新增；不得为复用代码而让 parser 获得 tool 权限，也不得把 provider SDK 类型泄漏进 Domain/Application。
-- [x] station-backed 与 stationless 起点必须分开：前者全空成功时 0 planning/0 final reasoning；后者没有本地观测是正常事实，允许有界 planning，但最终全部不足时必须 0 final reasoning。测试和计数不得把两条路径混写成“所有无证据会话 0 模型调用”。
+- [x] station-backed 先本地 preflight，stationless 先上游引用；缺少目标实测时两者均可由数值计划尝试模型范围估计。最终全部不足时不调用最终 reasoning，但模型估计和 planning 的实际调用仍需计数。
 - [x] 每轮取证后都通过 M5 原 executor/writer/materializer/bundle builder 形成新 handoff；旧 bundle 不原地修改。Agent 不能传任意 COMID/station/URL、提高 budget、删除 baseline rule 或把 contextual evidence 自报为 allowed-indirect。
-- [x] 最终 gate 由后端在 seal 后按 target ParameterKey × window 同时检查 target 与 required discharge。unsupported/blocked cells 不进入 reasoning batches；天气、设施邻近、历史推理或未物化 rule 不能单独解锁。
+- [x] 最终 gate 在数值任务收敛后按 target ParameterKey × window 检查保存证据。目标模型估计允许流量缺失，原始 contextual evidence 不能直接解锁；须先形成通过校验的保存估计。unsupported/blocked cells 不进入最终 reasoning batches。
 - [x] 后端先固定 identity、完整窗口骨架、fixed cells、evidence allowlist 与 source/unit/aggregation 资格。Agent draft 不得新增/删除窗口、覆盖 fixed result、引用 scope 外事实或伪造 observed/单位/计算。
 - [x] 风险等级只允许 `none / low / medium / high / indeterminate`，由 Agent 按 prompt 判断并给出 `risk_rationale` 与 refs。后端不得使用阈值、最大值、平均值或自定义 0–100 分重算或改写风险；没有证据不能成为 `none`。
 - [x] confidence 表示对水质判断的把握，由 Agent 在 cell、series、window overall、range overall 四层给出理由和 refs；后端只校验 `[0,1]`、scope 和引用。fixed `indeterminate/insufficient_evidence` confidence 固定为 0。
@@ -669,6 +683,18 @@
 - 风险：真实 OpenAI waterbody provider preflight 为 `not_run`，`requests=0`、`events=0`、`responses=0`，未获本阶段显式计费请求授权；仅有 Windows 本机证据，Ubuntu/macOS 同提交 CI 未运行，所以 `GLOBAL-C08`、`GLOBAL-C11` 保持 `partial`。M7 DAG、M8 transcript search producer、M9 frontend/settings/admin 仍按接力边界后续实现。
 - 提交：本地审计提交 `2ce10cd`；本完成记录及复审修复均随对应本地提交保存，均未 push。
 
+#### 真实运行修复记录（2026-10-16，未提交）
+
+- 实现：DeepSeek 的结构化输出请求适配其 JSON 模式，planning 明示决策对象的 oneOf 形状；batch、synthesis 与单次 repair 在请求中提供完整输出 schema，repair 另带有界证据摘要及真实 series refs。合法 JSON 对象先进入应用层 validator，再由既有单次 repair 处理字段错误；工具参数仍按本地 schema 校验。失败收敛时将 collection 状态映射为合法失败结果，summary 草稿的必要字段由 validator 检查并允许一次修复，同时增加失败定位日志。
+- 运行补充：DeepSeek `/responses` 工具输出只在原始 SSE 一致性检查后合并语义相同的重复 JSON 键；冲突键仍失败。唯一水体的 batch 可补足显式 `target_unit_id:null`，再交完整结果 validator 检查。规划提示词要求每次工具调用提供 `window_ids`、`parameter_keys` 和 `options`；多参数工具缺键时继续即时拒绝，不猜测目标参数。长关系说明仅在送模型的证据摘要中按字节截断，持久证据不截断。
+- 验证：planning、batch、repair、summary 与相关证据路径的当前分支跨层回归为 `710 passed`，完整 backend 回归为 `2591 passed, 2 warnings`；上游 COMID 1777616 的一次真实局部推理产出带证据的 pH 8.2 推断，但整次前端运行在后续节点失败，不能证明目标 COMID 有可量化 pH 结论。
+- 天气规划补修：planning roster 仅对作用域中有已登记天气映射的参数开放天气工具，工具 schema 也只列这些参数；pH 加流量不暴露天气工具，降水参数可暴露。执行时无映射参数不再隐式回退为 `temperature`，含无映射参数的混合请求在 provider 调用前拒绝。邻近跨层回归 `312 passed`，覆盖无天气调用和降水工具可见性；完整 backend 回归未在此补修后重跑。
+- 证据投影容量补修：真实运行中一个门禁携带 866 个证据引用，工作上下文又重复写入完整允许列表，两份编号已超过 128 KiB 上限。规划提示只展示已选摘要对应的背景引用，并报告省略数；有效证据、阻断引用、封存 bundle 与最终结果引用保持完整。无模型调用的汇总上下文也只投影必要引用。860 条背景引用与全固定结果回归均通过，reasoning 模块 `178 passed`；完整 backend 与真实前端流程须在本补修后重验。
+- 后续实跑与修复：重复提出同签名上游规则时规划正常收敛，不再因理由文字不同报 invalid_planning_response；仅缺必需流量时固定结果理由明确保留已存在的目标参数间接证据；结果点的解释、风险与置信理由若写出已知证据 ID，该 ID 必须出现在同点的结构化引用中。上述修复前的 run 4dbef96f-9826-4c7b-b8a9-2ecda9702fc6 完整完成，七个水体结果中一项 usable、六项 insufficient；目标 COMID 1777642 因无直接 pH 或合法跨水体定量规则而为 indeterminate。上游 COMID 1777616 的 pH 8.2 是 partial/provider-flagged 的 inferred 样本均值；其在无适用风险阈值时给出的 low 风险标签仍待产品规则取舍。修复后 reasoning 186 passed，独立测试库的完整 backend 2610 passed、2 warnings；修复后的完整付费分析尚未重跑。
+- 本轮历史空窗推理：最终门禁可把已登记的 `temporal_estimate` 数值证据作为当前目标或同窗流量依据；锚点可来自完整采集的 WDFN continuous `mean` 或 USGS Samples `discrete_samples` 默认 `latest` 窗口值。数字必须与已保存的对应目标证据相同，来源为 `inferred`，并保留算法、原始锚点引用和系统补值质量标记。置信度上限由后端依据锚点时间距离及单侧/双侧方法决定；目标结果另有只针对自身数值的 `temporal_estimate_method`，避免流量补值标记误称 pH 空窗。没有本指标可用原始读数或合法跨水体数值规则时，流量补值不会凭空生成 pH 数字；窗口有结果不等于该窗口已连续实测。`unit_unresolved` 原始项只保留审计，不阻止同序列其他可转换读数聚合；若当前窗只有此类原始项且采集完整，可由其他窗口同序列锚点补值。技术失败与不完整分页仍阻止对应空窗补值。
+- 验证范围：reasoning 定向回归 `192 passed`，包含目标证据与流量支持分别补值、原始锚点归属和结果方法标记。双侧插值置信度上限从 0.75、单侧保持值从 0.55 起，锚点距离超过窗口长度后继续按距离降低；本轮完整 backend 与真实分析尚未重验。
+- 最终复验：run `bcb21e89-35a6-41d5-bc54-8b281b0a04b6` 的 9 个 session 全部完成；上游 COMID 1777616 的 8 个 pH 窗均以每窗 24 条 Provisional 读数聚合为 8.2，`temporal_estimate_method` 为空，表示没有空窗补值。目标 COMID 1777642 的 8 个 pH 窗仍因没有自身 pH 依据或已登记的跨水体定量规则而为 `indeterminate`。本次真实数据未覆盖空窗补值；独立测试库完整 backend 回归 `2640 passed, 2 warnings`，真实模型流程已完成，跨平台 CI 未运行。
+
 ## 契约覆盖矩阵（实施时填写）
 
 | 契约 | 状态 | 计划实现位置 | 重点测试 | 证据与剩余风险 |
@@ -740,3 +766,13 @@ M6 完成后只交付以下稳定能力：
 - M9：轻量 `result_ref/result_summary`、完整 `InferenceResult` 引用和现有 session transcript/SSE；M9 展示分时段、window/range risk、confidence、availability、rationales 与真实 Agent context，不调用 prompt/model/tool test surface。
 
 M6 不因上述阶段尚未实现而增加 fake production producer、临时 unsupported product response、feature flag、V2、兼容层、第三条 SSE 或前端专用推理摘要。后续阶段应直接扩展同一最终系统和当前唯一 V1。
+
+## 数值依赖结果消费追加验收（2026-10-16）
+
+- [x] M5 完成数值计划、证据写入与读回后再封存 M6 输入；目标暂缺证据时，不能抢先固定为证据不足。
+- [x] `method_input` cell 和派生数值进入证据详情、prompt 与历史引用链；target/support 门禁仍只检查用户目标及必需流量。
+- [x] 校验最终数字来自实际执行且已保存的数值证据；方向性关联不能单独产生数字，推测输入的来源、质量与可信上限向下游传播。
+- [x] 最终 `InferenceResult` 仍只含用户请求指标；多指标测试公式不进入生产注册表，也不成为 pH 的隐含计算方法。
+- [x] 验证封存前后引用闭包、错误水体/窗口/单位/方法、自然缺数与技术失败、取消、SSE 和历史重读；新增保存的 A/B→C→T 数值链穿过真实 bundle、封存输入、目录与最终草稿校验的组合测试，正确值通过，篡改值拒绝。完整后端（含专用 PostgreSQL 测试库）`2693 passed, 2 warnings`，前端 `71 passed`，lint、类型检查、OpenAPI 类型检查和构建通过。完整回归之后摘要校验器的窄修复通过摘要专项 `45 passed` 和保存首稿的离线重放；该窄修复后未再次运行完整后端回归。
+
+2026-10-17 本机真实复验：run `77d773b3-e806-42a2-a10d-5fd8bd678be9` 在 `America/Chicago` 的 2026-10-15（UTC `[2026-10-15T05:00:00Z, 2026-10-16T05:00:00Z)`）、6h、stateless 完成 7 个水体和摘要会话；`summary_status=completed`。目标 COMID 1777642 四窗均为 indeterminate、overall_confidence=0；上游 1777616 四窗 pH 均为 8.2 standard units、推断，1 个水体可用、6 个水体证据不足。本次摘要有 2 次模型调用：首稿仅因合法窗口编号 `window-000` 被当作数值误拒，运行后已修复该校验并对保存首稿离线重放通过，未发起第三次真实请求。真实数据未触发多层数值计划；该路径由构造场景与独立 PostgreSQL reader 验证。跨平台 CI 本轮未运行。

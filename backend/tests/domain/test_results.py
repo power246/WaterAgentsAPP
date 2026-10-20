@@ -78,7 +78,7 @@ def assessment_for(
     status: OutcomeStatus,
     evidence_refs: tuple[str, ...] = ("evidence-empty",),
 ) -> RiskOrTrendAssessment:
-    if status is OutcomeStatus.QUANTIFIED:
+    if status in (OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE):
         return RiskOrTrendAssessment(
             summary="No identified temperature risk",
             trend=TrendDirection.STABLE,
@@ -134,7 +134,12 @@ def make_point(
         representative_value=(
             "7.4" if outcome_status is OutcomeStatus.QUANTIFIED else None
         ),
-        unit_id="degC" if outcome_status is OutcomeStatus.QUANTIFIED else None,
+        value_lower="6" if outcome_status is OutcomeStatus.RANGE_ESTIMATE else None,
+        value_upper="8" if outcome_status is OutcomeStatus.RANGE_ESTIMATE else None,
+        unit_id=(
+            "degC" if outcome_status in (OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE)
+            else None
+        ),
         assessment=effective_assessment,
         source=effective_source,
         confidence=effective_confidence,
@@ -449,6 +454,7 @@ def assert_json_round_trip(model) -> None:
 def test_result_enums_have_stable_values() -> None:
     assert [status.value for status in OutcomeStatus] == [
         "quantified",
+        "range_estimate",
         "directional",
         "indeterminate",
     ]
