@@ -522,24 +522,24 @@ git diff --check
 
 ### Work
 
-- [ ] 新增 `/guidelines` 与“说明书”导航、程序自带/我的说明书、来源标签、列表查询/分页和当前有效状态；本地修改内置项有清楚标记。
-- [ ] 实现创建/编辑/保存草稿，模板提示机制、条件、线索、例外；自编出处可空、专业整理出处必填，用户无需填写 profile/digest/vector。
-- [ ] 编辑内置先调用 local-edit；已有 override 从当前内容继续，内置升级不覆盖；恢复操作展示明确版本与保留修改历史。
-- [ ] 实现检查并发布：先获得保存 ACK 的 revision/digest，再展示该确切版本供确认；人工动作不能由 autosave/索引成功替代。
-- [ ] 展示草稿/正在准备/可用于分析/准备失败/已停用及 operation polling/retry/superseded；取消离开页面后的轮询，不制造重复 publication。
-- [ ] editor 分开 loaded revision、submitted edit version、current edit version、dirty 与 uncertain mutation；迟到 ACK 不抹掉后续输入，409 不自动覆盖。
-- [ ] timeout/丢响应/无效 JSON 保留原 key 与文本，通过 operation/document 或重放同 key 对账；对账前不盲目新建/再发发布。
-- [ ] 扩展 `DetailPanel.visibleRecords` 与 `referencedItems` 分类，transcript 展示实际 provided，结果只展示有效 used，保留估值/解释 phase provenance。
-- [ ] 使用共享安全 viewer 展示保存快照/原文/出处；无外部出处显示“用户编写，无外部出处”，history 不跳转当前草稿替代引用内容。
-- [ ] 安全 Markdown 禁用 HTML/脚本并限制链接 scheme；页面文案允许用户配置模型处理文本，不宣称所有内容绝不离开本机。
+- [x] 新增 `/guidelines` 与“说明书”导航、程序自带/我的说明书、来源标签、列表查询/分页和当前有效状态；本地修改内置项有清楚标记。
+- [x] 实现创建/编辑/保存草稿，模板提示机制、条件、线索、例外；自编出处可空、专业整理出处必填，用户无需填写 profile/digest/vector。
+- [x] 编辑内置先调用 local-edit；已有 override 从当前内容继续，内置升级不覆盖；恢复操作展示明确版本与保留修改历史。
+- [x] 实现检查并发布：先获得保存 ACK 的 revision/digest，再展示该确切版本供确认；人工动作不能由 autosave/索引成功替代。
+- [x] 展示草稿/正在准备/可用于分析/准备失败/已停用及 operation polling/retry/superseded；取消离开页面后的轮询，不制造重复 publication。
+- [x] editor 分开 loaded revision、submitted edit version、current edit version、dirty 与 uncertain mutation；迟到 ACK 不抹掉后续输入，409 不自动覆盖。
+- [x] timeout/丢响应/无效 JSON 保留原 key 与文本，通过 operation/document 或重放同 key 对账；对账前不盲目新建/再发发布。
+- [x] 扩展 `DetailPanel.visibleRecords` 与 `referencedItems` 分类，transcript 展示实际 provided，结果只展示有效 used，保留估值/解释 phase provenance。
+- [x] 使用共享安全 viewer 展示保存快照/原文/出处；无外部出处显示“用户编写，无外部出处”，history 不跳转当前草稿替代引用内容。
+- [x] 安全 Markdown 禁用 HTML/脚本并限制链接 scheme；页面文案允许用户配置模型处理文本，不宣称所有内容绝不离开本机。
 
 ### Tests
 
-- [ ] component 覆盖双库、创建、自编无出处、资料整理、编辑内置、真实检查确认、准备失败/重试、停用/恢复及历史 viewer。
-- [ ] 重现“保存 A 发出 → 用户输入 B → ACK A 返回”，B 保持 dirty；“提交成功但响应丢失/无效”复用原 key 对账不重建文档/版本。
-- [ ] 重现 publish 准备中继续编辑、restore/disable 期间旧 operation 返回、409 snapshot 和迟到 GET/ACK；界面不能误显示旧内容已激活或清除脏编辑。
-- [ ] 浏览器覆盖管理→发布→分析提供→引用→history→库更新后旧内容查看；API fake 的 UI 测试与真实后端集成分开标注。
-- [ ] 覆盖 HTML/危险链接、无引用不自动列 adopted、候选/移除项不计 provided、原有 detail panel 与键盘/导航交互回归。
+- [x] component 覆盖双库、创建、自编无出处、资料整理、编辑内置、真实检查确认、准备失败/重试、停用/恢复及历史 viewer。
+- [x] 重现“保存 A 发出 → 用户输入 B → ACK A 返回”，B 保持 dirty；“提交成功但响应丢失/无效”复用原 key 对账不重建文档/版本。
+- [x] 重现 publish 准备中继续编辑、restore/disable 期间旧 operation 返回、409 snapshot 和迟到 GET/ACK；界面不能误显示旧内容已激活或清除脏编辑。
+- [x] 浏览器覆盖管理→发布→分析提供→引用→history→库更新后旧内容查看；API fake 的 UI 测试与真实后端集成分开标注。
+- [x] 覆盖 HTML/危险链接、无引用不自动列 adopted、候选/移除项不计 provided、原有 detail panel 与键盘/导航交互回归。
 
 ### Verify
 
@@ -550,6 +550,12 @@ npm --prefix frontend run typecheck
 npm --prefix frontend run test -- --run tests/guidelines.test.tsx tests/detail-panel.test.tsx
 npm --prefix frontend run build
 npm --prefix frontend run test:e2e -- e2e/guidelines.spec.ts
+# opt-in 实际 HTTP/PostgreSQL/Chrome；先构建，使用附录 A 的专用测试库环境
+$env:WATERAGENTS_GUIDELINE_BROWSER_E2E = '1'
+try {
+    Invoke-GuidelinePytest -Stage gk-m10-browser -Paths @('backend/tests/smoke/test_guideline_browser.py')
+}
+finally { Remove-Item Env:WATERAGENTS_GUIDELINE_BROWSER_E2E }
 git diff --check
 ```
 
@@ -559,7 +565,15 @@ git diff --check
 
 提交边界：前端页面、client/hooks、shared viewer、generated types 与组件/E2E；不引入公共分享入口或用户不需要的模型内部配置表单。
 
-完成记录：`pending`。
+完成记录：**complete**（2026-10-21）。
+
+- 保持 `codex/guidelines-m0`，基线 `f8fc3b546f9c5266bec6036db28e9a749661d6b7`；本阶段实现 commit 在本地提交后补记。只更新原设计/本清单，无新 worktree 或状态 Markdown。
+- `/guidelines` 双库、来源/有效状态、查询/分页、草稿和人工发布已接入；内置先 local-edit，恢复确认明确目标并保留本地记录。编辑序号与服务器修订分开，保存 ACK、409、原 key 对账、准备轮询及停用/恢复均保留后续编辑；SPA/整页离开有保护。人工确认绑定保存快照，不显示 profile/digest/vector 表单。
+- `DetailPanel` 将说明书与历史水体证据分开；共享 viewer 从 delivery 显示 provided，从所选 result 的合法 usage 闭包显示 used，保留目标和估值/解释 phase。history/content 只读保存版本，不用当前库替代；无引用不推定采用。Markdown 原文转义显示，出处限制为无凭据/敏感查询参数的 HTTP(S)，页面明确配置的模型可能处理文本。
+- `check:api`、lint、typecheck、build、`git diff --check` 通过，生成契约无差异；前端完整 **109 passed / 15 files**，最终定向 **34 passed / 2 files**。覆盖保存 A→输入 B→ACK A、创建/发布响应丢失或无效时原 key/body 对账、409、迟到 GET、准备中编辑、停用/恢复后的旧 operation、取消轮询、出处/安全正文与旧 detail panel。构建有既有大 chunk 提示，无构建失败。
+- Playwright 全部 UI 回归 **9 passed / 2 skipped**：包括 M10 mocked API UI；两个需后端的用例在 Vite-only 模式按条件跳过。M10 另由 `backend/tests/smoke/test_guideline_browser.py` 启动隔离后端/Chrome，在真实 PostgreSQL 新 schema 完成创建/发布→准备→实际模型提供/引用→history→库第二版后仍查看第一版。模型与 embedding 明确使用 test composition 的确定性 fixture（单水体会话完成后结束外层 HoldingWorkflow），不等同于真实供应商/完整真实查询流程；API 不做 route mock，只有地图瓦片替身。
+- 后端定向（上述 browser + `backend/tests/api/test_guidelines.py` + `backend/tests/application/guidelines/test_transcript.py`）**64 passed**，59.79s；最终构建的 browser 单独复验 **1 passed**，9.67s（同一 runner，产物前缀 `browser-final`）。实际 DB-only runner 仅读取 `.env` 的 `WATERAGENTS_DB_*`，进程设置 `WATERAGENTS_TEST_DB_NAME=wateragents_test` / `WATERAGENTS_GUIDELINE_BROWSER_E2E=1`；`pytest.main` 使用 `-q -p no:cacheprovider --tb=short --show-capture=no --basetemp .tmp/guidelines-m10-20261021/integration-final --junitxml .tmp/guidelines-m10-20261021/integration-final.xml`。未改业务库或 `.env`，测试日志/结果不提交。
+- Windows 沙箱最初拒绝 Vite/Python 子进程，获准权限后运行；浏览器测试先修正 textarea/折叠 viewer 的定位范围，并移除真实发布稿中的 HTML（服务器按既有契约拒绝，安全测试仍保留恶意正文）。真实 embedding/分析供应商、hosted CI、专业内容人工批准及 pH 实测：**not run**；本阶段未重跑整个后端，M9 的 3305 项记录保持原验证时间。M11–12 和最终验收保持待完成。
 
 ## Milestone 11：首批 pH 资料、真实检索与实测配对
 

@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：产品决定已收敛，Milestone 0–9 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索、模型可选参考、typed 知识记录与结果/历史引用闭包。**前端及真实内容验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
+状态：产品决定已收敛，Milestone 0–10 已完成基线、领域/ports、数据库、内置导入、管理 API、embedding、持久化准备、run pin/session 检索、模型可选参考、typed 知识记录、结果/历史引用闭包与前端管理/快照查看。**真实内容、供应商效果与最终整体验收尚未完成，本文不是功能发布完成声明。** 决定依据见[讨论记录](guideline_design_discussion.md) D01–D14；本文规定功能与技术契约，[Implementation TODO](guideline_implementation_todo.md)是后续 coding agent 的唯一实施进度清单。
 
 ## 1. 目标与产品契约
 
@@ -346,7 +346,7 @@ M9 的 [transcript_models.py](../../backend/app/application/guidelines/transcrip
 
 既有 result assembler 完成科学结果后，`GuidelineModelContext.attach_result_usage()` 沿正式 point 的 evidence/数值输入/转换依赖投射 operation usages，数值引用同时匹配 operation 与 task；cell/window 必须一致，step 使用零基 index，overall 使用固定 key。result usage 先保存，再经已有 `analysis_detail.transcript_item_refs` 关联；不反向引用未来 result item。知识记录被 writer 拒绝时停止该路径，传播 `GuidelineTranscriptWriteError`，不把存储错误吞成 numeric task failure 或模型协议错误。
 
-`TranscriptRAGCaseSourceReader` 验证新引用闭包；既有 eligibility 与 projection 保持原科学字段及 canonical/hash 语义，guideline 记录不成为 historical case，不自动索引原文。M9 验证覆盖实际 HTTP SSE、PostgreSQL 快照重启和 history API；管理页与交互式引用 viewer 由 M10 完成。
+`TranscriptRAGCaseSourceReader` 验证新引用闭包；既有 eligibility 与 projection 保持原科学字段及 canonical/hash 语义，guideline 记录不成为 historical case，不自动索引原文。M9 验证覆盖实际 HTTP SSE、PostgreSQL 快照重启和 history API；M10 已接入管理页与运行/历史快照 viewer，浏览器通过真实 HTTP/PostgreSQL 和明确的确定性测试供应商核对旧版本读取。
 
 usage target keys 由 server 从已验证任务/结果建立：numeric task 使用既有 task ID，cell/window 使用既有 cell/window ID；analysis step 使用正式 steps 数组的零基 index，overall 使用固定 `overall`。operation-level binding 和 result-level mapping 分开，不能把一次未采用的候选估值仅凭同参数名称映射到结果。
 
@@ -414,6 +414,8 @@ M4 的 publish fingerprint 绑定 document ID、expected revision、已保存 co
 
 新增 `/guidelines` 页面及主导航“说明书”。现有分析页面继续承担结果、Agent/transcript 和引用查看；不把说明书管理塞进一次分析的必经步骤。
 
+M10 实现在 `frontend/src/features/guidelines/`：`GuidelinesPage` 负责双库查询/分页、草稿、人工检查、发布/重试和停用/恢复；`useGuidelineEditor` 保存独立的服务器修订、编辑序号、已确认编辑序号与原始请求。保存回执和后续 GET 都核对身份/修订，迟到响应保留后续输入；不确定结果只重放原 key/body，409 由用户比较后明确选择修订。operation 轮询只更新服务器状态，新的 mutation 与离页会取消旧轮询。路由使用 Data Router 拦截未保存或待对账时的 SPA 导航，整页离开使用原生提醒。
+
 ### 11.1 列表与编辑
 
 - “程序自带”与“我的说明书”两个来源视图；本地修改的内置项清楚标为“已在本机修改”。
@@ -433,6 +435,8 @@ transcript card 展示该次请求实际附带的说明书标题/版本、来源
 结果中的已验证 guideline citation 提供“查看参考说明书”入口，展示该次运行的版本和来源 phase。没有引用时不自动列出 provided 文档作为采用依据。没有外部出处的 user-authored 内容显示“用户编写，无外部出处”；不是内容错误。
 
 viewer 优先复用安全的正文查看交互；若引入 Markdown renderer，必须禁用原始 HTML 和脚本、限制链接 scheme，并增加相应测试。管理库编辑路由不能替代 history snapshot viewer。
+
+`GuidelineViewer` 在检查对话框、管理保存版本与 `RunGuidelines` 共用：正文以转义后的 Markdown 原文显示，不解析 HTML、脚本或正文链接；出处只生成无凭据/敏感查询参数的 HTTP(S) 链接。运行 viewer 只从 delivery 取得 provided，沿所选 result 的显式 refs → result usage → usage → delivery 取得 used，核对 run/session、目标、operation/phase 与版本；引用型内容经既有 content API 按当前 auto/history 读取，缺失/无效闭包不推定采用。候选不计 provided，说明书记录与历史水体证据分开；查看旧运行不会请求当前管理库来替换保存正文。
 
 对现有 `referencedItems` 按 content type 分类；guideline snapshots/usage 不显示为历史水体 inference 或 measurement evidence。result viewer 根据 result ID 和既有引用闭包取得 `result_guideline_usage`，按目标 cell/解释 target 展示对应引用。
 

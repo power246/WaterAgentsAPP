@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { BrowserRouter, Link, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { createBrowserRouter, Link, RouterProvider, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError, type AnchorDistanceEstimate, type Settings, type TranscriptItem } from '../api/http'
 import { AdminPage } from '../features/admin/AdminPage'
 import { subscribe } from '../api/sse'
@@ -14,6 +14,7 @@ import { emptyRun, emptyTranscript, runReducer, transcriptReducer } from '../fea
 import { DeleteRun } from '../features/history/DeleteRun'
 import { HistoryList } from '../features/history/HistoryList'
 import { SettingsDrawer } from '../features/settings/SettingsDrawer'
+import { GuidelinesPage } from '../features/guidelines/GuidelinesPage'
 
 type Mode = 'home' | 'history' | 'run'
 
@@ -293,7 +294,7 @@ function Workspace({ mode }: { mode: Mode }) {
       <Link to="/" className="brand" aria-label="Water Agents, University of Minnesota home">
         <img src="/M_maroon.svg" alt="" /><span className="brand-text">Water Agents</span>
       </Link>
-      <nav><Link to="/">New</Link><Link to="/history">History</Link></nav>
+      <nav><Link to="/">New</Link><Link to="/history">History</Link><Link to="/guidelines">说明书</Link></nav>
       <button type="button" aria-label="Settings" onClick={() => setSettingsOpen(true)}>⚙</button>
     </header>
     <div className="mobile-switch" role="tablist" aria-label="Workspace panels">
@@ -356,12 +357,15 @@ function NotFound() {
 }
 
 export function App() {
-  return <BrowserRouter><Routes>
-    <Route path="/" element={<Workspace mode="home" />} />
-    <Route path="/history" element={<Workspace mode="history" />} />
-    <Route path="/runs/:runId" element={<Workspace mode="run" />} />
-    <Route path="/runs/:runId/waterbodies/:sessionId" element={<Workspace mode="run" />} />
-    <Route path="/admin" element={<AdminPage />} />
-    <Route path="*" element={<NotFound />} />
-  </Routes></BrowserRouter>
+  const [router] = useState(() => createBrowserRouter([
+    { path: '/', element: <Workspace mode="home" /> },
+    { path: '/history', element: <Workspace mode="history" /> },
+    { path: '/runs/:runId', element: <Workspace mode="run" /> },
+    { path: '/runs/:runId/waterbodies/:sessionId', element: <Workspace mode="run" /> },
+    { path: '/admin', element: <AdminPage /> },
+    { path: '/guidelines', element: <GuidelinesPage /> },
+    { path: '*', element: <NotFound /> },
+  ]))
+  useEffect(() => () => router.dispose(), [router])
+  return <RouterProvider router={router} />
 }
