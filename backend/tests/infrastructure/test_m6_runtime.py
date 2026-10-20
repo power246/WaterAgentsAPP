@@ -44,6 +44,7 @@ from app.infrastructure.runtime import (
 from app.infrastructure.runtime.m6_test import build_m6_test_runtime
 from pydantic import ValidationError
 from scripts import m6_provider_smoke
+from tests.guideline_api_support import GUIDELINE_METHODS
 from tests.m4_support import (
     EMBEDDING_CAPABILITY,
     MODEL_CATALOG,
@@ -583,7 +584,8 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
     schema = application.openapi()
     paths = set(schema["paths"])
 
-    assert len(paths) == 29
+    assert set(GUIDELINE_METHODS) <= paths
+    assert len(paths - set(GUIDELINE_METHODS)) == 29
     assert "/api/settings" in paths
     assert "/api/keys" in paths
     assert not any(

@@ -1,9 +1,11 @@
+from tests.guideline_api_support import GUIDELINE_METHODS
 from tests.m4_support import create_test_app
 
 
 def test_m7_schemas_remain_with_m9_settings_route() -> None:
     schema = create_test_app().openapi()
     assert set(schema["paths"]) == {
+        *GUIDELINE_METHODS,
         "/health",
         "/api/analysis/runs",
         "/api/analysis/runs/{run_id}",

@@ -5,6 +5,8 @@ from app.domain.guidelines.citation import GuidelineCitationV1
 from app.domain.guidelines.content import GuidelineContentV1
 from app.domain.guidelines.delivery_ref import GuidelineDeliveryRef
 from app.domain.guidelines.document_snapshot import GuidelineDocumentSnapshot
+from app.domain.guidelines.document_details import GuidelineDocumentDetails
+from app.domain.guidelines.list_item import GuidelineListItem
 from app.domain.guidelines.draft import GuidelineDraftV1
 from app.domain.guidelines.draft_source_ref import GuidelineDraftSourceRef
 from app.domain.guidelines.embedding_batch import GuidelineEmbeddingBatch
@@ -27,6 +29,7 @@ from app.domain.guidelines.validation_error import GuidelineValidationError
 from app.domain.guidelines.version import GuidelineVersionV1
 
 __all__ = [
+    "GuidelineDocumentDetails", "GuidelineListItem",
     "CanonicalGuidelineDocumentV1", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
     "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",
     "GuidelineDraftV1", "GuidelineDraftSourceRef", "GuidelineEmbeddingBatch", "GuidelineEmbeddingProfileV1",

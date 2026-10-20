@@ -17,6 +17,8 @@ from app.api.http.health import router as health_router
 from app.api.http.settings import router as settings_router
 from app.api.http.admin import router as admin_router
 from app.api.http.keys import router as keys_router
+from app.api.http.guidelines import router as guidelines_router
+from app.application.guidelines.authoring import GuidelineAuthoringService
 from app.api.http.request_context import RequestContextMiddleware
 from app.api.http.local_mutation import LocalMutationGuardMiddleware, _loopback
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
@@ -69,6 +71,7 @@ from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.persistence.tombstone_repository import PostgresTombstoneRepository
 from app.infrastructure.persistence.admin_operation_repository import PostgresAdminOperationRepository
 from app.infrastructure.persistence.settings_repository import PostgresSettingsRepository
+from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
 from app.infrastructure.persistence.memory_settings import InMemorySettingsRepository
 from app.infrastructure.credentials import OSKeyStore
 from app.infrastructure.credentials.memory_key_store import (
@@ -94,6 +97,7 @@ from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
 from app.ports.settings_store import SettingsStorePort
 from app.ports.key_store import KeyStorePort
+from app.ports.guidelines import GuidelineRepositoryPort
 from app.domain.settings_admin import CredentialName
 
 
@@ -136,6 +140,7 @@ def create_app(
         Callable[..., AsyncContextManager[M8Runtime]] | None
     ) = None,
     frontend_dist: Path | None = None,
+    guideline_repository: GuidelineRepositoryPort | None = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
     if not _loopback(resolved_settings.host):
@@ -183,6 +188,12 @@ def create_app(
                     resolved_parameter_capabilities
                 )
             )
+            active_guideline_repository = guideline_repository
+            if active_guideline_repository is None and engine is not None:
+                active_guideline_repository = PostgresGuidelineRepository(
+                    resolved_settings, engine=engine, registry=resolved_parameter_capabilities)
+            application.state.guideline_service = GuidelineAuthoringService(
+                active_guideline_repository, resolved_parameter_capabilities, resolved_clock, id_factory=id_factory)
             try:
                 initial_defaults = deployment_defaults(
                     resolved_settings.analysis_timezone,
@@ -458,6 +469,8 @@ def create_app(
     application.state.id_factory = id_factory
     application.state.parameter_capability_registry = resolved_parameter_capabilities
     application.state.frontend_responder = frontend_responder
+    application.state.guideline_service = GuidelineAuthoringService(
+        guideline_repository, resolved_parameter_capabilities, resolved_clock, id_factory=id_factory)
     application.add_middleware(
         LocalMutationGuardMiddleware,
         bind_host=resolved_settings.host, bind_port=resolved_settings.port,
@@ -471,6 +484,7 @@ def create_app(
     application.include_router(settings_router)
     application.include_router(keys_router)
     application.include_router(admin_router)
+    application.include_router(guidelines_router)
 
     async def frontend_navigation(request: Request):
         return await frontend_responder.respond(request, request.path_params.get("full_path", ""))

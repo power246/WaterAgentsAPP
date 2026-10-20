@@ -15,6 +15,7 @@ from app.api.schemas.analysis_runs import (
     ValidationViolation,
 )
 from app.api.schemas.settings_admin import SettingsResponse
+from app.application.guidelines.errors import GuidelineServiceError
 from app.application.analysis_runs.coordinator import (
     AgentSessionNotFoundError,
     EventCursorAheadError,
@@ -84,6 +85,11 @@ _SAFE_FIELDS = set(CreateAnalysisRunRequest.model_fields) | {
     "value", "operation_id", "generation_id", "selection", "run_ids",
     "cascade_consumers", "confirmation_token", "confirmation_phrase",
     "safe_error_codes", "registry_digest",
+    "document_id", "version_id", "draft", "content_digest", "review_confirmed", "reviewer", "review_note",
+    "base_version_id", "base_content_digest", "title", "summary", "parameter_keys", "related_parameter_keys",
+    "code_system", "code", "scenario_tags", "keywords", "language", "source_kind", "body_markdown",
+    "sources", "source_id", "url", "locator", "published_date", "accessed_date", "enabled", "source", "state", "q",
+    "idempotency-key",
 }
 
 
@@ -257,6 +263,10 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         status, code, message = exception.status, exception.code, exception.public_message
         stage, retryable = exception.stage, exception.retryable
         headers["Cache-Control"] = "no-store"
+    elif isinstance(exception, GuidelineServiceError):
+        status, code = exception.status, exception.code
+        message = "The guideline request could not be completed."
+        stage, retryable = "guideline_management", status == 503
     elif isinstance(exception, IdempotencyKeyConflictError):
         status, code = 409, "idempotency_key_conflict"
         message = "The idempotency key was already used with a different request body."
@@ -378,7 +388,7 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         history_url=history_url,
     )
     headers["X-Request-ID"] = str(error.request_id)
-    if request.url.path.startswith(("/api/settings", "/api/keys")):
+    if request.url.path.startswith(("/api/settings", "/api/keys", "/api/guidelines")):
         headers["Cache-Control"] = "no-store"
     log_http(
         request, "http_request_failed", status, error=error,
@@ -386,6 +396,8 @@ async def handle_error(request: Request, exception: Exception) -> JSONResponse:
         exception=exception if status >= 500 and not isinstance(exception, HTTPException) else None,
     )
     body = envelope.model_dump(mode="json")
+    if isinstance(exception, GuidelineServiceError) and exception.status == 409:
+        body["current_document"] = None if exception.current is None else exception.current.model_dump(mode="json")
     if (
         isinstance(exception, SettingsRevisionConflictError)
         and isinstance(exception.current, SettingsSnapshot)
@@ -412,5 +424,6 @@ def register_error_handlers(application: FastAPI) -> None:
         CreationCommitUnconfirmedError, CreationPersistenceUnavailableError,
         CreationRolledBackError,
         SettingsAdminError,
+        GuidelineServiceError,
     ):
         application.add_exception_handler(exception_type, handle_error)

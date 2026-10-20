@@ -345,7 +345,7 @@ M8 继续只管理既有 historical case 语义。新增知识记录不自动进
 | `GET /api/guidelines/{document_id}` | 返回 origin、draft/revision、active/pending versions、base provenance 和是否存在新版内置内容。 |
 | `POST /api/guidelines/{bundled_id}/local-edit` | 绑定所见 base version/revision，创建本地 override draft；已有 override 时返回其当前内容，不重新覆盖。 |
 | `PUT /api/guidelines/{editable_id}/draft` | 完整替换 draft content，携带 `expected_revision`；仅 local custom/override 可编辑。 |
-| `POST /api/guidelines/{editable_id}/publish` | `expected_revision`、`content_digest`、`review_confirmed`、review note；返回 `202` 和稳定 operation ref。 |
+| `POST /api/guidelines/{editable_id}/publish` | `expected_revision`、`content_digest`、`review_confirmed`、显式 `reviewer` / `review_note`；返回 `202` 和稳定 operation ref。 |
 | `POST /api/guidelines/{family_root_id}/set-enabled` | `expected_revision`、`enabled`；改变以后 run 的有效目录。未准备好索引时不能显示为可用于分析。 |
 | `POST /api/guidelines/{bundled_id}/restore-bundled` | 校验所见 root revision、明确的目标 bundled version；恢复该最新可用内置版本，本地修改历史保留。 |
 | `GET /api/guidelines/operations/{operation_id}` | 返回准备/成功/失败/superseded 状态与安全错误；用于 UI polling 和不确定响应的对账。 |
@@ -354,11 +354,17 @@ M8 继续只管理既有 historical case 语义。新增知识记录不自动进
 
 静态 `/operations/...` 路由须避免与 `{document_id}` 捕获冲突。历史内容继续通过既有 run/session transcript/content API 读取，引用不依赖管理 API 的当前 active 指针。
 
+M4 的 create body 直接使用 `GuidelineDraftV1`；save body 为 `{expected_revision, draft}`。mutation 返回不可变 `GuidelineMutationReceipt`（`document_id`、`accepted_revision`、`content_digest`、`version_id`、`operation_id` 按操作提供）；所有重放保留原 body/status，当前状态另行 GET。document GET 返回服务端 `draft_digest`、`has_unpublished_changes`、own active/pending 完整版本、family effective version ID、最新内置版本、preparation operation 及管理状态。状态为 `draft/preparing/available/preparation_failed/disabled/unavailable`，描述资料/准备状态；旧有效版与尚未发布的草稿分别保留，列表也提供未发布修改标记，不把编辑后的正文当作已激活正文。
+
+列表使用 PostgreSQL 本地标题/关键词文字匹配；`q` 最多 160 字符，`limit` 为 1–50（默认 20），按 document UUID 升序分页。cursor 最多 512 字符，编码格式版本、最后 UUID 和 source/state/规范化 q 的 digest，不能跨筛选条件复用。列表不返回草稿/版本正文，不派发 embedding/model 请求。生产管理服务复用应用现有数据库连接；自定义 store 环境需显式注入 guideline repository，否则返回 `503 guideline_storage_unavailable`，不创建另一套临时资料库。全部 guideline 响应（含校验/安全拒绝/不存在/未知异常）由既有 RequestContextMiddleware 添加 no-store 与 request ID。
+
 ### 10.2 幂等、并发与不确定响应
 
 所有 mutation 使用 UUIDv4 `Idempotency-Key`，服务端记录 canonical request fingerprint。相同 key/body 返回已接受的 immutable response 或 operation ref；相同 key 不同 body 返回 `409 idempotency_conflict`。
 
 editor、publish、enable/restore 都使用相应 document/root `expected_revision`。冲突返回 `409 guideline_revision_conflict` 和可安全展示的最新 revision/snapshot，不能自动覆盖用户本地编辑。receipt lookup 必须早于 CAS 检查，避免成功提交的重试被误判为新冲突。
+
+M4 的 publish fingerprint 绑定 document ID、expected revision、已保存 content digest 和显式确认/reviewer/note，排除服务端分配的版本 ID/审核时间；先查 receipt，再读取当前草稿，因此后续编辑不会使已接受发布的重放变成另一份请求。服务端从已保存内容建立批准版本，并在 SQL 短事务中再次验证 revision/digest；客户端不能提交 origin、版本 ID 或完整审核记录来代替人工发布。409 error envelope 增加可选 `current_document`，携带安全的最新管理快照；accepted 后的准备失败通过 operation 报告，旧 receipt 仍重放原 202。M6 接入后台准备生命周期前，新发布保持 durable pending。
 
 创建 override、异步发布、停用和恢复都改变 document/root 相关 revision 或 activation token。worker 在激活时校验 token；用户后来的停用、恢复或新发布会使旧任务 `superseded`，旧 worker 不得反向恢复已经被替换的内容。
 

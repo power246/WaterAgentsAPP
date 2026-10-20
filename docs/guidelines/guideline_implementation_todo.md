@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–3 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖基础，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
+状态：**Milestone 0–4 已完成，其余阶段待实施**。本文是后续 coding agent 的唯一实施进度清单。已完成源码接缝盘点、领域/ports、PostgreSQL 事务、内置资源导入与 family 覆盖、草稿与人工发布管理 API，不代表 guideline 集成功能、内容审核、真实供应商调用或实测验收已经完成。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -279,20 +279,20 @@ wheel 安装/读取验证使用不含业务凭据的隔离环境，记录实际�
 
 ### Work
 
-- [ ] 实现 create/save/get/list、local-edit、publish、set-enabled、restore、operation 查询/retry、immutable version read 的 application services；列表搜索为本地 lexical，不调用 embedding。
-- [ ] 发布先检查已保存 draft revision/digest 与 `review_confirmed`，再原子创建 immutable reviewed version、pending pointer、operation/receipt 并返回 `202`；保存不等于发布。
-- [ ] 活跃 pending 阻止重复新发布；失败 pending 可重试同一批准版本，也可在重新检查后由新发布 supersede；不能用当前草稿替换旧批准内容。
-- [ ] 按主设计 §10 实现 `/api/guidelines` 全部管理路由与 typed schemas，固定 `/operations/...` 的路由匹配顺序，限制 cursor/limit 和 UUID/origin 写入权限。
-- [ ] 所有 mutation 复用 LocalMutationGuard 的 Host/Origin/JSON 与 request ID，所有响应 no-store；扩展当前 OpenAPI allowlist 与 guard，不移除既有 API 禁止项。
-- [ ] 实现安全 400/422/403/404/409/503、最新 revision/snapshot 冲突反馈；接受后的 embedding 失败通过 operation 报告，不伪装为保存失败。
-- [ ] 明确无 public sharing、额外账号/RBAC、运行时网页搜索或模型可调用管理工具；用户不能设置 bundled origin 或伪造 immutable version。
+- [x] 实现 create/save/get/list、local-edit、publish、set-enabled、restore、operation 查询/retry、immutable version read 的 application services；列表搜索为本地 lexical，不调用 embedding。
+- [x] 发布先检查已保存 draft revision/digest 与 `review_confirmed`，再原子创建 immutable reviewed version、pending pointer、operation/receipt 并返回 `202`；保存不等于发布。
+- [x] 活跃 pending 阻止重复新发布；失败 pending 可重试同一批准版本，也可在重新检查后由新发布 supersede；不能用当前草稿替换旧批准内容。
+- [x] 按主设计 §10 实现 `/api/guidelines` 全部管理路由与 typed schemas，固定 `/operations/...` 的路由匹配顺序，限制 cursor/limit 和 UUID/origin 写入权限。
+- [x] 所有 mutation 复用 LocalMutationGuard 的 Host/Origin/JSON 与 request ID，所有响应 no-store；扩展当前 OpenAPI allowlist 与 guard，不移除既有 API 禁止项。
+- [x] 实现安全 400/422/403/404/409/503、最新 revision/snapshot 冲突反馈；接受后的 embedding 失败通过 operation 报告，不伪装为保存失败。
+- [x] 明确无 public sharing、额外账号/RBAC、运行时网页搜索或模型可调用管理工具；用户不能设置 bundled origin 或伪造 immutable version。
 
 ### Tests
 
-- [ ] API 覆盖不完整草稿、自编无出处发布、资料整理缺出处拒绝、digest 不符、未确认审核、编辑 bundled 被拒与 override 成功。
-- [ ] 覆盖所有 mutation 幂等重放/不同 body 冲突、revision 冲突、pending/failed/superseded、不存在资源和操作路由不被 UUID 动态路由吞掉。
-- [ ] 覆盖恶意 Origin/Host、非 JSON、no-store、request ID、错误脱敏和存储不可用；正常 localhost same-origin 仍可使用。
-- [ ] 验证 management list/filter 不发生 provider dispatch；提交失败与提交后准备失败的 HTTP/operation 语义分开。
+- [x] API 覆盖不完整草稿、自编无出处发布、资料整理缺出处拒绝、digest 不符、未确认审核、编辑 bundled 被拒与 override 成功。
+- [x] 覆盖所有 mutation 幂等重放/不同 body 冲突、revision 冲突、pending/failed/superseded、不存在资源和操作路由不被 UUID 动态路由吞掉。
+- [x] 覆盖恶意 Origin/Host、非 JSON、no-store、request ID、错误脱敏和存储不可用；正常 localhost same-origin 仍可使用。
+- [x] 验证 management list/filter 不发生 provider dispatch；提交失败与提交后准备失败的 HTTP/operation 语义分开。
 
 ### Verify
 
@@ -307,7 +307,14 @@ git diff --check
 
 提交边界：authoring services、API、OpenAPI/generated types 和对应测试；generated API 文件由脚本生成，不手改。
 
-完成记录：`pending`。
+完成记录（2026-10-20）：`complete`。
+
+- 保持 `codex/guidelines-m0`，起点 `ef0b0b5a2fefdc5b1e5e99e0c92a237548acb1d0`；本阶段实现 commit 在提交后补记。没有新建 worktree 或阶段 Markdown。
+- 已实现 `GuidelineAuthoringService`、PostgreSQL 管理快照/本地分页搜索及 10 条路径上的 11 个 HTTP 方法。发布只使用已保存 revision/digest 和显式 reviewer/note；先重放 receipt，再读草稿，事务内复核 CAS；原子返回版本/operation 的 202 回执。详情和轻量列表分开提供草稿修改标记、own active/pending 与 family effective 身份，后续草稿不改变已批准内容。
+- 新路由复用 Host/Origin/JSON guard、安全错误、request ID 和全响应 no-store；409 返回最新管理快照，失败任务可重试原版本。限制筛选/cursor/limit、UUIDv4 mutation key 及客户端 origin/version 权限；扩展全部既有 OpenAPI 守卫并保留禁止项。`frontend/src/api/generated.ts` 由现有脚本生成；具体请求/回执与状态语义已同步主设计 §10。
+- 新增 application/API **42 项**测试，管理写入/读取使用独立 PostgreSQL：覆盖所有 mutation 重放/不同 body 冲突、两连接并发发布、批准 A 后编辑 B/重建 repository/重放 A、任务失败/retry、内置只读/override、列表筛选、恶意请求和错误正文/日志脱敏。针对性 + architecture **210 passed**，M2–4/OpenAPI 回归 **134 passed**，M6/OpenAPI **59 passed**。最终完整 `backend/tests` **3116 passed，0 failed/errors/skipped**，365.42s；仅有两条既有 Starlette/anyio 弃用 warning。
+- 实际完整 runner 沿 M2 的 DB-only 隔离方式，仅注入 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，执行 `pytest.main(['backend/tests','-q','-p','no:cacheprovider','--tb=short','--basetemp','.tmp/guidelines-m4-20261020/full-final','--junitxml','.tmp/guidelines-m4-20261020/full-final.xml'])`。`npm --prefix frontend run generate:api`、`check:api`、`typecheck` 均通过；无效 UTF-8 JSON 的真实 ASGI 请求验证安全 400/no-store/request ID。测试库 `check --test-database` 为 `20261020_02`，本阶段无 DDL，未修改业务库或 `.env`；Windows 临时目录/子进程权限使用获准执行处理。日志/XML 仅留本机，文档 50 个本地链接与代码围栏、暂存差异检查通过。
+- 验证等级：本地后端/真实 PostgreSQL、生成契约/TypeScript；管理/列表 provider dispatch 为 0。真实供应商、浏览器、hosted CI、专业批准与 pH 实测：**not run**。M5–12 保持未完成；M6 接入生产 worker 前新发布持久化为 pending，M10 实现管理 UI，测试中的批准仅为合成 fixture。
 
 ## Milestone 5：Embedding 契约与供应商生命周期
 
@@ -640,7 +647,7 @@ function Invoke-GuidelinePytest {
 
 若 dotenv runner 不在锁定环境中，按项目当前测试启动约定解决并记录；不能把 runner/Windows ACL 故障报成业务回归，也不能跳过 PostgreSQL 后勾选数据库验收。`--basetemp` 只指向本任务新建路径；禁止复用历史归档/用户临时目录。命令返回非零后先解决或记录原因，再继续依赖它的验证。
 
-本文列出的新路径由对应阶段创建；Milestone 1 的 domain/ports/architecture 测试已存在，application/persistence/frontend 的 guideline 测试仍待后续阶段实施。可按实际拆分调整，但须同步本文命令和证据，不能把尚不存在的测试写成已通过。
+本文列出的新路径由对应阶段创建；Milestone 1–4 的 domain/ports/architecture、application/persistence/API guideline 测试已存在，后续 embedding/retrieval/worker/frontend 测试由对应阶段实施。可按实际拆分调整，但须同步本文命令和证据，不能把尚不存在的测试写成已通过。
 
 浏览器验证分两类：
 
@@ -666,4 +673,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–3 的实际命令与证据见对应完成记录；Milestone 4–12、内容审核、实测实验与最终功能验收仍待实施。
+Milestone 0–4 的实际命令与证据见对应完成记录；Milestone 5–12、内容审核、实测实验与最终功能验收仍待实施。

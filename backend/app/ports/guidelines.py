@@ -7,6 +7,8 @@ from app.domain.guidelines.canonical import Digest, Revision
 from app.domain.guidelines.canonical_document import CanonicalGuidelineDocumentV1
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
 from app.domain.guidelines.document_snapshot import GuidelineDocumentSnapshot
+from app.domain.guidelines.document_details import GuidelineDocumentDetails
+from app.domain.guidelines.list_item import GuidelineListItem
 from app.domain.guidelines.draft import GuidelineDraftV1
 from app.domain.guidelines.embedding_batch import GuidelineEmbeddingBatch
 from app.domain.guidelines.embedding_profile import GuidelineEmbeddingProfileV1
@@ -25,6 +27,12 @@ class GuidelineRepositoryPort(Protocol):
     """Mutations replay a matching receipt before checking the expected revision."""
 
     async def read_document(self, document_id: UUID) -> GuidelineDocumentSnapshot | None: ...
+
+    async def read_document_details(self, document_id: UUID) -> GuidelineDocumentDetails | None: ...
+
+    async def list_documents(
+        self, *, source: str, state: str | None, q: str, after_id: UUID | None, limit: int,
+    ) -> tuple[GuidelineListItem, ...]: ...
 
     async def read_version(self, document_id: UUID, version_id: UUID) -> GuidelineVersionV1 | None: ...
 

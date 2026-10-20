@@ -12,16 +12,52 @@ from app.domain.guidelines import (
     GuidelineDraftV1, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
     GuidelineIdentity, GuidelineIndexGeneration, GuidelineMutation, GuidelineMutationReceipt,
     GuidelineOperation, GuidelineOperationKind, GuidelineOrigin, GuidelineVersionV1,
+    GuidelineDocumentDetails, GuidelineListItem,
 )
 from app.domain.guidelines.canonical import canonical_text
 from app.domain.guidelines.identity import bundled_guideline_version_id
 from app.domain.guidelines.mutation_bodies import action_body, create_body, publish_body, save_body
 from app.domain.hydrology.parameter_key import ParameterKey
+from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
 from app.domain.memory_rag.embedding_vector import EmbeddingVector
 from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import create_database_engine
 from app.ports.errors import GuidelineConflictError, PortUnavailableError
+
+_MANAGEMENT_QUERY = """
+SELECT d.*, r.activation_epoch AS root_epoch, r.disabled AS root_disabled,
+       (d.draft_digest IS NOT NULL AND d.draft_digest IS DISTINCT FROM a.content_digest) AS has_unpublished_changes,
+       a.snapshot AS active_body, p.snapshot AS pending_body, base.snapshot AS base_body,
+       e.version_id AS effective_version_id, job.body AS preparation,
+       (SELECT COALESCE(MAX(v.version_number), 0) FROM guideline_versions v
+        WHERE v.document_id = d.document_id) AS latest_number,
+       CASE WHEN r.disabled THEN 'disabled'
+            WHEN job.state IN ('pending', 'running') THEN 'preparing'
+            WHEN job.state = 'failed' THEN 'preparation_failed'
+            WHEN ready.version_id IS NOT NULL THEN 'available'
+            WHEN d.draft IS NOT NULL THEN 'draft' ELSE 'unavailable' END AS management_state,
+       COALESCE(d.draft->>'title', a.snapshot->'content'->>'title', p.snapshot->'content'->>'title',
+                base.snapshot->'content'->>'title') AS display_title,
+       COALESCE(d.draft->>'summary', a.snapshot->'content'->>'summary', p.snapshot->'content'->>'summary',
+                base.snapshot->'content'->>'summary') AS display_summary,
+       COALESCE(d.draft->>'source_kind', a.snapshot->'content'->>'source_kind', p.snapshot->'content'->>'source_kind',
+                base.snapshot->'content'->>'source_kind') AS display_source_kind,
+       COALESCE(d.draft->'keywords', a.snapshot->'content'->'keywords', p.snapshot->'content'->'keywords',
+                base.snapshot->'content'->'keywords', '[]'::jsonb)::text AS display_keywords
+FROM guideline_documents d JOIN guideline_documents r ON r.document_id = d.family_root_id
+LEFT JOIN guideline_versions a ON a.version_id = d.active_version_id
+LEFT JOIN guideline_versions p ON p.version_id = d.pending_version_id
+LEFT JOIN guideline_catalog_entries e ON e.family_root_id = d.family_root_id AND e.valid_to_revision IS NULL
+LEFT JOIN guideline_catalog_state c ON c.singleton_id = 1
+LEFT JOIN guideline_embeddings ready ON ready.version_id = d.active_version_id AND ready.generation_id = c.active_generation_id
+LEFT JOIN LATERAL (SELECT v.snapshot FROM guideline_versions v WHERE v.document_id = r.document_id
+                  AND r.origin = 'bundled' ORDER BY v.version_number DESC LIMIT 1) base ON true
+LEFT JOIN LATERAL (SELECT to_jsonb(o) AS body, o.state FROM guideline_operations o
+                  WHERE o.document_id = d.document_id AND o.version_id = d.pending_version_id
+                  ORDER BY CASE WHEN o.state IN ('pending', 'running', 'failed') THEN 0 ELSE 1 END,
+                  o.next_attempt_at DESC, o.operation_id DESC LIMIT 1) job ON true
+"""
 
 
 class PostgresGuidelineRepository:
@@ -31,11 +67,12 @@ class PostgresGuidelineRepository:
     Provider calls belong outside these methods. Reads never create schema or data.
     """
 
-    def __init__(self, settings: AppSettings, *, engine: AsyncEngine | None = None) -> None:
+    def __init__(self, settings: AppSettings, *, engine: AsyncEngine | None = None,
+                 registry: ParameterCapabilityRegistry | None = None) -> None:
         self._engine = engine or create_database_engine(settings)
         self._owns_engine = engine is None
         self._timeout = settings.db_operation_timeout_seconds
-        self._registry = load_parameter_capability_registry()
+        self._registry = registry or load_parameter_capability_registry()
 
     async def aclose(self) -> None:
         if self._owns_engine:
@@ -129,6 +166,50 @@ class PostgresGuidelineRepository:
                 "SELECT snapshot FROM guideline_versions WHERE document_id = :doc AND version_id = :id"
             ), {"doc": document_id, "id": version_id})
             return None if body is None else GuidelineVersionV1.model_validate(body)
+
+    @staticmethod
+    def _has_bundled_update(row):
+        return (row["origin"] == "local_override" and row["base_body"] is not None
+                and row["identity"]["based_on_version_id"] != row["base_body"]["version_id"])
+
+    async def read_document_details(self, document_id: UUID) -> GuidelineDocumentDetails | None:
+        async with self._connection() as connection:
+            row = (await connection.execute(text(_MANAGEMENT_QUERY + " WHERE d.document_id = :id"),
+                                             {"id": document_id})).mappings().one_or_none()
+            if row is None:
+                return None
+            return GuidelineDocumentDetails(
+                identity=row["identity"], revision=row["revision"], activation_epoch=row["root_epoch"],
+                disabled=row["root_disabled"], draft=row["draft"], active_version_id=row["active_version_id"],
+                draft_digest=row["draft_digest"], has_unpublished_changes=row["has_unpublished_changes"],
+                pending_version_id=row["pending_version_id"], active_version=row["active_body"],
+                pending_version=row["pending_body"], effective_version_id=row["effective_version_id"],
+                latest_version_number=row["latest_number"], latest_bundled_version=row["base_body"],
+                preparation=None if row["preparation"] is None else self._operation(row["preparation"]),
+                state=row["management_state"], has_bundled_update=self._has_bundled_update(row),
+            )
+
+    async def list_documents(self, *, source: str, state: str | None, q: str,
+                             after_id: UUID | None, limit: int) -> tuple[GuidelineListItem, ...]:
+        async with self._connection() as connection:
+            rows = (await connection.execute(text(
+                "WITH management AS (" + _MANAGEMENT_QUERY + ") SELECT * FROM management "
+                "WHERE (:source = 'all' OR (:source = 'bundled' AND origin = 'bundled') "
+                "OR (:source = 'mine' AND origin <> 'bundled')) "
+                "AND (CAST(:state AS text) IS NULL OR management_state = :state) "
+                "AND (CAST(:after AS uuid) IS NULL OR document_id > CAST(:after AS uuid)) "
+                "AND (:q = '' OR strpos(lower(COALESCE(display_title, '') || ' ' || display_keywords), lower(:q)) > 0) "
+                "ORDER BY document_id LIMIT :limit"
+            ), {"source": source, "state": state, "q": q, "after": after_id, "limit": limit})).mappings().all()
+            return tuple(GuidelineListItem(
+                identity=row["identity"], revision=row["revision"], activation_epoch=row["root_epoch"],
+                title=row["display_title"], summary=row["display_summary"], source_kind=row["display_source_kind"],
+                draft_digest=row["draft_digest"], active_version_id=row["active_version_id"],
+                has_unpublished_changes=row["has_unpublished_changes"],
+                pending_version_id=row["pending_version_id"], effective_version_id=row["effective_version_id"],
+                latest_bundled_version_id=None if row["base_body"] is None else row["base_body"]["version_id"],
+                state=row["management_state"], has_bundled_update=self._has_bundled_update(row),
+            ) for row in rows)
 
     async def _insert_document(self, connection, identity, draft=None):
         await connection.execute(text(
