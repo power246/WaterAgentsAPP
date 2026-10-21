@@ -1,8 +1,8 @@
 # Guideline Knowledge Implementation TODO
 
-日期：2026-10-20（Asia/Shanghai）
+日期：2026-10-20；最终核对：2026-10-22（Asia/Shanghai）
 
-状态：**Milestone 0–11 已完成，Milestone 12 交付中**。本文是唯一实施进度清单。四份 v1 已获内置分发批准，真实检索已核对，三个实测 holdout 配对已完成；小样本、未命中、范围漏覆盖和拓扑预算限制均保留，完成实施不等于证明普遍精度改善。各节早期记录保留其原验证时间，以本轮最终记录为准。
+状态：**Milestone 0–12 已完成**。本文是唯一实施进度清单。四份 v1 已获内置分发批准，真实检索已核对，三个实测 holdout 配对已完成；小样本、未命中、范围漏覆盖和拓扑预算限制均保留，完成实施不等于证明普遍精度改善。各节早期记录保留其原验证时间，以本轮最终记录为准。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -664,7 +664,7 @@ git diff --check
 - [x] 运行完整后端、PostgreSQL、前端 lint/typecheck/unit/build 和浏览器回归；真实 provider 与 hosted CI 仅在实际执行后填写，环境失败与产品失败分开。
 - [x] 检查旧历史内容仍可读、旧 digests 不变、无新增观察资格旁路/第三 SSE/归档 imports/测试生产入口；库更新保留用户内容。
 - [x] 更新技术设计中的真实实现路径、配置、操作说明和验证限制，本文原位填写各阶段完成记录；清除仅属过渡且不再需要的实现，不清理用户文件。
-- [ ] 交付记录实际 branch/HEAD/commits、文件范围、命令/计数、人工批准版本、3–5 例结果摘要、未完成项；按后续用户授权范围执行 commit/push/PR，不对已授权动作重复索取确认，不能把本次写 TODO 视作代码实现授权。
+- [x] 交付记录实际 branch/HEAD/commits、文件范围、命令/计数、人工批准版本、3–5 例结果摘要、未完成项；按后续用户授权范围执行 commit/push/PR，不对已授权动作重复索取确认，不能把本次写 TODO 视作代码实现授权。见本节最终交付记录；仅本地提交，未 push/PR。
 
 ### Tests
 
@@ -696,7 +696,7 @@ git rev-parse HEAD
 
 提交边界：最终回归修复、必要文档和完成记录；提交前确认无密钥、业务库快照、新日志/模型输出、无关改动或未经审核内容。
 
-完成记录：**partial**（2026-10-21；本地审计、回归与修复完成，真实内容与实测阶段出口仍未满足）。
+完成记录：**complete**（2026-10-22）。以下保留先前审计证据及当时限制，最终完整回归和实际交付见本节末尾。
 
 - 当前分支 `codex/guidelines-m0`，基线 `db1e11699161c719e7b636001aac2b9bcfcb05c8`，初始 tracked tree 干净；审计/修复提交为 `de2cba91a57f038637a9dfbbcdfd5eb8f390e2b6`（`fix(guidelines): audit milestone 12 and preserve editor reconciliation`），随后文档提交补记 hash 及交付环境。本次仅修改编辑器、其回归测试和现有两份 guideline 文档，不新建状态文档、不修改 `.env`、业务库、归档或生产 bundle，不 push/PR。
 - 复查路径覆盖 domain/ports → `20261020_02` schema/repository → runtime/provider/worker → run pin/retrieval → planning/numeric/batch/repair/synthesis builders → assembler/result usage → registry/public projection/M8 source reader → API/generated types → UI/history。既有 canonical/domain inference/evidence/hydrology 与 M8 projection 未变；旧 canonical golden、旧无知识记录、当前新增引用闭包和两个 SSE/单 workflow/无测试入口的架构守卫均纳入完整回归。未发现需要移除的过渡实现；未清理用户文件。
@@ -715,7 +715,7 @@ git rev-parse HEAD
 | GK-C01 | `backend/tests/application/guidelines/test_model_context.py::test_unavailable_or_omitted_guidelines_do_not_gate_a_valid_numeric_range` | 缺失参考继续原数值路径。 |
 | GK-C02 | 同文件 `test_valid_guideline_alias_never_authorizes_an_unanchored_point`；既有 evidence/numeric 全量回归 | 不授予 observation/anchor/risk 资格。 |
 | GK-C03 | `backend/tests/application/guidelines/test_bundled.py::test_upgrade_local_edit_override_disable_and_explicit_restore_keep_history` | 真实 PG 升级保留 override/历史；本地库无自动公开入口。 |
-| GK-C04 | `backend/tests/application/guidelines/test_authoring.py::test_publication_rejects_unreviewed_or_invalid_saved_content`；`test_evaluation.py::test_export_requires_exact_confirmed_content_and_never_publishes_changed_drafts` | 审核绑定程序通过；四份真实内容尚未批准。 |
+| GK-C04 | `backend/tests/application/guidelines/test_authoring.py::test_publication_rejects_unreviewed_or_invalid_saved_content`；`test_evaluation.py::test_export_requires_exact_confirmed_content_and_never_publishes_changed_drafts` | 审核绑定程序通过；四份真实批准见 M11 最终记录及生产 manifest。 |
 | GK-C05 | `backend/tests/domain/test_guidelines.py::test_canonical_digest_normalizes_only_text_encoding_and_metadata`、`test_publication_utf8_exact_limit` | 内容、来源、边界及 Windows 换行规范化通过。 |
 | GK-C06 | 同文件 `test_model_projection_replaces_only_urls_and_preserves_conditions`；`frontend/tests/guidelines.test.tsx` inert Markdown/安全 source link 用例 | 原文留存，受限 model view 与安全查看分离。 |
 | GK-C07 | `backend/tests/persistence/test_guidelines.py::test_postgres_constraints_and_immutable_guards`、`test_disable_restore_invalidates_claims_and_preserves_historical_catalog` | PG 约束与 family 停用无回退。 |
@@ -724,7 +724,7 @@ git rev-parse HEAD
 | GK-C10 | `backend/tests/infrastructure/embeddings/test_guideline_embeddings.py::test_ineligible_inputs_fail_before_any_dispatch_and_case_gate_is_preserved`；`test_embedding.py::test_profile_uses_catalog_configuration_and_separates_case_identity_and_threshold` | guideline/case namespace、输入校验和 cutoff 独立。 |
 | GK-C11 | `test_worker.py::test_generation_rebuild_reconciles_catalog_changes_before_atomic_switch`、`test_generation_switch_during_publication_recomputes_current_profile_with_same_attempt_lease` | PG 完整重建与原子切换、不混 profile。 |
 | GK-C12 | `backend/tests/application/guidelines/test_retrieval.py::test_real_postgres_two_sessions_keep_pin_across_catalog_changes_and_new_run_sees_change` | 同 run 跨 session 固定 pin，新 run 才见更新。 |
-| GK-C13 | 同文件 `test_real_postgres_exact_ranking_related_parameters_cutoff_top_k_stable_ties_and_profile_rejection`、`test_labeled_multilingual_fixture_uses_real_sql_and_counts_actual_embedding_dispatches` | SQL/cosine/预算程序通过；向量确定性，真实首批资料相关性待验。 |
+| GK-C13 | 同文件 `test_real_postgres_exact_ranking_related_parameters_cutoff_top_k_stable_ties_and_profile_rejection`、`test_labeled_multilingual_fixture_uses_real_sql_and_counts_actual_embedding_dispatches` | SQL/cosine/预算程序通过；程序测试向量确定性，真实 Google 结果、漏检和边界另见 M11。 |
 | GK-C14 | `test_model_context.py::test_first_actual_planning_or_numeric_dispatch_loads_once`、`test_knowledge_never_creates_a_dispatch`、`test_retrieval_finishing_after_boundary_never_dispatches_reasoning` | 实际测试 port dispatch 计数覆盖零模型/取消/deadline。 |
 | GK-C15 | 同文件 `test_final_serialized_request_preserves_evidence_and_output_reserve`；`test_transcript.py::test_repaired_output_usage_keeps_the_repair_operation_and_original_knowledge_subset` | 最终 payload/alias、完整主题裁剪、repair 一致。 |
 | GK-C16 | `test_transcript.py::test_selected_numeric_lineage_excludes_a_second_candidate_for_the_same_task_window`、`test_registry_writer_rejects_fabricated_citations_and_result_targets` | 候选丢弃、目标与采用 lineage 绑定。 |
@@ -841,6 +841,16 @@ git rev-parse HEAD
 
 保护核对：旧归档 **32 个文件 hash 未变**，四稿 SHA256 和隔离评估批准范围未变，升级前备份仍在；业务库仍为 `20261021_01`，**65 runs / 307 sessions / 23,783 items / 533 contents / 154 unit-policy entries**，说明书及关系表仍为 0，生产 manifest 为空，`.env` 未修改。按用户既有清理授权，保存失败原因、替代通过结果及 hash 后，删除本轮已被成功回归替代的 **4 个失败测试日志/XML、89,898 bytes**；两轮实际运行的失败节点及完整结果均保留。M11/M12 的生产资料批准、扩大检索质量核对、3–5 个实测 holdout 和最终交付出口仍未满足；此次修复及并发证据不替代这些验收。
 
+### 最终交付核对（2026-10-22）
+
+- 分支仍为 `codex/guidelines-m0`；本轮基线 `61cc7e9`，M11 实现提交 **`d472bf85767150b3975354c718e02b0e7f4a7f7f`**，34 个文件。范围为真实批准 bundle、必要公开采集/站点/检索输入、两份 live 评估源码、holdout 时间契约、门禁引用和有界修复提示及回归、既有文档与测试 fixture 隔离。M12 为紧随其后的 `docs(guidelines): complete milestone 12 verification and delivery` 本地文档提交；未 push/PR、未改分支/worktree，`.env` 不入 Git。
+- 最终后端 **3465 passed / 2 skipped / 0 failed，436.06s**；额外最终评估输入 **50 passed，7.20s**，门禁/修复定向 **102 passed，2.96s**。根目录使用 `.tmp/guideline-fixes-20261021/run_pytest.py`，仅从 dotenv 注入 DB 配置及进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`，工作目录 `backend`；最终参数 `tests -q -p no:cacheprovider --tb=short --show-capture=no --basetemp ../.tmp/guidelines-finish-20261021/backend-reasoning-final --junitxml ../.tmp/guidelines-finish-20261021/backend-reasoning-final.xml`。全量包含 domain/ports、架构、真实 PG 持久化及业务流程；标准 Starlette/httpx 和 anyio 弃用 warning 保留。
+- 两个 skip 为 opt-in 合成真实 embedding 比较和 guideline 浏览器；前者本轮 **not run**（本轮已有真实批准语料的 Google 检索与 DeepSeek 配对证据，不冒称合成比较重跑），后者以 `WATERAGENTS_GUIDELINE_BROWSER_E2E=1`、`WATERAGENTS_M9_BROWSER_E2E=1`、Chrome，单独运行 `tests/smoke/{test_guideline_browser,test_m9_production_pg}.py`，最终 **5 passed / 0 skipped，31.29s**。覆盖创建/发布/实际提供与引用/历史、生产页面、SSE/取消、重启历史及流量场景；HTTP/Chrome/PG 真实，模型/采集/embedding 为测试组合。
+- 前端 `npm --prefix frontend run {check:api,lint,typecheck,build}` 各 exit 0，`test -- --run` **114 passed / 15 files**；UI Playwright **9 passed / 2 skipped，14.6s**，两个后端 opt-in 场景由上述独立集成验证覆盖。没有前端实现变更，生成 API 契约不漂移，保留 build 大 chunk 提示。环境 Python 3.12.14 / Node 24.21.0 / npm 11.19.0；修改的 17 个 Python 文件另通过 3.11 AST 语法解析，其他解释器运行及 hosted CI/跨平台 matrix **not run**。
+- M11 的实际批准版本、三对输出、0 rejected、第一次失败和定性解释问题均已原位记录，不把 6 次 completed 或范围变窄写成科学精度改善；未增加说明书观测/数值/风险资格、第三 SSE 或生产测试入口。新的 4 个 Markdown 是正式说明书正文资源，无新增阶段状态 Markdown。
+- 只读保全核对：业务库 revision `20261021_01`、65 runs / 307 sessions / 23783 transcript items / 533 contents 及原配置行计数均未变，guideline 表仍为空；应用下次启动由既有 importer 安装批准 bundle。`runtime-test-1019/` 原 32 个文件 SHA256 均未变；既有 21,290,438 字节数据库备份仍在。配置密钥对提交范围扫描无命中；本地只改 cutoff 0.35→0.79，其他 dotenv 值相同，测试库名未写入 dotenv。
+- 按既有清理授权删除本次三处被成功验证替代的失败测试 scratch（347 文件、741,132 字节），保留失败日志/JUnit、全部真实成功/失败/取消快照；未清理用户目录或无关缓存。验收没有剩余未勾选必需项；未执行的费用重复、独立平台/CI 和科学推广验证保留上述边界。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。
@@ -854,9 +864,9 @@ git rev-parse HEAD
 - [x] **GK-A09**：旧 evidence/scope/numeric/observed/risk 与 M8 eligibility 不弱化；memory-disabled/stateless 可独立使用指南。证据：GK-C02/C10/C20/C22、完整旧数值/观测/M8 回归及 discharge 两类生产组合测试。
 - [x] **GK-A10**：本地 API/安全渲染/供应商文本范围正确，用户本地内容不自动进入 Git/共享平台。证据：GK-C03/C06/C18/C21；provider payload、safe error 与无上传/自动 Git 生产入口审计。
 - [x] **GK-A11**：首批资料有真实人工批准，真实 embedding 检索已核对，3–5 个实测 holdout 成对案例如实报告。
-- [ ] **GK-A12**：全栈回归和交付证据完整，fake/真实供应商/数据库/浏览器/hosted CI 的结论与限制分开。
+- [x] **GK-A12**：全栈回归和交付证据完整，fake/真实供应商/数据库/浏览器/hosted CI 的结论与限制分开。
 
-GK-A11 已有四稿仅限隔离评估的明确批准、真实检索/正文/引用链、一个非 holdout 成对场景及其并发复跑；仍缺生产分发批准、扩大检索质量核对、3–5 个有目标真值的实测 holdout。GK-A12 的本地回归部分已有证据，最终交付仍待这些必需项；最后 JSON 修复尚无第三轮真实全链路结果，不排除失败案例，也不以 fake 或文档替代真实验收。
+GK-A11 已取得当前四份 v1 的内置分发批准，完成真实检索核对及三组有目标实测的 holdout 配对。GK-A12 的完整本地回归和交付证据已补齐；原始失败、检索漏检、范围漏覆盖、实际拓扑覆盖不足和未运行的 hosted CI/推广验证均见上述最终记录，不以阶段完成保证科学精度。
 
 ## 附录 A：可复用验证环境与命令
 
@@ -907,4 +917,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–10 的实际命令与证据见对应完成记录；Milestone 11–12 的程序验证及隔离真实整链路记录见上，生产分发批准、检索质量与 3–5 个实测 holdout 的最终阶段出口仍未满足。
+Milestone 0–12 的实际命令与证据见对应完成记录；M11–12 已补齐生产分发批准、真实检索、三例实测 holdout 配对、完整回归与本地交付。检索漏检、范围漏覆盖、未抵达上游站和未运行的推广验证均按实际限制保留，不将阶段完成解释为精度保证。
