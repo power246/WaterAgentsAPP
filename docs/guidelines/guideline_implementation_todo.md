@@ -631,7 +631,7 @@ git diff --check
 - 新增审核导出、真实 PostgreSQL 检索评估入口、冻结输入/衍生链泄漏拒绝、统计可比性及保存配对审计工具。控制臂禁止任何已批准正文/实际 advisory；知识臂须匹配批准版本与实际 payload/delivery；比较时科学上下文/模型/version/budget 必须一致，保留失败/不可比项。此处是程序能力，尚无实际合格配对；不声称审计器能自行运行完整科学 workflow 或证明任意自由文字均无泄漏。
 - 阶段回归 **344 passed**，96.76s，路径为 application/guidelines、persistence/test_guidelines.py、domain/test_guidelines.py、ports/test_guideline_ports.py、architecture/test_guideline_boundaries.py。最终新增/调整定向 **33 passed**，3.94s（`test_evaluation.py`）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`；`pytest.main` 使用 `-q -p no:cacheprovider --tb=short --show-capture=no`，task-local 前缀 `.tmp/guidelines-m11-20261021/{regression-final,targeted-verified}`（XML/log 同名）。临时审核/embedding 向量只作程序测试，不算实际批准或检索质量证据。
 - 实际配置预检：`text-embedding-3-small` 向已配置 `api.deepseek.com` 发出 1 次请求，HTTP **404**，安全码 `guideline_embedding_unavailable`；未擅自切供应商/密钥或改 `.env`。实际 `deepseek-flash` 经既有 `m6_provider_smoke._main()` 连通性预检 **1 request / 1 response**（76 input / 25 output tokens），仅证明响应契约，不是 pH 对照或固定权重版本证明。真实检索排名/cutoff 核对、no-guide/with-guide 成对结果、解释质量及 hosted CI：**not run**。
-- 后续仍须：用户明确批准具体内容；修正本地兼容 embedding 配置；生成真实、冻结证据/同配置的 3–5 例配对，至少一完整配对，再记录实际提供/采用、点/范围误差及人工解释评价。当前不将通用“完成 M11”当作对尚未见到的草稿的批准，M11 未完成项目及 M12 的最终阶段出口保持未完成。
+- 后续仍须：用户明确批准具体内容；核对批准内容的真实 embedding 检索（Google 服务连通已通过，见 M12 后续补充）；生成真实、冻结证据/同配置的 3–5 例配对，至少一完整配对，再记录实际提供/采用、点/范围误差及人工解释评价。当前不将通用“完成 M11”当作对尚未见到的草稿的批准，M11 未完成项目及 M12 的最终阶段出口保持未完成。
 
 
 ## Milestone 12：整体回归、契约审计与交付
@@ -723,6 +723,14 @@ git rev-parse HEAD
 - 首次完整运行 **1 failed / 3358 passed / 1 skipped**：新测试的假密钥包含通用词 `analysis`，全局已知密钥片段脱敏使后续日志精确断言失败。仅改用不含该通用词的测试凭据，不放宽生产脱敏；配置模块 → observability 日志模块的同进程顺序回归 **31 passed**（4.71s），随后完整重跑得到上述最终通过结果。沿 M12 的 DB-only runner 仅注入 `WATERAGENTS_DB_*` 和进程级测试库名；pytest 参数仍为 `-q -p no:cacheprovider --tb=short --show-capture=no`，临时前缀为 `.tmp/embedding-config-20261021/{focused-final,log-order,backend-final,browser}`（同名 log/XML），所有结果仅留本机。
 - 新增独立地址的 HTTP header/host 校验、analysis key 替换/删除期间的 query/worker 行为、单独 M8 无分析 key 装配、错误配对拒绝与启动日志脱敏。未请求真实 Google embedding，未更换任何本地密钥或声称真实连通；生产 bundle 与待审内容不变。`gemini-embedding-001` 示例下两份草稿超过现有 2048-byte 保守门禁，记录在 README，未静默截断或抬高真实模型上限。
 
+后续实际 Google 预检（2026-10-21）：
+
+- [x] 用户配置后的独立 Google 服务连通验证：模型 `gemini-embedding-001`、1536 维、2048 输入限制；仅发送合成 canonical 文本，未发送待审 pH 草稿、未写业务库或改 `.env`。发现 Google 仅省略首条的 `index: 0`，修正共用 transport，在上述精确 HTTPS endpoint 仅将缺失首索引归零；后续索引、模型、数量、维度、有限数值、非零范数及其他供应商的原校验均保留。
+- 最终两条 guideline query 的批量/逐条、两条历史 case query 的批量/逐条、单条合成 guideline document 共 **7 次真实请求全部通过**（单次 0.524–1.639s，均在 3s 时限内），返回向量均为有限的 1536 维。两类批量与对应逐条向量 cosine 均约 **1.0**，交换匹配分别为 0.937277 / 0.991655，核对了关联顺序。整个定位过程共 18 次 embedding 请求，其中 5 次在修正前因索引契约被拒绝；不将其计为适配成功。真实分析模型、批准内容检索/排名/cutoff 与 pH 配对结果本次 **not run**。
+- 回归途中发现评估测试的非独立分支继承了本地新增 embedding 配置，产生 2 项失败；仅让 fixture 明确设置该分支的两项配置为 `None`，保留原供应商选择/错误断言。评估模块定向 **35 passed**（7.66s）；中途停止的全量运行不计为通过，最终完整结果以下方记录为准。
+- 新增 Google 单条/批量、显式/省略零索引、缺失非零索引/全部索引、假冒 origin、错误 path/HTTP、乱序/重复、模型/数量/维度及坏向量回归 **38 passed**（0.20s）。完整后端 **3396 passed / 1 failed / 1 skipped**（772.84s）；唯一失败为旧 M9 smoke 同样继承了本地独立配置，凭据断言不符。对该文件三个 settings fixture 显式清空独立配置，测试 embedding 替身在收集凭据前安全拒绝非 fixture 值；最终 M9 smoke → embeddings → evaluation → configuration → observability 同进程复测 **221 passed / 0 failed**（25.63s，含 4 个 M9 smoke 和新增 38 项）。最后的测试 fixture 修正后未再次完整重跑，不记为全量零失败；唯一 skip 仍为 opt-in 说明书浏览器，本次浏览器/前端/hosted CI **not run**。四个改动 Python 文件通过 3.11 语法检查。
+- M9 的失败断言曾在测试输出中展示部署密钥；已清理本次日志/XML 中的明文及可识别片段，聊天中的既有显示无法撤回，已建议用户轮换。没有更改本地密钥，也不把应用日志脱敏放宽。临时结果仅留 `.tmp/embedding-preflight-20261021/`，不新增阶段状态文档；人工批准与生产 bundle 仍待用户审核，M11/M12 最终出口不勾选。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。
@@ -738,7 +746,7 @@ git rev-parse HEAD
 - [ ] **GK-A11**：首批资料有真实人工批准，真实 embedding 检索已核对，3–5 个实测 holdout 成对案例如实报告。
 - [ ] **GK-A12**：全栈回归和交付证据完整，fake/真实供应商/数据库/浏览器/hosted CI 的结论与限制分开。
 
-GK-A11 尚缺实际批准、可用 embedding 和真实成对输出；GK-A12 的本地回归部分已通过，最终交付仍待这些必需证据。不是失败案例被排除，也不是以 fake 或现有说明文档替代真实验收。
+GK-A11 尚缺实际批准、批准内容的真实检索核对和真实成对输出；独立 Google embedding 连通预检已通过。GK-A12 的本地回归部分已通过，最终交付仍待这些必需证据。不是失败案例被排除，也不是以 fake 或现有说明文档替代真实验收。
 
 ## 附录 A：可复用验证环境与命令
 

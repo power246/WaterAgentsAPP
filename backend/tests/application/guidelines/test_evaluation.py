@@ -261,7 +261,8 @@ def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_miss
     with temporary_migrated_schema() as database:
         selected = database.model_copy(update={'model_catalog': catalog(max_input_tokens=8192).capabilities,
             'openai_api_key': None if independent else SecretStr('synthetic-fixture-key'), 'openai_base_url': 'https://fixture.invalid/v1',
-            **({'embedding_api_key': SecretStr('independent-fixture-key'), 'embedding_base_url': 'https://embedding.invalid/v1'} if independent else {})})
+            'embedding_api_key': SecretStr('independent-fixture-key') if independent else None,
+            'embedding_base_url': 'https://embedding.invalid/v1' if independent else None})
         result = asyncio.run(live_retrieval(selected, tmp_path / 'bundle', ROOT / 'backend/tests/fixtures/guidelines/ph_retrieval_cases.json'))
     if fail:
         assert result['status'] == 'failed' and result['reason'] == 'guideline_embedding_credentials_unavailable'

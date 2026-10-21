@@ -256,7 +256,9 @@ Here `provider: "openai"` selects the existing wire-protocol adapter; it does no
 
 The pair applies to both historical-memory and guideline embeddings: run query adapters keep their captured key, and background attempts resolve the embedding connection at their own boundary. Independent credentials come only from deployment configuration and require a restart to change; the Settings OpenAI user override continues to control analysis, and does not override the independent embedding key. With both entries unset, embeddings retain the effective OpenAI credential lease, including its OS-store override. A partially configured pair is rejected before any provider request; an embedding failure never retries against the analysis endpoint.
 
-Restart after changing configuration. Changing the model/profile rebuilds the guideline generation; historical memory retains its persisted generation until the existing Admin profile handoff/rebuild is explicitly applied. Old vectors, local documents and run snapshots are preserved; no database reset is required. This configuration support is tested with controlled HTTP services, and is not a claim that a user's Google key has been verified.
+At the exact HTTPS Google compatibility endpoint shown above, an omitted first response `index` means zero. All subsequent indices remain mandatory and must match input order; explicit invalid indices, model/count/dimension mismatches and invalid vector values are rejected. Other endpoints retain mandatory indices for every result.
+
+Restart after changing configuration. Changing the model/profile rebuilds the guideline generation; historical memory retains its persisted generation until the existing Admin profile handoff/rebuild is explicitly applied. Old vectors, local documents and run snapshots are preserved; no database reset is required. A successful provider connection does not establish guideline retrieval relevance or scientific accuracy.
 
 ### Local PostgreSQL with Compose
 
