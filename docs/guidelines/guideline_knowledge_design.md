@@ -488,11 +488,13 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 | 主题 | 可借鉴第一方资料 | 内容边界 |
 | --- | --- | --- |
 | 上下游 pH 与混合估计的限制 | [USGS PHREEQC MIX](https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-27.htm) | 混合涉及溶液组成与平衡；该资料不是仅给 pH/流量就能准确计算下游值的公式。 |
-| 酸性输入与缓冲能力 | [USGS Alkalinity and Water](https://www.usgs.gov/water-science-school/science/alkalinity-and-water) | 碱度影响酸性输入下的 pH 响应；未知碱度是缺口，不自动意味着变化大或小。 |
-| 营养物质、光照、光合作用与呼吸 | [EPA CADDIS Nutrients](https://www.epa.gov/caddis/nutrients) | 不同条件和竞争过程可能导致不同 pH/溶解氧现象；一般机理不证明本地已经发生该过程。 |
+| 酸性输入与缓冲能力 | [USGS Alkalinity and Water](https://www.usgs.gov/water-science-school/science/alkalinity-and-water) | 碱度影响酸性输入下的 pH 响应；核对碱度或 ANC 实测时须检查样品处理、滴定方法及时间/位置。`00410` 为现场 ANC；未知实测信息仍是缺口。 |
+| 营养物质、光照、光合作用与呼吸 | [EPA CADDIS Nutrients](https://www.epa.gov/caddis/nutrients)、[EPA CADDIS pH](https://www.epa.gov/caddis/ph) | 补全光合作用消耗 CO₂、呼吸/分解释放 CO₂ 经酸碱平衡影响 pH 的机制链；净效应取决于缓冲、气体交换等条件，不由溶解氧变化直接换算。 |
 | 从现象提出和比较原因 | [EPA Conceptual Diagrams](https://www.epa.gov/caddis/about-conceptual-diagrams)、[Data Analysis](https://www.epa.gov/caddis/getting-started-data-analysis) | 用可能的因果路径组织证据与缺口；箭头表示可能关系，不是无条件因果保证。 |
 
 四份实际草稿位于 [ph_guideline_drafts.json](ph_guideline_drafts.json)，均包含现象、机制、条件、线索、替代解释和估值边界，已通过领域内容/来源/model-view 校验，**尚待用户明确批准，未纳入生产 bundle**。M11 于 2026-10-21 核对 USGS 两页及 EPA 概念图；EPA Nutrients 可读索引片段支持所用条件化表述，直接全文请求失败。当前 Data Analysis 页面也无法直接获取，草稿明确引用可读的 EPA 官方 2021 存档，不将其声称为最新政策。用户自编内容仍可无外部来源。
+
+2026-10-21 按审查反馈补充第二、三稿，并直接核对 EPA pH 的 Overview、When to List / High pH 及 Conceptual Diagrams / Low pH；新增来源 ID `EPA_PH`，保留原 `EPA_NUTRIENTS`。当前内容 packet 与原始送审 packet 不同，仍须检查修改后的完整正文与出处；版本号保持未发布的 v1。
 
 `backend/scripts/guideline_evaluation.py` 的 `drafts/bundle` 将人工批准绑定规范化内容 packet、逐主题版本/digest 和 reviewer/time；JSON 缩进/Windows 换行不改变内容身份，正文或出处变化使旧批准失效。`retrieval` 仅接受非空已审核 bundle，在专用测试库临时 schema 使用现有 worker、generation 和 SQL 排序，记录 12 条中英文标注问题的 profile、top-3、漏检及负例误命中；文档/查询分别沿用 worker/online 超时，未获得真实结果前不调整 cutoff。
 

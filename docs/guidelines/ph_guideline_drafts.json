@@ -32,7 +32,7 @@
         "keywords": ["碱度", "酸性输入", "缓冲", "alkalinity", "acid", "buffering"],
         "language": "mixed",
         "source_kind": "reference_derived",
-        "body_markdown": "## 现象\n相似的酸性输入下，不同水体的 pH 响应可能不同；pH 读数本身不能替代碱度测量。\n\n## 可能机制\nUSGS 将碱度解释为水体中和酸、抵抗 pH 改变的能力；碳酸氢盐等组分会影响这一能力。[source:USGS_ALKALINITY]\n\n## 适用条件\n只有酸性输入及相关时空联系有证据时，才将该路径用于本次解释。较强缓冲可能减弱响应，但不能据一般机制确定本次幅度。\n\n## 观察线索\n核对碱度实测、酸性输入的时间与位置、输入前后的 pH 和流量、流域地质等；区分测得的碱度与从地质背景作出的推测。\n\n## 例外与替代解释\n地质和土地利用只能提供背景，不能保证某站某时的碱度。混合、途中其他输入、生物过程和时间不匹配也可能造成相似变化。\n\n## 估值注意事项\n未知碱度是信息缺口，不自动说明 pH 变化大或小。不凭此资料生成酸负荷、碱度或精确 pH；沿用原同指标锚点和点值/范围资格规则。\n",
+        "body_markdown": "## 现象\n相似的酸性输入下，不同水体的 pH 响应可能不同；pH 读数本身不能替代碱度测量。\n\n## 可能机制\nUSGS 将碱度解释为水体中和酸、抵抗 pH 改变的能力；碳酸氢盐等组分会影响这一能力。[source:USGS_ALKALINITY]\n\n## 适用条件\n只有酸性输入及相关时空联系有证据时，才将该路径用于本次解释。较强缓冲可能减弱响应，但不能据一般机制确定本次幅度。\n\n## 观察线索\n核对碱度或酸中和能力（ANC）实测，并检查样品处理、滴定方法及时间和位置是否匹配。同时核对酸性输入的时间与位置、输入前后的 pH 和流量、流域地质等；区分实测结果与从地质背景作出的推测。\n\n## 例外与替代解释\n地质和土地利用只能提供背景，不能保证某站某时的碱度。混合、途中其他输入、生物过程和时间不匹配也可能造成相似变化。\n\n## 估值注意事项\n未知碱度是信息缺口，不自动说明 pH 变化大或小。不凭此资料生成酸负荷、碱度或精确 pH；沿用原同指标锚点和点值/范围资格规则。\n",
         "sources": [{"source_id":"USGS_ALKALINITY","title":"USGS Water Science School — Alkalinity and Water","url":"https://www.usgs.gov/water-science-school/science/alkalinity-and-water","locator":"Alkalinity and Acid Neutralizing Capacity; What affects alkalinity?; Measuring alkalinity","accessed_date":"2026-10-21"}]
       }
     },
@@ -49,8 +49,11 @@
         "keywords": ["光合作用", "呼吸", "营养物质", "昼夜", "photosynthesis", "respiration", "nutrients"],
         "language": "mixed",
         "source_kind": "reference_derived",
-        "body_markdown": "## 现象\npH 或溶解氧随时段变化时，可把生产与呼吸列为候选路径；单个高值或低值不能据此诊断原因。\n\n## 可能机制\nEPA CADDIS 描述：在光照等条件适合时，营养物质可促进植物或藻类生产；增强的光合作用可能提高 pH 和溶解氧，增强的呼吸会耗氧，尤其当光合作用受限时。[source:EPA_NUTRIENTS]\n\n## 适用条件\n该路径取决于光照、生产者和微生物等条件。不能仅因营养物质偏高就断定 pH 必定上升，也不能把耗氧现象直接换算为 pH 降幅。\n\n## 观察线索\n比较同一地点匹配时段的 pH、溶解氧、温度、光照或昼夜时段、藻类及营养物质信息；注明没有观测的环节。\n\n## 例外与替代解释\n遮阴、浑浊、混合、酸碱缓冲、其他输入和采样时差可能改变或掩盖该模式。相同现象也可能由其他路径产生。\n\n## 估值注意事项\n机制只用于条件化解释与不确定性说明，不产生本次事实，不强迫给出 pH 点值；没有合格同指标锚点时保持原范围输出要求。\n",
-        "sources": [{"source_id":"EPA_NUTRIENTS","title":"US EPA CADDIS — Nutrients","url":"https://www.epa.gov/caddis/nutrients","locator":"Overview; Conceptual Diagrams: production, light limitation, respiration and pH","accessed_date":"2026-10-21"}]
+        "body_markdown": "## 现象\npH 或溶解氧随时段变化时，可把生产与呼吸列为候选路径；单个高值或低值不能据此诊断原因。\n\n## 可能机制\nEPA CADDIS 描述：在光照等条件适合时，营养物质可促进植物或藻类生产；增强的光合作用可能提高 pH 和溶解氧，增强的呼吸会耗氧，尤其当光合作用受限时。[source:EPA_NUTRIENTS]\n\n光合作用消耗水中 CO₂，可使 pH 上升；呼吸和分解释放 CO₂，经水中的酸碱平衡可使 pH 下降。实际方向和幅度取决于这些过程的净效应、缓冲能力和气体交换等条件，不能由溶解氧变化直接换算。[source:EPA_PH]\n\n## 适用条件\n该路径取决于光照、生产者和微生物等条件。不能仅因营养物质偏高就断定 pH 必定上升，也不能把耗氧现象直接换算为 pH 降幅。\n\n## 观察线索\n比较同一地点匹配时段的 pH、溶解氧、温度、光照或昼夜时段、藻类及营养物质信息；注明没有观测的环节。\n\n## 例外与替代解释\n遮阴、浑浊、混合、酸碱缓冲、其他输入和采样时差可能改变或掩盖该模式。相同现象也可能由其他路径产生。\n\n## 估值注意事项\n机制只用于条件化解释与不确定性说明，不产生本次事实，不强迫给出 pH 点值；没有合格同指标锚点时保持原范围输出要求。\n",
+        "sources": [
+          {"source_id":"EPA_NUTRIENTS","title":"US EPA CADDIS — Nutrients","url":"https://www.epa.gov/caddis/nutrients","locator":"Overview; Conceptual Diagrams: production, light limitation, respiration and pH","accessed_date":"2026-10-21"},
+          {"source_id":"EPA_PH","title":"US EPA CADDIS — pH","url":"https://www.epa.gov/caddis/ph","locator":"Overview; When to List: High pH — Sources and Activities; Conceptual Diagrams: Low pH — buffering and respiration","accessed_date":"2026-10-21"}
+        ]
       }
     },
     {
