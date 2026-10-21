@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from unittest.mock import patch
 
 import httpx
 
@@ -7,6 +8,7 @@ from app.infrastructure.persistence.database import create_database_engine
 from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
 from app.infrastructure.persistence.memory_store import InMemoryTranscriptStore
 from tests.m4_support import create_test_app
+from tests.guideline_bundle_support import EmptyBundledSource
 
 GUIDELINE_METHODS = {
     "/api/guidelines": {"get", "post"},
@@ -29,8 +31,9 @@ async def guideline_client(settings, *, repository=None):
     application = create_test_app(AppSettings(_env_file=None),
         transcript_store=InMemoryTranscriptStore(), guideline_repository=active_repository, shutdown_grace_period=0)
     try:
-        async with application.router.lifespan_context(application):
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://localhost:8000") as client:
-                yield application, client, active_repository
+        with patch('app.infrastructure.runtime.guidelines.PackageBundledGuidelineSource',return_value=EmptyBundledSource()):
+            async with application.router.lifespan_context(application):
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://localhost:8000") as client:
+                    yield application, client, active_repository
     finally:
         await engine.dispose()

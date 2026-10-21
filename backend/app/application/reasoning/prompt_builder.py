@@ -528,6 +528,16 @@ class PromptBuilder:
             body["coverage_facts"] = coverage_facts
         if prompt.batch_prompt is not None:
             body["batch_cells"] = prompt.batch_prompt.cells
+            if any(issue.code == "series_refs_incomplete" for issue in prompt.issues):
+                body["series_reference_instruction"] = (
+                    "For each cell, series_refs must be exactly the sorted union of the "
+                    "nonempty series_refs in evidence_summaries whose evidence_ref that "
+                    "cell actually cites. Uncited summaries, seals and input dependencies "
+                    "do not contribute series_refs. Use an empty list if every cited "
+                    "summary has no series_refs. Remove unrelated entries; do not add "
+                    "unrelated evidence to justify them. Preserve numeric values, bounds, "
+                    "evidence_refs and quality flags."
+                )
             if prompt.required_support_reference_groups:
                 body["required_support_reference_groups"] = prompt.required_support_reference_groups
                 body["support_reference_instruction"] = (

@@ -74,6 +74,7 @@ class HoldoutCase(DomainModel):
     topology_source: NonEmptyString
     topology_digest: NonEmptyString
     window: TimeRange
+    acquisition_window: TimeRange | None = None
     truth_kind: Literal['instant', 'available_readings_mean']
     instant: datetime | None = None
     expected_cadence_seconds: int | None = None
@@ -91,15 +92,18 @@ class HoldoutCase(DomainModel):
             raise ValueError('holdout requires aware timestamps and a nonempty window')
         if len({r.record_id for r in self.observations}) != len(self.observations):
             raise ValueError('duplicate observation identity')
-        if not self.heldout:
+        if not self.truth_observations:
             raise ValueError('holdout has no target observations')
+        acquisition=self.input_window
+        if acquisition.start>self.window.start or acquisition.end<self.window.end:
+            raise ValueError('acquisition window must contain the scoring window')
         if self.truth_kind == 'instant' and (self.instant is None or self.instant.tzinfo is None
-                or len(self.heldout) != 1 or self.heldout[0].observed_time != self.instant):
+                or len(self.truth_observations) != 1 or self.truth_observations[0].observed_time != self.instant):
             raise ValueError('instant truth requires exactly one matching measurement')
         if self.truth_kind == 'available_readings_mean' and self.instant is not None:
             raise ValueError('window truth cannot be labelled an instant')
         if any(r.location.station_id not in {self.target_station, *self.upstream_stations}
-               or r.observed_time is None or not self.window.contains(r.observed_time) for r in self.observations):
+               or r.observed_time is None or not acquisition.contains(r.observed_time) for r in self.observations):
             raise ValueError('observation is outside the declared site/window')
         return self
 
@@ -109,6 +113,14 @@ class HoldoutCase(DomainModel):
                      and r.parameter.code_system == 'usgs' and r.parameter.code in PH_CODES)
 
     @property
+    def input_window(self):
+        return self.acquisition_window or self.window
+
+    @property
+    def truth_observations(self):
+        return tuple(r for r in self.heldout if r.observed_time is not None and self.window.contains(r.observed_time))
+
+    @property
     def visible(self):
         removed = {r.record_id for r in self.heldout}
         return tuple(r for r in self.observations if r.record_id not in removed)
@@ -116,11 +128,11 @@ class HoldoutCase(DomainModel):
     @property
     def truth(self):
         if self.truth_kind == 'instant':
-            return Decimal(self.heldout[0].value)
+            return Decimal(self.truth_observations[0].value)
         registry = load_parameter_capability_registry()
         observations = tuple(build_policy_observation(registry, r,
             SourceRecordReference(item_id='holdout-source', record_id=r.record_id),
-            provider_name=ParameterProvider.WDFN_TIME_SERIES.value) for r in self.heldout)
+            provider_name=ParameterProvider.WDFN_TIME_SERIES.value) for r in self.truth_observations)
         if any(r is None for r in observations):
             raise ValueError('target observations are not supported by the production policy')
         outcome = aggregate_observations(registry, registry.get(self.heldout[0].parameter), observations,
@@ -177,9 +189,12 @@ def audit_inputs(case: HoldoutCase, artifacts: tuple[EvidenceArtifact, ...], *, 
     if any(Decimal(n) in target_values
            for n in re.findall(r'(?<![\w.])-?\d+(?:\.\d+)?(?![\w.])', question)):
         raise ValueError('question contains a heldout value')
-    return digest({'observations': [r.model_dump(mode='json') for r in sorted(case.visible, key=lambda r: r.record_id)],
+    payload={'observations': [r.model_dump(mode='json') for r in sorted(case.visible, key=lambda r: r.record_id)],
                    'artifacts': [a.model_dump(mode='json') for a in sorted(artifacts, key=lambda a: a.artifact_id)], 'question': question,
-                   'sealed_channels': sorted(sealed_channels), 'window': case.window.model_dump(mode='json')})
+                   'sealed_channels': sorted(sealed_channels), 'window': case.window.model_dump(mode='json')}
+    if case.acquisition_window is not None:
+        payload['acquisition_window']=case.acquisition_window.model_dump(mode='json')
+    return digest(payload)
 
 
 def prepared_inputs(case: HoldoutCase):
@@ -187,6 +202,7 @@ def prepared_inputs(case: HoldoutCase):
     artifacts = tuple(EvidenceArtifact(artifact_id=r.record_id, kind='raw', observation_refs=(r.record_id,)) for r in visible)
     fingerprint = audit_inputs(case, artifacts, sealed_channels=SEALED_CHANNELS)
     return {'case_id': case.case_id, 'input_digest': fingerprint, 'window': case.window.model_dump(mode='json'),
+            'acquisition_window':case.input_window.model_dump(mode='json'),
             'observations': [r.model_dump(mode='json') for r in visible],
             'artifacts': [a.model_dump(mode='json') for a in artifacts], 'sealed_channels': sorted(SEALED_CHANNELS)}
 

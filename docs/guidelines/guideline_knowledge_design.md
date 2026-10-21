@@ -290,7 +290,7 @@ M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标�
 | --- | --- |
 | 每 session 基础检索次数 | 1；在首次实际需要模型时惰性执行，相关 phase 复用 |
 | 返回说明书数 | 最多 3 份完整文档 |
-| `semantic_min_similarity` | 初始 0.35，使用所选模型的标注检索案例核对/校准 |
+| `semantic_min_similarity` | 通用初始值 0.35；当前本地 Google 1536 维 v3/四篇 pH 资料采用经 12+8 题核对的 0.79，不推定适用于其他模型/语料 |
 | guideline prompt budget | 每请求最多估计 3,072 input tokens，且不超过剩余模型容量；保留原 evidence/output 预算 |
 | query text | 最多 8,192 UTF-8 bytes，按固定字段预算构造；不截断任意用户正文来制造不同含义 |
 | 单次在线 retrieval deadline | 最多 3 秒，并受现有 session 剩余 deadline 约束；默认不在线重试 |
@@ -494,7 +494,7 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 
 按 [AGENT.md](../../AGENT.md) 构建前端并升级数据库；当前迁移 head 为 `20261021_01`，含原说明书迁移 `20261020_02` 及 v3 关系索引。浏览器 `/guidelines` 提供双库列表、草稿保存、检查发布、准备状态/重试、停用/启用和显式恢复。自编内容可以无出处；整理资料须填写出处。检查对话框展示服务器保存版本，发布绑定其 digest；准备成功前新版本不进入有效目录。查看运行的参考资料使用 transcript 保存版本，不读取当前资料库替换旧正文。
 
-配置来源为 `AppSettings.guideline_policy` 和模型目录的 embedding 条目；适配器支持同时配置 `WATERAGENTS_EMBEDDING_BASE_URL` 与 `WATERAGENTS_EMBEDDING_API_KEY`，让 guideline/M8 的在线与后台 embedding 使用独立的 OpenAI-compatible 服务。两项均不设置时沿用 `WATERAGENTS_OPENAI_BASE_URL` 及现有 OpenAI credential lease；只设置一项会拒绝启动，不混用地址/密钥。独立密钥由本地 deployment 配置提供，修改后重启；设置页 OpenAI 用户密钥不会覆盖它，当前 run/attempt 持有固定快照。分析模型仍使用原 `OPENAI_*` 与用户密钥优先规则。示例见 [backend/README.md](../../backend/README.md#independent-embedding-service)。仅分析模型可调用不代表同一服务提供 embedding。`WATERAGENTS_MEMORY_ENABLED=false` 关闭历史 memory，不关闭说明书。需要调整时可在本地设置 `WATERAGENTS_GUIDELINE_POLICY` JSON（例如 `'{"worker_max_concurrency":1}'`）；未指定项沿用 `GuidelinePolicy` 默认值。默认 top-k=3、cosine cutoff=0.35、知识预算=3072 tokens，在线单次最多 3 秒；后台并发 2、单次 20 秒、最多 3 次，退避 2/10 秒。cutoff 尚未由真实首批资料标注集校准。
+配置来源为 `AppSettings.guideline_policy` 和模型目录的 embedding 条目；适配器支持同时配置 `WATERAGENTS_EMBEDDING_BASE_URL` 与 `WATERAGENTS_EMBEDDING_API_KEY`，让 guideline/M8 的在线与后台 embedding 使用独立的 OpenAI-compatible 服务。两项均不设置时沿用 `WATERAGENTS_OPENAI_BASE_URL` 及现有 OpenAI credential lease；只设置一项会拒绝启动，不混用地址/密钥。独立密钥由本地 deployment 配置提供，修改后重启；设置页 OpenAI 用户密钥不会覆盖它，当前 run/attempt 持有固定快照。分析模型仍使用原 `OPENAI_*` 与用户密钥优先规则。示例见 [backend/README.md](../../backend/README.md#independent-embedding-service)。仅分析模型可调用不代表同一服务提供 embedding。`WATERAGENTS_MEMORY_ENABLED=false` 关闭历史 memory，不关闭说明书。需要调整时可在本地设置 `WATERAGENTS_GUIDELINE_POLICY` JSON（例如 `'{"worker_max_concurrency":1}'`）；未指定项沿用 `GuidelinePolicy` 默认值。默认 top-k=3、cosine cutoff=0.35、知识预算=3072 tokens，在线单次最多 3 秒；后台并发 2、单次 20 秒、最多 3 次，退避 2/10 秒。通用默认 cutoff 不代表已校准；当前本地 Google 1536 维 v3/四篇 pH 资料经原 12 题和独立 8 题核对采用 0.79，详见 backend README。
 
 草稿仍可在 embedding 不可用时保存。先修正本地服务、模型与密钥，再按需重启、对原批准版本显式重试；不能通过重新批准或改写版本解决供应商错误。版本/索引重建保留旧快照、用户 override 和历史引用；启动导入不删除资源包中缺失的用户内容。不执行业务库重置或自动 purge。
 
@@ -511,15 +511,17 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 | 营养物质、光照、光合作用与呼吸 | [EPA CADDIS Nutrients](https://www.epa.gov/caddis/nutrients)、[EPA CADDIS pH](https://www.epa.gov/caddis/ph) | 补全光合作用消耗 CO₂、呼吸/分解释放 CO₂ 经酸碱平衡影响 pH 的机制链；净效应取决于缓冲、气体交换等条件，不由溶解氧变化直接换算。 |
 | 从现象提出和比较原因 | [EPA Conceptual Diagrams](https://www.epa.gov/caddis/about-conceptual-diagrams)、[Data Analysis](https://www.epa.gov/caddis/getting-started-data-analysis) | 用可能的因果路径组织证据与缺口；箭头表示可能关系，不是无条件因果保证。 |
 
-四份实际草稿位于 [ph_guideline_drafts.json](ph_guideline_drafts.json)，均包含现象、机制、条件、线索、替代解释和估值边界，已通过领域内容/来源/model-view 校验，**尚待用户明确批准，未纳入生产 bundle**。M11 于 2026-10-21 核对 USGS 两页及 EPA 概念图；EPA Nutrients 可读索引片段支持所用条件化表述，直接全文请求失败。当前 Data Analysis 页面也无法直接获取，草稿明确引用可读的 EPA 官方 2021 存档，不将其声称为最新政策。用户自编内容仍可无外部来源。
+四份首批资料的可审查输入位于 [ph_guideline_drafts.json](ph_guideline_drafts.json)，均包含现象、机制、条件、线索、替代解释和估值边界，已通过领域内容/来源/model-view 校验。用户于 2026-10-21 明确批准当前四份 v1 纳入内置库，批准绑定 packet `sha256:7be03c684261704b0713327473828c0efd87c2ed7617440456b8f63c18d0b72b`；正文/出处未改变，实际批准版本、reviewer、时间和 digest 保存于 [生产 manifest](../../backend/app/infrastructure/guidelines/bundled/manifest.json)。输入文件仅更新审核状态，不改变内容 packet。M11 核对 USGS 两页及 EPA 概念图；EPA Nutrients 可读索引片段支持所用条件化表述，直接全文请求失败。Data Analysis 引用可读的 EPA 官方 2021 存档，不将其声称为最新政策。用户自编内容仍可无外部来源。
 
-2026-10-21 按审查反馈补充第二、三稿，并直接核对 EPA pH 的 Overview、When to List / High pH 及 Conceptual Diagrams / Low pH；新增来源 ID `EPA_PH`，保留原 `EPA_NUTRIENTS`。当前内容 packet 与原始送审 packet 不同，仍须检查修改后的完整正文与出处；版本号保持未发布的 v1。
+2026-10-21 按审查反馈补充第二、三稿，并直接核对 EPA pH 的 Overview、When to List / High pH 及 Conceptual Diagrams / Low pH；新增来源 ID `EPA_PH`，保留原 `EPA_NUTRIENTS`。用户批准的是该修订后的完整正文与出处，四份均发布为 v1；任何后续内容修改仍需重新批准。
 
 `backend/scripts/guideline_evaluation.py` 的 `drafts/bundle` 将人工批准绑定规范化内容 packet、逐主题版本/digest 和 reviewer/time；JSON 缩进/Windows 换行不改变内容身份，正文或出处变化使旧批准失效。`retrieval` 仅接受非空已审核 bundle，在专用测试库临时 schema 使用现有 worker、generation 和 SQL 排序，记录 12 条中英文标注问题的 profile、top-3、漏检及负例误命中；文档/查询分别沿用 worker/online 超时，未获得真实结果前不调整 cutoff。
 
-公开调查计划和冻结输入为 `backend/tests/fixtures/guidelines/ph_{survey_plan,holdout_cases}.json`：Potomac 两个日期窗口（目标 USGS-01646500，上游 USGS-01638500）及 Delaware 一个缺上游 pH 的窗口（目标 USGS-01463500，上游 USGS-01457500），均以 NLDI UT 核对连接、以 USGS OGC 原始观测保留来源。目标分别有 23/24/6 个样本，比较统计只表示可用读数的均值，不代表整窗连续真值或多个独立流域的普遍效果。
+真实配对入口为 `backend/scripts/guideline_live_pairs.py`，显式 `--allow-live` 后才执行。它在专用测试库临时 schema 使用生产 app/HTTP/SSE、M5 数值门槛、M6/M7 调度、模型适配器和持久化；冻结 query 和首份真实 NLDI 拓扑，观察端口只返回公开 fixture 的 visible 记录，额外采集与历史 RAG 关闭，目标 pH 不进入拓扑资格或模型输入。拓扑范围沿原调查计划为 100 km，其他并发/数值预算保持固定；六小时真值对应整天输出中的同一 UTC 窗口。历史时钟只回放日期契约，HTTP 截止时间按同一时钟转换为实际剩余秒数，不更改或延长预算。状态轮询只读状态/计数，完整解析在终态后执行；异常退出也保存原始快照，失败/取消不能冒充完整配对。`guideline_live_review.py` 只审计保存结果，核对两臂初始科学上下文/拓扑/模型、实际原文 delivery/usage、原始观测与 measured anchor 闭包；非 mean 点值明确列为统计不可比，范围覆盖仅描述观测可用样本均值，不声称校准覆盖率。供应商权重、随机抽样及小样本限制单独记录。
 
-`guideline_holdout.py` 从模型可见快照排除目标 pH，检查 observation/derivation 引用、其他水体副本、RAG/cache/context/例子与目标均值泄漏，输出固定 input digest 与须封闭的外部渠道；真值计算复用既有 aggregation policy。`guideline_pair_review.py` 审计保存的 request/delivery/usage 与两臂科学输入、模型/version/budget 一致性，`score` 区分点误差、范围、失败和时间/统计不可比，保留拒绝项。它们是输入准备及已保存运行审计/评分工具，**不会自行调度完整水体 workflow 或证明实际 provider dispatch**；任意文字转述的来源仍需人工检查。真实配对和解释质量评价尚未运行，生产数值资格规则未修改。
+公开调查计划和冻结输入为 `backend/tests/fixtures/guidelines/ph_{survey_plan,holdout_cases,holdout_acquisition_cases}.json`：Potomac 两个日期窗口（目标 USGS-01646500，上游 USGS-01638500）及 Delaware 一个缺上游 pH 的窗口（目标 USGS-01463500，上游 USGS-01457500），均以 NLDI UT 核对连接、以 USGS OGC 原始观测保留来源。真实运行使用 acquisition 输入以满足既有整天采集契约，隔离目标站整天 95/96/24 个 pH，仅评分原窗口 23/24/6 个样本。比较统计只表示可用读数均值，不代表整窗连续真值或多个独立流域的普遍效果。
+
+`guideline_holdout.py` 从模型可见快照排除目标 pH，检查 observation/derivation 引用、其他水体副本、RAG/cache/context/例子与目标均值泄漏，输出固定 input digest 与须封闭的外部渠道；真值计算复用既有 aggregation policy。`guideline_pair_review.py` 审计保存的 request/delivery/usage 与两臂科学输入、模型/version/budget 一致性，`score` 区分点误差、范围、失败和时间/统计不可比，保留拒绝项。这些离线工具不调度 provider；真实调度由上述 live-pairs 入口执行。2026-10-22 完成三对真实运行及解释检查，六个评分窗口均为范围，两例实际采用已批准内容，一例未命中；Potomac 第二天两臂均漏掉观测均值。原 128 节点拓扑预算未到达候选上游 pH 站，不能声称已验证有同指标 anchor 的点精度。结果、初次失败及限制见现有 TODO；数值资格规则未放宽。
 
 embedding 检索原理参考 [Sentence Transformers Semantic Search](https://www.sbert.net/examples/sentence_transformer/applications/semantic-search/README.html)：查询和文档使用兼容向量空间匹配相关内容。该引用不表示选定 Sentence Transformers 库或某个权重；当前工程优先复用已配置的 embedding 供应商能力。
 

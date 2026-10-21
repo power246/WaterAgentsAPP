@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "status": "awaiting_human_review",
+  "status": "approved_for_bundled_distribution",
   "drafts": [
     {
       "bundle_key": "ph.mixing-transport",

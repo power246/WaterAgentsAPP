@@ -29,6 +29,7 @@ from app.infrastructure.credentials.embedding import embedding_api_key, embeddin
 from app.infrastructure.guidelines.bundled_source import PackageBundledGuidelineSource
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
+from app.infrastructure.runtime.event_loop import configure_asyncio_event_loop
 from app.ports import PortAuthenticationError
 from scripts.guideline_holdout import HoldoutCase, compact_dataset, load_cases, prepared_inputs, score_prediction, Prediction
 from scripts.guideline_pair_review import RecordedArm, review_pair
@@ -149,17 +150,28 @@ async def live_retrieval(settings, bundle_path, cases_path):
             for case in load_json(cases_path):
                 keys = tuple(ParameterKey.model_validate(k) for k in case['parameter_keys'])
                 query = CanonicalGuidelineQueryV1(profile_id=profile.profile_id, instructions=profile.query_instructions,
-                    parameter_keys=keys, mode='prediction', question=case['question'])
+                    parameter_keys=keys, mode=case.get('mode', 'prediction'), question=case['question'],
+                    scenario_tags=tuple(case.get('scenario_tags', ())), task_facts=tuple(case.get('task_facts', ())))
                 query.require_registered_parameters(load_parameter_capability_registry())
+                queries = (query,)
+                if case.get('aspects'):
+                    from app.application.guidelines.search_skill import GuidelineSearchArguments
+                    arguments = GuidelineSearchArguments(query=case['question'], aspects=case['aspects'])
+                    queries = tuple(CanonicalGuidelineQueryV1.model_validate(
+                        query.model_dump() | {'question': aspect}) for aspect in arguments.aspects)
                 library, candidates = await repository.retrieval_counts(catalog, keys)
                 ranked = ()
                 if candidates:
-                    result = await query_counted.embed(profile, (query,), asyncio.get_running_loop().time() + settings.guideline_policy.online_timeout_seconds, None)
-                    ranked = await repository.rank_guidelines(catalog, keys, result.vectors[0], cutoff=0, limit=3)
+                    from app.application.guidelines.embedding import distinct_query_vectors
+                    result = await query_counted.embed(profile, queries, asyncio.get_running_loop().time() + settings.guideline_policy.online_timeout_seconds, None)
+                    vectors = distinct_query_vectors(result.vectors)
+                    ranked = await repository.rank_guidelines(catalog, keys,
+                        vectors[0] if len(vectors) == 1 else vectors, cutoff=0, limit=3)
                 selected = [m.version.identity.bundle_key for m in ranked if m.similarity >= settings.guideline_policy.semantic_min_similarity]
                 expected = set(case['expected'])
                 report['cases'].append({'id': case['id'], 'question': case['question'], 'expected': sorted(expected),
                     'library_count': library, 'metadata_candidates': candidates, 'query_digest': query.canonical_digest,
+                    'embedding_inputs': len(queries),
                     'ranking': [{'key': m.version.identity.bundle_key, 'similarity': m.similarity} for m in ranked],
                     'selected': selected, 'missed': sorted(expected - set(selected)), 'unexpected': sorted(set(selected) - expected)})
             report['status'] = 'completed'
@@ -325,6 +337,7 @@ def main(argv=None):
 
 
 if __name__ == '__main__':
+    configure_asyncio_event_loop()
     try:
         exit_code = main()
     except Exception:

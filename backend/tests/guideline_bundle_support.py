@@ -7,6 +7,11 @@ from app.domain.guidelines.identity import bundled_guideline_id, bundled_guideli
 from tests.guideline_support import content, version
 
 
+class EmptyBundledSource:
+    def read_versions(self):
+        return ()
+
+
 def bundled_version(number=1, *, key="fixture.mechanism", selected_content=None):
     root = bundled_guideline_id(key)
     selected_identity = GuidelineIdentity(guideline_id=root, family_root_id=root, origin="bundled", bundle_key=key)

@@ -29,7 +29,11 @@ def settings():
 
 
 def test_production_package_has_no_unreviewed_or_fixture_approval():
-    assert PackageBundledGuidelineSource().read_versions() == ()
+    versions = PackageBundledGuidelineSource().read_versions()
+    assert len(versions) == 4
+    assert all(v.review.review_confirmed and v.review.content_digest == v.content.content_digest for v in versions)
+    assert all(v.review.reviewer == 'project-user-explicit-approval' for v in versions)
+    assert all(not v.identity.bundle_key.startswith('fixture.') for v in versions)
 
 
 def test_fixture_resource_is_review_bound_and_stable(tmp_path):
@@ -149,8 +153,9 @@ def test_import_is_idempotent_and_only_prepares_approved_content(settings, tmp_p
             assert bad.error_codes and not bad.receipts
             assert await repository.read_effective_versions(await repository.read_catalog(), (PH,)) == (approved,)
             async with repository._engine.connect() as connection:
-                assert await connection.scalar(text("SELECT count(*) FROM guideline_versions")) == 1
-                assert await connection.scalar(text("SELECT count(*) FROM guideline_operations WHERE kind = 'import_bundled'")) == 1
+                expected = 1 + len(PackageBundledGuidelineSource().read_versions())
+                assert await connection.scalar(text("SELECT count(*) FROM guideline_versions")) == expected
+                assert await connection.scalar(text("SELECT count(*) FROM guideline_operations WHERE kind = 'import_bundled'")) == expected
         finally:
             await repository.aclose()
     asyncio.run(exercise())

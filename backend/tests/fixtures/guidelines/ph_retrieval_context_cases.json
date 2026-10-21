@@ -1,0 +1,273 @@
+[
+  {
+    "id": "gap_transfer",
+    "question": "Estimate missing six-hour mean river pH with available discharge and upstream observations, retaining uncertainty.",
+    "aspects": [
+      "Conditions and limits of transferring upstream pH measurements to estimate missing downstream pH",
+      "Uncertainty of estimating river pH from discharge when local acid-base and buffering measurements are unavailable"
+    ],
+    "expected": [
+      "ph.mixing-transport"
+    ],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "gap_contextual_flow",
+    "question": "How can flow observations inform missing river pH without being treated as pH measurements?",
+    "aspects": [
+      "Discharge can contextualize transport and dilution when estimating missing river pH, but cannot determine pH without acid-base information"
+    ],
+    "expected": [
+      "ph.mixing-transport"
+    ],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "gap_buffering",
+    "question": "Estimate pH response to acid input with unknown buffering capacity.",
+    "aspects": [
+      "Missing alkalinity or acid-neutralizing capacity limits estimation of river pH response to an acid input"
+    ],
+    "expected": [
+      "ph.acid-buffering"
+    ],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "gap_diel",
+    "question": "Infer missing afternoon river pH with light and dissolved oxygen as contextual evidence.",
+    "aspects": [
+      "Photosynthesis and respiration affect carbon dioxide and pH, but oxygen changes cannot be directly converted to pH"
+    ],
+    "expected": [
+      "ph.photosynthesis-respiration"
+    ],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "gap_alternatives",
+    "question": "How should a pH estimate distinguish possible causes when local evidence is incomplete?",
+    "aspects": [
+      "Compare acid input, mixing, buffering and biological explanations for missing river pH while preserving alternative causes and uncertainty"
+    ],
+    "expected": [
+      "ph.compare-causes"
+    ],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "gap_transfer_zh",
+    "question": "用上游读数估计下游缺失的六小时平均 pH，哪些条件限制空间迁移？",
+    "aspects": [
+      "将上游 pH 实测迁移到下游缺测时间窗时，混合、传输和未知缓冲条件如何限制估值"
+    ],
+    "expected": [
+      "ph.mixing-transport"
+    ],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "office_context",
+    "question": "What time does the library office open on weekends?",
+    "expected": [],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "instrument_context",
+    "question": "What exact screw driver and replacement battery does this pH meter require?",
+    "expected": [],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "invoice_context",
+    "question": "Which invoice code should be used to buy a pH probe?",
+    "expected": [],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "software_context",
+    "question": "How do I change the display font in the pH dashboard software?",
+    "expected": [],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "shipping_context",
+    "question": "How long will shipping a spare pH sensor take?",
+    "expected": [],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  },
+  {
+    "id": "office_zh_context",
+    "question": "水质实验室周末办公室几点开门？",
+    "expected": [],
+    "parameter_keys": [
+      {
+        "code_system": "usgs",
+        "code": "00400"
+      }
+    ],
+    "mode": "gap_filling",
+    "scenario_tags": [
+      "gap_filling"
+    ],
+    "task_facts": [
+      "agent_comid=4512772",
+      "requested_target_comid=4512772",
+      "direct_upstream_count=1"
+    ]
+  }
+]

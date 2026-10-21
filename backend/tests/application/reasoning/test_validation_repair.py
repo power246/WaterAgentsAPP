@@ -124,6 +124,35 @@ def test_initial_invalid_repair_valid_is_correlated_and_scoped_once() -> None:
     assert outcome.audit.validated_digest == outcome.validated.validation_digest
 
 
+@pytest.mark.parametrize("corrected", [True, False])
+def test_series_repair_removes_uncited_refs_without_changing_evidence_or_numbers(corrected):
+    _skeleton, plan, catalog, validator = m7_fixture()
+    batch = plan.batch_plan.batches[0]
+    valid = batch_payload(batch, catalog)
+    invalid = copy.deepcopy(valid)
+    invalid["cells"][0]["series_refs"].append("seal:uncited:00400")
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(batch.operation_id, batch.model, invalid),
+        _completed_script(_repair_id(batch.operation_id), batch.model,
+                          valid if corrected else invalid),
+    )
+    pending = _exchange(fake, validator).run_batch(batch, cancellation=_token())
+    if corrected:
+        outcome = asyncio.run(pending)
+        assert outcome.validated.cells[0].evidence_refs == tuple(valid["cells"][0]["evidence_refs"])
+        assert outcome.validated.cells[0].representative_value == valid["cells"][0]["representative_value"]
+    else:
+        with pytest.raises(ValidationRepairFailedError) as raised:
+            asyncio.run(pending)
+        assert "series_refs_incomplete" in {issue.code for issue in raised.value.audit.repair_issues}
+    assert len(fake.calls) == 2
+    body = json.loads(fake.calls[1].messages[0].text)
+    assert "exactly the sorted union" in body["series_reference_instruction"]
+    assert "cell actually cites" in body["series_reference_instruction"]
+    assert "Remove unrelated entries" in body["series_reference_instruction"]
+    assert "Preserve numeric values" in body["series_reference_instruction"]
+
+
 @pytest.mark.parametrize("repair_kind", ["hypothesis", "omit", "enum_only"])
 def test_contextual_attribution_repair_receives_current_scope_and_stays_validated(repair_kind):
     skeleton, plan, catalog, validator = m7_fixture(attribution_context=True)

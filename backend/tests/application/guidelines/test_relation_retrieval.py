@@ -242,6 +242,7 @@ def test_synthetic_corpus_comparison_uses_only_isolated_fixture_versions():
     from tests.application.guidelines.test_embedding import catalog
     from app.infrastructure.guidelines.bundled_source import PackageBundledGuidelineSource
 
+    production_before = PackageBundledGuidelineSource().read_versions()
     with temporary_migrated_schema() as settings:
         settings = settings.model_copy(update={"model_catalog": catalog().capabilities,
             "embedding_api_key": None, "embedding_base_url": None, "openai_api_key": None})
@@ -251,7 +252,7 @@ def test_synthetic_corpus_comparison_uses_only_isolated_fixture_versions():
     assert report["relation_version_links"] > report["unique_relation_vectors"]
     assert len(report["arms"]) == 3
     assert all(len(arm["cases"]) == 10 for arm in report["arms"].values())
-    assert PackageBundledGuidelineSource().read_versions() == ()
+    assert PackageBundledGuidelineSource().read_versions() == production_before
 
 
 @pytest.mark.skipif(os.environ.get("WATERAGENTS_RELATION_LIVE_E2E") != "1", reason="Opt-in synthetic embedding comparison")

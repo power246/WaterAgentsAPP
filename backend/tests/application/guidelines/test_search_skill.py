@@ -127,7 +127,7 @@ def test_summary_v2_excludes_body_and_legacy_profile_retains_its_exact_contract(
         old.require_profile(current)
 
 
-def test_all_four_unapproved_drafts_fit_google_wire_gate_without_body_changes():
+def test_all_four_approved_topics_fit_google_wire_gate_without_body_changes():
     from scripts.guideline_evaluation import reviewed_drafts
     from app.application.guidelines.embedding import validated_guideline_texts
     from app.domain.guidelines import GuidelinePolicy, GuidelineEmbeddingProfileV1
@@ -146,7 +146,7 @@ def test_all_four_unapproved_drafts_fit_google_wire_gate_without_body_changes():
         assert len(wires) > 1
         assert all(len(wire.encode()) <= 2048 and topic["content"].body_markdown not in wire for wire in wires)
     assert path.read_bytes() == before
-    assert json.loads(before)["status"] == "awaiting_human_review"
+    assert json.loads(before)["status"] == "approved_for_bundled_distribution"
 
 
 def test_unprepared_model_request_cannot_bypass_guideline_delivery_recording():

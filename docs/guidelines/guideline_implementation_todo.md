@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–10 已完成，Milestone 11–12 为 partial**。本文是唯一实施进度清单。M12 已进行跨层审计、全栈回归和编辑器并发修复；后续已完成仅限隔离评估的四稿批准与一个真实模型成对链路（见下方补充），最终阶段出口仍依赖生产分发批准、检索质量核对及 3–5 个实测 holdout 配对，不能将本地程序检查视作整体验收。
+状态：**Milestone 0–11 已完成，Milestone 12 交付中**。本文是唯一实施进度清单。四份 v1 已获内置分发批准，真实检索已核对，三个实测 holdout 配对已完成；小样本、未命中、范围漏覆盖和拓扑预算限制均保留，完成实施不等于证明普遍精度改善。各节早期记录保留其原验证时间，以本轮最终记录为准。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -581,19 +581,19 @@ git diff --check
 
 - [x] 从主设计 §13 第一方资料重新核实原文与适用边界，准备四个独立草稿：混合/传递限制、酸性输入/缓冲、光合作用/呼吸、原因比较；保留 URL、章节/locator、访问时间。
 - [x] 每稿写清现象→可能机制→条件→观察线索→替代解释/反例→估值注意事项；区分本次事实与一般机制，不提供仅凭上游 pH/流量就保证精确的假公式。
-- [ ] 将实际草稿与出处交用户/指定人员检查；记录真实批准的 digest/version/时间，未批准或修改后未重新批准的内容继续为草稿，不纳入生产 bundle。
-- [ ] 以真实配置 embedding 执行小型中英文标注检索集，报告期望命中、实际排名、无关误命中、未命中和 profile；依据结果调整初始 cutoff/模板并按需重建 generation。
+- [x] 将实际草稿与出处交用户/指定人员检查；记录真实批准的 digest/version/时间，未批准或修改后未重新批准的内容继续为草稿，不纳入生产 bundle。2026-10-21 用户明确批准当前四份 v1 纳入内置库，实际逐项 review 保存于生产 manifest，packet 仍为 `sha256:7be03c684261704b0713327473828c0efd87c2ed7617440456b8f63c18d0b72b`。
+- [x] 以真实配置 embedding 执行小型中英文标注检索集，报告期望命中、实际排名、无关误命中、未命中和 profile；依据结果调整初始 cutoff/模板并按需重建 generation。Google 1536 维 v3：原 12 题默认门槛 0.35 有 2 个负例误命中；固定为 0.79 后，原集 9/9 正例首位命中、3/3 负例不返回，独立 8 题为 5/5 与 3/3。仅修改本地 policy 的 cutoff，不修改向量 profile 或重建；小样本限制和全部原始排名保留。
 - [x] 只读调查可获得的目标点/上游/时间配对观测，选择 3–5 个可比较 pH 案例，至少含上游信息较完整与部分信息缺失两类；不足时明确未达标，不能用预测代实测。
 - [x] 建立 holdout 清单：隔离目标实测及 raw/aggregate/其他水体副本/历史 RAG/缓存/context/说明书例子的等价泄漏；保留符合原资格的上游同指标 anchors。
-- [ ] 每例固定证据快照、provider/model/version、预算和时间语义，运行无 guideline/有 guideline 的成对比较；至少一完整配对，成本允许各重复 3 次。
-- [ ] 区分单点与时间窗统计的可比性，报告点误差的 pH 差、范围宽度/覆盖、解释质量、实际提供/采用版本和所有失败/不可比较/未运行项；不把单点实测说成整窗连续真值。
+- [x] 每例固定证据快照、provider/model/version、预算和时间语义，运行无 guideline/有 guideline 的成对比较；至少一完整配对，成本允许各重复 3 次。最终三对六臂全部完成；未执行每例三次重复，供应商仅固定模型别名，权重/随机抽样不可锁定，限制如实记录。
+- [x] 区分单点与时间窗统计的可比性，报告点误差的 pH 差、范围宽度/覆盖、解释质量、实际提供/采用版本和所有失败/不可比较/未运行项；不把单点实测说成整窗连续真值。见本节最终表，六个评分窗口均为范围，点误差不适用。
 - [x] 保存可复现的公开输入 fixture/脱敏清单和必要评估脚本源码；大输出/截图留 task-local，报告中保留反例，不承诺普遍精度提升。
 
 ### Tests
 
-- [ ] 生产 bundle 中的每项都能定位真实人工批准且 digest 一致；测试 fixture 审核信息不能混作真实批准。
+- [x] 生产 bundle 中的每项都能定位真实人工批准且 digest 一致；测试 fixture 审核信息不能混作真实批准。实际用户批准原话、逐版本 content/model-view digest 与时间保存在 manifest；发布资源与输入逐项相等及 synthetic fixture 隔离回归通过。
 - [x] 对评估脚本做必要的 holdout/leakage 检查，刻意注入重复目标 raw/aggregate/history/cached 值应被拒绝；避免只凭“输入没有 target 字段”断言隔离。
-- [x] 证明 no-guide 对照真正未提供知识、with-guide 提供的是批准版本；两组证据/模型/预算差异明确，query 不含对照答案。证据：下方 2026-10-21 整链路回归；仅一个非 holdout 案例，批准仅限隔离评估，不代表实测精度验收。
+- [x] 证明 no-guide 对照真正未提供知识、with-guide 提供的是批准版本；两组证据/模型/预算差异明确，query 不含对照答案。最终三对原始输入/context/topology/配置一致，控制臂固定空 catalog；两例实际提供并采用批准 v1，一例明确未命中。实际 payload、delivery、usage 和结果绑定审计通过。
 - [x] 用已知小数据核对评估指标、窗口匹配、无点估计/仅范围/失败等统计；合成数据只检验程序，不计入 3–5 个真实案例。
 - [x] 缺合格同指标 anchors 的案例仍遵守原 range-only/来源规则；不能为了算点误差而放宽资格或强迫模型输出单点。
 - [x] 真实 embedding、真实分析模型及实测核对分别记录，未配置、费用/服务限制或样本不足保留 `not run`，不能以 fake 通过代替。
@@ -605,7 +605,7 @@ Invoke-GuidelinePytest -Stage gk-m11 -Paths @('backend/tests/application/guideli
 git diff --check
 ```
 
-已实现的独立工具如下（从 `backend/` 执行；输出只留 `.tmp`）。本次实际执行了 `drafts`、只读 `discover`、`audit` 和程序测试；`bundle/retrieval/score/verify-pairs` 对真实内容/运行尚未执行，后两项只审计已有结果，不自动产生模型运行。
+独立工具如下（从 `backend/` 执行；输出只留 `.tmp`）。已实际执行草稿核对、批准导出、公开输入调查/审计、真实检索和 live-pairs/live-review。旧 `score/verify-pairs` 是另一种保存输入格式的离线入口，本轮原生 transcript 由 live-review 审计评分，不冒称执行过未使用的 CLI。
 
 ```powershell
 .venv/Scripts/python.exe -m scripts.guideline_evaluation drafts --drafts ../docs/guidelines/ph_guideline_drafts.json --output ../.tmp/guidelines-m11-20261021/review-packet.json
@@ -615,15 +615,17 @@ git diff --check
 .venv/Scripts/python.exe -m scripts.guideline_evaluation retrieval --bundle-root app/infrastructure/guidelines/bundled --cases tests/fixtures/guidelines/ph_retrieval_cases.json --output ../.tmp/guidelines-m11-20261021/real-retrieval.json
 .venv/Scripts/python.exe -m scripts.guideline_evaluation score --help
 .venv/Scripts/python.exe -m scripts.guideline_evaluation verify-pairs --help
+.venv/Scripts/python.exe -m scripts.guideline_live_pairs --dataset tests/fixtures/guidelines/ph_holdout_acquisition_cases.json --metadata-root tests/fixtures/guidelines/ph_sites --output ../.tmp/guidelines-finish-20261021/live-pairs-repaired --allow-live
+.venv/Scripts/python.exe -m scripts.guideline_live_review --dataset tests/fixtures/guidelines/ph_holdout_acquisition_cases.json --runs-root ../.tmp/guidelines-finish-20261021/live-pairs-repaired --output ../.tmp/guidelines-finish-20261021/comparison-repaired.json
 ```
 
-批准记录须包含 `packet_digest`、逐 topic 的 `version/content_digest`、显式 `review_confirmed=true`、`reviewer/review_note/reviewed_at`；`bundle --drafts <packet> --approval <actual-human-record> --bundle-root <resources> --output <task-local-report>` 才能导出。评估 input/outputs 的类型和保存运行契约见 `guideline_holdout.py` / `guideline_pair_review.py`，不得用合成响应代替实际模型输出。尚无合格真实 paired-run 导出；完成它们后再运行评分与人工解释检查。
+批准记录包含 `packet_digest`、逐 topic 的 `version/content_digest`、显式 `review_confirmed=true`、`reviewer/review_note/reviewed_at`；`bundle --drafts <packet> --approval <actual-human-record> --bundle-root <resources> --output <task-local-report>` 才能导出。实际用户批准与逐项 digest 已绑定生产 manifest；真实运行原生 transcript 已导出、审计评分并检查解释，不使用合成响应代替模型输出。
 
 阶段出口：真实批准内容可分发，真实 embedding 的相关性已核对，3–5 个真实 holdout 案例有完整成对结果和限制；未获得人工批准或样本证据时本阶段保持未完成。
 
 提交边界：实际批准的 bundle、必要公开输入 fixture/评估源码、文档证据摘要和针对性修正；不提交新运行结果归档、不虚构批准或选掉更差案例。
 
-完成记录：**in progress**（2026-10-21；尚未达到阶段出口）。
+完成记录：**complete**（2026-10-22）。以下保留准备阶段的历史证据；最终批准、检索、实测和限制见本节末尾。
 
 - 保持 `codex/guidelines-m0`，基线 `9a20a584d50bdef23fe04ac1e5d4f1479a83e95b`；准备工作 commit：`56b9716fe3f776fd5fdc133951e01471d21fff58`（`feat(guidelines): prepare milestone 11 review and holdout evaluation`），随后仅补记此 hash。只更新原设计/本清单；待审正文为一个必要 JSON 输入，无额外阶段状态 Markdown。
 - 四份 v1 草稿和来源的原始送审文件 SHA256 为 `c8105b605ca6e50b0410b2080c9123e1395eb3b067a7d6fea33d2ddebae662f2`，原始规范化 packet 为 `sha256:dd561e4a0421f3067889793249d68333e73a40699be86ab3e95ddf4fd00d94b3`；当前修订见下条。未收到明确批准；没有 reviewer/time 或批准文件，不生成生产资源，原生产 manifest 仍为空。首批内容/来源更新见主设计 §13。
@@ -634,6 +636,24 @@ git diff --check
 - 实际配置预检：`text-embedding-3-small` 向已配置 `api.deepseek.com` 发出 1 次请求，HTTP **404**，安全码 `guideline_embedding_unavailable`；未擅自切供应商/密钥或改 `.env`。实际 `deepseek-flash` 经既有 `m6_provider_smoke._main()` 连通性预检 **1 request / 1 response**（76 input / 25 output tokens），仅证明响应契约，不是 pH 对照或固定权重版本证明。真实检索排名/cutoff 核对、no-guide/with-guide 成对结果、解释质量及 hosted CI：**not run**。
 - 后续仍须：用户明确批准具体内容；核对批准内容的真实 embedding 检索（Google 服务连通已通过，见 M12 后续补充）；生成真实、冻结证据/同配置的 3–5 例配对，至少一完整配对，再记录实际提供/采用、点/范围误差及人工解释评价。当前不将通用“完成 M11”当作对尚未见到的草稿的批准，M11 未完成项目及 M12 的最终阶段出口保持未完成。
 
+
+### 最终核对（2026-10-22）
+
+- 用户原话“批准当前四份 v1 纳入内置库”，记录时间 `2026-10-21T15:12:35Z`，reviewer `project-user-explicit-approval`；packet 为上述 `7be03c…b72b`。生产版本依次为 mixing `4113c0d4-5980-5fca-8d5c-42c444ce892b`、buffering `0d4910c4-bad6-5971-818f-9687e75b763f`、biology `10a7639f-5249-5a2d-8c28-e9e1e176d405`、causes `e5f134bd-4797-5c6b-b614-d303a9afc002`；未把测试审核写入生产。
+- Google `gemini-embedding-001` / 1536 维 / v3、profile `6eefa2d3…d0f7028`：12 题基线保留两个负例误命中；cutoff 0.79 后原集及独立 8 题为 14/14 正例首位、6/6 负例不返回。补充任务上下文/多方面 12 题为 6/6 正例 top-3（4/6 首位）、6/6 负例不返回；第一轮两条真实改写复测仍漏检，不继续降低门槛来追逐样本。`.env` 仅本地更新 cutoff，其他设置未改变；不改 profile、不需重建。原始排名与一次被安全文本规则拒绝的补充评估均保留。
+- 冻结实际 USGS 整个 UTC 日输入、四站真实 NLDI 元数据及首份生产拓扑；只评分原 UTC 12–18 时段。目标站整天 95/96/24 条 pH 都隔离，原评分真值仍为 23/24/6 条的既有 mean。正常整天采集门禁未放宽；六小时输入不足的先前尝试按原门禁失败并保留。
+- 同一隔离 app/test schema，DeepSeek `https://api.deepseek.com` / `deepseek-flash`，Google 独立 embedding；stateless、UTC、100 km、48 hops、128 nodes、水体并发 4、规划 6 轮/每轮 4 tools、模型单次 90s/会话 600s、知识 3072 tokens/检索 3s/无重试。应用和 HTTP 使用同一日期回放时钟，不延长预算。真实 POST 不重放；公开 NLDI GET 缓存不重复施加网络请求节流。初始观测/context/topology/模型配置一致，适应性模型回复和工具选择可以不同，不能声称调用序列相同或锁定供应商权重。
+
+| 评分案例（UTC 12–18） | 可用读数均值 / 样本 | 无说明书范围（宽度；覆盖均值） | 说明书臂范围（宽度；覆盖均值） | 实际知识 |
+| --- | --- | --- | --- | --- |
+| Potomac 2024-07-01 | 8.230435 / 23 | 6.8–8.4（1.6；是） | 7–8.5（1.5；是） | mixing v1，9 次非空 delivery / 9 次引用绑定 |
+| Potomac 2024-07-02 | 8.791667 / 24 | 6.5–8.5（2.0；否） | 7.4–8.6（1.2；否） | no_match，0 delivery / 0 引用，不能归因于知识 |
+| Delaware 2024-07-01 | 8.166667 / 6 | 6.5–8.5（2.0；是） | 6.8–8.5（1.7；是） | buffering v1，9 次非空 delivery / 13 次引用绑定 |
+
+- 最终六臂 completed，原生 transcript 离线审计 **3 对 accepted / 0 rejected**，控制臂均未提供知识。所有评分窗口无合格 PH anchor，点误差 **not applicable**；范围宽度变小不代表精度提升，覆盖仅对可用样本均值，不是连续真值/校准覆盖率。候选 Potomac 上游确有 24 条 pH，但生产拓扑在 128 节点预算内未到达其站点；Delaware 候选上游无 pH。故本轮尚未验证“实际取得同指标上游 anchor”的点精度，也不是三个独立流域。
+- 解释检查：控制臂已能说明无 PH、流量仅间接支持；有知识的两例增加混合不可线性外推、缓冲/ANC 缺口和不确定性，并实际绑定对应 v1。仍有反例：Delaware 文本把未测 ANC 称为“dominant control”，虽然标为 hypothesized，主导性并无本地证据；Potomac 第一例另外的 06–12 窗口因模型 numeric dependency 的 scope violation 保持 blocked，评分窗口不受影响。不得把引用次数等同科学解释正确率或宣称解释全面改善。
+- 先前反例保留：首个完整输入尝试六臂中四失败、两成功，知识臂分别 no_match/unavailable/no_match；初期目录/轮询压力、500 km 试跑取消、六小时采集不足均留诊断，不能充作有效样本。修复确认的 usable/contextual ref 重叠以及 `series_refs` 修复误加未引用序列；资格校验、一次修复上限和数值门槛保持。定向 **102 passed**；整天/评分/评估输入 **50 passed**。
+- 最终实际运行 ID：Potomac Jul1 `d8bd6501-80d7-4be0-b4c5-22636c1abbcb` / `a26b3f4c-c024-4036-828d-eb6921ae8ebb`；Jul2 `85123cd5-f59b-48ad-9974-b08f1ea830db` / `a12a1b5b-6a80-46b5-b8f1-a7c2d5d4811f`；Delaware `0edd8899-97f4-4a31-9f28-dff880cf1418` / `2db0b6f4-6a85-4dc9-bc14-91062696f293`。所有新输出仅在 `.tmp/guidelines-finish-20261021/`（`retrieval-{baseline,calibrated,validation,context-complete}.json`、`comparison-{first-real,repaired}.json`、`live-pairs-*`）留本机；只提交公开输入、评估源码、批准内容和现有文档。未修改业务库或旧归档；新 bundle 由应用既有启动 importer 安装。
 
 ## Milestone 12：整体回归、契约审计与交付
 
@@ -833,7 +853,7 @@ git rev-parse HEAD
 - [x] **GK-A08**：发布/编辑/停用/恢复/generation/重启/响应丢失的指定竞态有实测测试，旧 worker/ACK 不覆盖新意图。证据：GK-C08/C09/C11/C19/C21；PG 屏障和前端 deferred/fake-timer 操作顺序测试。
 - [x] **GK-A09**：旧 evidence/scope/numeric/observed/risk 与 M8 eligibility 不弱化；memory-disabled/stateless 可独立使用指南。证据：GK-C02/C10/C20/C22、完整旧数值/观测/M8 回归及 discharge 两类生产组合测试。
 - [x] **GK-A10**：本地 API/安全渲染/供应商文本范围正确，用户本地内容不自动进入 Git/共享平台。证据：GK-C03/C06/C18/C21；provider payload、safe error 与无上传/自动 Git 生产入口审计。
-- [ ] **GK-A11**：首批资料有真实人工批准，真实 embedding 检索已核对，3–5 个实测 holdout 成对案例如实报告。
+- [x] **GK-A11**：首批资料有真实人工批准，真实 embedding 检索已核对，3–5 个实测 holdout 成对案例如实报告。
 - [ ] **GK-A12**：全栈回归和交付证据完整，fake/真实供应商/数据库/浏览器/hosted CI 的结论与限制分开。
 
 GK-A11 已有四稿仅限隔离评估的明确批准、真实检索/正文/引用链、一个非 holdout 成对场景及其并发复跑；仍缺生产分发批准、扩大检索质量核对、3–5 个有目标真值的实测 holdout。GK-A12 的本地回归部分已有证据，最终交付仍待这些必需项；最后 JSON 修复尚无第三轮真实全链路结果，不排除失败案例，也不以 fake 或文档替代真实验收。

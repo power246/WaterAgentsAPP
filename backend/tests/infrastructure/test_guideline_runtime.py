@@ -27,7 +27,7 @@ from app.infrastructure.persistence.guideline_repository import PostgresGuidelin
 from app.infrastructure.config import load_parameter_capability_registry
 from app.application.guidelines.authoring import GuidelineAuthoringService
 from tests.application.guidelines.test_worker import Clock, custom, Embedding, worker
-from tests.guideline_bundle_support import bundled_version
+from tests.guideline_bundle_support import bundled_version, EmptyBundledSource
 
 
 @pytest.fixture
@@ -93,6 +93,7 @@ def test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_
 
 def test_application_starts_worker_and_cancels_inflight_http_before_closing_pool(database_settings, monkeypatch):
     import app.main as main
+    monkeypatch.setattr('app.infrastructure.runtime.guidelines.PackageBundledGuidelineSource',lambda **kwargs:EmptyBundledSource())
 
     async def exercise():
         clock = Clock()
@@ -278,7 +279,7 @@ def test_run_pin_retrieval_uses_fixed_run_lease_once_and_empty_library_dispatche
             runtime=GuidelineRuntime(settings=AppSettings(_env_file=None,memory_enabled=False),catalog=selected,
                 credentials=service,http=http,clock=clock)
             try:
-                await runtime.start(repository,registry)
+                await runtime.start(repository,registry,source=EmptyBundledSource())
                 # Stop preparation polling; use the same durable preparation implementation deterministically.
                 await runtime.shutdown()
                 preparation=worker(repository,Embedding(),runtime.desired_profile)

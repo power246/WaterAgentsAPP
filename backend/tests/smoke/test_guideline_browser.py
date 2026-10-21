@@ -39,6 +39,12 @@ def test_browser_management_to_saved_run_and_history(monkeypatch, tmp_path):
         async def embedding_for_attempt(self):
             return embedding
 
+        async def start(self, repository, registry, *, source=None):
+            class EmptyBundledSource:
+                def read_versions(self):
+                    return ()
+            await super().start(repository, registry, source=source or EmptyBundledSource())
+
     monkeypatch.setattr('app.main.GuidelineRuntime', OfflineGuidelines)
 
     async def exercise(settings):

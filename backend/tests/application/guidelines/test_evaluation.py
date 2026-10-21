@@ -41,7 +41,7 @@ def reviewed_fixture(tmp_path):
     return PackageBundledGuidelineSource(root=tmp_path / 'bundle').read_versions()
 
 
-def test_four_real_drafts_are_valid_but_are_not_approved_production_resources():
+def test_four_real_drafts_match_the_explicitly_approved_production_bundle():
     packet, topics = reviewed_drafts(DRAFTS)
     assert len(topics) == 4 and packet.startswith('sha256:')
     assert {t['bundle_key'] for t in topics} == {'ph.mixing-transport', 'ph.acid-buffering', 'ph.photosynthesis-respiration', 'ph.compare-causes'}
@@ -50,10 +50,16 @@ def test_four_real_drafts_are_valid_but_are_not_approved_production_resources():
         assert c.source_kind.value == 'reference_derived' and c.sources
         assert len(c.body_markdown.encode()) <= 6000
         assert all(s.accessed_date is not None and s.locator for s in c.sources)
-    assert load_json(DRAFTS)['status'] == 'awaiting_human_review'
-    # An unreviewed seed packet alone never creates a production version.
+    assert load_json(DRAFTS)['status'] == 'approved_for_bundled_distribution'
     production = PackageBundledGuidelineSource().read_versions()
-    assert all(v.review.content_digest == v.content.content_digest for v in production)
+    assert {v.identity.bundle_key for v in production} == {t['bundle_key'] for t in topics}
+    by_key = {topic['bundle_key']: topic for topic in topics}
+    for version in production:
+        topic = by_key[version.identity.bundle_key]
+        assert version.content == topic['content']
+        assert version.version_number == topic['version'] == 1
+        assert version.review.content_digest == version.content.content_digest
+        assert version.review.reviewer == 'project-user-explicit-approval'
 
 
 @pytest.mark.parametrize('change', ['missing_confirmation', 'body', 'source', 'version', 'review_digest'])
@@ -258,12 +264,19 @@ def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_miss
         assert kwargs['api_key'] == ('independent-fixture-key' if independent else 'synthetic-fixture-key')
         return port
     monkeypatch.setattr(evaluation, 'OpenAIGuidelineEmbeddingAdapter', adapter)
+    queries = load_json(ROOT / 'backend/tests/fixtures/guidelines/ph_retrieval_cases.json')
+    queries[0].update(mode='gap_filling', scenario_tags=['gap_filling'],
+                      task_facts=['agent_comid=4512772'],
+                      aspects=['Conditions for transferring upstream pH to a downstream estimate',
+                               'Uncertainty when estimating missing pH from discharge'])
+    query_path = tmp_path / 'queries.json'
+    write_json(query_path, queries)
     with temporary_migrated_schema() as database:
         selected = database.model_copy(update={'model_catalog': catalog(max_input_tokens=8192).capabilities,
             'openai_api_key': None if independent else SecretStr('synthetic-fixture-key'), 'openai_base_url': 'https://fixture.invalid/v1',
             'embedding_api_key': SecretStr('independent-fixture-key') if independent else None,
             'embedding_base_url': 'https://embedding.invalid/v1' if independent else None})
-        result = asyncio.run(live_retrieval(selected, tmp_path / 'bundle', ROOT / 'backend/tests/fixtures/guidelines/ph_retrieval_cases.json'))
+        result = asyncio.run(live_retrieval(selected, tmp_path / 'bundle', query_path))
     if fail:
         assert result['status'] == 'failed' and result['reason'] == 'guideline_embedding_credentials_unavailable'
         assert 0 < result['provider_requests'] <= 2
@@ -271,6 +284,7 @@ def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_miss
     else:
         assert result['status'] == 'completed' and len(result['cases']) == 12
         assert len(result['versions']) == 4 and result['generation_id']
+        assert result['cases'][0]['embedding_inputs'] == 2
         negative = next(c for c in result['cases'] if c['id'] == 'unrelated_precipitation')
         assert negative['metadata_candidates'] == 0 and negative['selected'] == []
         # Deliberately equal synthetic vectors expose, rather than hide, irrelevant matches.

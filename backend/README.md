@@ -244,7 +244,7 @@ In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the s
     "output_dimensions": 1536,
     "max_input_tokens": 2048,
     "distance_metric": "cosine",
-    "semantic_min_similarity": 0.78,
+    "semantic_min_similarity": 0.79,
     "canonical_query_schema_version": 1,
     "canonical_template_version": 1,
     "projection_schema_version": 1
@@ -252,7 +252,18 @@ In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the s
 }
 ```
 
-说明书索引当前采用关系模板 v3：安全正文按完整段落及标题边界生成关系单元，保留标题层级、条件与否定；完全相同的单元共享向量，并以多对多关联指向不可变文章版本。标题/摘要保留作简介，命中后仍读取完整正文与出处。四份待审 pH 草稿在上述 Google 示例下分别生成 6／6／7／6 个片段，最长完整 wire 输入分别为 623／680／675／624 UTF-8 字节，均通过 2048 字节保守门禁；这仅是离线长度校验，草稿尚未批准、未发送到真实服务或纳入生产库。门禁检查包含角色指令的完整输入，单个超长段落仍会明确准备失败，不截断条件或提高模型限制。
+说明书索引当前采用关系模板 v3：安全正文按完整段落及标题边界生成关系单元，保留标题层级、条件与否定；完全相同的单元共享向量，并以多对多关联指向不可变文章版本。标题/摘要保留作简介，命中后仍读取完整正文与出处。四份 pH 说明书已于 2026-10-21 获用户明确批准并以 v1 纳入内置资源，逐项批准记录位于 bundle manifest；在上述 Google 示例下分别生成 6／6／7／6 个片段，最长完整 wire 输入分别为 623／680／675／624 UTF-8 字节，均通过 2048 字节保守门禁。门禁检查包含角色指令的完整输入，单个超长段落仍会明确准备失败，不截断条件或提高模型限制。
+
+上例的 0.79 门槛仅针对当前 Google `gemini-embedding-001`、1536 维、v3 和这四篇内容校准：原 12 题在默认 0.35 下有 2 个负例误命中；固定为 0.79 后，原集和另行编写的 8 题中，14 个正例均首位命中、6 个负例均未返回。原始误命中记录保留。门槛不是其他模型/语料的通用默认值；`GuidelinePolicy` 默认仍为 0.35，部署通过 `WATERAGENTS_GUIDELINE_POLICY` 指定。仅改 cutoff 不改变向量输入/profile，不需重建 generation；更换模型、模板或角色指令须按原流程重建。扩大资料库后需重新核对，不能以小样本证明普遍检索质量。
+
+补充的任务上下文/多方面输入集 `tests/fixtures/guidelines/ph_retrieval_context_cases.json` 有 6 个正例、6 个负例：期望主题均进入 top-3，4/6 首位命中，负例均未返回；两条保留的真实模型改写却仍未命中。最终三个 holdout 配对全部完成，两组实际提供并引用批准内容，一组未命中。六个评分窗口均为范围，没有合格 pH anchor；Potomac 第二天两臂都未覆盖观测均值。这个结果验证链路和边界，尚不能证明估值精度改善，详见现有 guideline TODO。
+
+真实配对需完整 UTC 采集日输入，评分仍限原六小时窗口。目标站整天的 pH 均被隔离，不能把相邻窗口读数用于补值。下列命令从 `backend/` 在已加载服务配置、并设置进程级 `WATERAGENTS_TEST_DB_NAME` 的环境执行；只创建临时测试 schema，输出目录必须尚不存在。`--allow-live` 会向已配置服务发出真实模型/embedding 请求；默认不运行：
+
+```powershell
+.venv/Scripts/python.exe -m scripts.guideline_live_pairs --dataset tests/fixtures/guidelines/ph_holdout_acquisition_cases.json --metadata-root tests/fixtures/guidelines/ph_sites --output ../.tmp/my-live-pairs --allow-live
+.venv/Scripts/python.exe -m scripts.guideline_live_review --dataset tests/fixtures/guidelines/ph_holdout_acquisition_cases.json --runs-root ../.tmp/my-live-pairs --output ../.tmp/my-live-comparison.json
+```
 
 首次实际模型请求前，查询 skill 通过一次 `search_guidelines(query, aspects)` 提交专业改写和 1–3 个原问题侧面；后端做一次批量 embedding，固定范围/profile/top-k（最多 3 份），按最佳片段匹配及独立侧面覆盖排序，后续阶段复用。近同查询向量去重，每侧面最多取一个最佳匹配，同一片段不重复贡献；不会仅靠文章片段多就堆高排名。空库和零模型路径不新增该调用，实际额外回合计入调用数和用量。升级 profile 仍通过完整 building generation 原子切换；显式旧 v1/v2 generation 及历史全文继续可读。
 
