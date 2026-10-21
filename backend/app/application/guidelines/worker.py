@@ -5,6 +5,7 @@ from uuid import uuid4
 from app.application.guidelines.embedding import guideline_embedding_failure
 from app.domain.guidelines import canonical_guideline_document, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1
 from app.domain.guidelines.policy import GuidelinePolicy
+from app.domain.guidelines.canonical_relations import CanonicalGuidelineDocumentV3
 from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
 from app.ports import EmbeddingCancelledError, InvalidPortResponseError, PortConfigurationError, PortError
 from app.ports.errors import GuidelineConflictError
@@ -103,7 +104,25 @@ class GuidelinePreparationWorker:
                         if generation_id is None:
                             raise PortConfigurationError("Guideline generation is unavailable.")
                     document = canonical_guideline_document(version.content, profile, self.registry)
-                    vector = await self.repository.read_embedding(generation_id, version.version_id)
+                    if isinstance(document, CanonicalGuidelineDocumentV3):
+                        cache = await self.repository.read_relation_embeddings(generation_id, document.fragments)
+                        if cache.profile != profile:
+                            raise InvalidPortResponseError("Guideline relation cache profile is invalid.")
+                        saved = dict(type(cache).model_validate(cache.model_dump()).entries)
+                        missing = tuple(f for f in document.fragments if f.canonical_digest not in saved)
+                        if missing:
+                            if embedding is None:
+                                embedding = await self.embedding_factory()
+                            if self.is_requested():
+                                return
+                            result = await embedding.embed(profile, missing, deadline, self)
+                            if result.profile != profile or len(result.vectors) != len(missing):
+                                raise InvalidPortResponseError("Guideline relation embedding batch count/profile is invalid.")
+                            checked = GuidelineEmbeddingBatch.model_validate(result.model_dump())
+                            saved.update(zip((f.canonical_digest for f in missing), checked.vectors, strict=True))
+                        vector = tuple(saved[f.canonical_digest] for f in document.fragments)
+                    else:
+                        vector = await self.repository.read_embedding(generation_id, version.version_id)
                     if vector is None:
                         if embedding is None:
                             embedding = await self.embedding_factory()

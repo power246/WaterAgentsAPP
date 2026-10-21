@@ -748,6 +748,34 @@ git rev-parse HEAD
 运行沿用附录的 DB-only runner（只注入 `WATERAGENTS_DB_*`，测试库名仅在进程设置），参数为 `-q -p no:cacheprovider --tb=short --show-capture=no`，每阶段独立 `--basetemp`/JUnit；最终结果仅留 `.tmp/guideline-search-20261021/{backend-final2,browser-final,audit-final,architecture-final}.{log,xml}`。未修改 `.env`、业务库、四份待审草稿或生产 manifest；未发送待审正文/摘要到真实服务。真实新摘要检索质量、真实分析配对、人工内容批准和 hosted CI **not run**，不据此勾选 M11/M12 的最终出口。
 
 
+### 后续授权补充：关系片段多对多检索（2026-10-21）
+
+- [x] v3 片段 profile、完整安全段落与原文定位；共享向量和版本关联；保留旧 generation/history。
+- [x] 一次工具调用提交 1–3 个原问题侧面，单次批量 embedding；最佳关系匹配与不同侧面覆盖排序，限制重复贡献。
+- [x] 新迁移与原子准备、完整覆盖、重建/取消/版本更新/停用回归；完整正文与实际引用仍走原链路。
+- [x] 独立合成资料夹具、真实 PostgreSQL 程序验证与真实 embedding 对照；合成内容不进入生产 bundle/业务库。
+- [x] 完整回归、现有文档更新并提交本地。
+
+基线 `20e11eba2dfff8851417e7ee09a995b07317693b`，当前分支 `codex/guidelines-m0`。用户批准实现并允许合成测试资料；四份真实草稿的人工批准仍未获得。初版从安全正文提取完整段落关系，保留条件、否定与替代解释，不在线生成新科学命题；相同 canonical 片段可跨文章共享向量，各版本单独保存原文定位。近义片段通过每个查询侧面只取最佳匹配限制贡献；近乎相同查询向量去重，同一片段跨侧面仅计一次。旧一版本一向量行在 v3 仅作为原子完整性标记，实际排名只用片段向量。
+
+实现：迁移 `20261021_01` 增加两张不可变关系表、generation/profile/版本外键与双向延迟完整性检查；缓存先校验身份和向量，再只嵌入缺失片段。每版本全部定位/向量/就绪计数在原提交事务中完成，缺项、插入多余定位、迟到停用任务均拒绝。保留所有标题层级及无空行的标题边界，避免把“错误示例”下的子段误作正向机制。完整安全正文、来源、批准 digest、引用 alias 和历史快照仍保留。四份待审草稿离线生成 **6／6／7／6** 个片段，各自最长完整 wire 为 **623／680／675／624 bytes**，通过 2048-byte 门禁；原始文件 SHA256 仍为 `5c3b25320a49e08f9ef48e1f8c7406ccb1a70bcd30db6a7f64742505c297be58`。单个超长段落仍明确失败，不截断或声称已做 tokenizer 精确计数。
+
+真实 embedding 对比：`tests/fixtures/guidelines/synthetic_relation_corpus.json` 的 **12 篇虚构文章、10 个预先标注问题**，在独立测试 schema 中通过真实 PostgreSQL 比较三组。Google `gemini-embedding-001`、1536 维、2048 输入限制；最终固定夹具身份的对比使用 **33 次请求、62 条输入**，生成 **19 个共享关系向量、28 条版本关联**，唯一双侧面问题保留 2 个独立查询向量。在线 embedding+SQL 的单例耗时 **0.469–0.591s**，均小于 3s。报告保存 profile、cutoff、实际侧面与去重后向量数，固定身份由夹具 ID 的 SHA256 生成，避免每次随机 UUID 改变同分顺序。
+
+| 方案 | 首位命中 | 前三命中 | 平均 recall@3 | 平均在线秒数 |
+| --- | --- | --- | --- | --- |
+| v2 摘要 + 单查询 | 7/10 | 9/10 | 0.6833 | 0.510 |
+| v3 片段 + 单查询 | 8/10 | 9/10 | 0.9000 | 0.525 |
+| v3 片段 + 多侧面 | 9/10 | 9/10 | 0.9000 | 0.511 |
+
+合成问题的专业改写/侧面由测试夹具预先编写，三组单查询使用同一专业表述；这次没有验证真实分析模型生成侧面的质量，没有因排名结果调整标签或隐藏未命中。首次随机身份对比的首位/前三命中相同、片段 recall@3 为 0.85，固定身份后为 0.90，说明同分顺序会影响小样本指标；两次合计 **66 次真实请求均完成**。资料规模小、仅一个双侧面问题，不能据此认定普遍提升、真实 pH 科学准确性或 cutoff 已校准。合成资料仅存在测试源码与临时 schema；生产 manifest 仍为空，四份真实草稿未发送服务、未批准/导入。测试脚本不是生产导入入口。
+
+针对性结果：端口/领域架构及关系回归 **81 passed / 1 skipped**（7.587s），固定身份后的真实 embedding 关系模块 **9 passed**（28.050s），包含共享、覆盖优先、重复措辞、近同查询去重、范围先过滤、原文完整、旧 pin、停用和迟到任务。真实 HTTP/PG/Chrome 两份 smoke **5 passed**（39.748s，确定性测试模型/embedding；说明书 smoke 已切至 v3）。前端 `check:api`、build、lint、typecheck、**114 tests / 15 files** 通过，生成 API 未变。首轮架构检查发现端口 raw dict 返回类型，已改为领域 cache envelope 并复测；早期 fixture 单向量/全文输入断言已按旧 profile 兼容与新片段契约分别修正。首轮完整后端 **3421 passed / 2 failed / 2 skipped**（511.275s），两项失败仅为旧表清单缺少新关系表；补齐后相关结构/重复升级 **6 passed**（1.029s），最终完整结果另记下方。
+
+复现：沿附录 DB-only runner，仅注入 `WATERAGENTS_DB_*`，测试库名只设置进程；参数 `-q -p no:cacheprovider --tb=short --show-capture=no`，独立 `--basetemp`/JUnit。真实对比额外设置 `WATERAGENTS_RELATION_LIVE_E2E=1` 与本地 report path，运行 `test_relation_retrieval.py`；浏览器设置两个既有 E2E 开关，运行 `test_guideline_browser.py` 与 `test_m9_production_pg.py`。日志/XML/对比 JSON 仅留 `.tmp/guideline-relations-20261021/`，不提交结果产物。未修改 `.env`、业务数据库或既有运行证据包；真实分析配对、真实内容批准和 hosted CI **not run**，M11/M12 最终出口仍待验。
+
+最终完整后端 **3423 passed / 2 skipped / 0 failed**（473.634s，包含隔离 PostgreSQL）；两个 opt-in skip 已分别以真实 embedding **9 passed**、真实 HTTP/PG/Chrome **5 passed** 覆盖。固定身份后对比源码另行复测通过，33 个改动 Python 文件通过 3.11 语法检查，当前执行环境为 3.12。主设计、讨论记录及 README 已同步 v3/迁移/运行门禁与隔离测试方式，`git diff --cached --check` 通过；实现与本记录一并提交当前分支本地，不推送远程。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。

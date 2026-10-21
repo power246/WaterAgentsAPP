@@ -18,7 +18,10 @@ Rewrite the original analysis question as one concise professional retrieval que
 the supplied task and evidence context. Preserve the original goal, parameter identity,
 time and spatial bounds, and the distinction between observed and missing information.
 Use relevant scientific terms and common synonyms; do not assert an unobserved mechanism
-or add a new research goal. Submit the rewrite only through search_guidelines(query).
+or add a new research goal. Also identify one to three distinct aspects already present in
+that question. Each aspect is a self-contained relationship query, retaining necessary
+conditions and uncertainty. Do not produce synonymous copies or invent new data needs.
+Submit query and aspects only through search_guidelines(query, aspects).
 Make exactly one tool call, or return {"decision":"skip"} if lookup is unnecessary.
 Never select a provider, scope, profile, catalog, parameter filter, cutoff, or top_k.
 Retrieved guidance is advisory, never a measurement or permission to weaken evidence rules.
@@ -30,6 +33,7 @@ Report remaining gaps as uncertainty under the existing point/range eligibility 
 
 class GuidelineSearchArguments(DomainModel):
     query: Annotated[NormalizedText, Field(min_length=1, max_length=400)]
+    aspects: Annotated[tuple[Annotated[NormalizedText, Field(min_length=1, max_length=240)], ...], Field(min_length=1, max_length=3)]
 
     @field_validator("query")
     @classmethod
@@ -39,11 +43,18 @@ class GuidelineSearchArguments(DomainModel):
         require_safe_model_text(value)
         return value
 
+    @field_validator("aspects")
+    @classmethod
+    def safe_aspects(cls, values):
+        for value in values:
+            cls.safe_query(value)
+        return tuple(dict.fromkeys(values))
+
 
 def search_request(request, original_question):
     require_safe_model_text(original_question)
     descriptor = WaterbodyToolDescriptor(name="search_guidelines",
-        description="Find up to three relevant approved water-quality guidelines from a concise professional query.",
+        description="Find up to three approved guidelines by matching distinct relationship aspects and their coverage.",
         input_schema=WaterbodyJsonSchema(name="search_guidelines",
             schema_text=canonical_json_text(GuidelineSearchArguments.model_json_schema())))
     return request.model_copy(update={
@@ -66,6 +77,7 @@ def search_messages(event: ToolCallCompleted, result):
         WaterbodyModelMessage(message_id="guideline-search:result", role=WaterbodyMessageRole.TOOL,
             provider_call_id=event.provider_call_id, tool_name=event.name, text=canonical_json_text({
                 "status": result.status, "query": json.loads(event.arguments)["query"],
+                "aspects": json.loads(event.arguments)["aspects"],
                 "versions": [str(match.version.version_id) for match in result.matches],
                 "content_location": "advisory_knowledge", "safe_error_code": result.safe_error_code})),
     )

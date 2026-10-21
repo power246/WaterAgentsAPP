@@ -1,3 +1,6 @@
+from app.domain.guidelines.relation_embedding_cache import GuidelineRelationEmbeddingCache
+from app.domain.guidelines.canonical_fragment import CanonicalGuidelineFragmentV3
+from app.domain.guidelines.canonical_relations import CanonicalGuidelineDocumentV3
 from app.domain.guidelines.canonical_document import CanonicalGuidelineDocumentV1, canonical_guideline_document
 from app.domain.guidelines.canonical_summary import CanonicalGuidelineDocumentV2
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
@@ -37,7 +40,7 @@ __all__ = [
     "GuidelineMatch", "GuidelineRunPin", "GuidelineRetrievalResult",
     "GuidelinePolicy",
     "GuidelineDocumentDetails", "GuidelineListItem",
-    "CanonicalGuidelineDocumentV1", "CanonicalGuidelineDocumentV2", "canonical_guideline_document", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
+    "GuidelineRelationEmbeddingCache", "CanonicalGuidelineFragmentV3", "CanonicalGuidelineDocumentV3", "CanonicalGuidelineDocumentV1", "CanonicalGuidelineDocumentV2", "canonical_guideline_document", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
     "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",
     "GuidelineDraftV1", "GuidelineDraftSourceRef", "GuidelineEmbeddingBatch", "GuidelineEmbeddingProfileV1",
     "GuidelineIdentity", "GuidelineIndexGeneration", "GuidelineModelViewV1", "GuidelineMutation",

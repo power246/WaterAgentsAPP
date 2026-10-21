@@ -150,8 +150,8 @@ async def race(engine, *calls):
 def test_migration_upgrade_downgrade_and_schema_guards(settings):
     config = alembic_config(settings)
     command.downgrade(config, "20261020_01")
-    assert upgrade_database(settings) == "20261020_02"
-    assert asyncio.run(check_database_schema(settings)) == "20261020_02"
+    assert upgrade_database(settings) == "20261021_01"
+    assert asyncio.run(check_database_schema(settings)) == "20261021_01"
 
     async def exercise():
         engine = create_database_engine(settings)
@@ -162,7 +162,7 @@ def test_migration_upgrade_downgrade_and_schema_guards(settings):
                 await check_database_schema(settings, engine=engine)
             async with engine.begin() as connection:
                 await connection.execute(text("ALTER TABLE guideline_versions ENABLE TRIGGER guideline_versions_guard"))
-            assert await check_database_schema(settings, engine=engine) == "20261020_02"
+            assert await check_database_schema(settings, engine=engine) == "20261021_01"
         finally:
             await engine.dispose()
     asyncio.run(exercise())
@@ -477,7 +477,7 @@ def test_postgres_constraints_and_immutable_guards(settings, constraint):
                 "immutable_version": "P0001", "immutable_receipt": "P0001",
             }.get(constraint, "23505")
             assert await repository.read_version(base.identity.guideline_id, base.version_id) == base
-            assert await check_database_schema(settings, engine=engine) == "20261020_02"
+            assert await check_database_schema(settings, engine=engine) == "20261021_01"
         finally:
             await engine.dispose()
     asyncio.run(exercise())

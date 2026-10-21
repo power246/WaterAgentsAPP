@@ -95,7 +95,7 @@ class GuidelineModelContext:
             args = GuidelineSearchArguments.model_validate_json(calls[0].arguments)
             self.search_tool_calls += 1
             try:
-                result = await self.session.search(args.query, deadline=request.deadline)
+                result = await self.session.search(args.query, aspects=args.aspects, deadline=request.deadline)
             except ValueError:
                 result = GuidelineRetrievalResult(status="unavailable", safe_error_code="guideline_embedding_configuration_invalid")
             self._search_messages = search_messages(calls[0], result)

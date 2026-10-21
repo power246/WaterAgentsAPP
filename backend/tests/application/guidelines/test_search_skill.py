@@ -35,7 +35,7 @@ class Lookup:
         else:
             for index in range(2 if self.twice else 1):
                 yield ToolCallCompleted(**values, provider_call_id=f"call:{index}", name=self.name,
-                    arguments=json.dumps({"query": self.query, **(self.extra or {})}))
+                    arguments=json.dumps({"query": self.query, "aspects": [self.query], **(self.extra or {})}))
         yield UsageReported(**values, input_tokens=13, output_tokens=9)
         yield Terminal(**values, provider_response_id="guideline-search-response", finish_reason="completed")
 
@@ -142,8 +142,9 @@ def test_all_four_unapproved_drafts_fit_google_wire_gate_without_body_changes():
         query_instructions=policy.query_instructions)
     for topic in topics:
         document = canonical_guideline_document(topic["content"], selected, load_parameter_capability_registry())
-        wire, = validated_guideline_texts(selected, (document,))
-        assert len(wire.encode()) <= 2048 and topic["content"].body_markdown not in wire
+        wires = validated_guideline_texts(selected, document.fragments)
+        assert len(wires) > 1
+        assert all(len(wire.encode()) <= 2048 and topic["content"].body_markdown not in wire for wire in wires)
     assert path.read_bytes() == before
     assert json.loads(before)["status"] == "awaiting_human_review"
 

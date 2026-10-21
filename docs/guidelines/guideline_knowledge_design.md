@@ -189,7 +189,9 @@ stateDiagram-v2
 | `guideline_catalog_state` | 单例 monotonic revision、唯一 active guideline index generation；锁定 catalog mutation 的事务入口。 |
 | `guideline_catalog_entries` | `family_root_id`、`version_id`、`valid_from_revision`、`valid_to_revision`；同一 revision 的同一 root 不得重叠。 |
 | `guideline_index_generations` | 不可变 profile snapshot/digest，`building/active/retired/failed`；至多一个 active，至多一个 building。 |
-| `guideline_embeddings` | 唯一 generation/version、canonical document digest、向量、维度；向量维度/profile 与所属 generation 一致。 |
+| `guideline_embeddings` | 唯一 generation/version、canonical document digest、维度；v1/v2 保存文章向量，v3 保存清单 digest、`relation_count` 与代表向量作为完整就绪标记，代表向量不参与 v3 排名。 |
+| `guideline_relation_embeddings` | generation/fragment digest 唯一的 v3 关系文本与向量；相同 profile 下完全相同的关系跨文章共享，维度/profile 外键绑定 generation。 |
+| `guideline_relation_links` | generation/version/fragment/locator 多对多关联；段落定位绑定不可变文章版本，外键和延迟完整性 trigger 保证一整套关联与就绪标记同时提交。 |
 | `guideline_operations` | 幂等请求 receipt、fingerprint、immutable accepted response、关联 document/version、操作状态、claim lease、attempt、safe error；发布/重建任务可重启恢复。状态为 `pending/running/succeeded/failed/superseded`，普通保存 receipt 可直接 succeeded。 |
 
 索引是派生数据，不能代替内容版本。用户数据属于本地数据库；程序更新与资源导入不得清空用户表。首版不自动永久删除旧内容或 retired generation；清理策略必须另有显式依赖检查，历史知识快照不依赖当前 index 存活。
@@ -206,6 +208,8 @@ stateDiagram-v2
 锁序固定为 catalog state → document → operation/version；worker 不持数据库锁等待远程调用。操作重试不能生成第二个人工批准版本。
 
 M2 持久化实现：迁移 `20261020_02` 显式创建七表及 `btree_gist` 扩展；GiST exclusion constraint 禁止同 family 的 revision 区间重叠。当前本地应用通过 catalog 单例行锁串行化 guideline 写事务，随后按 UUID 顺序锁定 family documents，再处理 operation/version；receipt 在 document CAS 之前重放。canonical fingerprint 包含操作种类、规范化请求正文和 expected revision，不包含服务端新分配的 operation/version ID 或审核时间；创建本地草稿也不绑定重试时重新分配的 document ID。数据库 trigger 禁止改写批准版本、向量和 accepted receipt，旧版本及 generation 不自动删除。
+
+后续迁移 `20261021_01` 增加上述两张关系表和就绪计数。关系向量/关联禁止 UPDATE/DELETE；就绪标记与关联的 INSERT 均触发提交时完整性检查，防止缺片段激活或事后插入额外关联。仓储另行重算清单 digest 并逐项核对版本的全部定位；共享关系不会使被停用或不符合指标范围的文章获得候选资格。
 
 每个 operation 最多自动尝试三次，lease 为 1–3600 秒，前两次失败可分别等待 2/10 秒后再 claim。激活、向量写入与失败回写都在取得资源锁后读取当前 UTC clock，检查 attempt、owner、lease 截止时间和 root epoch；过期 lease 在下一次 claim 时回收，无需启动时重置 running 状态。显式重试为原批准 version 建立新 operation/receipt，旧 operation 标为 superseded，避免 attempt 重置造成旧 worker 再次获得完成资格。building generation 可回填经过完整 canonical/profile 验证的不可变向量，全部覆盖后才可按 catalog revision CAS 切换；publication 激活另须当前 active generation 中的向量就绪。
 
@@ -233,20 +237,22 @@ M7 的 [GuidelineRunContext](../../backend/app/application/guidelines/retrieval.
 
 新增 `GuidelineEmbeddingProfileV1`，identity 包含 provider、model、dimensions、cosine metric、document/query template version、text-contract version 及明确的 query/document instructions。不得复用历史 case profile ID 代表说明书向量。
 
-`CanonicalGuidelineDocumentV2` / `CanonicalGuidelineQueryV1` 与 `GuidelineEmbeddingBatch` 使用独立契约。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。document 仅由已验证 content 的 title、summary、参数名称、scenario tags 和 keywords 构建，不含正文、出处 URLs 或完整 model view，canonical JSON 最多 24,000 UTF-8 bytes；query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，超限直接拒绝，后续检索 builder 按 §7.3 整字段缩减。
+`CanonicalGuidelineDocumentV3` 是版本对应的关系清单，保留 title/summary、完整安全正文 digest、片段身份和原文定位；清单本身不发给 embedding。实际输入为 `CanonicalGuidelineFragmentV3` / `CanonicalGuidelineQueryV1`，输出仍用 `GuidelineEmbeddingBatch`。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。标题/摘要保留作说明书简介与用途描述，不把全文拼成一个向量。query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，后续 builder 按 §7.3 整字段缩减。
+
+初版关系单元取已批准正文的完整安全段落，不让模型额外生成科学断言。每段保留其标题层级及条件、否定、替代解释；标题变化即切分边界，即使 Markdown 未插空行。嵌入文本移除来源占位标记，来源与完整正文仍随原版本保存；`paragraph:N` 定位是该确定性切分结果的序号。仅有标题时退回已有摘要，使用 `summary` 定位。每版本最多 128 个单元/关联，片段 relation 最多 6,000 字符；完全相同 canonical 单元共享向量，近义单元不自动合并。此规则不解决跨段代词指代，也不宣称完成科学知识图谱抽取；维护者应把必要条件写在对应段落或标题中。
 
 提供 `GuidelineEmbeddingPort` 和 guideline 专用 canonical document/query inputs。将当前 adapter 的公共 HTTP 调用、输出 count/order/dimensions/finite/norm 校验抽为共享传输/校验基础；历史 `EmbeddingPort` 及 `CanonicalCaseQueryV1` 资格校验继续由其原调用路径负责。不要把说明书伪造成历史 case，也不要简单删除历史输入校验。
 
-M5 的 `OpenAIGuidelineEmbeddingAdapter` 只接受 typed document/query，重验 schema/template、canonical bytes、profile identity 与角色指令，再经共享 `OpenAIEmbeddingTransport` / `embedding_validation` 发送和校验；旧 `OpenAIEmbeddingAdapter` 继续先执行原 case canonical 校验。说明书实际 provider input 固定为 `instructions + LF + canonical_text`，因此 `query:` / `passage:` 等可配置角色前缀位于文本开头，且完整内容与指令均绑定 profile。包含角色前缀的实际 document/query 输入分别不超过 24,000/8,192 UTF-8 bytes；每条实际输入同时用 UTF-8 字节数作为保守 token 上界，与 catalog 的 `max_input_tokens` 比较。这不是供应商 tokenizer 的精确计数，可能拒绝仍能被供应商接受的较长内容，超限不会截断条件/例外或派发请求。实际 tokenizer/检索质量由 M11 核对。
+`OpenAIGuidelineEmbeddingAdapter` 只接受 typed fragment/query（历史 profile 保留对应 typed document），重验 schema/template、canonical bytes、profile identity 与角色指令，再经共享 `OpenAIEmbeddingTransport` / `embedding_validation` 发送和校验；旧 `OpenAIEmbeddingAdapter` 继续先执行原 case canonical 校验。说明书实际 provider input 固定为 `instructions + LF + canonical_text`，因此 `query:` / `passage:` 等可配置角色前缀位于文本开头，且完整内容与指令均绑定 profile。包含角色前缀的实际 relation/query 输入分别不超过 24,000/8,192 UTF-8 bytes；每条实际输入同时用 UTF-8 字节数作为保守 token 上界，与 catalog 的 `max_input_tokens` 比较。这不是供应商 tokenizer 的精确计数，可能拒绝仍能被供应商接受的较长内容，超限不会截断条件/例外或派发请求。实际 tokenizer/检索质量由 M11 核对。
 
-当前 profile 的 text-contract/document-template 为 2，query-template 仍为 1。历史显式 v1 profile 保留原全文模板和 digest 校验，仅供其已固定 generation 读取；新 profile 通过既有 building → 全量覆盖 → CAS 原子切换，旧 run pin 和历史正文继续可读，跨 profile 不混排。摘要不独立批准或覆盖正文；修改摘要仍随内容版本接受人工检查。
+当前 profile 的 text-contract/document-template 为 3，query-template 仍为 1。历史显式 v1/v2 profile 分别保留全文/摘要模板与 digest 校验，仅供其已固定 generation 读取；新 profile 通过既有 building → 全量覆盖 → CAS 原子切换，旧 run pin 和历史正文继续可读，跨 profile 不混排。段落与摘要不独立批准或覆盖正文；修改仍随内容版本接受人工检查。每个完整片段仍受上述 wire 字节门禁约束，单个超长段落会明确准备失败，不静默截断，也不提高供应商容量。
 
 query/document 使用相同兼容 profile；若模型要求角色前缀，固定在 profile 模板中。更换 model、维度、模板或角色指令需重建相应 generation，不直接比较或混排不同 profile 的向量。
 
 ### 7.2 索引准备与更新
 
-- 发布或内置资源导入时预计算 document vector；canonical text 仅包含 title、summary、parameter names、scenario/keywords；命中后按 immutable version ID 读取完整安全 model view。
-- 每次分析只计算必要的 query vector；不在每个时间窗重新嵌入资料库。
+- 发布或内置资源导入时派生 v3 关系清单，读取当前 generation 内的已校验共享向量，只对缺失片段做一次批量 embedding；在原 publication 短事务内一起保存向量、全部版本定位和就绪标记。迟到/已失效任务不写入片段。命中后按 immutable version ID 读取完整安全 model view。
+- 每 session 只做一次在线批量 embedding，最多 3 个原问题侧面；不在每个时间窗重新嵌入资料库。不同 generation 的向量不共用。
 - worker 使用持久化 operation、有限并发、timeout/attempt 与重启后 lease 回收；失败保留人工批准版本和明确状态。
 - 期望 embedding 配置变化时建立 building generation，覆盖当前有效 catalog 的全部版本。完成后在锁内核对 catalog revision；有变化先补齐/重试核对，再原子切换。切换前旧 active 继续服务。
 - 没有 active generation、配置不兼容或 provider 不可用时，知识功能记录不可用；不阻断已有分析，不扫描未批准草稿兜底。
@@ -257,12 +263,12 @@ M6 的 `ensure_generation()` / `queue_generation()` 每轮检查期望 profile�
 
 1. 从 run pin 获得 generation/profile/catalog revision；排除 draft、未激活版本及该 revision 下停用的 root。
 2. 以 canonical parameters 和显式 `related_parameter_keys` metadata 获得候选；通用机制可声明相关指标，避免把 pH 与碱度、温度等相关知识机械隔离。scenario 是排序信号，未知情境不伪造为已知事实。
-3. 首次需要模型参与且存在候选资料时，通过应用内查询 skill 开启一个 `evidence_planning` 工具回合。模型保留原问题目标、证据状态、时空边界，生成专业简洁的 `search_guidelines({"query":"..."})`（最多 400 字符），或明确返回 `{"decision":"skip"}`。后端只接受一次该工具调用，拒绝额外参数、其他工具、多调用和不安全文本；模型不能设置 scope、参数过滤、profile、catalog、cutoff 或 top-k。构造 canonical query：专业改写问题、服务端固定目标指标、inference mode、已知的水系/任务情境；不拼接 raw transcript、凭据、provider envelope 或无界观测数据。输入过长时优先保留结构化任务字段，整项省略超预算的可选自然语言字段并记录 `input_reduced`，不从正文中随意裁一段伪装完整问题。模型提交的改写查询若仍不满足完整 wire 输入门禁，返回 unavailable，不改写、截断或退回原问题重试。
-4. 对该 profile 计算 query vector；PostgreSQL/pgvector 对授权候选做 exact cosine ranking。
-5. 使用最低相似度、去重、稳定 tie-break、top-k 与上下文预算选取完整说明书。相同 family 只返回其有效版本。
+3. 首次需要模型参与且存在候选资料时，通过应用内查询 skill 开启一个 `evidence_planning` 工具回合。模型保留原问题目标、证据状态、时空边界，以 `search_guidelines({"query":"专业改写","aspects":["原问题中一个自足的关系侧面"]})` 提交一次查询，或明确返回 `{"decision":"skip"}`。query 最多 400 字符；aspects 必填 1–3 项、每项最多 240 字符，保持必要条件，不生成同义副本或新增研究目标。后端拒绝额外参数、其他工具、多调用和不安全文本；模型不能设置 scope、参数过滤、profile、catalog、cutoff 或 top-k。每侧面构造 canonical query，附服务端固定目标指标、inference mode、已知的水系/任务情境；不拼接 raw transcript、凭据、provider envelope 或无界观测数据。输入过长时优先保留结构化任务字段，整项省略超预算的可选自然语言字段并记录 `input_reduced`，不从正文中随意裁一段伪装完整问题。任一改写/侧面不满足完整 wire 门禁则 unavailable，不截断或换问题重试。旧固定 v1/v2 generation 仍使用单条 query。
+4. 同一 profile 一次批量计算侧面向量；cosine≥0.98 的近同查询向量只保留首个。PostgreSQL/pgvector 在授权文章所关联片段内做 exact cosine matching；不先搜全库再让共享关系扩大范围。
+5. 关系匹配先过 cosine cutoff；每文章、每侧面只取最佳片段，同一片段 identity 跨侧面只贡献一次。单侧面得分为最佳 cosine；多侧面得分为 `0.85 × 最佳匹配 + 0.15 × 其余独立侧面最佳匹配之和 / (有效侧面数 - 1)`。未覆盖侧面按零计，控制重复措辞和片段数量的影响，覆盖仅为有界加分。稳定排序后按 top-k 和上下文预算选取完整说明书，相同 family 只返回其有效版本。
 6. 保留 retrieval 状态、选中内容和实际请求子集。相似度只用于相关性，不提升 confidence、风险等级或 measurement eligibility。
 
-首版稳定排序为 similarity DESC、family root UUID ASC、version UUID ASC；不按用户来源或内置来源直接赋科学可信度。无关联候选或低于阈值时允许空结果。
+稳定排序为得分 DESC、family root UUID ASC、version UUID ASC；不按用户来源或内置来源直接赋科学可信度。无关联候选或片段全部低于阈值时允许空结果。现有结果字段 `similarity` 在 v3 表示上述聚合相关性，不能与旧 profile 的单 cosine 分数直接对比；权重与去重阈值是初版工程参数，尚非真实资料上的校准结论。
 
 M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标检查候选，区分 empty-library/no-candidate；此时零 embedding。`rank_guidelines()` 在 materialized 授权候选内以 pgvector exact cosine 排序，执行 cutoff、family 去重及 top-k；拒绝不一致的 generation/profile、维度、向量范数或 canonical digest，并重新验证返回的批准版本/model view。scenario 仅进入语义 query，不授予候选资格。
 
@@ -478,7 +484,7 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 
 ### 12.2 配置与本地操作
 
-按 [AGENT.md](../../AGENT.md) 构建前端并升级数据库；说明书迁移为 `20261020_02`。浏览器 `/guidelines` 提供双库列表、草稿保存、检查发布、准备状态/重试、停用/启用和显式恢复。自编内容可以无出处；整理资料须填写出处。检查对话框展示服务器保存版本，发布绑定其 digest；准备成功前新版本不进入有效目录。查看运行的参考资料使用 transcript 保存版本，不读取当前资料库替换旧正文。
+按 [AGENT.md](../../AGENT.md) 构建前端并升级数据库；当前迁移 head 为 `20261021_01`，含原说明书迁移 `20261020_02` 及 v3 关系索引。浏览器 `/guidelines` 提供双库列表、草稿保存、检查发布、准备状态/重试、停用/启用和显式恢复。自编内容可以无出处；整理资料须填写出处。检查对话框展示服务器保存版本，发布绑定其 digest；准备成功前新版本不进入有效目录。查看运行的参考资料使用 transcript 保存版本，不读取当前资料库替换旧正文。
 
 配置来源为 `AppSettings.guideline_policy` 和模型目录的 embedding 条目；适配器支持同时配置 `WATERAGENTS_EMBEDDING_BASE_URL` 与 `WATERAGENTS_EMBEDDING_API_KEY`，让 guideline/M8 的在线与后台 embedding 使用独立的 OpenAI-compatible 服务。两项均不设置时沿用 `WATERAGENTS_OPENAI_BASE_URL` 及现有 OpenAI credential lease；只设置一项会拒绝启动，不混用地址/密钥。独立密钥由本地 deployment 配置提供，修改后重启；设置页 OpenAI 用户密钥不会覆盖它，当前 run/attempt 持有固定快照。分析模型仍使用原 `OPENAI_*` 与用户密钥优先规则。示例见 [backend/README.md](../../backend/README.md#independent-embedding-service)。仅分析模型可调用不代表同一服务提供 embedding。`WATERAGENTS_MEMORY_ENABLED=false` 关闭历史 memory，不关闭说明书。需要调整时可在本地设置 `WATERAGENTS_GUIDELINE_POLICY` JSON（例如 `'{"worker_max_concurrency":1}'`）；未指定项沿用 `GuidelinePolicy` 默认值。默认 top-k=3、cosine cutoff=0.35、知识预算=3072 tokens，在线单次最多 3 秒；后台并发 2、单次 20 秒、最多 3 次，退避 2/10 秒。cutoff 尚未由真实首批资料标注集校准。
 

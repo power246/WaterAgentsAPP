@@ -31,6 +31,7 @@ def content(**overrides) -> GuidelineContentV1:
 
 def profile(**overrides) -> GuidelineEmbeddingProfileV1:
     return GuidelineEmbeddingProfileV1(**{
+        "text_contract_version": 2, "document_template_version": 2,
         "provider": "openai", "model": "fixture-embedding", "output_dimensions": 3,
         "max_input_tokens": 2048, "document_instructions": "Represent the complete advisory topic.",
         "query_instructions": "Retrieve relevant advisory mechanisms.", **overrides,
@@ -73,7 +74,7 @@ def search_events(request):
     values = {"operation_id": request.operation_id, "model": request.model}
     return (
         ToolCallCompleted(**values, provider_call_id=f"lookup:{request.operation_id}", name="search_guidelines",
-            arguments='{"query":"Water quality mechanism, available observations and uncertainty under the original task bounds"}'),
+            arguments='{"query":"Water quality mechanism, available observations and uncertainty under the original task bounds","aspects":["Water quality mechanism, available observations and uncertainty under the original task bounds"]}'),
         UsageReported(**values, input_tokens=11, output_tokens=7),
         Terminal(**values, provider_response_id="guideline-search-response", finish_reason="completed"),
     )

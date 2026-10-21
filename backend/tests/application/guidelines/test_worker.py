@@ -44,7 +44,7 @@ class Embedding:
         if self.callback:
             returned = await self.callback(selected, inputs, token)
             if returned is not None: return returned
-        return GuidelineEmbeddingBatch(profile=selected, vectors=(EmbeddingVector(values=(1.,) + (0.,) * (selected.output_dimensions - 1)),))
+        return GuidelineEmbeddingBatch(profile=selected, vectors=tuple(EmbeddingVector(values=(1.,) + (0.,) * (selected.output_dimensions - 1)) for _ in inputs))
 
 
 @pytest.fixture

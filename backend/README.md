@@ -252,7 +252,11 @@ In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the s
 }
 ```
 
-说明书索引采用摘要模板 v2，仅嵌入标题、摘要、参数名称、场景与关键词，命中后读取对应不可变版本的完整正文。四份待审 pH 草稿在上述 Google 示例下的完整 embedding 输入为 793／782／906／862 UTF-8 字节，均通过现有 2048 字节保守门禁；草稿尚未批准，未发送到真实服务或纳入生产库。门禁仍检查包含角色指令的完整输入，不静默截断或提高模型限制。首次实际模型请求前，查询 skill 通过一次 `search_guidelines(query)` 提交专业改写；后端固定检索范围、profile 和 top-k（最多 3 份），后续阶段复用结果。空库和零模型路径不新增该调用，实际额外回合计入调用数和用量。
+说明书索引当前采用关系模板 v3：安全正文按完整段落及标题边界生成关系单元，保留标题层级、条件与否定；完全相同的单元共享向量，并以多对多关联指向不可变文章版本。标题/摘要保留作简介，命中后仍读取完整正文与出处。四份待审 pH 草稿在上述 Google 示例下分别生成 6／6／7／6 个片段，最长完整 wire 输入分别为 623／680／675／624 UTF-8 字节，均通过 2048 字节保守门禁；这仅是离线长度校验，草稿尚未批准、未发送到真实服务或纳入生产库。门禁检查包含角色指令的完整输入，单个超长段落仍会明确准备失败，不截断条件或提高模型限制。
+
+首次实际模型请求前，查询 skill 通过一次 `search_guidelines(query, aspects)` 提交专业改写和 1–3 个原问题侧面；后端做一次批量 embedding，固定范围/profile/top-k（最多 3 份），按最佳片段匹配及独立侧面覆盖排序，后续阶段复用。近同查询向量去重，每侧面最多取一个最佳匹配，同一片段不重复贡献；不会仅靠文章片段多就堆高排名。空库和零模型路径不新增该调用，实际额外回合计入调用数和用量。升级 profile 仍通过完整 building generation 原子切换；显式旧 v1/v2 generation 及历史全文继续可读。
+
+合成语义对比的源码位于 `tests/fixtures/guidelines/synthetic_relation_corpus.json` 和 `tests/guideline_relation_benchmark.py`，不属于生产资源。可在已配置独立测试库的进程中设置 `WATERAGENTS_RELATION_LIVE_E2E=1`，运行 `tests/application/guidelines/test_relation_retrieval.py::test_real_embedding_synthetic_relation_comparison`；它只向真实 embedding 发送虚构内容，比较摘要单查询、片段单查询和片段多侧面，结束后清理测试 schema。可选 `WATERAGENTS_RELATION_REPORT_PATH` 指定本地 JSON 结果路径；不向 `.env` 写测试库名、不导入业务库。结果与限制见现有 guideline TODO；合成查询使用人工编写侧面，不代表真实分析模型改写或实测 pH 验收。
 
 The pair applies to both historical-memory and guideline embeddings: run query adapters keep their captured key, and background attempts resolve the embedding connection at their own boundary. Independent credentials come only from deployment configuration and require a restart to change; the Settings OpenAI user override continues to control analysis, and does not override the independent embedding key. With both entries unset, embeddings retain the effective OpenAI credential lease, including its OS-store override. A partially configured pair is rejected before any provider request; an embedding failure never retries against the analysis endpoint.
 

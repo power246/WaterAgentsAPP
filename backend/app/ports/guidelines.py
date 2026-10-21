@@ -4,7 +4,10 @@ from uuid import UUID
 
 from app.domain.guidelines.catalog_snapshot import GuidelineCatalogSnapshot
 from app.domain.guidelines.canonical import Digest, Revision
-from app.domain.guidelines.canonical_document import CanonicalGuidelineDocument
+from app.domain.guidelines.canonical_document import CanonicalGuidelineDocument, CanonicalGuidelineDocumentV1
+from app.domain.guidelines.canonical_summary import CanonicalGuidelineDocumentV2
+from app.domain.guidelines.canonical_fragment import CanonicalGuidelineFragmentV3
+from app.domain.guidelines.relation_embedding_cache import GuidelineRelationEmbeddingCache
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
 from app.domain.guidelines.document_snapshot import GuidelineDocumentSnapshot
 from app.domain.guidelines.document_details import GuidelineDocumentDetails
@@ -75,7 +78,7 @@ class GuidelineRepositoryPort(Protocol):
 
     async def rank_guidelines(
         self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
-        vector: EmbeddingVector, *, cutoff: float, limit: int,
+        vector: EmbeddingVector | tuple[EmbeddingVector, ...], *, cutoff: float, limit: int,
     ) -> tuple[GuidelineMatch, ...]: ...
 
     async def set_enabled(
@@ -96,6 +99,8 @@ class GuidelineRepositoryPort(Protocol):
 
     async def read_embedding(self, generation_id: UUID, version_id: UUID) -> EmbeddingVector | None: ...
 
+    async def read_relation_embeddings(self, generation_id: UUID, fragments: tuple[CanonicalGuidelineFragmentV3, ...]) -> GuidelineRelationEmbeddingCache: ...
+
     async def activate_generation(self, generation_id: UUID, *, expected_catalog_revision: Revision) -> None: ...
 
     async def claim_operation(
@@ -113,7 +118,7 @@ class GuidelineRepositoryPort(Protocol):
 
     async def write_embedding(
         self, claim: GuidelineOperation, generation_id: UUID,
-        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
+        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector | tuple[EmbeddingVector, ...],
         *, now: datetime | None = None,
     ) -> None: ...
 
@@ -121,13 +126,13 @@ class GuidelineRepositoryPort(Protocol):
 
     async def complete_operation(
         self, claim: GuidelineOperation, generation_id: UUID,
-        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
+        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector | tuple[EmbeddingVector, ...],
         *, now: datetime | None = None,
     ) -> None: ...
 
     async def write_building_embedding(
         self, generation_id: UUID, version_id: UUID,
-        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
+        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector | tuple[EmbeddingVector, ...],
     ) -> None: ...
 
 
@@ -138,6 +143,6 @@ class BundledGuidelineSourcePort(Protocol):
 class GuidelineEmbeddingPort(Protocol):
     async def embed(
         self, profile: GuidelineEmbeddingProfileV1,
-        inputs: tuple[CanonicalGuidelineDocument | CanonicalGuidelineQueryV1, ...],
+        inputs: tuple[CanonicalGuidelineDocumentV1 | CanonicalGuidelineDocumentV2 | CanonicalGuidelineFragmentV3 | CanonicalGuidelineQueryV1, ...],
         deadline: float | None, cancel_token: EmbeddingCancellationPort | None,
     ) -> GuidelineEmbeddingBatch: ...

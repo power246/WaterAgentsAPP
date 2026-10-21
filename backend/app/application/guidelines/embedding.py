@@ -1,8 +1,9 @@
 import asyncio
+from math import sqrt
 
 from app.application.embedding_validation import EmbeddingContractError, MAX_EMBEDDING_BATCH_ITEMS
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1, GuidelineEmbeddingProfileV1,
+    CanonicalGuidelineFragmentV3, CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1, GuidelineEmbeddingProfileV1,
 )
 from app.domain.guidelines.policy import GuidelinePolicy
 from app.domain.guidelines.canonical_document import MAX_GUIDELINE_DOCUMENT_BYTES
@@ -35,7 +36,7 @@ def validated_guideline_texts(profile: GuidelineEmbeddingProfileV1, inputs) -> t
             raise ValueError()
         texts = []
         for item in inputs:
-            if type(item) not in {CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1}:
+            if type(item) not in {CanonicalGuidelineFragmentV3, CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1}:
                 raise ValueError()
             checked = type(item).model_validate_json(item.canonical_text)
             checked.require_profile(profile)
@@ -43,7 +44,7 @@ def validated_guideline_texts(profile: GuidelineEmbeddingProfileV1, inputs) -> t
                 raise ValueError()
             text = checked.instructions + "\n" + checked.canonical_text
             # A conservative UTF-8 byte upper bound avoids a model-specific tokenizer.
-            byte_limit = (MAX_GUIDELINE_DOCUMENT_BYTES if isinstance(checked, (CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2))
+            byte_limit = (MAX_GUIDELINE_DOCUMENT_BYTES if isinstance(checked, (CanonicalGuidelineFragmentV3, CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2))
                           else MAX_GUIDELINE_QUERY_BYTES)
             if len(text.encode("utf-8")) > min(byte_limit, profile.max_input_tokens):
                 raise ValueError()
@@ -51,6 +52,16 @@ def validated_guideline_texts(profile: GuidelineEmbeddingProfileV1, inputs) -> t
         return tuple(texts)
     except ValueError:
         raise EmbeddingContractError("guideline embedding input violates its profile or text limits") from None
+
+
+def distinct_query_vectors(vectors):
+    distinct = []
+    for vector in vectors:
+        norm = sqrt(sum(v*v for v in vector.values))
+        unit = tuple(v/norm for v in vector.values)
+        if not any(sum(a*b for a, b in zip(unit, other, strict=True)) >= .98 for _, other in distinct):
+            distinct.append((vector, unit))
+    return tuple(vector for vector, _ in distinct)
 
 
 def guideline_embedding_failure(error: BaseException) -> tuple[str, bool]:

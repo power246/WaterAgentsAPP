@@ -6,12 +6,12 @@ from uuid import UUID
 
 from app.application.analysis_runs.cancellation import await_with_cancellation
 from app.application.analysis_runs.workflow import CancellationToken, WorkflowStopped
-from app.application.guidelines.embedding import guideline_embedding_failure, validated_guideline_texts
+from app.application.guidelines.embedding import guideline_embedding_failure, validated_guideline_texts, distinct_query_vectors
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
 from app.domain.guidelines.embedding_batch import GuidelineEmbeddingBatch
 from app.domain.guidelines.policy import GuidelinePolicy
 from app.domain.guidelines import GuidelineMatch, GuidelineRetrievalResult, GuidelineRunPin
-from app.domain.guidelines.canonical import normalize_text
+from app.domain.guidelines.canonical import normalize_text, digest
 from app.ports.clock import ClockPort
 from app.ports.errors import GuidelineConflictError, InvalidPortResponseError, PortError
 
@@ -126,6 +126,7 @@ class GuidelineSessionKnowledge:
         self.pin = pin
         self.session_id = session_id
         self._query = query
+        self._queries = (query,) if query is not None else ()
         self._repository = repository
         self._embedding = embedding
         self._policy = policy
@@ -153,7 +154,7 @@ class GuidelineSessionKnowledge:
         """Check the pinned catalog without sending an embedding request."""
         return await self._load(check_only=True)
 
-    async def search(self, question: str, *, deadline: datetime | None = None) -> GuidelineRetrievalResult:
+    async def search(self, question: str, *, aspects: tuple[str, ...] = (), deadline: datetime | None = None) -> GuidelineRetrievalResult:
         if deadline is not None:
             self._deadline = min(self._deadline, deadline)
         if self._task is not None:
@@ -163,11 +164,20 @@ class GuidelineSessionKnowledge:
         candidate = CanonicalGuidelineQueryV1.model_validate(self._query.model_dump() | {"question": question})
         validated_guideline_texts(self.pin.catalog.profile, (candidate,))
         self._query = candidate
+        if self.pin.catalog.profile.document_template_version == 3 and aspects:
+            if not 1 <= len(aspects) <= 3:
+                raise ValueError("invalid guideline query aspect count")
+            self._queries = tuple(CanonicalGuidelineQueryV1.model_validate(candidate.model_dump() | {"question": aspect})
+                for aspect in dict.fromkeys(aspects))
+            validated_guideline_texts(self.pin.catalog.profile, self._queries)
+        else:
+            self._queries = (candidate,)
         return await self.get_or_load()
 
     def _result(self, status, code=None, matches=()):
         return GuidelineRetrievalResult(status=status, safe_error_code=code, matches=matches,
-            query_digest=self._query.canonical_digest if self._query is not None else None,
+            query_digest=(self._queries[0].canonical_digest if len(self._queries) == 1 else
+                digest([q.canonical_digest for q in self._queries])) if self._queries else None,
             input_reduced=self._query.input_reduced if self._query is not None else False)
 
     async def _load(self, *, check_only=False):
@@ -208,15 +218,16 @@ class GuidelineSessionKnowledge:
             return self._result("no_match")
         if check_only:
             return None
-        batch = await self._embedding.embed(catalog.profile, (query,), deadline, self._cancellation)
+        batch = await self._embedding.embed(catalog.profile, self._queries, deadline, self._cancellation)
         self._checkpoint(deadline)
-        if batch.profile != catalog.profile or len(batch.vectors) != 1:
+        if batch.profile != catalog.profile or len(batch.vectors) != len(self._queries):
             raise InvalidPortResponseError("Guideline query embedding profile/count is invalid.")
         try:
-            vector = GuidelineEmbeddingBatch.model_validate(batch.model_dump()).vectors[0]
+            vectors = GuidelineEmbeddingBatch.model_validate(batch.model_dump()).vectors
         except ValueError:
             raise InvalidPortResponseError("Guideline query embedding vector is invalid.") from None
-        matches = await self._repository.rank_guidelines(catalog, query.parameter_keys, vector,
+        selected = distinct_query_vectors(vectors)
+        matches = await self._repository.rank_guidelines(catalog, query.parameter_keys, selected[0] if len(selected) == 1 else selected,
             cutoff=self._policy.semantic_min_similarity, limit=self._policy.top_k)
         self._checkpoint(deadline)
         return self._result("retrieved" if matches else "no_match", matches=matches)
@@ -229,3 +240,4 @@ class GuidelineSessionKnowledge:
             await asyncio.gather(self._task, return_exceptions=True)
             self._task = None
         self._query = None
+        self._queries = ()

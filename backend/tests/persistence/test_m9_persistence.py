@@ -122,7 +122,7 @@ def test_m9_migration_round_trip_preserves_m8_transcripts_and_registry() -> None
         command.downgrade(alembic_config(settings), "20261007_01")
         generation_id = asyncio.run(verify_survival(settings, source))
         assert run_database_cli(["upgrade", "--test-database"]) == 0
-        assert asyncio.run(check_database_schema(settings)) == "20261020_02"
+        assert asyncio.run(check_database_schema(settings)) == "20261021_01"
         assert run_database_cli(["check", "--test-database"]) == 0
         async def check_preserved():
             engine = create_database_engine(settings)

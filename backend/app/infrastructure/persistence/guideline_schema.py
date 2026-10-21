@@ -5,6 +5,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ExcludeConstraint, JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncConnection
+from app.infrastructure.persistence.guideline_relation_schema import define_relation_tables
 
 
 def define_guideline_tables(metadata: MetaData) -> None:
@@ -120,6 +121,7 @@ def define_guideline_tables(metadata: MetaData) -> None:
         Column("profile_id", Text, nullable=False),
         Column("dimensions", Integer, nullable=False),
         Column("canonical_document_digest", Text, nullable=False),
+        Column("relation_count", Integer),
         Column("embedding", VECTOR(), nullable=False),
         ForeignKeyConstraint(["version_id"], ["guideline_versions.version_id"]),
         ForeignKeyConstraint(["generation_id", "profile_id", "dimensions"],
@@ -127,7 +129,9 @@ def define_guideline_tables(metadata: MetaData) -> None:
                               "guideline_index_generations.dimensions"]),
         CheckConstraint("public.vector_dims(embedding) = dimensions "
                         "AND public.vector_norm(embedding) BETWEEN 1e-12 AND 1e6", name="vector"),
+        CheckConstraint("relation_count IS NULL OR relation_count > 0", name="relation_count"),
     )
+    define_relation_tables(metadata)
     operations = Table(
         "guideline_operations", metadata,
         Column("operation_id", UUID(as_uuid=True), primary_key=True),
@@ -190,6 +194,8 @@ async def guideline_schema_matches(connection: AsyncConnection, metadata: MetaDa
     return (required <= constraints
             and {str(i.name) for table in tables.values() for i in table.indexes} <= indexes
             and {name + "_guard" for name in tables} <= triggers
+            and "guideline_relation_completeness" in triggers
+            and "guideline_relation_link_completeness" in triggers
             and await connection.scalar(text(
                 "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'btree_gist')"
             )))

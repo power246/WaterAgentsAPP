@@ -25,6 +25,8 @@ def test_schema_has_core_transcript_and_m8_rag_tables() -> None:
         "guideline_catalog_entries",
         "guideline_index_generations",
         "guideline_embeddings",
+        "guideline_relation_embeddings",
+        "guideline_relation_links",
         "guideline_operations",
     }
 

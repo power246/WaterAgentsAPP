@@ -17,6 +17,9 @@ from app.domain.guidelines import (
     GuidelineDocumentDetails, GuidelineListItem,
 )
 from app.domain.guidelines.canonical_document import CanonicalGuidelineDocument
+from app.domain.guidelines.canonical_relations import CanonicalGuidelineDocumentV3
+from app.domain.guidelines.relation_embedding_cache import GuidelineRelationEmbeddingCache
+from app.infrastructure.persistence.guideline_relations import read_relation_embeddings, write_relations, rank_relations
 from app.domain.guidelines.canonical import canonical_text
 from app.domain.guidelines.identity import bundled_guideline_version_id
 from app.domain.guidelines.mutation_bodies import action_body, create_body, publish_body, save_body
@@ -523,14 +526,21 @@ class PostgresGuidelineRepository:
             return row["library"], row["candidates"]
 
     async def rank_guidelines(self, snapshot: GuidelineCatalogSnapshot, parameter_keys: tuple[ParameterKey, ...],
-                              vector: EmbeddingVector, *, cutoff: float, limit: int):
+                              vector: EmbeddingVector | tuple[EmbeddingVector, ...], *, cutoff: float, limit: int):
         if not isfinite(cutoff) or not 0 <= cutoff <= 1 or type(limit) is not int or not 1 <= limit <= 3:
             raise ValueError("invalid guideline ranking bounds")
         if snapshot.profile is None:
             raise ValueError("guideline profile is unavailable")
-        GuidelineEmbeddingBatch.model_validate({"profile": snapshot.profile.model_dump(), "vectors": [vector.model_dump()]})
+        vectors = vector if isinstance(vector, tuple) else (vector,)
+        if not 1 <= len(vectors) <= 3:
+            raise ValueError("invalid guideline query aspect count")
+        GuidelineEmbeddingBatch.model_validate({"profile": snapshot.profile.model_dump(), "vectors": [v.model_dump() for v in vectors]})
         async with self._connection() as connection:
             parameters = await self._retrieval_parameters(connection, snapshot, parameter_keys)
+            if snapshot.profile.document_template_version == 3:
+                return await rank_relations(connection, _PINNED_CATALOG, parameters, snapshot, vectors, cutoff, limit, self._registry)
+            if len(vectors) != 1:
+                raise ValueError("legacy guideline profiles require one query")
             rows = (await connection.execute(text(
                 "WITH catalog AS (" + _PINNED_CATALOG + "), "
                 "eligible AS MATERIALIZED (SELECT * FROM catalog WHERE eligible AND embedding IS NOT NULL), "
@@ -548,6 +558,15 @@ class PostgresGuidelineRepository:
                     raise GuidelineConflictError("guideline_embedding_conflict")
                 matches.append(GuidelineMatch(version=version, similarity=row["similarity"]))
             return tuple(matches)
+
+    async def read_relation_embeddings(self, generation_id, fragments):
+        async with self._connection() as connection:
+            profile_body = await connection.scalar(text("SELECT profile FROM guideline_index_generations WHERE generation_id = :id"), {"id": generation_id})
+            if profile_body is None:
+                raise GuidelineConflictError("guideline_generation_conflict")
+            profile = GuidelineEmbeddingProfileV1.model_validate(profile_body)
+            entries = await read_relation_embeddings(connection, generation_id, profile, fragments)
+            return GuidelineRelationEmbeddingCache(profile=profile, entries=tuple(sorted(entries.items())))
 
     @staticmethod
     def _generation(row):
@@ -821,7 +840,7 @@ class PostgresGuidelineRepository:
                                       pending=True, epoch=root["activation_epoch"])
 
     async def write_embedding(self, claim: GuidelineOperation, generation_id: UUID,
-                              canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
+                              canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector | tuple[EmbeddingVector, ...],
                               *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, _, _ = await self._fence(connection, claim, now)
@@ -833,7 +852,7 @@ class PostgresGuidelineRepository:
                                      {"gen": generation_id, "id": row["operation_id"]})
 
     async def write_building_embedding(self, generation_id: UUID, version_id: UUID,
-                                       canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector):
+                                       canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector | tuple[EmbeddingVector, ...]):
         """Backfill immutable derived rows; this cannot modify an active catalog.
 
         A duplicate keeps the first stored vector. Only an independently complete
@@ -851,7 +870,8 @@ class PostgresGuidelineRepository:
         if generation is None or generation["state"] not in allowed_states:
             raise GuidelineConflictError("guideline_generation_conflict")
         profile = GuidelineEmbeddingProfileV1.model_validate(generation["profile"])
-        GuidelineEmbeddingBatch.model_validate({"profile": profile.model_dump(), "vectors": [vector.model_dump()]})
+        vectors = vector if isinstance(vector, tuple) else (vector,)
+        GuidelineEmbeddingBatch.model_validate({"profile": profile.model_dump(), "vectors": [v.model_dump() for v in vectors]})
         body = await connection.scalar(text("SELECT snapshot FROM guideline_versions WHERE version_id = :id"), {"id": version_id})
         if body is None:
             raise GuidelineConflictError("guideline_version_conflict")
@@ -859,16 +879,26 @@ class PostgresGuidelineRepository:
         expected = canonical_guideline_document(version.content, profile, self._registry)
         if canonical_document != expected:
             raise ValueError("embedding document differs from the approved version/profile")
+        relation_count = None
+        if isinstance(expected, CanonicalGuidelineDocumentV3):
+            if len(vectors) != len(expected.fragments):
+                raise ValueError("relation vector count differs from approved manifest")
+            vector = await write_relations(connection, generation_id, version_id, profile, expected, vectors)
+            relation_count = len(expected.links)
+        elif len(vectors) != 1:
+            raise ValueError("legacy guideline profile requires one vector")
+        else:
+            vector = vectors[0]
         existing = await connection.scalar(text(
             "SELECT canonical_document_digest FROM guideline_embeddings WHERE generation_id = :gen AND version_id = :version"
         ), {"gen": generation_id, "version": version_id})
         if existing is None:
             await connection.execute(text(
                 "INSERT INTO guideline_embeddings (generation_id, version_id, profile_id, dimensions, "
-                "canonical_document_digest, embedding) VALUES (:gen, :version, :profile, :dim, :digest, CAST(:vector AS public.vector))"
+                "canonical_document_digest, embedding, relation_count) VALUES (:gen, :version, :profile, :dim, :digest, CAST(:vector AS public.vector), :relations)"
             ), {"gen": generation_id, "version": version_id, "profile": profile.profile_id,
                 "dim": profile.output_dimensions, "digest": expected.canonical_digest,
-                "vector": canonical_text(list(vector.values))})
+                "vector": canonical_text(list(vector.values)), "relations": relation_count})
         elif existing != expected.canonical_digest:
             raise GuidelineConflictError("guideline_embedding_conflict")
 
@@ -931,7 +961,7 @@ class PostgresGuidelineRepository:
         ), {"id": row["operation_id"]})
 
     async def complete_operation(self, claim: GuidelineOperation, generation_id: UUID,
-                                 canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
+                                 canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector | tuple[EmbeddingVector, ...],
                                  *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, root_id, _ = await self._fence(connection, claim, now)

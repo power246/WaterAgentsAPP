@@ -13,8 +13,8 @@ class GuidelineEmbeddingProfileV1(DomainModel):
     output_dimensions: Annotated[int, Field(strict=True, ge=1)]
     max_input_tokens: Annotated[int, Field(strict=True, ge=1)]
     distance_metric: Literal["cosine"] = "cosine"
-    text_contract_version: Literal[1, 2] = 2
-    document_template_version: Literal[1, 2] = 2
+    text_contract_version: Literal[1, 2, 3] = 3
+    document_template_version: Literal[1, 2, 3] = 3
     query_template_version: Literal[1] = 1
     document_instructions: Annotated[NormalizedText, Field(min_length=1, max_length=2000)]
     query_instructions: Annotated[NormalizedText, Field(min_length=1, max_length=2000)]

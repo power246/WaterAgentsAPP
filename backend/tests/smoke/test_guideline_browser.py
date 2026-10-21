@@ -27,7 +27,7 @@ from tests.persistence.test_m6_reasoning_persistence import _wait_persisted
 @pytest.mark.skipif(os.environ.get('WATERAGENTS_GUIDELINE_BROWSER_E2E') != '1',
                     reason='Opt-in: requires built frontend and installed Chrome/Playwright')
 def test_browser_management_to_saved_run_and_history(monkeypatch, tmp_path):
-    selected = profile(max_input_tokens=8192)
+    selected = profile(text_contract_version=3, document_template_version=3, max_input_tokens=8192)
     embedding = Embedding()
 
     class OfflineGuidelines(GuidelineRuntime):

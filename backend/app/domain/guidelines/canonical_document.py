@@ -7,6 +7,7 @@ from app.domain.guidelines.canonical import (
     MAX_GUIDELINE_DOCUMENT_BYTES, NormalizedText, canonical_text, digest, require_safe_model_text, unique_texts,
 )
 from app.domain.guidelines.canonical_summary import CanonicalGuidelineDocumentV2
+from app.domain.guidelines.canonical_relations import CanonicalGuidelineDocumentV3
 from app.domain.guidelines.content import GuidelineContentV1
 from app.domain.guidelines.embedding_profile import GuidelineEmbeddingProfileV1
 from app.domain.guidelines.model_view import GuidelineModelViewV1, project_model_view
@@ -71,10 +72,10 @@ class CanonicalGuidelineDocumentV1(DomainModel):
         )
 
 
-CanonicalGuidelineDocument = CanonicalGuidelineDocumentV1 | CanonicalGuidelineDocumentV2
+CanonicalGuidelineDocument = CanonicalGuidelineDocumentV1 | CanonicalGuidelineDocumentV2 | CanonicalGuidelineDocumentV3
 
 
 def canonical_guideline_document(content: GuidelineContentV1, profile: GuidelineEmbeddingProfileV1,
                                  registry: ParameterCapabilityRegistry) -> CanonicalGuidelineDocument:
-    template = CanonicalGuidelineDocumentV2 if profile.document_template_version == 2 else CanonicalGuidelineDocumentV1
+    template = {1: CanonicalGuidelineDocumentV1, 2: CanonicalGuidelineDocumentV2, 3: CanonicalGuidelineDocumentV3}[profile.document_template_version]
     return template.from_content(content, profile, registry)
