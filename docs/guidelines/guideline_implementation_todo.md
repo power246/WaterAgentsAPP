@@ -2,7 +2,7 @@
 
 日期：2026-10-20（Asia/Shanghai）
 
-状态：**Milestone 0–10 已完成，Milestone 11–12 为 partial**。本文是唯一实施进度清单。M12 已进行跨层审计、全栈回归和编辑器并发修复；最终阶段出口仍依赖 M11 的真实内容批准、可用 embedding 检索及真实配对结果，不能将本地程序检查视作整体验收。
+状态：**Milestone 0–10 已完成，Milestone 11–12 为 partial**。本文是唯一实施进度清单。M12 已进行跨层审计、全栈回归和编辑器并发修复；后续已完成仅限隔离评估的四稿批准与一个真实模型成对链路（见下方补充），最终阶段出口仍依赖生产分发批准、检索质量核对及 3–5 个实测 holdout 配对，不能将本地程序检查视作整体验收。
 
 规格依据：[技术设计](guideline_knowledge_design.md)；产品决定与调查证据：[讨论记录 D01–D14](guideline_design_discussion.md)。阅读顺序为产品契约 → 当前源码 → 本清单对应阶段。本文定义施工、测试与交付要求，字段和状态语义以技术设计为准；发现冲突先在同一变更中修正文档一致性，不能静默选择更省事的实现。
 
@@ -593,7 +593,7 @@ git diff --check
 
 - [ ] 生产 bundle 中的每项都能定位真实人工批准且 digest 一致；测试 fixture 审核信息不能混作真实批准。
 - [x] 对评估脚本做必要的 holdout/leakage 检查，刻意注入重复目标 raw/aggregate/history/cached 值应被拒绝；避免只凭“输入没有 target 字段”断言隔离。
-- [ ] 证明 no-guide 对照真正未提供知识、with-guide 提供的是批准版本；两组证据/模型/预算差异明确，query 不含对照答案。
+- [x] 证明 no-guide 对照真正未提供知识、with-guide 提供的是批准版本；两组证据/模型/预算差异明确，query 不含对照答案。证据：下方 2026-10-21 整链路回归；仅一个非 holdout 案例，批准仅限隔离评估，不代表实测精度验收。
 - [x] 用已知小数据核对评估指标、窗口匹配、无点估计/仅范围/失败等统计；合成数据只检验程序，不计入 3–5 个真实案例。
 - [x] 缺合格同指标 anchors 的案例仍遵守原 range-only/来源规则；不能为了算点误差而放宽资格或强迫模型输出单点。
 - [x] 真实 embedding、真实分析模型及实测核对分别记录，未配置、费用/服务限制或样本不足保留 `not run`，不能以 fake 通过代替。
@@ -714,7 +714,7 @@ git rev-parse HEAD
 | GK-C20 | `test_transcript.py::test_historical_case_closure_accepts_usage_refs_without_indexing_knowledge`；`backend/tests/infrastructure/test_guideline_runtime.py::test_guideline_runtime_and_profile_are_independent_of_memory_setting`；M8 eligibility 全量回归 | canonical/投影相等；正文不成为历史 evidence，memory disabled 独立。 |
 | GK-C21 | `test_guideline_runtime.py::test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_persisting_secrets`、`test_run_pin_retrieval_uses_fixed_run_lease_once_and_empty_library_dispatches_zero`；`test_worker.py::test_worker_concurrency_is_bounded_and_stop_does_not_dispatch_more_tasks` | run/attempt lease、重启/有界重试/关闭各自验证。 |
 | GK-C22 | `backend/tests/architecture/test_production_test_isolation.py` two-SSE/one-runner/no-test-route；`test_archive_isolation.py`；`backend/tests/application/transcript_memory/test_projection.py::test_projection_replay_and_canonical_golden_are_stable` | 旧 golden `sha256:e6eb4684faad50a02b97c096602e9a096bc23e582fa0ee3cc87124570b1e738b` 与 case UUID 不变；无归档/生产测试入口。 |
-| GK-C23 | `backend/tests/application/guidelines/test_evaluation.py` 原始/派生/隐藏均值泄漏拒绝及统计匹配；M11 冻结公开输入记录 | 评估守卫通过；真实模型的完整成对结果 **not run**。 |
+| GK-C23 | `backend/tests/application/guidelines/test_evaluation.py` 原始/派生/隐藏均值泄漏拒绝及统计匹配；M11 冻结公开输入记录；下方整链路回归 | 评估守卫通过；一个非 holdout 的真实模型成对链路完成，目标真值及 3–5 个实测 holdout 配对 **not run**。 |
 | GK-C24 | 本阶段与 M11 完成记录、下方 GK-A 清单 | 程序/PG/browser/真实供应商/批准/CI 分列，不宣称整体完成。 |
 
 ### 后续授权补充：独立 embedding 配置（2026-10-21）
@@ -778,6 +778,31 @@ git rev-parse HEAD
 
 本地部署补充（2026-10-21，用户明确授权更新业务库）：已确认目标 `127.0.0.1:5432/wateragents` / `public`，先以 `pg_dump --format=custom` 备份并通过 `pg_restore --list` 目录检查，再执行现有 CLI `upgrade` / `check`，由 `20261020_01` 升至 **`20261021_01`**，完整结构检查通过。原有 **65 runs、307 sessions、23,783 transcript items、533 contents、154 unit-policy entries** 及其他既有表行数均一致；说明书版本、关系向量和关联仍为零，没有导入测试资料或待审草稿。备份与前后计数仅保存在 `.tmp/guideline-relations-20261021/`，不纳入 Git；该部署操作不替代真实资料与分析效果验收。
 
+### 后续授权补充：真实整链路回归与旧归档对比（2026-10-21）
+
+- [x] 用户明确批准当前四份 pH 草稿**仅用于本次隔离评估**，packet `sha256:7be03c684261704b0713327473828c0efd87c2ed7617440456b8f63c18d0b72b`，文件 SHA256 仍为 `5c3b25320a49e08f9ef48e1f8c7406ccb1a70bcd30db6a7f64742505c297be58`；另明确允许本次请求/坐标、公开观测、新推理上下文与四稿发往已配置 DeepSeek，片段/查询发往 Google embedding。实际服务为 `https://api.deepseek.com` / `deepseek-flash` 与 `https://generativelanguage.googleapis.com/v1beta/openai` / `gemini-embedding-001`。旧归档原文只在本地核对；未生成生产批准，生产 manifest 保持空。
+- [x] 基于 `codex/guidelines-m0` / `c408739`，通过实际生产 app、HTTP API、PostgreSQL 与真实供应商运行 no-guide/with-guide。测试库 `wateragents_test` 每轮使用临时迁移 schema，memory-disabled/stateless；生产代码、阈值、时限与 `.env` 均未修改。两组沿用旧请求、模型 ID、预算和拓扑配置，日期固定为 **2026-10-15 America/Chicago**（UTC 2026-10-15 05:00 至 2026-10-16 05:00），四个 6h 窗口。缓存只复用成功的原始 GET 响应，保留 adapter 的请求节流；模型/embedding POST 不重放。串行知识组命中缓存 467 次、新增真实 GET 为 0；两组 192 条唯一观测的规范化 digest 相同：`f56a714b67931f6e0080bb59251fe6a5abf60f97a5ae63cb812ede7193c1222f`。
+
+| 项目 | 旧 `runtime-test-1019` | 本次无说明书 | 本次有说明书（串行） |
+| --- | --- | --- | --- |
+| run ID | `12ccd705-d5be-4de9-8f53-0e04a358cb11` | `8101a96f-7888-427a-9000-f356e2d4739d` | `d958f69c-7e2d-476c-9e25-fd961f4fa25d` |
+| run / 可用水体 | completed / 7 | completed / 7 | completed / 6，另 1 invalid |
+| 目标四窗 pH 点值 | 8.2 / 8.2 / 8.2 / 8.2 | 8.12 / 8.14 / 8.10 / 8.10 | 8.10 / 8.10 / 8.10 / 8.00 |
+| 目标四窗可能范围 | 7.8–8.6 / 7.8–8.6 / 7.8–8.6 / 7.9–8.5 | 7.95–8.30 / 7.90–8.40 / 7.90–8.30 / 7.80–8.40 | 7.50–8.50 / 7.80–8.40 / 7.85–8.35 / 7.50–8.40 |
+| 目标 overall confidence（非校准概率） | 0.34 | 0.39 | 0.26 |
+| 水体模型请求 / schema repair | 78 / 2 | 71 / 1 | 84 / 6（含 7 次查询改写） |
+| 数值任务 / 实际采集指标 | 48 / pH、流量 | 48 / pH、流量 | 48 / pH、流量 |
+
+实际能力：对照在导入草稿前固定 empty pin，search/正文提供/使用均为 0。串行知识组 ready pin、7 次实际 tool 查询均 retrieved，每次返回缓冲、光合/呼吸、混合/传递三篇；77 条 delivery 中 76 条有正文。逐一与最终记录的模型请求比对 **200 次整篇正文与 digest 一致**，没有截断正文；44 条显式 usage 含 69 条合法 delivery/version 引用，5 个最终水体结果含 36 条合法 usage 绑定（包括目标）。首个水体未显式采用，失败分支的引用未成为最终结果。provided 与 used 分开；目标四窗仍为 inferred / model_estimate / same_parameter_measurement，并保留 estimated/provider_flagged，没有因说明书升级证据资格。
+
+本例限制与反例：知识组 COMID `1777622` 在 overall synthesis 首次因 `attribution_basis_invalid` 与 `evidence_out_of_scope` 被拒绝，修复又把 contextual-only 上游引用归为 inferred，最终 `waterbody_model_repair_failed`；下游保留 invalid 分支并完成目标及摘要。7 次真实改写中有 **5 次偏向标准/限值查询**，偏离原问题的 pH 估值目标；四篇同领域小库仍返回上述三篇，不能据此确认专业改写或多对多片段的真实召回/精度提升。本次证据调用 16 次，对照 15 次；采集指标和数值任务没有扩张，但单例不能证明所有补证过程都收敛。没有目标实测真值，也未锁定供应商权重版本或做重复抽样，因此不计算科学准确率，不将置信度下降或点值变化解释为更准确。
+
+与旧归档的可比性：同一站点/指标/时间/统计键下，192 条观测中 **79 条 pH 返回值不同**，无新增/缺失键；具体原因未确认。固定日期不能冻结供应商响应，旧 run 的 8.2 不能作为新推理真值；主要对照采用本次相同输入的两组。7 个活动水体及执行层一致，原归档 32 个文件逐一 hash 未变。旧包当前校验通过（9 sessions / 771 items / 72 bodies / 555 references），导入隔离 schema 后实际 History API 验证 7 个水体/4 个目标点/33 个 fragment、距离覆盖与 provider_flagged，issues 为空。
+
+失败尝试也保留摘要：最初 task-local 导出助手把 SQLAlchemy Result 直接转 dict 导致 TypeError，改为 `.tuples().all()` 后重跑；并发知识尝试 `f3a50987-bb7b-4880-98bc-f5b54dcdf963` 的目录 pin 为 unavailable，未实际检索，且同期有持久化 5s timeout。用户明确批准取消（HTTP 200）并修正重跑；串行运行使用同一生产代码和时限成功取得 ready pin，精确并发根因仍未确认，不能声称已修复该可用性问题。按用户清理要求，保存诊断/取消记录/文件 hash 后删除该取消尝试的大输出及既有失败测试残留，共 **26 个目标、29,732,938 bytes**；有效两组结果、旧归档和升级前数据库备份保留。
+
+验证与复现：`backend/tests/smoke/test_m6_reasoning_workflow_smoke.py`、`test_m7_topology_workflow_smoke.py`、`test_m9_production_pg.py` 及 `backend/tests/application/guidelines` 定向 **260 passed / 1 skipped**（108.17s，既有 opt-in browser skip）。实际两组各 9 sessions，763/846 items 全部 parse ok，70/65 bodies 长度相符、563/658 typed references 全部可解；History issues 为空，SSE 终态 stream_end 可达。task-local 实际模型脚本为 `.tmp/guideline-chain-20261021/{run_chain,run_guided}.py`，从 `backend/` 以锁定 `.venv` 和仅进程级测试库运行；`compare_chain.py` 与 `audit_chain.py` 仅本地读取快照。比较、逐请求正文/引用审计、失败诊断、日志/XML 与清理清单均留在该临时目录，不提交结果产物。业务库仍为 `20261021_01`，65 runs / 307 sessions / 23,783 items / 533 contents / 154 unit-policy entries，所有说明书表 0，前后行数无变化；备份仍在。真实浏览器/完整全栈/hosted CI 本轮未重跑，既有全量通过记录保持原日期；3–5 实测 holdout 与生产批准仍未完成。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。
@@ -793,7 +818,7 @@ git rev-parse HEAD
 - [ ] **GK-A11**：首批资料有真实人工批准，真实 embedding 检索已核对，3–5 个实测 holdout 成对案例如实报告。
 - [ ] **GK-A12**：全栈回归和交付证据完整，fake/真实供应商/数据库/浏览器/hosted CI 的结论与限制分开。
 
-GK-A11 尚缺实际批准、批准内容的真实检索核对和真实成对输出；独立 Google embedding 连通预检已通过。GK-A12 的本地回归部分已通过，最终交付仍待这些必需证据。不是失败案例被排除，也不是以 fake 或现有说明文档替代真实验收。
+GK-A11 已有四稿仅限隔离评估的明确批准、真实检索/正文/引用链和一个非 holdout 成对运行；仍缺生产分发批准、检索质量修正与核对、3–5 个有目标真值的实测 holdout。GK-A12 的本地回归部分已有证据，最终交付仍待这些必需项及已发现问题的后续处理；不排除失败案例，也不以 fake 或文档替代真实验收。
 
 ## 附录 A：可复用验证环境与命令
 
@@ -844,4 +869,4 @@ API schemas 用 `npm --prefix frontend run generate:api` 生成，以 `check:api
 阶段出口：逐项证据或尚未满足项；不得以文档完成代替运行验收
 ```
 
-Milestone 0–10 的实际命令与证据见对应完成记录；Milestone 11–12 已有局部证据，内容批准、真实检索/实测配对及最终阶段出口仍未满足。
+Milestone 0–10 的实际命令与证据见对应完成记录；Milestone 11–12 的程序验证及隔离真实整链路记录见上，生产分发批准、检索质量与 3–5 个实测 holdout 的最终阶段出口仍未满足。
