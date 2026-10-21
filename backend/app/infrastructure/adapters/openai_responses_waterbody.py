@@ -335,6 +335,9 @@ def _request_body(
                     "output": message.text,
                 }
             )
+        elif message.role is WaterbodyMessageRole.ASSISTANT and getattr(message, "provider_call_id", None) is not None:
+            input_items.append({"type": "function_call", "call_id": message.provider_call_id,
+                "name": message.tool_name, "arguments": message.text})
         else:
             input_items.append(
                 {

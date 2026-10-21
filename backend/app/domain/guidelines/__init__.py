@@ -1,4 +1,5 @@
-from app.domain.guidelines.canonical_document import CanonicalGuidelineDocumentV1
+from app.domain.guidelines.canonical_document import CanonicalGuidelineDocumentV1, canonical_guideline_document
+from app.domain.guidelines.canonical_summary import CanonicalGuidelineDocumentV2
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
 from app.domain.guidelines.catalog_snapshot import GuidelineCatalogSnapshot
 from app.domain.guidelines.citation import GuidelineCitationV1
@@ -36,7 +37,7 @@ __all__ = [
     "GuidelineMatch", "GuidelineRunPin", "GuidelineRetrievalResult",
     "GuidelinePolicy",
     "GuidelineDocumentDetails", "GuidelineListItem",
-    "CanonicalGuidelineDocumentV1", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
+    "CanonicalGuidelineDocumentV1", "CanonicalGuidelineDocumentV2", "canonical_guideline_document", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
     "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",
     "GuidelineDraftV1", "GuidelineDraftSourceRef", "GuidelineEmbeddingBatch", "GuidelineEmbeddingProfileV1",
     "GuidelineIdentity", "GuidelineIndexGeneration", "GuidelineModelViewV1", "GuidelineMutation",

@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from app.application.guidelines.embedding import guideline_embedding_failure
-from app.domain.guidelines import CanonicalGuidelineDocumentV1, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1
+from app.domain.guidelines import canonical_guideline_document, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1
 from app.domain.guidelines.policy import GuidelinePolicy
 from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
 from app.ports import EmbeddingCancelledError, InvalidPortResponseError, PortConfigurationError, PortError
@@ -102,7 +102,7 @@ class GuidelinePreparationWorker:
                         generation_id, profile = catalog.generation_id, catalog.profile
                         if generation_id is None:
                             raise PortConfigurationError("Guideline generation is unavailable.")
-                    document = CanonicalGuidelineDocumentV1.from_content(version.content, profile, self.registry)
+                    document = canonical_guideline_document(version.content, profile, self.registry)
                     vector = await self.repository.read_embedding(generation_id, version.version_id)
                     if vector is None:
                         if embedding is None:

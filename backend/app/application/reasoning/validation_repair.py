@@ -301,7 +301,7 @@ class ValidationExchange:
     ) -> tuple[ValidatedDraftT, ValidationExchangeAudit]:
         if self._guidelines is not None:
             request = await self._guidelines.prepare(request, cancellation=cancellation, parameters=parameters,
-                                                     targets=targets, versions=versions)
+                                                     targets=targets, versions=versions, model_port=self._model_port)
         initial_response = await consume_waterbody_model_stream(
             self._model_port,
             request,

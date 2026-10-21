@@ -387,13 +387,17 @@ class TranscriptRecordingWaterbodyModelPort:
             cancellation = self._store._cancellation
             async with cancellation.commit_section():
                 self._store.guidelines._checkpoint(request, cancellation)
+                if (request.operation_id not in self._store.guidelines.operations
+                        and request != self._store.guidelines.search_request):
+                    raise GuidelineTranscriptWriteError()
                 try:
                     request_ref = await self._store.write_model_request(request)
                 except (asyncio.CancelledError, WorkflowStopped):
                     raise
                 except Exception as error:
                     raise GuidelineTranscriptWriteError() from error
-                await self._store.guidelines.transcript.submitted(request, request_ref)
+                if request.operation_id in self._store.guidelines.operations:
+                    await self._store.guidelines.transcript.submitted(request, request_ref)
         messages: dict[str, _OpenMessage] = {}
         message_refs: list[TranscriptContentRef] = []
         tool_calls: list[ToolCallCompleted] = []

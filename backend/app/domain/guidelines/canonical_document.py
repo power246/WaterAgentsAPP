@@ -4,14 +4,13 @@ from pydantic import Field, field_validator, model_validator
 
 from app.domain.domain_model import DomainModel
 from app.domain.guidelines.canonical import (
-    NormalizedText, canonical_text, digest, require_safe_model_text, unique_texts,
+    MAX_GUIDELINE_DOCUMENT_BYTES, NormalizedText, canonical_text, digest, require_safe_model_text, unique_texts,
 )
+from app.domain.guidelines.canonical_summary import CanonicalGuidelineDocumentV2
 from app.domain.guidelines.content import GuidelineContentV1
 from app.domain.guidelines.embedding_profile import GuidelineEmbeddingProfileV1
 from app.domain.guidelines.model_view import GuidelineModelViewV1, project_model_view
 from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
-
-MAX_GUIDELINE_DOCUMENT_BYTES = 24_000
 
 
 class CanonicalGuidelineDocumentV1(DomainModel):
@@ -52,7 +51,8 @@ class CanonicalGuidelineDocumentV1(DomainModel):
         return digest(self.model_dump(mode="json"))
 
     def require_profile(self, profile: GuidelineEmbeddingProfileV1) -> None:
-        if self.profile_id != profile.profile_id or self.instructions != profile.document_instructions:
+        if (self.profile_id != profile.profile_id or self.instructions != profile.document_instructions
+                or profile.document_template_version != self.template_version):
             raise ValueError("document input does not match guideline profile")
 
     @classmethod
@@ -69,3 +69,12 @@ class CanonicalGuidelineDocumentV1(DomainModel):
             model_view=project_model_view(content), parameter_names=names,
             scenario_tags=content.scenario_tags, keywords=content.keywords,
         )
+
+
+CanonicalGuidelineDocument = CanonicalGuidelineDocumentV1 | CanonicalGuidelineDocumentV2
+
+
+def canonical_guideline_document(content: GuidelineContentV1, profile: GuidelineEmbeddingProfileV1,
+                                 registry: ParameterCapabilityRegistry) -> CanonicalGuidelineDocument:
+    template = CanonicalGuidelineDocumentV2 if profile.document_template_version == 2 else CanonicalGuidelineDocumentV1
+    return template.from_content(content, profile, registry)

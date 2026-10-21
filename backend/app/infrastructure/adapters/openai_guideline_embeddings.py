@@ -4,8 +4,9 @@ from math import isfinite
 from app.application.embedding_validation import EmbeddingContractError
 from app.application.guidelines.embedding import validated_guideline_texts
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, CanonicalGuidelineQueryV1, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
+    CanonicalGuidelineQueryV1, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
 )
+from app.domain.guidelines.canonical_document import CanonicalGuidelineDocument
 from app.domain.guidelines.policy import DEFAULT_GUIDELINE_POLICY
 from app.infrastructure.adapters.openai_embedding_transport import OpenAIEmbeddingTransport, PROVIDER
 from app.infrastructure.http import ProviderHttpClient
@@ -21,7 +22,7 @@ class OpenAIGuidelineEmbeddingAdapter:
         self._transport = OpenAIEmbeddingTransport(http, api_key=api_key, base_url=base_url)
 
     async def embed(self, profile: GuidelineEmbeddingProfileV1,
-                    inputs: tuple[CanonicalGuidelineDocumentV1 | CanonicalGuidelineQueryV1, ...],
+                    inputs: tuple[CanonicalGuidelineDocument | CanonicalGuidelineQueryV1, ...],
                     deadline: float | None, cancel_token: EmbeddingCancellationPort | None) -> GuidelineEmbeddingBatch:
         try:
             texts = validated_guideline_texts(profile, inputs)

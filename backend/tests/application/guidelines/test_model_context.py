@@ -36,7 +36,7 @@ class Session:
         self.result = GuidelineRetrievalResult(status="retrieved" if versions else "no_match", matches=tuple(
             GuidelineMatch(version=item, similarity=1-index/10) for index, item in enumerate(versions)))
 
-    async def get_or_load(self):
+    async def availability(self):
         self.loads += 1
         return self.result
 
@@ -78,6 +78,10 @@ def test_first_actual_planning_or_numeric_dispatch_loads_once(skip_planning):
         original_stream = model.stream
 
         async def checked_stream(request):
+            if request.batch_id == "guideline-search":
+                async for event in original_stream(request):
+                    yield event
+                return
             assert len(embedding.calls) == 1
             assert advisory(request)
             async for event in original_stream(request):
@@ -123,6 +127,7 @@ def test_knowledge_never_creates_a_dispatch(boundary):
                 assert boundary == "cancelled"
                 assert error.code == "planning_cancelled"
             assert not model.calls and not embedding.calls and not repository.ranks
+            assert not getattr(model, "search_requests", [])
             assert not context.operations and not context.usages
         finally:
             await session.aclose()
@@ -138,6 +143,10 @@ def test_numeric_aliases_are_optional_scoped_and_do_not_change_values(refs, capl
         original = port.stream
 
         async def respond(request):
+            if request.batch_id == "guideline-search":
+                async for event in original(request):
+                    yield event
+                return
             assert len(embedding.calls) == 1 and advisory(request)
             alias = advisory(request)[0]["alias"]
             if refs != "missing":
@@ -425,7 +434,7 @@ def test_composed_runtime_records_the_same_advisory_requests_and_completes(monke
             @staticmethod
             def _body(request):
                 return next(json.loads(message.text) for message in reversed(request.messages)
-                            if "advisory_knowledge" not in json.loads(message.text))
+                            if message.role.value == "user" and "advisory_knowledge" not in json.loads(message.text))
 
             def _payload(self, request):
                 assert len(embedding.calls) == 1 and advisory(request)
@@ -456,6 +465,10 @@ def test_composed_runtime_records_the_same_advisory_requests_and_completes(monke
                     WaterbodyModelPhase.REASONING_BATCH, WaterbodyModelPhase.OVERALL_SYNTHESIS]
                 assert [usage.target.kind for usage in runner._guidelines.usages] == ["cell", "overall"]
                 assert len(repository.ranks) == len(embedding.calls) == 1
+                assert len(model.search_requests) == 1
+                summary = outcome.result.model_execution_summary
+                assert summary.planning_calls == 2
+                assert summary.usage.input_tokens == 41 and summary.usage.output_tokens == 22
                 assert "guideline_refs" not in canonical_json_text(outcome.result.model_dump(mode="json"))
             finally:
                 await session.aclose()

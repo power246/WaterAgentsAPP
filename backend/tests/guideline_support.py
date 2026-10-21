@@ -65,3 +65,15 @@ def version(selected_content=None, selected_identity=None) -> GuidelineVersionV1
             reviewed_at=FIXTURE_TIME,
         ),
     )
+
+
+def search_events(request):
+    from app.application.reasoning.model_models import ToolCallCompleted, Terminal, UsageReported
+
+    values = {"operation_id": request.operation_id, "model": request.model}
+    return (
+        ToolCallCompleted(**values, provider_call_id=f"lookup:{request.operation_id}", name="search_guidelines",
+            arguments='{"query":"Water quality mechanism, available observations and uncertainty under the original task bounds"}'),
+        UsageReported(**values, input_tokens=11, output_tokens=7),
+        Terminal(**values, provider_response_id="guideline-search-response", finish_reason="completed"),
+    )

@@ -61,7 +61,8 @@ flowchart TD
   J --> E[用户配置的 embedding 服务]
   E --> V[本地 guideline 向量索引]
   V --> C[固定本次运行的有效版本目录]
-  C --> R[按水体任务自动检索]
+  C --> S[查询 skill：专业改写原问题]
+  S --> R[search_guidelines 工具：检索摘要向量]
   R --> K[随请求提供的知识快照]
   K --> M[现有估值与解释模型]
   K --> T[既有 transcript / history]
@@ -232,17 +233,19 @@ M7 的 [GuidelineRunContext](../../backend/app/application/guidelines/retrieval.
 
 新增 `GuidelineEmbeddingProfileV1`，identity 包含 provider、model、dimensions、cosine metric、document/query template version、text-contract version 及明确的 query/document instructions。不得复用历史 case profile ID 代表说明书向量。
 
-`CanonicalGuidelineDocumentV1` / `CanonicalGuidelineQueryV1` 与 `GuidelineEmbeddingBatch` 使用独立契约。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。document 由已验证 content/model view 和参数名称构建，canonical JSON 最多 24,000 UTF-8 bytes；query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，超限直接拒绝，后续检索 builder 按 §7.3 整字段缩减。
+`CanonicalGuidelineDocumentV2` / `CanonicalGuidelineQueryV1` 与 `GuidelineEmbeddingBatch` 使用独立契约。profile 使用 `guideline:sha256:...` 身份，digest 同时覆盖 max-input 与两种角色指令；canonical inputs 含各自 role kind、profile ID、模板/契约版本和显式指令，`require_profile()` 验证身份及角色匹配。document 仅由已验证 content 的 title、summary、参数名称、scenario tags 和 keywords 构建，不含正文、出处 URLs 或完整 model view，canonical JSON 最多 24,000 UTF-8 bytes；query 保持 8,192 bytes 上限，显式 facts 最多 24 条、各 240 字符，超限直接拒绝，后续检索 builder 按 §7.3 整字段缩减。
 
 提供 `GuidelineEmbeddingPort` 和 guideline 专用 canonical document/query inputs。将当前 adapter 的公共 HTTP 调用、输出 count/order/dimensions/finite/norm 校验抽为共享传输/校验基础；历史 `EmbeddingPort` 及 `CanonicalCaseQueryV1` 资格校验继续由其原调用路径负责。不要把说明书伪造成历史 case，也不要简单删除历史输入校验。
 
 M5 的 `OpenAIGuidelineEmbeddingAdapter` 只接受 typed document/query，重验 schema/template、canonical bytes、profile identity 与角色指令，再经共享 `OpenAIEmbeddingTransport` / `embedding_validation` 发送和校验；旧 `OpenAIEmbeddingAdapter` 继续先执行原 case canonical 校验。说明书实际 provider input 固定为 `instructions + LF + canonical_text`，因此 `query:` / `passage:` 等可配置角色前缀位于文本开头，且完整内容与指令均绑定 profile。包含角色前缀的实际 document/query 输入分别不超过 24,000/8,192 UTF-8 bytes；每条实际输入同时用 UTF-8 字节数作为保守 token 上界，与 catalog 的 `max_input_tokens` 比较。这不是供应商 tokenizer 的精确计数，可能拒绝仍能被供应商接受的较长内容，超限不会截断条件/例外或派发请求。实际 tokenizer/检索质量由 M11 核对。
 
+当前 profile 的 text-contract/document-template 为 2，query-template 仍为 1。历史显式 v1 profile 保留原全文模板和 digest 校验，仅供其已固定 generation 读取；新 profile 通过既有 building → 全量覆盖 → CAS 原子切换，旧 run pin 和历史正文继续可读，跨 profile 不混排。摘要不独立批准或覆盖正文；修改摘要仍随内容版本接受人工检查。
+
 query/document 使用相同兼容 profile；若模型要求角色前缀，固定在 profile 模板中。更换 model、维度、模板或角色指令需重建相应 generation，不直接比较或混排不同 profile 的向量。
 
 ### 7.2 索引准备与更新
 
-- 发布或内置资源导入时预计算 document vector；canonical text 包含 title、summary、parameter names、scenario/keywords 和完整 model-view body。
+- 发布或内置资源导入时预计算 document vector；canonical text 仅包含 title、summary、parameter names、scenario/keywords；命中后按 immutable version ID 读取完整安全 model view。
 - 每次分析只计算必要的 query vector；不在每个时间窗重新嵌入资料库。
 - worker 使用持久化 operation、有限并发、timeout/attempt 与重启后 lease 回收；失败保留人工批准版本和明确状态。
 - 期望 embedding 配置变化时建立 building generation，覆盖当前有效 catalog 的全部版本。完成后在锁内核对 catalog revision；有变化先补齐/重试核对，再原子切换。切换前旧 active 继续服务。
@@ -254,7 +257,7 @@ M6 的 `ensure_generation()` / `queue_generation()` 每轮检查期望 profile�
 
 1. 从 run pin 获得 generation/profile/catalog revision；排除 draft、未激活版本及该 revision 下停用的 root。
 2. 以 canonical parameters 和显式 `related_parameter_keys` metadata 获得候选；通用机制可声明相关指标，避免把 pH 与碱度、温度等相关知识机械隔离。scenario 是排序信号，未知情境不伪造为已知事实。
-3. 构造 canonical query：用户问题、目标指标、inference mode、已知的水系/任务情境；不拼接 raw transcript、凭据、provider envelope 或无界观测数据。输入过长时优先保留结构化任务字段，整项省略超预算的可选自然语言字段并记录 `input_reduced`，不从正文中随意裁一段伪装完整问题。
+3. 首次需要模型参与且存在候选资料时，通过应用内查询 skill 开启一个 `evidence_planning` 工具回合。模型保留原问题目标、证据状态、时空边界，生成专业简洁的 `search_guidelines({"query":"..."})`（最多 400 字符），或明确返回 `{"decision":"skip"}`。后端只接受一次该工具调用，拒绝额外参数、其他工具、多调用和不安全文本；模型不能设置 scope、参数过滤、profile、catalog、cutoff 或 top-k。构造 canonical query：专业改写问题、服务端固定目标指标、inference mode、已知的水系/任务情境；不拼接 raw transcript、凭据、provider envelope 或无界观测数据。输入过长时优先保留结构化任务字段，整项省略超预算的可选自然语言字段并记录 `input_reduced`，不从正文中随意裁一段伪装完整问题。模型提交的改写查询若仍不满足完整 wire 输入门禁，返回 unavailable，不改写、截断或退回原问题重试。
 4. 对该 profile 计算 query vector；PostgreSQL/pgvector 对授权候选做 exact cosine ranking。
 5. 使用最低相似度、去重、稳定 tie-break、top-k 与上下文预算选取完整说明书。相同 family 只返回其有效版本。
 6. 保留 retrieval 状态、选中内容和实际请求子集。相似度只用于相关性，不提升 confidence、风险等级或 measurement eligibility。
@@ -265,7 +268,9 @@ M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标�
 
 `build_guideline_query()` 只采用验证后的问题、canonical 指标、mode、agent/target COMID 和拓扑直接上游数；可选问题过长或包含不安全内容时整项省略，记录 `input_reduced`，结构化字段优先。包括角色前缀的实际输入仍受 8,192 bytes 与该 profile 的保守 max-input 约束，无法容纳必需字段则 unavailable。
 
-每个实际 Agent session 拥有独立 `GuidelineSessionKnowledge.get_or_load()`：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。M8 的 `GuidelineModelContext` 在首次真实 planning/numeric 请求前加载，使用既有实际模型 size estimator 对最终请求整份裁剪，保留 evidence/output 预算；M9 已通过既有 writer 持久化 retrieval/delivery/usage；仅实际进入模型端口才记录 delivery。
+每个实际 Agent session 拥有独立的 `GuidelineSessionKnowledge.search()`，内部通过 `get_or_load()` 缓存一次已验证改写查询：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。`GuidelineModelContext` 先检查原请求 fit，再在首次真实 planning/numeric 请求前执行上述有界工具回合；空库、无候选和不可用时不新增模型或 embedding dispatch，零模型路径不进入此回合。新增回合复用当前分析模型、记录真实 request/response 和原问题，计入 planning_calls、tool_calls 及 token usage，并受原 session deadline 和最终请求预算约束。后续阶段复用同一检索结果，repair 不重新搜索；普通响应字段不触发检索。工具调用/返回作为 assistant/tool 消息传给后续请求，最终实际提供的完整正文仍使用既有 `advisory_knowledge` 块、版本 alias 与 delivery/usage 记录。上下文不足时整份裁剪正文，不挤占原 evidence/output 预算。M9 已通过既有 writer 持久化 retrieval/delivery/usage；仅实际进入模型端口才记录 delivery。
+
+补证必须说明预计改变原问题的哪条判断，辅助指标不自动成为新的研究任务。无新证据或已确认不可获取时收敛；整轮仅复用缓存工具结果且没有新增规则，后端以 `no_progress` 停止规划。既有轮次、工具和数值任务预算继续生效；剩余缺口进入不确定性，不新增证据资格门槛。
 
 ### 7.4 初始工程参数
 

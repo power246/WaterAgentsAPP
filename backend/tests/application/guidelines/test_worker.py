@@ -118,7 +118,7 @@ def test_first_generation_and_approved_a_inflight_do_not_publish_later_draft_b(s
             assert document.active_version.content.title == "Approved A" and document.draft.title == "Unapproved B"
             assert document.has_unpublished_changes and document.state == "available"
             assert (await service.get_operation(receipt.operation_id)).state.value == "succeeded"
-            assert len(embedding.calls) == 1 and embedding.calls[0][1][0].model_view.title == "Approved A"
+            assert len(embedding.calls) == 1 and embedding.calls[0][1][0].title == "Approved A"
             assert (await repository.read_catalog()).profile == selected.profile
     asyncio.run(exercise())
 

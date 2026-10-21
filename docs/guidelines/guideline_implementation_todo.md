@@ -627,7 +627,7 @@ git diff --check
 
 - 保持 `codex/guidelines-m0`，基线 `9a20a584d50bdef23fe04ac1e5d4f1479a83e95b`；准备工作 commit：`56b9716fe3f776fd5fdc133951e01471d21fff58`（`feat(guidelines): prepare milestone 11 review and holdout evaluation`），随后仅补记此 hash。只更新原设计/本清单；待审正文为一个必要 JSON 输入，无额外阶段状态 Markdown。
 - 四份 v1 草稿和来源的原始送审文件 SHA256 为 `c8105b605ca6e50b0410b2080c9123e1395eb3b067a7d6fea33d2ddebae662f2`，原始规范化 packet 为 `sha256:dd561e4a0421f3067889793249d68333e73a40699be86ab3e95ddf4fd00d94b3`；当前修订见下条。未收到明确批准；没有 reviewer/time 或批准文件，不生成生产资源，原生产 manifest 仍为空。首批内容/来源更新见主设计 §13。
-- [x] 2026-10-21 落实审查反馈：第三稿在“可能机制”补全 CO₂—酸碱平衡链、净效应/缓冲/气体交换与禁止 DO 直接换算的条件，新增已核对的 `EPA_PH` 来源；第二稿澄清碱度或 ANC 实测及样品/方法/时空匹配，保留注册表中的 `00410`。第一、四稿内容未变。修改稿文件 SHA256 `5c3b25320a49e08f9ef48e1f8c7406ccb1a70bcd30db6a7f64742505c297be58`，新 packet 为 `sha256:7be03c684261704b0713327473828c0efd87c2ed7617440456b8f63c18d0b72b`；继续为 `awaiting_human_review`，不生成批准或生产版本。领域内容/来源/model-view/审核绑定及评估工具定向 **124 passed / 0 failed / 0 skipped**（XML 6.451s，含隔离 PostgreSQL 程序验证），临时结果为 `.tmp/guidelines-review-20261021/{review-packet.json,targeted.log,targeted.xml}`。默认 Google profile 的完整 canonical 输入现为 2037/2121/2489/2233 字节，第二至四稿超出当前 2048-byte 保守门禁，README 已同步；未截断正文或抬高模型上限。本次真实模型、真实检索、浏览器及完整回归 **not run**。
+- [x] 2026-10-21 落实审查反馈：第三稿在“可能机制”补全 CO₂—酸碱平衡链、净效应/缓冲/气体交换与禁止 DO 直接换算的条件，新增已核对的 `EPA_PH` 来源；第二稿澄清碱度或 ANC 实测及样品/方法/时空匹配，保留注册表中的 `00410`。第一、四稿内容未变。修改稿文件 SHA256 `5c3b25320a49e08f9ef48e1f8c7406ccb1a70bcd30db6a7f64742505c297be58`，新 packet 为 `sha256:7be03c684261704b0713327473828c0efd87c2ed7617440456b8f63c18d0b72b`；继续为 `awaiting_human_review`，不生成批准或生产版本。领域内容/来源/model-view/审核绑定及评估工具定向 **124 passed / 0 failed / 0 skipped**（XML 6.451s，含隔离 PostgreSQL 程序验证），临时结果为 `.tmp/guidelines-review-20261021/{review-packet.json,targeted.log,targeted.xml}`。当时全文模板 v1 的完整 canonical 输入为 2037/2121/2489/2233 字节，第二至四稿超出 2048-byte 保守门禁；此限制已由下方“摘要索引与查询 skill”补充中的 v2 摘要输入解决；未截断正文或抬高模型上限。本次真实模型、真实检索、浏览器及完整回归 **not run**。
 - 只读 USGS OGC/NLDI 调查并冻结 3 个历史 holdout 候选输入，窗口均为 UTC 12:00–18:00：Potomac 2024-07-01（23 个目标 pH、24 个上游 pH）、2024-07-02（24/24）；Delaware 2024-07-01（6/0，上游仅有本次采集的流量/温度）。保留公开原始 ID、时间、值、质量标记、来源 URL 和 topology digest；共享 series metadata 压缩为约 202 KB，无模型结果。均值复用原 aggregation policy，第一例有缺样；不宣称连续真值或三个独立流域。
 - 新增审核导出、真实 PostgreSQL 检索评估入口、冻结输入/衍生链泄漏拒绝、统计可比性及保存配对审计工具。控制臂禁止任何已批准正文/实际 advisory；知识臂须匹配批准版本与实际 payload/delivery；比较时科学上下文/模型/version/budget 必须一致，保留失败/不可比项。此处是程序能力，尚无实际合格配对；不声称审计器能自行运行完整科学 workflow 或证明任意自由文字均无泄漏。
 - 阶段回归 **344 passed**，96.76s，路径为 application/guidelines、persistence/test_guidelines.py、domain/test_guidelines.py、ports/test_guideline_ports.py、architecture/test_guideline_boundaries.py。最终新增/调整定向 **33 passed**，3.94s（`test_evaluation.py`）。DB-only runner 仅注入 `.env` 的 `WATERAGENTS_DB_*` 与进程级 `WATERAGENTS_TEST_DB_NAME=wateragents_test`；`pytest.main` 使用 `-q -p no:cacheprovider --tb=short --show-capture=no`，task-local 前缀 `.tmp/guidelines-m11-20261021/{regression-final,targeted-verified}`（XML/log 同名）。临时审核/embedding 向量只作程序测试，不算实际批准或检索质量证据。
@@ -722,7 +722,7 @@ git rev-parse HEAD
 - 用户另行授权保留分析服务并增加独立 embedding 地址/密钥。基线 `06600a3a9f38fa00aedcf5b9e7f44cce4af1d925`，仍在 `codex/guidelines-m0`；实现 `WATERAGENTS_EMBEDDING_BASE_URL` / `WATERAGENTS_EMBEDDING_API_KEY` 成对校验，未配置时保留原有效 OpenAI credential lease。独立 deployment 密钥只供 M8/guideline 在线与后台调用，分析/地图仍用原配置；run/attempt 固定快照、脱敏、设置页用途及评估脚本一并更新。配置/Google 模型目录示例见 `backend/README.md#independent-embedding-service`，不改本地 `.env`。
 - 定向配置/凭据/run bundle/M8/guideline/API/真实 PostgreSQL 回归 **127 passed**（21.51s）；最终完整后端 **3359 passed / 1 skipped / 0 failed**（391.00s），两条既有依赖弃用 warning。唯一 skip 是 opt-in 说明书浏览器，另行开启说明书/M9 browser 两个环境开关运行两份 smoke 文件为 **5 passed / 0 skipped**（29.89s，真实 HTTP/PG/Chrome，确定性测试供应商）。前端 `check:api`、lint、typecheck 与 **114 passed / 15 files** 通过，生成契约未变；17 个改动 Python 文件通过 3.11 语法检查，本机执行仍为 Python 3.12，hosted CI/其他平台 **not run**。
 - 首次完整运行 **1 failed / 3358 passed / 1 skipped**：新测试的假密钥包含通用词 `analysis`，全局已知密钥片段脱敏使后续日志精确断言失败。仅改用不含该通用词的测试凭据，不放宽生产脱敏；配置模块 → observability 日志模块的同进程顺序回归 **31 passed**（4.71s），随后完整重跑得到上述最终通过结果。沿 M12 的 DB-only runner 仅注入 `WATERAGENTS_DB_*` 和进程级测试库名；pytest 参数仍为 `-q -p no:cacheprovider --tb=short --show-capture=no`，临时前缀为 `.tmp/embedding-config-20261021/{focused-final,log-order,backend-final,browser}`（同名 log/XML），所有结果仅留本机。
-- 新增独立地址的 HTTP header/host 校验、analysis key 替换/删除期间的 query/worker 行为、单独 M8 无分析 key 装配、错误配对拒绝与启动日志脱敏。未请求真实 Google embedding，未更换任何本地密钥或声称真实连通；生产 bundle 与待审内容不变。`gemini-embedding-001` 示例下两份草稿超过现有 2048-byte 保守门禁，记录在 README，未静默截断或抬高真实模型上限。
+- 新增独立地址的 HTTP header/host 校验、analysis key 替换/删除期间的 query/worker 行为、单独 M8 无分析 key 装配、错误配对拒绝与启动日志脱敏。未请求真实 Google embedding，未更换任何本地密钥或声称真实连通；生产 bundle 与待审内容不变。当时 `gemini-embedding-001` 全文示例下两份草稿超过 2048-byte 保守门禁，未静默截断或抬高真实模型上限；该限制已由后续摘要索引 v2 处理。
 
 后续实际 Google 预检（2026-10-21）：
 
@@ -731,6 +731,22 @@ git rev-parse HEAD
 - 回归途中发现评估测试的非独立分支继承了本地新增 embedding 配置，产生 2 项失败；仅让 fixture 明确设置该分支的两项配置为 `None`，保留原供应商选择/错误断言。评估模块定向 **35 passed**（7.66s）；中途停止的全量运行不计为通过，最终完整结果以下方记录为准。
 - 新增 Google 单条/批量、显式/省略零索引、缺失非零索引/全部索引、假冒 origin、错误 path/HTTP、乱序/重复、模型/数量/维度及坏向量回归 **38 passed**（0.20s）。完整后端 **3396 passed / 1 failed / 1 skipped**（772.84s）；唯一失败为旧 M9 smoke 同样继承了本地独立配置，凭据断言不符。对该文件三个 settings fixture 显式清空独立配置，测试 embedding 替身在收集凭据前安全拒绝非 fixture 值；最终 M9 smoke → embeddings → evaluation → configuration → observability 同进程复测 **221 passed / 0 failed**（25.63s，含 4 个 M9 smoke 和新增 38 项）。最后的测试 fixture 修正后未再次完整重跑，不记为全量零失败；唯一 skip 仍为 opt-in 说明书浏览器，本次浏览器/前端/hosted CI **not run**。四个改动 Python 文件通过 3.11 语法检查。
 - M9 的失败断言曾在测试输出中展示部署密钥；已清理本次日志/XML 中的明文及可识别片段，聊天中的既有显示无法撤回，已建议用户轮换。没有更改本地密钥，也不把应用日志脱敏放宽。临时结果仅留 `.tmp/embedding-preflight-20261021/`，不新增阶段状态文档；人工批准与生产 bundle 仍待用户审核，M11/M12 最终出口不勾选。
+
+### 后续授权补充：摘要索引与查询 skill（2026-10-21）
+
+- [x] 摘要 canonical v2/profile 版本与 generation 原子重建；命中后提供完整批准正文，保留旧 pin/history。
+- [x] 首次实际模型调用前的专业问题改写 `search_guidelines(query)`，后端校验固定范围、top-k≤3；每 session 一次并复用。
+- [x] numeric-only、skip、空库、取消/deadline、最终预算、真实 request/response、delivery/usage 及实际调用用量闭环。
+- [x] 补证围绕原问题、无进展收敛、缺口进入不确定性；完成定向/完整回归并本地提交。
+
+基线为 `codex/guidelines-m0` / `7d14da9e8ddad2de72c61c1afafe9f258bbe11a3`，用户已确认设计并授权修改。只改现有实施文档，四份草稿与生产 manifest 不变，M11/M12 的实际审核和配对出口保持待验。
+
+实现：摘要只取已有 title/summary/参数名称/场景/关键词，四稿完整 wire 输入为 **793／782／906／862 bytes**，全部通过 2048-byte 门禁；正文、来源及审核 digest 不变。旧显式 v1 profile 保留其固定 generation 校验，新默认 text-contract/document-template=2；实际 PostgreSQL 验证切换前完整覆盖、CAS 切换及旧 pin/body 可读。查询 skill 只接受一次 `search_guidelines(query)`（≤400 字符）或显式 skip，普通 JSON 字段不触发检索；后端不接受额外过滤/路由参数，最多返回 3 份。原请求及附加内容均校验 fit，真实查询 request/response、改写、检索、正文 delivery 与有效 usage 分开记录，新增调用计入 planning/tool calls 和 token usage。整轮只复用缓存结果且无新增规则时 `no_progress` 收敛；其余缺口按原数值资格进入不确定性。
+
+验证：最终完整后端 **3415 passed / 1 skipped / 0 failed**（411.181s，含隔离 PostgreSQL），唯一 skip 为 opt-in 说明书浏览器；另行开启两个 browser 开关，真实 HTTP/PG/Chrome 两份 smoke **5 passed / 0 skipped**（31.212s，确定性模型/embedding）。最终审计保护定向 **71 passed**，领域类型按一文件一类型拆分后的 architecture/domain/query skill **276 passed**；新证据收敛策略引起的 plan digest 已在 hash seeds 0/1/42 下核对一致。前端 `check:api`、lint、typecheck、build 与 **114 tests / 15 files** 通过，生成契约未变；40 个改动 Python 文件通过 3.11 语法检查，本机执行版本仍为 3.12。第一次 `check:api` 的 Windows sandbox EPERM 经权限允许后通过，首轮完整的领域文件布局失败已按原架构约束修正，未放宽检查。
+
+运行沿用附录的 DB-only runner（只注入 `WATERAGENTS_DB_*`，测试库名仅在进程设置），参数为 `-q -p no:cacheprovider --tb=short --show-capture=no`，每阶段独立 `--basetemp`/JUnit；最终结果仅留 `.tmp/guideline-search-20261021/{backend-final2,browser-final,audit-final,architecture-final}.{log,xml}`。未修改 `.env`、业务库、四份待审草稿或生产 manifest；未发送待审正文/摘要到真实服务。真实新摘要检索质量、真实分析配对、人工内容批准和 hosted CI **not run**，不据此勾选 M11/M12 的最终出口。
+
 
 ## 最终验收清单
 

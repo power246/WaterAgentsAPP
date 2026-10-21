@@ -1058,5 +1058,5 @@ def test_hash_seed_audit_has_a_fixed_plan_digest() -> None:
     skeleton = _make_skeleton(parameter_count=2)
     plan = _plan(skeleton)
     assert plan.plan_digest == (
-        "sha256:b3849bf023578814c3573ad30e09960a1b18fbb8233208c28e0722acd0d0e976"
+        "sha256:87e42480f63bd68918119a4ffc7d8548b23771503c0346afcb6dddecd8f63dc0"
     )

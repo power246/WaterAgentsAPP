@@ -37,7 +37,7 @@ class GuidelineModelContext:
     """Session selection and operation-local advisory bindings, independent of scientific facts."""
 
     def __init__(self, session: GuidelineSessionKnowledge, *, model_fit: ModelFitCapability,
-                 size_estimator: ModelSizeEstimator, clock: ClockPort):
+                 size_estimator: ModelSizeEstimator, clock: ClockPort, model_port=None):
         self.session = session
         self._fit = model_fit
         self._estimator = size_estimator
@@ -48,6 +48,62 @@ class GuidelineModelContext:
         self._selection: GuidelineRetrievalResult | None = None
         self._evidence: dict[str, object] = {}
         self.transcript = None
+        self._model_port = model_port
+        self.search_calls = 0
+        self.search_tool_calls = 0
+        self.search_usage = None
+        self.search_request: WaterbodyModelRequest | None = None
+        self._search_messages = ()
+
+    async def _search(self, request, cancellation, model_port):
+        from app.application.guidelines.search_skill import GuidelineSearchArguments, search_request, search_messages
+        from app.application.reasoning.model_protocol import consume_waterbody_model_stream
+        from app.application.reasoning.model_models import ToolCallCompleted, StructuredOutputCompleted
+        from app.ports.errors import WaterbodyModelPortError
+
+        available = await self.session.availability()
+        self._checkpoint(request, cancellation)
+        if available is not None:
+            return available
+        try:
+            lookup = search_request(request, self.session.original_question)
+        except ValueError:
+            return GuidelineRetrievalResult(status="unavailable", safe_error_code="guideline_query_invalid")
+        size = self._estimator.estimate(lookup.model,
+            serialized_request=canonical_json_text(lookup.model_dump(mode="json")).encode(),
+            serialized_response_shape=canonical_json_text({"response_schema": json.loads(lookup.response_schema.schema_text),
+                "tool_schema": json.loads(lookup.tool_descriptors[0].input_schema.schema_text),
+                "cell_ids": ["guideline-search"]}).encode())
+        if (size.input_tokens + size.output_tokens > self._fit.context_window_tokens
+                or size.output_tokens > self._fit.max_output_tokens
+                or len(canonical_json_text(lookup.model_dump(mode="json")).encode()) > self._limits.max_serialized_input_bytes
+                or size.estimated_output_bytes > self._limits.max_serialized_output_bytes):
+            return GuidelineRetrievalResult(status="budget_limited")
+        self._checkpoint(request, cancellation)
+        self.search_request = lookup
+        self.search_calls += 1
+        try:
+            response = await consume_waterbody_model_stream(model_port or self._model_port, lookup, cancellation=cancellation)
+            self.search_usage = response.usage
+            self._checkpoint(request, cancellation)
+            calls = tuple(event for event in response.events if isinstance(event, ToolCallCompleted))
+            decisions = tuple(event for event in response.events if isinstance(event, StructuredOutputCompleted))
+            if not calls and len(decisions) == 1 and json.loads(decisions[0].value) == {"decision": "skip"}:
+                return GuidelineRetrievalResult(status="no_match")
+            if len(calls) != 1 or decisions or calls[0].name != "search_guidelines":
+                raise ValueError("invalid guideline lookup response")
+            args = GuidelineSearchArguments.model_validate_json(calls[0].arguments)
+            self.search_tool_calls += 1
+            try:
+                result = await self.session.search(args.query, deadline=request.deadline)
+            except ValueError:
+                result = GuidelineRetrievalResult(status="unavailable", safe_error_code="guideline_embedding_configuration_invalid")
+            self._search_messages = search_messages(calls[0], result)
+            return result
+        except (WaterbodyModelCancelledError, WaterbodyModelTimeoutError):
+            raise
+        except (WaterbodyModelPortError, ValueError):
+            return GuidelineRetrievalResult(status="unavailable", safe_error_code="guideline_search_unavailable")
 
     def bind_transcript(self, store):
         from app.application.guidelines.transcript import GuidelineTranscript
@@ -62,27 +118,10 @@ class GuidelineModelContext:
 
     async def prepare(self, request: WaterbodyModelRequest, *, cancellation: CancellationProbe,
                       parameters: tuple[ParameterKey, ...] = (), targets: tuple[str, ...] = (),
-                      repair_of: UUID | None = None, versions: set[UUID] | None = None) -> WaterbodyModelRequest:
+                      repair_of: UUID | None = None, versions: set[UUID] | None = None, model_port=None) -> WaterbodyModelRequest:
         self._checkpoint(request, cancellation)
         if request.operation_id in self.operations:
             raise ValueError("guideline model operation must be prepared only once")
-        if repair_of is not None:
-            parent = self.operations[repair_of]
-            entries, status = parent.aliases, parent.status
-        else:
-            if self._selection is None and versions is None:
-                self._selection = await self.session.get_or_load()
-            self._checkpoint(request, cancellation)
-            if self.transcript is not None:
-                await self.transcript.retrieved(self._selection or GuidelineRetrievalResult(status="no_match"))
-                self._checkpoint(request, cancellation)
-            keys = set(parameters)
-            matches = tuple(match for match in (self._selection.matches if self._selection is not None else ())
-                if (not keys or keys.intersection((*match.version.content.parameter_keys, *match.version.content.related_parameter_keys)))
-                and (versions is None or match.version.version_id in versions))
-            entries = tuple((f"G{index+1}_{request.operation_id.hex}", match.version) for index, match in enumerate(matches))
-            status = "retrieved" if entries else (
-                self._selection.status if self._selection is not None and not self._selection.matches else "no_match")
         response_shape = canonical_json_text({"response_schema": json.loads(request.response_schema.schema_text),
                                                "cell_ids": targets or (request.batch_id or "operation",)}).encode()
 
@@ -104,10 +143,32 @@ class GuidelineModelContext:
         if not fits(request, base):
             raise WaterbodyModelProtocolError(provider=request.model.provider, model=request.model.model,
                                               operation_id=str(request.operation_id))
+        if repair_of is not None:
+            parent = self.operations[repair_of]
+            entries, status = parent.aliases, parent.status
+        else:
+            if self._selection is None and versions is None:
+                self._selection = await self._search(request, cancellation, model_port)
+            self._checkpoint(request, cancellation)
+            if self.transcript is not None:
+                await self.transcript.retrieved(self._selection or GuidelineRetrievalResult(status="no_match"))
+                self._checkpoint(request, cancellation)
+            keys = set(parameters)
+            matches = tuple(match for match in (self._selection.matches if self._selection is not None else ())
+                if (not keys or keys.intersection((*match.version.content.parameter_keys, *match.version.content.related_parameter_keys)))
+                and (versions is None or match.version.version_id in versions))
+            entries = tuple((f"G{index+1}_{request.operation_id.hex}", match.version) for index, match in enumerate(matches))
+            status = "retrieved" if entries else (
+                self._selection.status if self._selection is not None and not self._selection.matches else "no_match")
         selected = request
+        history = self._search_messages if not any(message.message_id == "guideline-search:call" for message in request.messages) else ()
+        if history:
+            candidate = request.model_copy(update={"messages": (*request.messages, *history)})
+            if fits(candidate, estimate(candidate)):
+                selected = candidate
         while entries:
             block = [{"alias": alias, **version.model_view.model_dump(mode="json")} for alias, version in entries]
-            candidate = request.model_copy(update={"messages": (*request.messages, WaterbodyModelMessage(
+            candidate = request.model_copy(update={"messages": (*request.messages, *history, WaterbodyModelMessage(
                 message_id=f"advisory:{request.operation_id}", role=WaterbodyMessageRole.USER,
                 text=canonical_json_text({"advisory_knowledge": block})))})
             size = estimate(candidate)

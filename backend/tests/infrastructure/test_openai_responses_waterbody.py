@@ -571,6 +571,25 @@ def test_tool_result_message_is_sent_as_function_call_output() -> None:
     ]
 
 
+def test_assistant_tool_call_is_sent_with_matching_function_output() -> None:
+    from app.infrastructure.adapters.openai_responses_waterbody import _request_body
+
+    call = WaterbodyModelMessage(message_id="lookup-call", role="assistant", text='{"query":"pH buffer capacity"}',
+        provider_call_id="lookup-1", tool_name="search_guidelines")
+    result = WaterbodyModelMessage(message_id="lookup-result", role="tool", text='{"status":"no_match"}',
+        provider_call_id="lookup-1", tool_name="search_guidelines")
+    body = _request_body(model_request(messages=(call, result)))
+    assert body["input"] == [
+        {"type": "function_call", "call_id": "lookup-1", "name": "search_guidelines", "arguments": call.text},
+        {"type": "function_call_output", "call_id": "lookup-1", "output": result.text},
+    ]
+    with pytest.raises(ValueError):
+        WaterbodyModelMessage(message_id="partial", role="assistant", text='{}', tool_name="search_guidelines")
+    with pytest.raises(ValueError):
+        WaterbodyModelMessage(message_id="invalid", role="assistant", text='not JSON',
+            tool_name="search_guidelines", provider_call_id="lookup-1")
+
+
 @pytest.mark.parametrize(
     ("fixture_name", "expected_error"),
     [

@@ -21,7 +21,7 @@ class GuidelinePolicy(DomainModel):
     max_attempts: Literal[3] = 3
     retry_backoff_seconds: tuple[Literal[2], Literal[10]] = (2, 10)
     document_instructions: Annotated[NormalizedText, Field(min_length=1, max_length=2000)] = (
-        "Represent this complete water-quality advisory topic, retaining its conditions and exceptions."
+        "Represent this water-quality advisory title, summary, parameters, scenarios, and keywords for retrieval."
     )
     query_instructions: Annotated[NormalizedText, Field(min_length=1, max_length=2000)] = (
         "Retrieve water-quality advisory topics relevant to the question, parameters, and known task context."

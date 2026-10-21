@@ -268,7 +268,7 @@ class ModelNumericEstimator:
                 raise NumericEstimationError("numeric_estimation_deadline_exceeded")
             if self._guidelines is not None:
                 request = await self._guidelines.prepare(request, cancellation=scope.cancel_token,
-                    parameters=(task.output_parameter,), targets=(task.task_id,))
+                    parameters=(task.output_parameter,), targets=(task.task_id,), model_port=self._port)
                 prompt_digest = canonical_json_digest({"policy": request.system_prompt,
                     "input": [item.model_dump(mode="json") for item in request.messages]})
                 remaining_seconds = (self._deadline - self._clock.now()).total_seconds()

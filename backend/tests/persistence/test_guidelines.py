@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, GuidelineDraftV1, GuidelineIdentity, GuidelineMutation,
+    CanonicalGuidelineDocumentV2, GuidelineDraftV1, GuidelineIdentity, GuidelineMutation,
     GuidelineOperationKind as Kind,
 )
 from app.domain.guidelines.identity import bundled_guideline_id
@@ -60,10 +60,42 @@ async def active_generation(repository, selected_profile=None):
 
 
 async def write(repository, claim, generation, selected_version, *, now=None, vector=None):
-    canonical = CanonicalGuidelineDocumentV1.from_content(
+    from app.domain.guidelines import canonical_guideline_document
+    canonical = canonical_guideline_document(
         selected_version.content, generation.profile, load_parameter_capability_registry())
     await repository.write_embedding(claim, generation.generation_id, canonical,
         vector or EmbeddingVector(values=(1., 0., 0.)), now=now)
+
+
+def test_summary_generation_rebuild_preserves_legacy_pin_and_original_body(settings):
+    from app.domain.guidelines import canonical_guideline_document
+
+    async def exercise():
+        repository = PostgresGuidelineRepository(settings)
+        try:
+            legacy = await active_generation(repository, profile(text_contract_version=1, document_template_version=1))
+            body = content(body_markdown="Full original conditions, exceptions and scientific explanation.")
+            identity, receipt = await create(repository, selected_content=body)
+            original = version(body, identity)
+            await ready(repository, original, receipt.accepted_revision, legacy)
+            old_catalog = await repository.read_catalog()
+            current = await repository.create_generation(profile())
+            with pytest.raises(GuidelineConflictError):
+                await repository.activate_generation(current.generation_id, expected_catalog_revision=old_catalog.revision)
+            document = canonical_guideline_document(original.content, current.profile, load_parameter_capability_registry())
+            assert original.content.body_markdown not in document.canonical_text
+            await repository.write_building_embedding(current.generation_id, original.version_id, document,
+                EmbeddingVector(values=(1., 0., 0.)))
+            await repository.activate_generation(current.generation_id, expected_catalog_revision=old_catalog.revision)
+            for catalog in (old_catalog, await repository.read_catalog()):
+                matches = await repository.rank_guidelines(catalog, (PH,), EmbeddingVector(values=(1., 0., 0.)), cutoff=.35, limit=3)
+                assert matches[0].version == original
+                assert matches[0].version.model_view.body == original.model_view.body
+            assert (await repository.read_generation(legacy.generation_id)).state == "retired"
+            assert await repository.read_embedding(legacy.generation_id, original.version_id) is not None
+        finally:
+            await repository.aclose()
+    asyncio.run(exercise())
 
 
 async def ready(repository, selected_version, revision, generation):
@@ -394,7 +426,7 @@ def test_generation_switch_requires_complete_profile_and_retains_old_vectors(set
                 await repository.activate_generation(third.generation_id,
                     expected_catalog_revision=(await repository.read_catalog()).revision)
             assert error.value.code == "guideline_generation_incomplete"
-            canonical = CanonicalGuidelineDocumentV1.from_content(
+            canonical = CanonicalGuidelineDocumentV2.from_content(
                 approved.content, third.profile, load_parameter_capability_registry())
             await repository.write_building_embedding(third.generation_id, approved.version_id, canonical,
                                                        EmbeddingVector(values=(1., 0., 0.)))
@@ -557,7 +589,7 @@ def test_embedding_rows_bind_complete_approved_content_and_profile(settings, bad
             claim = await repository.claim_operation("worker")
             selected_content = content(title="Unapproved edit") if bad_input == "content" else approved.content
             selected_profile = profile(model="wrong-profile") if bad_input == "profile" else generation.profile
-            canonical = CanonicalGuidelineDocumentV1.from_content(selected_content, selected_profile, load_parameter_capability_registry())
+            canonical = CanonicalGuidelineDocumentV2.from_content(selected_content, selected_profile, load_parameter_capability_registry())
             if bad_input == "canonical_metadata":
                 canonical = canonical.model_copy(update={"keywords": ("injected",)})
             values = (1., 0.) if bad_input == "dimensions" else ((0., 0., 0.) if bad_input == "zero" else (1., 0., 0.))

@@ -5,7 +5,7 @@ import logging
 import httpx
 import pytest
 
-from app.domain.guidelines import CanonicalGuidelineDocumentV1
+from app.domain.guidelines import CanonicalGuidelineDocumentV2
 from app.infrastructure.adapters import OpenAIEmbeddingAdapter
 from app.infrastructure.adapters.openai_guideline_embeddings import OpenAIGuidelineEmbeddingAdapter
 from app.infrastructure.config import load_parameter_capability_registry
@@ -18,7 +18,7 @@ from tests.infrastructure.embeddings.test_openai_embeddings import http_client, 
 
 def test_document_and_query_share_transport_with_exact_roles_and_safe_payload():
     selected = profile(max_input_tokens=10_000, document_instructions="passage: ", query_instructions="query: ")
-    inputs = (CanonicalGuidelineDocumentV1.from_content(content(), selected, load_parameter_capability_registry()), query(selected))
+    inputs = (CanonicalGuidelineDocumentV2.from_content(content(), selected, load_parameter_capability_registry()), query(selected))
     seen = []
 
     def handler(request):
@@ -58,8 +58,8 @@ def test_ineligible_inputs_fail_before_any_dispatch_and_case_gate_is_preserved(b
         inputs = (query(selected),)
     elif bad == "oversized_query": inputs = (candidate.model_copy(update={"question": "中" * 8192}),)
     elif bad == "oversized_document":
-        document = CanonicalGuidelineDocumentV1.from_content(content(), selected, load_parameter_capability_registry())
-        inputs = (document.model_copy(update={"model_view": document.model_view.model_copy(update={"body": "中" * 24000})}),)
+        document = CanonicalGuidelineDocumentV2.from_content(content(), selected, load_parameter_capability_registry())
+        inputs = (document.model_copy(update={"summary": "中" * 24000}),)
     elif bad == "batch": inputs = (candidate,) * 2049
 
     def handler(request):

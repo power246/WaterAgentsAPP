@@ -10,12 +10,13 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, GuidelineCatalogSnapshot, GuidelineDocumentSnapshot,
+    canonical_guideline_document, GuidelineCatalogSnapshot, GuidelineDocumentSnapshot,
     GuidelineDraftV1, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
     GuidelineIdentity, GuidelineIndexGeneration, GuidelineMutation, GuidelineMutationReceipt,
     GuidelineOperation, GuidelineOperationKind, GuidelineOrigin, GuidelineVersionV1,
     GuidelineDocumentDetails, GuidelineListItem,
 )
+from app.domain.guidelines.canonical_document import CanonicalGuidelineDocument
 from app.domain.guidelines.canonical import canonical_text
 from app.domain.guidelines.identity import bundled_guideline_version_id
 from app.domain.guidelines.mutation_bodies import action_body, create_body, publish_body, save_body
@@ -542,7 +543,7 @@ class PostgresGuidelineRepository:
             matches = []
             for row in rows:
                 version = GuidelineVersionV1.model_validate(row["snapshot"])
-                expected = CanonicalGuidelineDocumentV1.from_content(version.content, snapshot.profile, self._registry)
+                expected = canonical_guideline_document(version.content, snapshot.profile, self._registry)
                 if expected.canonical_digest != row["canonical_document_digest"]:
                     raise GuidelineConflictError("guideline_embedding_conflict")
                 matches.append(GuidelineMatch(version=version, similarity=row["similarity"]))
@@ -820,7 +821,7 @@ class PostgresGuidelineRepository:
                                       pending=True, epoch=root["activation_epoch"])
 
     async def write_embedding(self, claim: GuidelineOperation, generation_id: UUID,
-                              canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+                              canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
                               *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, _, _ = await self._fence(connection, claim, now)
@@ -832,7 +833,7 @@ class PostgresGuidelineRepository:
                                      {"gen": generation_id, "id": row["operation_id"]})
 
     async def write_building_embedding(self, generation_id: UUID, version_id: UUID,
-                                       canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector):
+                                       canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector):
         """Backfill immutable derived rows; this cannot modify an active catalog.
 
         A duplicate keeps the first stored vector. Only an independently complete
@@ -855,7 +856,7 @@ class PostgresGuidelineRepository:
         if body is None:
             raise GuidelineConflictError("guideline_version_conflict")
         version = GuidelineVersionV1.model_validate(body)
-        expected = CanonicalGuidelineDocumentV1.from_content(version.content, profile, self._registry)
+        expected = canonical_guideline_document(version.content, profile, self._registry)
         if canonical_document != expected:
             raise ValueError("embedding document differs from the approved version/profile")
         existing = await connection.scalar(text(
@@ -930,7 +931,7 @@ class PostgresGuidelineRepository:
         ), {"id": row["operation_id"]})
 
     async def complete_operation(self, claim: GuidelineOperation, generation_id: UUID,
-                                 canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+                                 canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
                                  *, now: datetime | None = None):
         async with self._connection(write=True) as connection:
             row, root_id, _ = await self._fence(connection, claim, now)

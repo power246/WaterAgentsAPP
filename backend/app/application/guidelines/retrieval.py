@@ -114,6 +114,7 @@ class GuidelineRunContext:
         session = GuidelineSessionKnowledge(self.pin, task.task.session_id, query, self._repository, self._embedding,
             self._policy, self._clock, deadline, task.task.cancellation_token, code)
         session.run_context = self
+        session.original_question = normalize_text(task.context.query)
         return session
 
 
@@ -148,12 +149,30 @@ class GuidelineSessionKnowledge:
             self._task = asyncio.create_task(self._load(), name="guideline-session-retrieval")
         return await asyncio.shield(self._task)
 
+    async def availability(self) -> GuidelineRetrievalResult | None:
+        """Check the pinned catalog without sending an embedding request."""
+        return await self._load(check_only=True)
+
+    async def search(self, question: str, *, deadline: datetime | None = None) -> GuidelineRetrievalResult:
+        if deadline is not None:
+            self._deadline = min(self._deadline, deadline)
+        if self._task is not None:
+            return await self.get_or_load()
+        if self._query is None or self.pin.status != "ready":
+            return self._result("unavailable", self._error_code)
+        candidate = CanonicalGuidelineQueryV1.model_validate(self._query.model_dump() | {"question": question})
+        validated_guideline_texts(self.pin.catalog.profile, (candidate,))
+        self._query = candidate
+        return await self.get_or_load()
+
     def _result(self, status, code=None, matches=()):
         return GuidelineRetrievalResult(status=status, safe_error_code=code, matches=matches,
             query_digest=self._query.canonical_digest if self._query is not None else None,
             input_reduced=self._query.input_reduced if self._query is not None else False)
 
-    async def _load(self):
+    async def _load(self, *, check_only=False):
+        if self._closed:
+            return self._result("unavailable", "guideline_session_closed")
         if self._cancellation.is_requested():
             return self._result("cancelled", "guideline_retrieval_cancelled")
         remaining = min(self._policy.online_timeout_seconds, (self._deadline - self._clock.now()).total_seconds())
@@ -163,7 +182,7 @@ class GuidelineSessionKnowledge:
             return self._result("unavailable", self._error_code)
         deadline = asyncio.get_running_loop().time() + remaining
         try:
-            return await await_with_cancellation(self._retrieve(deadline), self._cancellation, timeout=remaining)
+            return await await_with_cancellation(self._retrieve(deadline, check_only=check_only), self._cancellation, timeout=remaining)
         except WorkflowStopped:
             return self._result("cancelled", "guideline_retrieval_cancelled")
         except TimeoutError:
@@ -178,7 +197,7 @@ class GuidelineSessionKnowledge:
         if self._clock.now() >= self._deadline or asyncio.get_running_loop().time() >= deadline:
             raise TimeoutError()
 
-    async def _retrieve(self, deadline):
+    async def _retrieve(self, deadline, *, check_only=False):
         self._checkpoint(deadline)
         catalog, query = self.pin.catalog, self._query
         library, candidates = await self._repository.retrieval_counts(catalog, query.parameter_keys)
@@ -187,6 +206,8 @@ class GuidelineSessionKnowledge:
             return self._result("empty_library")
         if candidates == 0:
             return self._result("no_match")
+        if check_only:
+            return None
         batch = await self._embedding.embed(catalog.profile, (query,), deadline, self._cancellation)
         self._checkpoint(deadline)
         if batch.profile != catalog.profile or len(batch.vectors) != 1:

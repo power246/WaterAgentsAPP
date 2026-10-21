@@ -2,7 +2,7 @@ import asyncio
 
 from app.application.embedding_validation import EmbeddingContractError, MAX_EMBEDDING_BATCH_ITEMS
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, CanonicalGuidelineQueryV1, GuidelineEmbeddingProfileV1,
+    CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1, GuidelineEmbeddingProfileV1,
 )
 from app.domain.guidelines.policy import GuidelinePolicy
 from app.domain.guidelines.canonical_document import MAX_GUIDELINE_DOCUMENT_BYTES
@@ -35,7 +35,7 @@ def validated_guideline_texts(profile: GuidelineEmbeddingProfileV1, inputs) -> t
             raise ValueError()
         texts = []
         for item in inputs:
-            if type(item) not in {CanonicalGuidelineDocumentV1, CanonicalGuidelineQueryV1}:
+            if type(item) not in {CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1}:
                 raise ValueError()
             checked = type(item).model_validate_json(item.canonical_text)
             checked.require_profile(profile)
@@ -43,7 +43,7 @@ def validated_guideline_texts(profile: GuidelineEmbeddingProfileV1, inputs) -> t
                 raise ValueError()
             text = checked.instructions + "\n" + checked.canonical_text
             # A conservative UTF-8 byte upper bound avoids a model-specific tokenizer.
-            byte_limit = (MAX_GUIDELINE_DOCUMENT_BYTES if isinstance(checked, CanonicalGuidelineDocumentV1)
+            byte_limit = (MAX_GUIDELINE_DOCUMENT_BYTES if isinstance(checked, (CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2))
                           else MAX_GUIDELINE_QUERY_BYTES)
             if len(text.encode("utf-8")) > min(byte_limit, profile.max_input_tokens):
                 raise ValueError()

@@ -58,6 +58,12 @@ class EstimatePort:
         }
 
     async def stream(self, request):
+        if request.batch_id == "guideline-search":
+            from tests.guideline_support import search_events
+            self.search_requests = [*getattr(self, "search_requests", []), request]
+            for event in search_events(request):
+                yield event
+            return
         self.calls.append(request)
         values = {"operation_id": request.operation_id, "model": request.model}
         yield StructuredOutputCompleted(**values, output_id="estimate", value=json.dumps(self.payload))

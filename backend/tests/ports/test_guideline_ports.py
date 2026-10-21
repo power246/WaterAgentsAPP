@@ -5,7 +5,7 @@ from typing import get_type_hints
 import pytest
 
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
+    CanonicalGuidelineDocumentV2, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
     GuidelineMutationReceipt, GuidelineOperation, GuidelineVersionV1,
 )
 from app.infrastructure.config import load_parameter_capability_registry
@@ -50,7 +50,7 @@ def test_typed_embedding_port_supports_both_roles_and_shared_cancellation():
 
     async def exercise():
         selected = profile()
-        document = CanonicalGuidelineDocumentV1.from_content(content(), selected, load_parameter_capability_registry())
+        document = CanonicalGuidelineDocumentV2.from_content(content(), selected, load_parameter_capability_registry())
         implementation = FixtureEmbedding()
         port: GuidelineEmbeddingPort = implementation
         with pytest.raises(EmbeddingCancelledError):

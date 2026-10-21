@@ -329,7 +329,8 @@ class EvidencePlanningLoop:
             )
             if self._guidelines is not None:
                 request = await self._guidelines.prepare(request, cancellation=scope.cancel_token,
-                    parameters=(*scope.requested_parameters, *scope.supporting_parameters, *scope.intermediate_parameters))
+                    parameters=(*scope.requested_parameters, *scope.supporting_parameters, *scope.intermediate_parameters),
+                    model_port=self._model_port)
             response = await consume_waterbody_model_stream(
                 self._model_port,
                 request,
@@ -366,6 +367,8 @@ class EvidencePlanningLoop:
                 _ = visible
                 raise PlanningLoopError("invalid_planning_response")
             decision_bundle_ref = handoff.bundle_ref
+            previous_rule_digest = handoff.rule_plan_digest
+            fresh_tool_result = False
 
             if tool_events:
                 offered_optional_tools = {
@@ -412,6 +415,7 @@ class EvidencePlanningLoop:
                     agent_tool_calls += (
                         len(handoff.tool_result_refs) - previous_results
                     )
+                    fresh_tool_result |= any(not execution.result.deduplicated for execution in executions)
                     bundle_refs.append(handoff.bundle_ref)
                     if scope.cancel_token.is_requested():
                         raise PlanningLoopError("planning_cancelled")
@@ -468,6 +472,10 @@ class EvidencePlanningLoop:
                     convergence = PlanningConvergenceReason.NO_PROGRESS
             elif not deadline_reached and isinstance(decision, _EvidenceReadyDecision):
                 convergence = PlanningConvergenceReason.EVIDENCE_READY
+
+            if (tool_events and not deadline_reached and not fresh_tool_result
+                    and handoff.rule_plan_digest == previous_rule_digest):
+                convergence = PlanningConvergenceReason.NO_PROGRESS
 
             if self._transcript_store is not None:
                 from app.application.reasoning.transcript_models import (

@@ -301,7 +301,7 @@ class RunSingleWaterbodyAgent:
 
             stage = "assembling_result"
             self._checkpoint(task, deadline, stage=stage)
-            execution = _execution_summary(task, planning, audits, plan)
+            execution = _execution_summary(task, planning, audits, plan, self._guidelines)
             result = assemble_inference_result(
                 skeleton,
                 reasoning=reasoning,
@@ -541,16 +541,21 @@ def _committed_outcome(
     return calculated
 
 
-def _execution_summary(task, planning, audits, plan) -> ModelExecutionSummary:
+def _execution_summary(task, planning, audits, plan, guidelines=None) -> ModelExecutionSummary:
     usage = _aggregate_usage(planning.counts.usage, audits)
+    if guidelines is not None and guidelines.search_usage is not None:
+        extra = guidelines.search_usage
+        usage = ModelUsageSummary(input_tokens=(usage.input_tokens or 0 if usage else 0) + (extra.input_tokens or 0),
+            output_tokens=(usage.output_tokens or 0 if usage else 0) + (extra.output_tokens or 0))
     return ModelExecutionSummary(
         model=task.task.waterbody_model,
-        planning_calls=planning.counts.planning_model_calls,
+        planning_calls=planning.counts.planning_model_calls + (guidelines.search_calls if guidelines else 0),
         numeric_estimation_calls=planning.counts.numeric_estimation_calls,
         numeric_failure_codes=planning.counts.numeric_failure_codes,
         tool_calls=(
             planning.counts.preflight_tool_calls
             + planning.counts.agent_tool_calls
+            + (guidelines.search_tool_calls if guidelines else 0)
         ),
         reasoning_batches=plan.batch_plan.batch_count,
         repair_calls=sum(audit.repair_request is not None for audit in audits),

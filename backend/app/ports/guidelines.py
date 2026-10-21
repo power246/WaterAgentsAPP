@@ -4,7 +4,7 @@ from uuid import UUID
 
 from app.domain.guidelines.catalog_snapshot import GuidelineCatalogSnapshot
 from app.domain.guidelines.canonical import Digest, Revision
-from app.domain.guidelines.canonical_document import CanonicalGuidelineDocumentV1
+from app.domain.guidelines.canonical_document import CanonicalGuidelineDocument
 from app.domain.guidelines.canonical_query import CanonicalGuidelineQueryV1
 from app.domain.guidelines.document_snapshot import GuidelineDocumentSnapshot
 from app.domain.guidelines.document_details import GuidelineDocumentDetails
@@ -113,7 +113,7 @@ class GuidelineRepositoryPort(Protocol):
 
     async def write_embedding(
         self, claim: GuidelineOperation, generation_id: UUID,
-        canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
         *, now: datetime | None = None,
     ) -> None: ...
 
@@ -121,13 +121,13 @@ class GuidelineRepositoryPort(Protocol):
 
     async def complete_operation(
         self, claim: GuidelineOperation, generation_id: UUID,
-        canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
         *, now: datetime | None = None,
     ) -> None: ...
 
     async def write_building_embedding(
         self, generation_id: UUID, version_id: UUID,
-        canonical_document: CanonicalGuidelineDocumentV1, vector: EmbeddingVector,
+        canonical_document: CanonicalGuidelineDocument, vector: EmbeddingVector,
     ) -> None: ...
 
 
@@ -138,6 +138,6 @@ class BundledGuidelineSourcePort(Protocol):
 class GuidelineEmbeddingPort(Protocol):
     async def embed(
         self, profile: GuidelineEmbeddingProfileV1,
-        inputs: tuple[CanonicalGuidelineDocumentV1 | CanonicalGuidelineQueryV1, ...],
+        inputs: tuple[CanonicalGuidelineDocument | CanonicalGuidelineQueryV1, ...],
         deadline: float | None, cancel_token: EmbeddingCancellationPort | None,
     ) -> GuidelineEmbeddingBatch: ...

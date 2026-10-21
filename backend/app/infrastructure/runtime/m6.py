@@ -56,7 +56,7 @@ class M6RuntimeLimits:
 
     @property
     def maximum_model_calls(self) -> int:
-        return self.planning_turns + self.numeric_estimation_calls + 2 * self.batches + 2
+        return self.planning_turns + self.numeric_estimation_calls + 2 * self.batches + 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,6 +256,8 @@ class M6RunnerService:
             guidelines.bind_transcript(store)
             store.guidelines = guidelines
         recording_port = store.recording_port(self._model_router)
+        if guidelines is not None:
+            guidelines._model_port = recording_port
         planning_loop = EvidencePlanningLoop(
             acquisition=self._m5_runtime.acquisition,
             capability_registry=self._capability_registry,

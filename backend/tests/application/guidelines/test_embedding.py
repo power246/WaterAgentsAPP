@@ -8,7 +8,7 @@ from app.application.guidelines.embedding import (
     desired_guideline_profile, guideline_embedding_failure, validated_guideline_texts,
 )
 from app.domain import ModelCapability, ModelCatalogSnapshot, ModelRole
-from app.domain.guidelines import CanonicalGuidelineDocumentV1, GuidelinePolicy
+from app.domain.guidelines import CanonicalGuidelineDocumentV2, GuidelinePolicy
 from app.infrastructure.config import AppSettings, load_parameter_capability_registry
 from app.ports import (
     EmbeddingCancelledError, InvalidPortResponseError, PortAuthenticationError, PortConfigurationError,
@@ -72,13 +72,14 @@ def test_policy_rejects_unsafe_or_unbounded_configuration(change):
 
 def test_canonical_roles_are_prefixed_stable_and_limit_complete_input_without_truncation():
     selected = profile(max_input_tokens=10_000, document_instructions="passage: ", query_instructions="query: ")
-    document = CanonicalGuidelineDocumentV1.from_content(content(), selected, load_parameter_capability_registry())
+    document = CanonicalGuidelineDocumentV2.from_content(content(), selected, load_parameter_capability_registry())
     question = query(selected)
     texts = validated_guideline_texts(selected, (document, question))
     assert texts == ("passage: \n" + document.canonical_text, "query: \n" + question.canonical_text)
-    assert content().body_markdown in texts[0]
-    other = CanonicalGuidelineDocumentV1.from_content(content(body_markdown="中文条件\r\nOtherwise retain C."), selected, load_parameter_capability_registry())
-    equivalent = CanonicalGuidelineDocumentV1.from_content(content(body_markdown="中文条件\nOtherwise retain C."), selected, load_parameter_capability_registry())
+    assert content().summary in texts[0]
+    assert content().body_markdown not in texts[0]
+    other = CanonicalGuidelineDocumentV2.from_content(content(body_markdown="中文条件\r\nOtherwise retain C."), selected, load_parameter_capability_registry())
+    equivalent = CanonicalGuidelineDocumentV2.from_content(content(body_markdown="中文条件\nOtherwise retain C."), selected, load_parameter_capability_registry())
     assert validated_guideline_texts(selected, (other,)) == validated_guideline_texts(selected, (equivalent,))
     tiny = profile(max_input_tokens=1)
     with pytest.raises(EmbeddingContractError):
@@ -102,8 +103,8 @@ def test_role_prefix_counts_toward_the_complete_wire_input_byte_limit(kind):
         def make(extra): return query(selected, question="q" * extra)
         empty = query(selected, question="")
     else:
-        document = CanonicalGuidelineDocumentV1.from_content(content(), selected, load_parameter_capability_registry())
-        def make(extra): return CanonicalGuidelineDocumentV1.model_validate({**document.model_dump(), "parameter_names": ("p" * (extra + 1),)})
+        document = CanonicalGuidelineDocumentV2.from_content(content(), selected, load_parameter_capability_registry())
+        def make(extra): return CanonicalGuidelineDocumentV2.model_validate({**document.model_dump(), "parameter_names": ("p" * (extra + 1),)})
         empty = make(0)
     size = len(empty.canonical_text.encode("utf-8"))
     boundary = make(limit - size - prefix_size)

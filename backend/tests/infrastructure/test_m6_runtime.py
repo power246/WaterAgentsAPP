@@ -189,7 +189,7 @@ def test_m6_limit_defaults_and_derived_worst_case_are_fixed() -> None:
     ) == (6, 4, 32, 24, 90.0, 600.0)
     assert limits.repairs_per_exchange == 1
     assert limits.numeric_estimation_calls == 64
-    assert limits.maximum_model_calls == 6 + 64 + 2 * 24 + 2 == 120
+    assert limits.maximum_model_calls == 6 + 64 + 2 * 24 + 3 == 121
     assert not any("repair" in field for field in AppSettings.model_fields)
 
 
@@ -206,7 +206,7 @@ def test_m6_limits_accept_lower_values_and_keep_m5_budgets_independent() -> None
         evidence_max_transform_calls=3,
     )
 
-    assert m6_runtime_limits(settings).maximum_model_calls == 69
+    assert m6_runtime_limits(settings).maximum_model_calls == 70
     m5_limits = evidence_tool_limits(settings)
     assert m5_limits.collection_calls == 2
     assert m5_limits.transform_calls == 3
@@ -410,7 +410,7 @@ def test_runtime_composes_the_real_chain_and_reuses_m5_m3_instances() -> None:
             "model_timeout_seconds": 90.0,
             "session_deadline_seconds": 600.0,
             "repairs_per_exchange": 1,
-            "maximum_model_calls": 120,
+            "maximum_model_calls": 121,
             "numeric_estimation_calls": 64,
         },
         "adapter_providers": ("openai",),
@@ -600,7 +600,7 @@ def test_openapi_keeps_exact_existing_surface_and_safe_m6_metadata() -> None:
         )
     )
     encoded = json.dumps(schema["x-m6-runtime"], sort_keys=True)
-    assert schema["x-m6-runtime"]["limits"]["maximum_model_calls"] == 120
+    assert schema["x-m6-runtime"]["limits"]["maximum_model_calls"] == 121
     assert "metadata-secret" not in encoded
     assert settings.openai_base_url not in encoded
     assert "prompt" not in encoded.casefold()

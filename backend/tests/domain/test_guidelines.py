@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.domain.guidelines import (
-    CanonicalGuidelineDocumentV1, CanonicalGuidelineQueryV1, GuidelineCatalogSnapshot,
+    CanonicalGuidelineDocumentV2, CanonicalGuidelineQueryV1, GuidelineCatalogSnapshot,
     GuidelineCitationV1, GuidelineDocumentSnapshot, GuidelineDraftV1, GuidelineEmbeddingBatch,
     GuidelineIdentity, GuidelineIndexGeneration, GuidelineModelViewV1, GuidelineMutation,
     GuidelineMutationReceipt, GuidelineOperation, GuidelineResultUsageBinding,
@@ -267,7 +267,7 @@ def test_override_cannot_reuse_base_review_even_for_identical_content():
 
 def test_embedding_inputs_have_separate_case_identity_and_no_source_urls(registry):
     selected = profile()
-    doc = CanonicalGuidelineDocumentV1.from_content(content(sources=(source(),)), selected, registry)
+    doc = CanonicalGuidelineDocumentV2.from_content(content(sources=(source(),)), selected, registry)
     question = query(selected)
     assert selected.profile_id != case_profile().profile_id
     for value in (doc, question):
@@ -281,7 +281,7 @@ def test_embedding_inputs_have_separate_case_identity_and_no_source_urls(registr
     with pytest.raises(ValidationError):
         CanonicalGuidelineQueryV1.model_validate_json(case_text())
     assert json.loads(doc.canonical_text)["kind"] == "guideline_document"
-    assert CanonicalGuidelineDocumentV1.model_validate_json(doc.canonical_text) == doc
+    assert CanonicalGuidelineDocumentV2.model_validate_json(doc.canonical_text) == doc
     assert CanonicalGuidelineQueryV1.model_validate_json(question.canonical_text) == question
 
 
@@ -296,8 +296,8 @@ def test_profile_identity_covers_all_configuration(field, value):
 
 def test_profile_versions_and_forged_identity_rejected():
     for fields in ({"profile_id": case_profile().profile_id}, {"profile_digest": "forged"},
-                   {"text_contract_version": 2}, {"query_template_version": 2},
-                   {"document_template_version": 2}, {"distance_metric": "euclidean"}):
+                   {"text_contract_version": 3}, {"query_template_version": 2},
+                   {"document_template_version": 3}, {"distance_metric": "euclidean"}):
         with pytest.raises(ValidationError):
             profile(**fields)
 
@@ -319,11 +319,11 @@ def test_query_exact_byte_boundary_and_document_metadata_canonicalization(regist
     assert len(exact.canonical_text.encode("utf-8")) == 8192
     with pytest.raises(ValidationError, match="8192"):
         query(question=exact.question + "x")
-    document = CanonicalGuidelineDocumentV1.from_content(content(), profile(), registry)
-    first = CanonicalGuidelineDocumentV1.model_validate(document.model_dump() | {
+    document = CanonicalGuidelineDocumentV2.from_content(content(), profile(), registry)
+    first = CanonicalGuidelineDocumentV2.model_validate(document.model_dump() | {
         "scenario_tags": ["b", "a", "b"], "parameter_names": ["B", "A", "A"],
     })
-    second = CanonicalGuidelineDocumentV1.model_validate(document.model_dump() | {
+    second = CanonicalGuidelineDocumentV2.model_validate(document.model_dump() | {
         "scenario_tags": ["a", "b"], "parameter_names": ["A", "B"],
     })
     assert first.canonical_digest == second.canonical_digest

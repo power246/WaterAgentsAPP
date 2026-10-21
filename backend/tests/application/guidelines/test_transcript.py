@@ -44,7 +44,7 @@ class AdvisoryModel(AdaptiveWaterbodyModelPort):
     @staticmethod
     def _body(request):
         body = next(json.loads(message.text) for message in reversed(request.messages)
-                    if "advisory_knowledge" not in json.loads(message.text))
+                    if message.role.value == "user" and "advisory_knowledge" not in json.loads(message.text))
         for field in ("evidence_summaries", "bounded_reference_summaries"):
             for entry in body.get(field, []):
                 summary = json.loads(entry["summary"])
@@ -171,7 +171,8 @@ def test_submission_transport_and_adoption_are_distinct_and_scoped(monkeypatch, 
             assert len(usages) == (4 if cite is True and not fail else 0)
             if fail:
                 assert outcome.status is WaterbodyAgentRunStatus.FAILED
-                response = next(entry.body for entry in items.values() if entry.item.content_type == "waterbody_model_response")
+                response = next(entry.body for entry in items.values() if entry.item.content_type == "waterbody_model_response"
+                    and entry.body.operation_id == state.model.calls[0].operation_id)
                 assert response.finish_reason.value == "error" and not usages
             else:
                 assert outcome.status is WaterbodyAgentRunStatus.COMPLETED, outcome.error

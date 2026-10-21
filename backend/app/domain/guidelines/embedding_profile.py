@@ -13,8 +13,8 @@ class GuidelineEmbeddingProfileV1(DomainModel):
     output_dimensions: Annotated[int, Field(strict=True, ge=1)]
     max_input_tokens: Annotated[int, Field(strict=True, ge=1)]
     distance_metric: Literal["cosine"] = "cosine"
-    text_contract_version: Literal[1] = 1
-    document_template_version: Literal[1] = 1
+    text_contract_version: Literal[1, 2] = 2
+    document_template_version: Literal[1, 2] = 2
     query_template_version: Literal[1] = 1
     document_instructions: Annotated[NormalizedText, Field(min_length=1, max_length=2000)]
     query_instructions: Annotated[NormalizedText, Field(min_length=1, max_length=2000)]
@@ -23,6 +23,8 @@ class GuidelineEmbeddingProfileV1(DomainModel):
 
     @model_validator(mode="after")
     def validate_identity(self) -> Self:
+        if self.text_contract_version != self.document_template_version:
+            raise ValueError("guideline text and document template versions must agree")
         for field in ("provider", "model", "document_instructions", "query_instructions"):
             text = getattr(self, field)
             if not text.strip():

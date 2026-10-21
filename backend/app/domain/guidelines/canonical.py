@@ -58,3 +58,6 @@ def unique_texts(value: object) -> object:
     if isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value):
         return tuple(sorted({normalize_text(item) for item in value}))
     return value
+
+
+MAX_GUIDELINE_DOCUMENT_BYTES = 24_000
