@@ -8,6 +8,7 @@ from pydantic import Field, StrictInt, field_validator, model_validator
 
 from app.application.evidence_tools import EvidenceToolDescriptor
 from app.application.evidence_tools.evidence_sources import weather_capable_parameters
+from app.application.reasoning.draft_models import AttributionReferenceConstraint, CellSupportReferenceGroup
 from app.application.reasoning.model_models import (
     ModelItemName,
     NonBlankText,
@@ -293,6 +294,10 @@ class SchemaRepairPromptInput(_PromptInput):
     issues: tuple[PromptValidationIssue, ...]
     batch_prompt: ReasoningBatchPromptInput | None = None
     synthesis_prompt: OverallSynthesisPromptInput | None = None
+    attribution_reference_constraints: Annotated[
+        tuple[AttributionReferenceConstraint, ...], Field(max_length=64)
+    ] = ()
+    required_support_reference_groups: tuple[CellSupportReferenceGroup, ...] = ()
 
     @field_validator("original_visible_response")
     @classmethod
@@ -330,6 +335,16 @@ class SchemaRepairPromptInput(_PromptInput):
             or self.synthesis_prompt.response_schema != self.response_schema
         ):
             raise ValueError("synthesis repair scope does not match the original request")
+        references = tuple(fact.evidence_ref for fact in self.attribution_reference_constraints)
+        ensure_unique_tuple(references, field_name="attribution reference constraints")
+        if not set(references) <= set(self.context.reference_allowlist):
+            raise ValueError("attribution reference constraints exceed the sealed scope")
+        cells = {cell.cell_id: cell for cell in self.batch_prompt.cells} if self.batch_prompt is not None else {}
+        ensure_unique_tuple(tuple(group.cell_id for group in self.required_support_reference_groups),
+                            field_name="required support reference groups")
+        for group in self.required_support_reference_groups:
+            if group.cell_id not in cells or not set(group.reference_options) <= set(cells[group.cell_id].allowed_evidence_refs):
+                raise ValueError("required support reference group exceeds its original cell scope")
         return self
 
 
@@ -475,6 +490,7 @@ class PromptBuilder:
             },
         }
         _add_dependency_context(body, prompt.context)
+        _add_fixed_window_constraints(body, prompt)
         return self._request(
             phase=WaterbodyModelPhase.OVERALL_SYNTHESIS,
             prompt=prompt,
@@ -512,6 +528,16 @@ class PromptBuilder:
             body["coverage_facts"] = coverage_facts
         if prompt.batch_prompt is not None:
             body["batch_cells"] = prompt.batch_prompt.cells
+            if prompt.required_support_reference_groups:
+                body["required_support_reference_groups"] = prompt.required_support_reference_groups
+                body["support_reference_instruction"] = (
+                    "For each quantified or range_estimate cell listed here, cite at least one "
+                    "reference_options entry from that same cell alongside its target evidence. "
+                    "These are server-eligible derived support values, including range-only "
+                    "support; empty collection facts do not replace them. Indeterminate cells "
+                    "are exempt. Preserve the target value and bounds, and retain the exact "
+                    "quality flag union of the references actually cited."
+                )
             body["range_estimate_instruction"] = (
                 "Every range_estimate cell must explicitly retain value_lower and "
                 "value_upper as non-null decimal strings, including when unchanged."
@@ -529,6 +555,7 @@ class PromptBuilder:
                 )
         if prompt.synthesis_prompt is not None:
             synthesis = prompt.synthesis_prompt
+            _add_fixed_window_constraints(body, synthesis)
             body["synthesis_scope"] = {
                 "requested_parameters": synthesis.requested_parameters,
                 "window_ids": synthesis.window_ids,
@@ -538,6 +565,24 @@ class PromptBuilder:
                 "validated_cells": synthesis.validated_cells,
                 "fixed_cells": synthesis.fixed_cells,
             }
+        if prompt.attribution_reference_constraints:
+            body["attribution_reference_constraints"] = prompt.attribution_reference_constraints
+            body["attribution_repair_instruction"] = (
+                "For each attribution_basis_invalid issue, inspect the cited references' "
+                "current_waterbody_applicability below. This current-waterbody classification "
+                "controls eligibility even when an upstream payload itself says inferred. "
+                "A set containing only contextual_only references cannot support inferred "
+                "attribution. Changing the basis enum alone does not repair that evidence. "
+                "An inferred factor must cite eligible evidence with its complete dependency "
+                "closure; every reference must already be in the sealed scope. Do not invent "
+                "a missing reference or substitute an unrelated eligible value. A genuine "
+                "hypothesis uses only contextual_only evidence and remains explicitly unproven. "
+                "General mechanisms from advisory material belong in analysis_detail with "
+                "guideline_refs, not a claim of an observed local cause. Omit a factor if no "
+                "valid basis and references support its claim; primary_factors may be empty. "
+                "For evidence_out_of_scope, use a relevant existing reference or omit the "
+                "unsupported claim. Preserve validated numeric values, ranges and flags."
+            )
         return self._request(
             phase=WaterbodyModelPhase.SCHEMA_REPAIR,
             prompt=prompt,
@@ -810,6 +855,24 @@ def _option_schema(
 
 def _schema_digest(schema: WaterbodyJsonSchema) -> str:
     return canonical_json_digest(json.loads(schema.schema_text))
+
+
+def _add_fixed_window_constraints(body: dict, prompt: OverallSynthesisPromptInput) -> None:
+    contributing = {cell.window_id for cell in prompt.validated_cells
+                    if cell.outcome_status in {OutcomeStatus.QUANTIFIED, OutcomeStatus.RANGE_ESTIMATE}}
+    windows = tuple(window for window in prompt.window_ids if window not in contributing)
+    if windows:
+        body["fixed_window_constraints"] = tuple(
+            {"window_id": window, "risk_level": "indeterminate", "confidence": 0,
+             "contributing_cell_refs": ()} for window in windows
+        )
+        body["fixed_window_instruction"] = (
+            "These windows contain no quantified or range_estimate validated cells. "
+            "Set risk_level=indeterminate, confidence=0 and contributing_cell_refs=[] "
+            "exactly, including during repair. Very low positive confidence is not zero. "
+            "Keep their eligible blocker/context references and explain the missing support; "
+            "fixed or indeterminate cells cannot contribute as numerical results."
+        )
 
 
 def _add_dependency_context(

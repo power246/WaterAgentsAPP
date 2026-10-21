@@ -1,6 +1,8 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import datetime
+from time import perf_counter
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -14,6 +16,8 @@ from app.domain.guidelines import GuidelineMatch, GuidelineRetrievalResult, Guid
 from app.domain.guidelines.canonical import normalize_text, digest
 from app.ports.clock import ClockPort
 from app.ports.errors import GuidelineConflictError, InvalidPortResponseError, PortError
+
+logger = logging.getLogger("wateragents.guidelines")
 
 if TYPE_CHECKING:
     from app.application.reasoning.task import ValidatedWaterbodyAgentTask
@@ -86,15 +90,30 @@ class GuidelineRunContext:
         catalog = None
         code = "guideline_embedding_configuration_invalid"
         if repository is not None and embedding is not None and profile is not None:
+            started = perf_counter()
+            failure, error_type = None, None
             try:
                 catalog = await await_with_cancellation(repository.read_catalog(), cancellation,
                     timeout=policy.online_timeout_seconds)
                 if catalog.profile != profile:
                     code = "guideline_snapshot_unavailable"
+                    failure = "catalog_profile_mismatch"
                 else:
                     code = None
-            except (PortError, ValueError, TimeoutError):
+            except TimeoutError as error:
                 code = "guideline_snapshot_unavailable"
+                failure, error_type = "catalog_timeout", type(error).__name__
+            except (PortError, ValueError) as error:
+                code = "guideline_snapshot_unavailable"
+                failure = "catalog_invalid" if isinstance(error, ValueError) else "catalog_storage_unavailable"
+                error_type = type(error).__name__
+            logger.log(logging.WARNING if failure else logging.DEBUG,
+                "Guideline run catalog pin prepared.", extra={
+                    "event_name": "guideline_run_pin_prepared", "run_id": run_id,
+                    "embedding_stage": "run_pin", "outcome": "unavailable" if failure else "ready",
+                    "duration_ms": round((perf_counter() - started) * 1000, 3),
+                    "failure_code": failure, "exception_type": error_type,
+                })
         cancellation.checkpoint()
         pin = GuidelineRunPin(run_id=run_id, status="ready" if code is None else "unavailable",
                               catalog=catalog, safe_error_code=code)

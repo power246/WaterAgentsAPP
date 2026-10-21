@@ -754,12 +754,11 @@ async def _terminal_events(
                                 "duplicate_key_paths": list(dict.fromkeys(duplicate_paths))[:8],
                             },
                         )
-                _validate_schema_output(value, request.response_schema, request)
-                yield _structured_output_event(
-                    request,
-                    output_id=output_id,
-                    value=value,
-                )
+                if _validate_schema_output(value, request.response_schema, request):
+                    yield _structured_output_event(request, output_id=output_id, value=value)
+                elif not state.text_deltas.get(output_id):
+                    yield VisibleTextDelta(operation_id=request.operation_id, model=request.model,
+                                           message_id=output_id, text=value)
             if not text_messages and not state.emitted_calls:
                 _protocol_error(request)
             finish_reason = WaterbodyFinishReason.COMPLETED
@@ -928,10 +927,16 @@ def _validate_schema_output(
     raw: str,
     schema: WaterbodyJsonSchema,
     request: WaterbodyModelRequest | RunSummaryModelRequest,
-) -> None:
+) -> bool:
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
+        # Keep completed object text visible for the application's single
+        # repair without accepting it as a structured result.
+        if (isinstance(request, WaterbodyModelRequest)
+                and request.phase in {WaterbodyModelPhase.REASONING_BATCH, WaterbodyModelPhase.OVERALL_SYNTHESIS}
+                and raw.lstrip().startswith("{")):
+            return False
         _protocol_error(request)
     if not isinstance(value, dict):
         _protocol_error(request)
@@ -940,6 +945,7 @@ def _validate_schema_output(
         and request.phase is WaterbodyModelPhase.EVIDENCE_PLANNING
     ):
         _validate_json_schema(value, schema, request)
+    return True
 
 
 def _canonicalize_duplicate_json_keys(raw: str) -> tuple[str, tuple[str, ...]]:

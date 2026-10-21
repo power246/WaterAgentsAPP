@@ -278,6 +278,8 @@ M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标�
 
 补证必须说明预计改变原问题的哪条判断，辅助指标不自动成为新的研究任务。无新证据或已确认不可获取时收敛；整轮仅复用缓存工具结果且没有新增规则，后端以 `no_progress` 停止规划。既有轮次、工具和数值任务预算继续生效；剩余缺口进入不确定性，不新增证据资格门槛。
 
+查询 skill 中的 guideline 指可选科学参考。估值、预测和缺测补全查询应检索已有证据的适用条件、机制及推断限制；只有原问题明确要求标准、限值或达标判断时才查找相应 criteria。这个目标约束同时适用于 query 和每个实际参与 embedding 的 aspect，不能把估值问题改写成标准查询。
+
 ### 7.4 初始工程参数
 
 这些是实现起始默认值，必须在对应策略对象中单点定义。真实检索样例可促使调整并记录策略版本；下列数值不是已验证的最优参数。
@@ -338,6 +340,12 @@ server 把有效 alias 解析为 `GuidelineCitationV1`：delivery item ref、gui
 如实现中确实需要改变已有持久化 content schema，保留其旧版读定义、canonical hash/digest 和 history 解析；新生产写单一当前 schema，不原地重写旧 JSON，也不引入两个并行的生产分析路径。
 
 仅 guideline alias 非法时：丢弃非法引用、保存 safe warning，不生成可点击的虚假出处；不要改写已通过校验的数值或把所有 provided 文档补成 adopted。原有 evidence、数值、identity 和 scope 错误仍按原严格 validator/repair 契约处理。模型自由推理不等于引用可以伪造。
+
+综合归因修复遇到 `attribution_basis_invalid` 或 `evidence_out_of_scope` 时，模型获得本轮有界证据的 `current_waterbody_applicability` 和依赖引用约束，区分当前水体用途与上游 payload 自身的 source。约束来自服务端验证目录，保留原 scope、数值和一次修复限制；仅改 basis 枚举不能使 contextual-only 引用成为 inferred 依据。无合法依据时允许省略因素、明确无法归因，一般机制通过 analysis_detail/guideline_refs 表达，最终仍通过原资格和依赖闭包校验。
+
+批次修复另外列明原校验器要求的同窗派生支持引用候选组；非 indeterminate 结果必须引用其中一个合格支持，保留原目标值及实际引用的质量标记。没有 quantified/range_estimate 有效结果的窗口，在首次综合与修复请求中都明确列为 risk=indeterminate、confidence=0、空 contributing cells；这些是原契约的显式输入，不新增缺测门槛。
+
+完整且一致的 Responses 终态中，若 reasoning_batch/overall_synthesis 的对象形文本仅有 JSON 语法错误，保留为可见文本，交给既有一次修复；不产生不合法的 StructuredOutputCompleted。非法传输事件、工具参数、非对象文本、取消/拒绝/截断及修复回复的原错误边界保持不变。修复仍使用原模型、证据范围、原知识子集及剩余 deadline，失败不再递归修复。
 
 ## 9. Transcript、引用闭包与历史
 

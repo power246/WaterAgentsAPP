@@ -1,8 +1,10 @@
 import asyncio
 import json
+import logging
 from math import isfinite
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -33,6 +35,8 @@ from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.persistence.database import create_database_engine
 from app.ports.errors import GuidelineConflictError, PortUnavailableError
 from app.ports.clock import ClockPort
+
+logger = logging.getLogger("wateragents.guidelines.storage")
 
 _MANAGEMENT_QUERY = """
 SELECT d.*, r.activation_epoch AS root_epoch, r.disabled AS root_disabled,
@@ -105,19 +109,32 @@ class PostgresGuidelineRepository:
             await self._engine.dispose()
 
     @asynccontextmanager
-    async def _connection(self, *, write: bool = False):
+    async def _connection(self, *, write: bool = False, operation: str | None = None):
+        started, acquired, completed = perf_counter(), None, False
         try:
             async with asyncio.timeout(self._timeout):
                 async with self._engine.begin() as connection:
+                    acquired = perf_counter()
                     if write:
                         await connection.execute(text(
                             "SELECT singleton_id FROM guideline_catalog_state WHERE singleton_id = 1 FOR UPDATE"
                         ))
                     yield connection
+            completed = True
         except IntegrityError as error:
             raise GuidelineConflictError("guideline_constraint_conflict") from error
         except (SQLAlchemyError, OSError, TimeoutError) as error:
             raise PortUnavailableError("Guideline storage is unavailable.") from error
+        finally:
+            if operation is not None:
+                finished = perf_counter()
+                logger.debug("Guideline storage operation timing.", extra={
+                    "event_name": "guideline_storage_timing", "operation": operation,
+                    "outcome": "completed" if completed else "interrupted",
+                    "duration_ms": round((finished - started) * 1000, 3),
+                    "db_connection_wait_ms": round(((acquired or finished) - started) * 1000, 3),
+                    "db_transaction_ms": round((finished - acquired) * 1000, 3) if acquired is not None else None,
+                })
 
     async def _family(self, connection, root_id: UUID):
         rows = (await connection.execute(text(
@@ -477,7 +494,7 @@ class PostgresGuidelineRepository:
         ), {"root": root_id})
 
     async def read_catalog(self) -> GuidelineCatalogSnapshot:
-        async with self._connection() as connection:
+        async with self._connection(operation="read_catalog") as connection:
             row = (await connection.execute(text(
                 "SELECT c.revision, c.active_generation_id, g.profile FROM guideline_catalog_state c "
                 "LEFT JOIN guideline_index_generations g ON g.generation_id = c.active_generation_id "

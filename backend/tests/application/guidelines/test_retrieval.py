@@ -14,7 +14,7 @@ from app.domain.guidelines import GuidelineMatch
 from app.domain import ParameterKey
 from app.domain.memory_rag.embedding_vector import EmbeddingVector
 from app.infrastructure.config import load_parameter_capability_registry
-from app.ports import PortAuthenticationError
+from app.ports import PortAuthenticationError, PortUnavailableError
 from tests.application.analysis_runs._topology_scheduler_support import topology
 from tests.application.guidelines.test_worker import Clock, Embedding, system, worker, publish, edit, finish_generation
 from tests.guideline_support import PH, DO, content, identity, profile, version
@@ -65,6 +65,35 @@ async def pin(repository=None, embedding=None, policy=None, *, selected=PROFILE,
     return await GuidelineRunContext.prepare(run_id or uuid4(), repository=repository or Repository(),
         embedding=embedding or Embedding(), profile=selected, registry=REGISTRY, policy=policy or GuidelinePolicy(),
         clock=clock or Clock(), cancellation=token or CancellationToken(asyncio.Event()))
+
+
+@pytest.mark.parametrize("failure,code", [
+    ("timeout", "catalog_timeout"), ("storage", "catalog_storage_unavailable"),
+    ("invalid", "catalog_invalid"), ("profile", "catalog_profile_mismatch"),
+])
+def test_pin_failure_logs_safe_distinct_causes_without_retry(failure, code, application_logs):
+    async def exercise():
+        repository = Repository()
+        if failure == "profile":
+            repository.catalog = repository.catalog.model_copy(update={"profile": profile(model="other")})
+        else:
+            async def failed():
+                repository.reads += 1
+                if failure == "timeout":
+                    await asyncio.Event().wait()
+                error = ValueError if failure == "invalid" else PortUnavailableError
+                raise error("private-diagnostic-value https://private.invalid/path")
+            repository.read_catalog = failed
+        run = await pin(repository, policy=GuidelinePolicy(online_timeout_seconds=.02))
+        assert run.pin.status == "unavailable" and repository.reads == 1
+        assert run.pin.safe_error_code == "guideline_snapshot_unavailable"
+
+    asyncio.run(exercise())
+    messages = [json.loads(row) for row in application_logs]
+    diagnostic = next(row for row in messages if row["event_name"] == "guideline_run_pin_prepared")
+    assert diagnostic["failure_code"] == code and diagnostic["duration_ms"] >= 0
+    assert "private-diagnostic-value" not in json.dumps(diagnostic)
+    assert "private.invalid" not in json.dumps(diagnostic)
 
 
 @pytest.mark.parametrize("library,candidates,status", [(0, 0, "empty_library"), (1, 0, "no_match")])

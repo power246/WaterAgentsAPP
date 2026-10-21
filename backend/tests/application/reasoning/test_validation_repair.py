@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
@@ -20,7 +21,8 @@ from app.application.reasoning.model_models import (
     WaterbodyModelPhase,
 )
 from app.application.reasoning.prompt_builder import PromptBuilder
-from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POLICY
+from app.application.reasoning.prompt_policy import DEFAULT_REASONING_PROMPT_POLICY, canonical_json_digest
+from app.application.reasoning.working_context import BoundedEvidenceSummary, build_working_context_projection
 from app.domain import (
     DataQualityFlag,
     EvidenceApplicability,
@@ -38,6 +40,7 @@ from tests.application.reasoning.m7_support import (
     validated_reasoning,
 )
 from tests.application.reasoning.test_draft_validator import (
+    _low_basis_flow_support_fixture,
     _mixed_model_estimate_fixture,
 )
 
@@ -119,6 +122,120 @@ def test_initial_invalid_repair_valid_is_correlated_and_scoped_once() -> None:
     assert outcome.audit.initial_issues[0].code == "scope_digest_mismatch"
     assert outcome.audit.accepted_operation_id == repair_request.operation_id
     assert outcome.audit.validated_digest == outcome.validated.validation_digest
+
+
+@pytest.mark.parametrize("repair_kind", ["hypothesis", "omit", "enum_only"])
+def test_contextual_attribution_repair_receives_current_scope_and_stays_validated(repair_kind):
+    skeleton, plan, catalog, validator = m7_fixture(attribution_context=True)
+    reasoning = validated_reasoning(plan, validator, catalog)
+    baseline = synthesis_payload(skeleton, plan, reasoning)
+    initial = copy.deepcopy(baseline)
+    factor = initial["attribution_summary"]["primary_factors"][0]
+    factor.update(basis="correlated", evidence_refs=["e:context"],
+                  explanation="A contextual upstream estimate may explain this result.")
+    repaired = copy.deepcopy(initial)
+    if repair_kind == "omit":
+        repaired["attribution_summary"].update(primary_factors=[], summary="No cause can be established.")
+    else:
+        repaired["attribution_summary"]["primary_factors"][0]["basis"] = (
+            "hypothesized" if repair_kind == "hypothesis" else "inferred"
+        )
+
+    class Model:
+        def __init__(self):
+            self.calls = []
+
+        async def stream(self, request):
+            self.calls.append(request)
+            if request.phase is WaterbodyModelPhase.SCHEMA_REPAIR:
+                body = json.loads(request.messages[0].text)
+                constraints = {v["evidence_ref"]: v for v in body["attribution_reference_constraints"]}
+                assert constraints["e:context"]["current_waterbody_applicability"] == "contextual_only"
+                assert constraints["e:relation"]["dependency_evidence_refs"]
+                assert set(constraints) <= set(plan.synthesis_plan.context.reference_allowlist)
+                assert "Changing the basis enum alone" in body["attribution_repair_instruction"]
+                assert body["synthesis_scope"]["validated_cells"]
+                payload = repaired
+            else:
+                payload = initial
+            for event in _completed_script(request.operation_id, request.model, payload):
+                yield event
+
+    model = Model()
+    pending = _exchange(model, validator).run_synthesis(
+        skeleton, plan.batch_plan, plan.synthesis_plan, reasoning, cancellation=_token()
+    )
+    if repair_kind == "enum_only":
+        with pytest.raises(ValidationRepairFailedError) as raised:
+            asyncio.run(pending)
+        assert [i.code for i in raised.value.audit.repair_issues] == ["attribution_basis_invalid"]
+    else:
+        outcome = asyncio.run(pending)
+        assert outcome.audit.accepted_operation_id == model.calls[1].operation_id
+        assert outcome.validated.overall == validator.validate_synthesis(
+            skeleton, plan.batch_plan, plan.synthesis_plan, reasoning, baseline
+        ).overall
+    assert len(model.calls) == 2
+
+
+def test_repair_cites_range_only_support_without_lowering_a_direct_target_confidence():
+    original, catalog, planned, target, flow = _low_basis_flow_support_fixture()
+    values = {name: getattr(original.context, name) for name in type(original.context).model_fields
+              if name not in {"schema_version", "working_context_digest"}}
+    values["reference_allowlist"] = (*original.context.reference_allowlist, flow.evidence_ref)
+    values["evidence_summaries"] = (*original.context.evidence_summaries, BoundedEvidenceSummary(
+        evidence_ref=flow.evidence_ref, summary="Range-only derived discharge support: 5 to 50 ft3/s, estimated.",
+        truncated=False))
+    context = build_working_context_projection(**values)
+    values = original.model_dump(mode="python", exclude={"batch_digest"})
+    values.update(context=context, cells=(planned, *original.cells[1:]))
+    batch = type(original)(**values, batch_digest=canonical_json_digest(values))
+    initial = batch_payload(original, catalog)
+    repaired = copy.deepcopy(initial)
+    repaired["cells"][0].update(evidence_refs=[target.evidence_ref, flow.evidence_ref],
+                                series_refs=[target.series_ref, flow.series_ref], quality_flags=["estimated"])
+
+    class Model:
+        calls = []
+
+        async def stream(self, request):
+            self.calls.append(request)
+            if request.phase is WaterbodyModelPhase.SCHEMA_REPAIR:
+                body = json.loads(request.messages[0].text)
+                assert body["required_support_reference_groups"] == [
+                    {"cell_id": planned.cell_id, "reference_options": [flow.evidence_ref]}]
+                payload = repaired
+            else:
+                payload = initial
+            for event in _completed_script(request.operation_id, request.model, payload):
+                yield event
+
+    model = Model()
+    result = asyncio.run(_exchange(model, DraftValidator(catalog)).run_batch(batch, cancellation=_token()))
+    assert len(model.calls) == 2
+    assert result.validated.cells[0].confidence == .8
+    assert result.validated.cells[0].representative_value == initial["cells"][0]["representative_value"]
+
+
+def test_fixed_window_zero_confidence_contract_is_present_initially_and_in_repair():
+    skeleton, plan, catalog, validator = m7_fixture(supported=lambda _p, w: w < 2)
+    reasoning = validated_reasoning(plan, validator, catalog)
+    valid = synthesis_payload(skeleton, plan, reasoning)
+    invalid = copy.deepcopy(valid)
+    for window in invalid["window_assessments"][2:]:
+        window["confidence"] = .05
+    fake = DeterministicWaterbodyModelPort(
+        _completed_script(plan.synthesis_plan.operation_id, plan.synthesis_plan.model, invalid),
+        _completed_script(_repair_id(plan.synthesis_plan.operation_id), plan.synthesis_plan.model, valid),
+    )
+    outcome = asyncio.run(_exchange(fake, validator).run_synthesis(
+        skeleton, plan.batch_plan, plan.synthesis_plan, reasoning, cancellation=_token()))
+    assert len(fake.calls) == 2
+    initial, repair = [json.loads(request.messages[-1].text) for request in fake.calls]
+    assert initial["fixed_window_constraints"] == repair["fixed_window_constraints"] == [
+        {"window_id": window.window_id, "risk_level": "indeterminate", "confidence": 0,
+         "contributing_cell_refs": []} for window in skeleton.windows[2:]]
+    assert all(window.confidence == 0 for window in outcome.validated.window_assessments[2:])
 
 
 def test_quantified_point_with_missing_bounds_needs_no_paid_repair() -> None:
@@ -455,6 +572,71 @@ def test_missing_structured_output_repairs_once_with_bounded_visible_text() -> N
         "original_visible_response"
     ]
     assert len(fake.calls) == 2
+
+
+@pytest.mark.parametrize("bad_repair", [False, True])
+@pytest.mark.parametrize("with_guidelines", [False, True])
+def test_completed_malformed_json_from_real_http_adapter_enters_only_one_scoped_repair(bad_repair, with_guidelines):
+    from app.infrastructure.adapters import OpenAIResponsesWaterbodyAdapter
+    from tests.infrastructure.test_openai_responses_waterbody import client, encode_events, response_for, malformed_object_events
+
+    _skeleton, plan, catalog, validator = m7_fixture()
+    original = plan.batch_plan.batches[0]
+    values = original.model_dump(mode="python", exclude={"batch_digest"})
+    values["deadline"] = datetime.now(UTC) + timedelta(seconds=60)
+    batch = type(original)(**values, batch_digest=canonical_json_digest(values))
+    valid = batch_payload(batch, catalog)
+    raw = '{"note":"pH indicates "low" risk"}'
+    requests = []
+    knowledge = None
+    if with_guidelines:
+        from tests.application.guidelines.test_model_context import Session, model_context
+        from tests.guideline_support import version, content
+        session = Session((version(content(parameter_keys=(batch.parameter,))),))
+        session.pin.run_id, session.session_id = batch.run_id, batch.session_id
+        knowledge = model_context(session, batch.model)
+
+    def handler(request):
+        requests.append(request)
+        if with_guidelines:
+            messages = [json.loads(message["content"]) for message in json.loads(request.content)["input"]]
+            alias = next(entry["alias"] for message in messages for entry in message.get("advisory_knowledge", []))
+            valid["cells"][0]["guideline_refs"] = [alias]
+        answer = raw if len(requests) == 1 or bad_repair else json.dumps(valid)
+        return response_for(request, (encode_events(malformed_object_events(answer, batch.model.model)),))
+
+    async def exercise():
+        async with client(handler) as http:
+            adapter = OpenAIResponsesWaterbodyAdapter(http, api_key="qxv0K8pL7s6D5n4M3z2R",
+                                                       base_url="https://api.openai.test/v1")
+
+            class FixtureProvider:
+                async def stream(self, request):
+                    routed = request.model_copy(update={"model": type(request.model)(
+                        provider="openai", model=request.model.model)})
+                    async for event in adapter.stream(routed):
+                        yield event.model_copy(update={"model": request.model})
+
+            exchange = ValidationExchange(model_port=FixtureProvider(), validator=validator,
+                prompt_builder=PromptBuilder(DEFAULT_REASONING_PROMPT_POLICY), guidelines=knowledge)
+            return await exchange.run_batch(batch, cancellation=_token())
+
+    if bad_repair:
+        with pytest.raises(ValidationRepairFailedError):
+            asyncio.run(exercise())
+    else:
+        outcome = asyncio.run(exercise())
+        assert outcome.audit.initial_issues[0].code == "missing_structured_output"
+        assert raw in json.loads(json.loads(outcome.audit.repair_request.messages[0].text)[
+            "original_visible_response"])["visible_text"]
+        assert outcome.audit.accepted_operation_id == _repair_id(batch.operation_id)
+        assert outcome.validated == validator.validate_batch(batch, valid,
+            guideline_aliases=knowledge.aliases(batch.operation_id) if knowledge is not None else frozenset())
+    if knowledge is not None:
+        assert len(knowledge.usages) == (0 if bad_repair else 1)
+        if not bad_repair:
+            assert knowledge.usages[0].operation_id == _repair_id(batch.operation_id)
+    assert len(requests) == 2
 
 
 @pytest.mark.parametrize(

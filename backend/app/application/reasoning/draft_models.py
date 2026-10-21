@@ -24,6 +24,7 @@ from app.domain import (
     DataQualityFlag,
     DomainFloat,
     DomainModel,
+    EvidenceApplicability,
     IndeterminateReason,
     NonEmptyString,
     OutcomeStatus,
@@ -39,6 +40,17 @@ from app.domain.inference.value_range import validate_result_range
 class DraftValidationIssue(DomainModel):
     code: ModelItemName
     path: NonEmptyString
+
+
+class AttributionReferenceConstraint(DomainModel):
+    evidence_ref: NonEmptyString
+    current_waterbody_applicability: EvidenceApplicability
+    dependency_evidence_refs: tuple[NonEmptyString, ...]
+
+
+class CellSupportReferenceGroup(DomainModel):
+    cell_id: NonEmptyString
+    reference_options: Annotated[tuple[NonEmptyString, ...], Field(min_length=1)]
 
 
 class ReasoningCellDraft(DomainModel):

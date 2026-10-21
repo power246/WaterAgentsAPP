@@ -25,6 +25,8 @@ from app.application.reasoning.batch_planner import (
     SynthesisInputPlan,
 )
 from app.application.reasoning.draft_models import (
+    AttributionReferenceConstraint,
+    CellSupportReferenceGroup,
     DraftValidationIssue,
     OverallSynthesisDraft,
     ReasoningBatchDraft,
@@ -375,6 +377,30 @@ class DraftValidator:
         self._cell_scopes = {
             scope.cell_id: scope for scope in evidence_catalog.cell_scopes
         }
+
+    def attribution_reference_constraints(
+        self, references: tuple[str, ...],
+    ) -> tuple[AttributionReferenceConstraint, ...]:
+        return tuple(
+            AttributionReferenceConstraint(
+                evidence_ref=reference,
+                current_waterbody_applicability=self._facts[reference].applicability,
+                dependency_evidence_refs=self._facts[reference].dependency_evidence_refs,
+            )
+            for reference in sorted(set(references)) if reference in self._facts
+        )
+
+    def required_support_reference_groups(self, cell_ids: tuple[str, ...]) -> tuple[CellSupportReferenceGroup, ...]:
+        return tuple(
+            CellSupportReferenceGroup(cell_id=cell_id, reference_options=references)
+            for cell_id in cell_ids
+            if (references := self._derived_support_refs(self._cell_scopes[cell_id]))
+        )
+
+    def _derived_support_refs(self, scope: CellEvidenceValidationScope) -> tuple[str, ...]:
+        references = (*scope.support_direct_refs, *scope.support_indirect_refs)
+        return references if all(self._facts[ref].payload_type in {"temporal_estimate", "numeric_derived"}
+                                 for ref in references) else ()
 
     def validate_batch(
         self,
@@ -812,15 +838,8 @@ class DraftValidator:
             fact for fact in selected_derived
             if fact.payload_type == "numeric_derived"
         )
-        support_refs = (
-            *evidence_scope.support_direct_refs,
-            *evidence_scope.support_indirect_refs,
-        )
-        if support_refs and all(
-            self._facts[ref].payload_type
-            in {"temporal_estimate", "numeric_derived"}
-            for ref in support_refs
-        ):
+        support_refs = self._derived_support_refs(evidence_scope)
+        if support_refs:
             cited_support_refs = refs & set(support_refs)
             if (
                 cell.outcome_status is not OutcomeStatus.INDETERMINATE

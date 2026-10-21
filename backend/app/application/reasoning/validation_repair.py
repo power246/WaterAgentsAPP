@@ -356,7 +356,20 @@ class ValidationExchange:
                     for issue in initial_issues[:64]
                 ),
                 batch_prompt=batch.prompt_input() if batch is not None else None,
+                required_support_reference_groups=(
+                    self._validator.required_support_reference_groups(tuple(cell.cell_id for cell in batch.cells))
+                    if batch is not None else ()
+                ),
                 synthesis_prompt=synthesis_prompt,
+                attribution_reference_constraints=(
+                    self._validator.attribution_reference_constraints(tuple(
+                        summary.evidence_ref for summary in context.evidence_summaries
+                    ))
+                    if request.phase is WaterbodyModelPhase.OVERALL_SYNTHESIS and any(
+                        issue.code in {"attribution_basis_invalid", "evidence_out_of_scope"}
+                        for issue in initial_issues
+                    ) else ()
+                ),
             )
         )
         try:
