@@ -39,24 +39,29 @@ def credentials():
     return CredentialService(InMemoryKeyStore(), dict.fromkeys(CredentialName), FixedClock(), OfflineCredentialTester())
 
 
-def test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_persisting_secrets():
+@pytest.mark.parametrize("independent", [False, True])
+def test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_persisting_secrets(independent):
     async def exercise():
         service = credentials()
         await service.save(CredentialName.OPENAI, SecretStr("fixture-old-key"))
         selected = catalog(max_input_tokens=4096)
         started, release = asyncio.Event(), asyncio.Event()
         seen = []
+        expected_key = "fixture-independent-key" if independent else "fixture-old-key"
 
         async def handler(request):
             key = request.headers["Authorization"]
             seen.append(key)
-            if key == "Bearer fixture-old-key":
+            assert request.url.host == ("embedding.test" if independent else "api.openai.com")
+            if key == f"Bearer {expected_key}" and len(seen) == 1:
                 started.set()
                 await release.wait()
             return httpx.Response(200, json=response_body(selected.embedding_profile.model, [[1, 0, 0]]))
 
         async with http_client(handler) as http:
-            runtime = GuidelineRuntime(settings=AppSettings(_env_file=None), catalog=selected, credentials=service, http=http)
+            configured = AppSettings(_env_file=None, **({"embedding_base_url": "https://embedding.test/v1",
+                "embedding_api_key": expected_key} if independent else {}))
+            runtime = GuidelineRuntime(settings=configured, catalog=selected, credentials=service, http=http)
             profile = runtime.desired_profile
             with patch.object(service, "lease", wraps=service.lease) as lease:
                 first = await runtime.embedding_for_attempt()
@@ -69,11 +74,15 @@ def test_attempt_lease_is_fixed_inflight_and_next_attempt_reads_new_key_without_
                 release.set()
                 await task
                 await first.embed(profile, (query(profile),), None, None)
-                with pytest.raises(PortAuthenticationError) as error:
+                if independent:
                     await runtime.embedding_for_attempt()
-                assert guideline_embedding_failure(error.value) == ("guideline_embedding_credentials_unavailable", False)
-                assert lease.await_count == 3
-            assert seen == ["Bearer fixture-old-key", "Bearer fixture-new-key", "Bearer fixture-old-key"]
+                else:
+                    with pytest.raises(PortAuthenticationError) as error:
+                        await runtime.embedding_for_attempt()
+                    assert guideline_embedding_failure(error.value) == ("guideline_embedding_credentials_unavailable", False)
+                assert lease.await_count == (0 if independent else 3)
+            assert seen == ([f"Bearer {expected_key}"] * 3 if independent else
+                ["Bearer fixture-old-key", "Bearer fixture-new-key", "Bearer fixture-old-key"])
             assert first._transport._http is second._transport._http is http
             assert first._timeout == second._timeout == 20
             assert not http._client.is_closed and "Authorization" not in http._client.headers

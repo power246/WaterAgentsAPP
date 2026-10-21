@@ -173,7 +173,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
 | `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with `provider`, `model`, and `roles`; configured catalogs require exactly one exclusive `embedding` capability with a cosine `embedding_profile` including dimensions, input-token limit, threshold, and schema versions, while every `waterbody` model requires its exact token limits |
-| `WATERAGENTS_MEMORY_ENABLED` | `true`; set `false` to offer only stateless analysis and stop background embedding/index reconciliation. The embedding catalog entry remains required by the current settings schema but is not called while memory is disabled. |
+| `WATERAGENTS_MEMORY_ENABLED` | `true`; set `false` to disable historical memory and its background indexing. The embedding catalog entry remains required. Published guidelines use a separate index and can still use embedding when historical memory is disabled. |
 | `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `500` |
 | `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `48` |
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
@@ -195,6 +195,8 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_USGS_API_KEY` | unset; backend-only optional rate-limit secret |
 | `WATERAGENTS_OPENAI_API_KEY` | unset; required backend-only parser secret |
 | `WATERAGENTS_OPENAI_BASE_URL` | `https://api.openai.com/v1` |
+| `WATERAGENTS_EMBEDDING_BASE_URL` | unset; optional independent OpenAI-compatible embedding base URL; configure together with `WATERAGENTS_EMBEDDING_API_KEY` |
+| `WATERAGENTS_EMBEDDING_API_KEY` | unset; backend-only embedding secret from deployment configuration, paired with the independent URL |
 | `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `1200`; total topology-building deadline, valid range `(0, 3600]` |
 | `WATERAGENTS_DB_HOST` | `127.0.0.1` |
 | `WATERAGENTS_DB_PORT` | `5432` |
@@ -217,6 +219,44 @@ Each waterbody token limit belongs to that exact provider/model entry. Copy the 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
 Production startup validates the complete topology workflow and requires at least one `query_parser` catalog entry (currently with provider `openai`), one `waterbody` entry with explicit token limits, and one supported embedding profile. It does not permanently capture the OpenAI or Google key at startup: each run leases its effective user-store override or deployment fallback before creation, and each background embedding attempt leases its key when claimed. Missing effective credentials prevent the relevant run or attempt. The run summarizer uses the run's exact waterbody model and catalog token limits; it has no separate model setting or tools. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
+
+### Independent embedding service
+
+To keep the current analysis provider and use a separate OpenAI-compatible embedding service, add both entries to the uncommitted `backend/.env`:
+
+```dotenv
+WATERAGENTS_EMBEDDING_BASE_URL='https://generativelanguage.googleapis.com/v1beta/openai/'
+WATERAGENTS_EMBEDDING_API_KEY='your-local-gemini-api-key'
+```
+
+Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/api-keys). Google documents the `/embeddings` compatibility endpoint in its [OpenAI compatibility guide](https://ai.google.dev/gemini-api/docs/openai/#embeddings). Leave the existing analysis `WATERAGENTS_OPENAI_*` values unchanged. Do not use the Google Geocoding key for this service.
+
+In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the service's model/profile. For Google's text-only `gemini-embedding-001`, an example is:
+
+```json
+{
+  "provider": "openai",
+  "model": "gemini-embedding-001",
+  "roles": ["embedding"],
+  "embedding_profile": {
+    "provider": "openai",
+    "model": "gemini-embedding-001",
+    "output_dimensions": 1536,
+    "max_input_tokens": 2048,
+    "distance_metric": "cosine",
+    "semantic_min_similarity": 0.78,
+    "canonical_query_schema_version": 1,
+    "canonical_template_version": 1,
+    "projection_schema_version": 1
+  }
+}
+```
+
+Here `provider: "openai"` selects the existing wire-protocol adapter; it does not select OpenAI's host. Both model fields must match. Google's [embedding documentation](https://ai.google.dev/gemini-api/docs/embeddings) lists the model's dimensions and input limit. The application conservatively bounds complete canonical text by UTF-8 bytes against that limit and rejects overlong topics instead of truncating them. In the current pending-review packet, `ph.photosynthesis-respiration` and `ph.compare-causes` require 2201/2233 bytes with default instructions, so they do not fit this 2048-byte conservative check. Select a service/model with sufficient capacity or split content during human review; do not inflate the declared model limit. Similarity thresholds still need application-specific evaluation.
+
+The pair applies to both historical-memory and guideline embeddings: run query adapters keep their captured key, and background attempts resolve the embedding connection at their own boundary. Independent credentials come only from deployment configuration and require a restart to change; the Settings OpenAI user override continues to control analysis, and does not override the independent embedding key. With both entries unset, embeddings retain the effective OpenAI credential lease, including its OS-store override. A partially configured pair is rejected before any provider request; an embedding failure never retries against the analysis endpoint.
+
+Restart after changing configuration. Changing the model/profile rebuilds the guideline generation; historical memory retains its persisted generation until the existing Admin profile handoff/rebuild is explicitly applied. Old vectors, local documents and run snapshots are preserved; no database reset is required. This configuration support is tested with controlled HTTP services, and is not a claim that a user's Google key has been verified.
 
 ### Local PostgreSQL with Compose
 

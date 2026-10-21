@@ -18,6 +18,7 @@ from app.domain.settings_admin import CredentialName
 from app.infrastructure.adapters import OpenAIEmbeddingAdapter
 from app.infrastructure.adapters.nldi_request_state import NldiRequestState
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
+from app.infrastructure.credentials.embedding import embedding_api_key, embedding_base_url
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.runtime.m4 import build_m4_runtime
 from app.infrastructure.runtime.m5 import M5Runtime
@@ -137,8 +138,8 @@ class RunProviderBundleFactory:
                 error_id_factory=self._id_factory, operation_id_factory=self._id_factory,
             ))
             embedding = OpenAIEmbeddingAdapter(
-                self._http, api_key=openai.value.get_secret_value(),
-                base_url=settings.openai_base_url,
+                self._http, api_key=embedding_api_key(settings, openai.value).get_secret_value(),
+                base_url=embedding_base_url(settings),
             )
             return RunProviderBundle(workflow, stack, embedding, self._m8_runtime,
                 self._guideline_runtime.embedding_for_lease(openai), self._guideline_runtime)

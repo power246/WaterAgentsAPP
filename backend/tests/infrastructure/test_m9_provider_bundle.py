@@ -47,10 +47,14 @@ class _M8Bindings:
         self.ports.pop(run_id)
 
 
-def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
+@pytest.mark.parametrize("independent", [False, True])
+def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool(independent):
     async def exercise():
         configured = settings(openai_api_key=None, google_geocoding_api_key=None, memory_enabled=False,
-                              guideline_policy=GuidelinePolicy(document_instructions="passage: ", query_instructions="query: "))
+            guideline_policy=GuidelinePolicy(document_instructions="passage: ", query_instructions="query: "),
+            **({"embedding_base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+                "embedding_api_key": "fixture-independent-embedding-key"} if independent else {}))
+        first_embedding_key = "fixture-independent-embedding-key" if independent else OPENAI_OLD
         store = InMemoryKeyStore()
         credentials = CredentialService(
             store, {CredentialName.OPENAI: None, CredentialName.GOOGLE_GEOCODING: None},
@@ -73,12 +77,14 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
 
         async def handler(request):
             seen.append(request.headers.get("Authorization"))
-            assert request.url.path == "/v1/embeddings"
-            if request.headers["Authorization"] == f"Bearer {OPENAI_OLD}":
+            assert request.url.host == ("generativelanguage.googleapis.com" if independent else "api.openai.com")
+            assert request.url.path == ("/v1beta/openai/embeddings" if independent else "/v1/embeddings")
+            if request.headers["Authorization"] == f"Bearer {first_embedding_key}":
                 started.set()
                 if json.loads(request.content)["input"][0].startswith("query: "):
                     guideline_started.set()
-                await release.wait()
+                if len(seen) <= 2:
+                    await release.wait()
             return httpx.Response(200, json={
                 "object": "list", "model": profile.model,
                 "data": [{"object": "embedding", "index": 0,
@@ -160,7 +166,12 @@ def test_run_bundle_leases_survive_replace_and_delete_with_one_shared_pool():
             await guidelines.embedding_for_run(str(first_id)).embed(
                 guideline_profile, (guideline_query(guideline_profile),), None, None,
             )
-            assert seen == [f"Bearer {key}" for key in (OPENAI_OLD, OPENAI_OLD, OPENAI_NEW, OPENAI_NEW, OPENAI_OLD, OPENAI_OLD)]
+            expected = ([first_embedding_key] * 6 if independent else
+                [OPENAI_OLD, OPENAI_OLD, OPENAI_NEW, OPENAI_NEW, OPENAI_OLD, OPENAI_OLD])
+            assert seen == [f"Bearer {key}" for key in expected]
+            if independent:
+                assert first_embedding_key in first_stage._summary_boundary._m6_runtime.private_values
+                assert first_embedding_key in first_workflow._query_understanding._private_values
             await first.aclose()
             await first.aclose()
             await second.aclose()

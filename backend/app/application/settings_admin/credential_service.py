@@ -36,6 +36,7 @@ class CredentialService:
     def __init__(
         self, store: KeyStorePort, deployment: dict[CredentialName, SecretStr | None],
         clock: ClockPort, tester: CredentialTester,
+        *, embedding_uses_openai: bool = True,
     ) -> None:
         if set(deployment) != set(CredentialName):
             raise ValueError("deployment credential mapping must match the allowlist")
@@ -46,6 +47,7 @@ class CredentialService:
                 register_private_value(value.get_secret_value())
         self._clock = clock
         self._tester = tester
+        self._embedding_uses_openai = embedding_uses_openai
 
     async def statuses(self) -> tuple[CredentialStatus, ...]:
         return tuple([await self.status(name) for name in CredentialName])
@@ -57,12 +59,14 @@ class CredentialService:
                 name, source=CredentialSource.USER_STORE,
                 value=stored.value, updated_at=stored.updated_at,
                 store_available=available,
+                embedding_uses_openai=self._embedding_uses_openai,
             )
         deployment = self._deployment[name]
         return project_credential_status(
             name, source=(CredentialSource.DEPLOYMENT if deployment is not None
                          else CredentialSource.NONE),
             value=deployment, updated_at=None, store_available=available,
+            embedding_uses_openai=self._embedding_uses_openai,
         )
 
     async def lease(self, name: CredentialName) -> CredentialLease:

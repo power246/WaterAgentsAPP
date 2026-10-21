@@ -7,15 +7,15 @@ from app.application.guidelines.retrieval import GuidelineRunContext
 from app.application.guidelines.bundled import BundledGuidelineImporter, BundledImportReport
 from app.application.embedding_validation import EmbeddingContractError
 from app.application.settings_admin.credential_service import CredentialService
-from app.application.settings_admin.errors import CredentialMissingError, CredentialStoreUnavailableError
 from app.domain.model_catalog_snapshot import ModelCatalogSnapshot
 from app.domain.settings_admin import CredentialLease, CredentialName
 from app.domain.hydrology.parameter_capability_registry import ParameterCapabilityRegistry
 from app.infrastructure.adapters.openai_guideline_embeddings import OpenAIGuidelineEmbeddingAdapter
 from app.infrastructure.config import AppSettings
+from app.infrastructure.credentials.embedding import embedding_api_key, embedding_base_url, lease_embedding_api_key
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.guidelines.bundled_source import PackageBundledGuidelineSource
-from app.ports import PortAuthenticationError, PortConfigurationError
+from app.ports import PortConfigurationError
 from app.ports.guidelines import BundledGuidelineSourcePort, GuidelineEmbeddingPort, GuidelineRepositoryPort
 from app.ports.clock import ClockPort
 from app.infrastructure.runtime.system_clock import SystemClock
@@ -32,7 +32,8 @@ class GuidelineRuntime:
         self._clock = clock or SystemClock()
         self._repository = None
         self._registry = None
-        self._base_url = settings.openai_base_url
+        self._settings = settings
+        self._base_url = embedding_base_url(settings)
         self._run_embeddings: dict[str, GuidelineEmbeddingPort | None] = {}
         self.worker: GuidelinePreparationWorker | None = None
         self.import_report = BundledImportReport()
@@ -51,17 +52,19 @@ class GuidelineRuntime:
         except (EmbeddingContractError, PortConfigurationError) as error:
             self.safe_error_code = guideline_embedding_failure(error)[0]
 
-    def _adapter(self, lease: CredentialLease, timeout: float) -> GuidelineEmbeddingPort:
-        if self.desired_profile is None or self._http is None or lease.name is not CredentialName.OPENAI:
+    def _adapter(self, key, timeout: float) -> GuidelineEmbeddingPort:
+        if self.desired_profile is None or self._http is None:
             raise PortConfigurationError("Guideline embedding configuration is unavailable.", operation="embed")
         return OpenAIGuidelineEmbeddingAdapter(
-            self._http, api_key=lease.value.get_secret_value(), base_url=self._base_url, timeout_seconds=timeout,
+            self._http, api_key=key.get_secret_value(), base_url=self._base_url, timeout_seconds=timeout,
         )
 
     def embedding_for_lease(self, lease: CredentialLease) -> GuidelineEmbeddingPort | None:
         if self.desired_profile is None:
             return None
-        return self._adapter(lease, self.policy.online_timeout_seconds)
+        if lease.name is not CredentialName.OPENAI:
+            raise PortConfigurationError("Guideline embedding configuration is unavailable.", operation="embed")
+        return self._adapter(embedding_api_key(self._settings, lease.value), self.policy.online_timeout_seconds)
 
     def bind_run_embedding(self, run_id: str, port: GuidelineEmbeddingPort | None) -> None:
         if run_id in self._run_embeddings:
@@ -84,11 +87,8 @@ class GuidelineRuntime:
             raise PortConfigurationError("Guideline runtime is shutting down.", operation="embed")
         if self.desired_profile is None:
             raise PortConfigurationError("Guideline embedding configuration is unavailable.", operation="embed")
-        try:
-            lease = await self._credentials.lease(CredentialName.OPENAI)
-        except (CredentialMissingError, CredentialStoreUnavailableError):
-            raise PortAuthenticationError("Guideline embedding credential is unavailable.", operation="embed") from None
-        return self._adapter(lease, self.policy.worker_timeout_seconds)
+        key = await lease_embedding_api_key(self._settings, self._credentials)
+        return self._adapter(key, self.policy.worker_timeout_seconds)
 
     async def start(self, repository: GuidelineRepositoryPort | None, registry: ParameterCapabilityRegistry,
                     *, source: BundledGuidelineSourcePort | None = None) -> None:

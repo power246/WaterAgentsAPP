@@ -447,7 +447,9 @@ async def build_m6_runtime(
             operation_id_factory=operation_id_factory,
             result_id_factory=result_id_factory,
             error_id_factory=error_id_factory,
-            private_values=(api_key,),
+            private_values=(api_key, *(
+                (settings.embedding_api_key.get_secret_value(),) if settings.embedding_api_key is not None else ()
+            )),
         )
 
 

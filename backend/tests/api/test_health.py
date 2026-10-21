@@ -73,6 +73,8 @@ def test_app_uses_expected_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "usgs_api_key": None,
         "openai_api_key": None,
         "openai_base_url": "https://api.openai.com/v1",
+        "embedding_api_key": None,
+        "embedding_base_url": None,
         "topology_stage_timeout_seconds": 1200.0,
         "db_host": "127.0.0.1",
         "db_port": 5432,

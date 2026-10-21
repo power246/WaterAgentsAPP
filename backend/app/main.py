@@ -19,6 +19,7 @@ from app.api.http.admin import router as admin_router
 from app.api.http.keys import router as keys_router
 from app.api.http.guidelines import router as guidelines_router
 from app.application.guidelines.authoring import GuidelineAuthoringService
+from app.application.transcripts.redaction import register_private_value
 from app.api.http.request_context import RequestContextMiddleware
 from app.api.http.local_mutation import LocalMutationGuardMiddleware, _loopback
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
@@ -144,6 +145,8 @@ def create_app(
     guideline_repository: GuidelineRepositoryPort | None = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
+    if resolved_settings.embedding_api_key is not None:
+        register_private_value(resolved_settings.embedding_api_key.get_secret_value())
     if not _loopback(resolved_settings.host):
         raise SettingsConfigurationError("local API requires a loopback bind host")
     resolved_clock = clock if clock is not None else SystemClock()
@@ -229,6 +232,7 @@ def create_app(
                     CredentialName.GOOGLE_GEOCODING: resolved_settings.google_geocoding_api_key,
                 },
                 resolved_clock, active_tester,
+                embedding_uses_openai=resolved_settings.embedding_base_url is None,
             )
             async with AsyncExitStack() as stack:
                 # Provider auth belongs to adapters created for one run. The

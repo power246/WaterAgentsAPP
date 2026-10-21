@@ -238,7 +238,8 @@ def test_hidden_target_aggregate_in_actual_model_message_is_rejected_even_with_a
 
 
 @pytest.mark.parametrize('fail', [False, True])
-def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_misses_and_failures(monkeypatch, tmp_path, fail):
+@pytest.mark.parametrize('independent', [False, True])
+def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_misses_and_failures(monkeypatch, tmp_path, fail, independent):
     from pydantic import SecretStr
     from app.ports import PortAuthenticationError
     from scripts.test_database import temporary_migrated_schema
@@ -252,10 +253,15 @@ def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_miss
                 raise PortAuthenticationError('synthetic private key must never enter the report')
             return await super().embed(*args)
     port = Port()
-    monkeypatch.setattr(evaluation, 'OpenAIGuidelineEmbeddingAdapter', lambda *args, **kwargs: port)
+    def adapter(*args, **kwargs):
+        assert kwargs['base_url'] == ('https://embedding.invalid/v1' if independent else 'https://fixture.invalid/v1')
+        assert kwargs['api_key'] == ('independent-fixture-key' if independent else 'synthetic-fixture-key')
+        return port
+    monkeypatch.setattr(evaluation, 'OpenAIGuidelineEmbeddingAdapter', adapter)
     with temporary_migrated_schema() as database:
         selected = database.model_copy(update={'model_catalog': catalog(max_input_tokens=8192).capabilities,
-            'openai_api_key': SecretStr('synthetic-fixture-key'), 'openai_base_url': 'https://fixture.invalid/v1'})
+            'openai_api_key': None if independent else SecretStr('synthetic-fixture-key'), 'openai_base_url': 'https://fixture.invalid/v1',
+            **({'embedding_api_key': SecretStr('independent-fixture-key'), 'embedding_base_url': 'https://embedding.invalid/v1'} if independent else {})})
         result = asyncio.run(live_retrieval(selected, tmp_path / 'bundle', ROOT / 'backend/tests/fixtures/guidelines/ph_retrieval_cases.json'))
     if fail:
         assert result['status'] == 'failed' and result['reason'] == 'guideline_embedding_credentials_unavailable'

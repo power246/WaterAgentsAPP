@@ -132,7 +132,7 @@ def validate_unit_policy(
 
 def project_credential_status(
     name: CredentialName, *, source: CredentialSource, value: SecretStr | None,
-    updated_at: datetime | None, store_available: bool,
+    updated_at: datetime | None, store_available: bool, embedding_uses_openai: bool = True,
 ) -> CredentialStatus:
     if (source is CredentialSource.NONE) != (value is None):
         raise ValueError("effective credential source and value disagree")
@@ -144,6 +144,8 @@ def project_credential_status(
     if secret is not None and not secret.strip():
         raise ValueError("effective credential is empty")
     label, purpose = _CREDENTIAL_METADATA[name]
+    if name is CredentialName.OPENAI and not embedding_uses_openai:
+        purpose = tuple(role for role in purpose if role != "embedding")
     return CredentialStatus(
         key_name=name,
         label=label,

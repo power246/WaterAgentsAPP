@@ -457,9 +457,9 @@ viewer 优先复用安全的正文查看交互；若引入 Markdown renderer，�
 
 guideline 与 M8 historical memory 是不同功能。`stateless` 或 `WATERAGENTS_MEMORY_ENABLED=false` 不自动禁用已发布的专业/用户说明书；guideline 自身依当前本地库和 embedding readiness 决定可用性。
 
-后台 publication worker 在每次 attempt 开始获取自己的 credential lease；run 查询/分析复用 run-owned lease。替换密钥不把一个正在执行的 operation 改成混合凭据，也不把 lease 内容写入知识版本、manifest、transcript 或日志。
+后台 publication worker 在每次 attempt 开始获取自己的有效凭据快照；默认使用 OpenAI credential lease，独立 embedding 配置使用 deployment 密钥。run 查询/分析分别持有其运行时快照。替换密钥不把一个正在执行的 operation 改成混合凭据，也不把凭据写入知识版本、manifest、transcript 或日志。
 
-M5 的 [GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 从既有 OpenAI lease 构造独立说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次获取一次新 lease，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M6 已接入 worker/generation，M7 已接入 run pin/readiness 与 session 惰性检索，未把 M8 historical memory generation 当作说明书索引。
+[GuidelineRuntime](../../backend/app/infrastructure/runtime/guidelines.py) 在生产 composition 中复用应用 HTTP pool；`RunProviderBundle` 根据 §12.2 的独立配置或既有 OpenAI lease 构造说明书 adapter，bind/release 使用自己的 run registry，不读取 memory mode 或 M8 开关。后台通过 `embedding_for_attempt()` 每次解析有效密钥，已返回 adapter 持有该次凭据快照。online/attempt adapter 分别把 deadline 限制为剩余 session 时间与 3/20 秒策略的较小值，不隐式重试。缺失 profile、unsupported provider 或缺少 pool 仅记录安全配置不可用；缺凭据在 attempt 边界报告安全鉴权失败。统一 `guideline_embedding_failure()` 映射安全错误/可重试性，不保存 provider diagnostics。M6 已接入 worker/generation，M7 已接入 run pin/readiness 与 session 惰性检索，未把 M8 historical memory generation 当作说明书索引。
 
 M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并发 2，整个 attempt 有 20 秒上限，lease 至少 60 秒且大于 attempt 加两次 DB operation timeout。合法 profile 缺凭据时仍能初始化 generation，准备操作安全失败；补密钥、重启及显式 retry 继续原批准版本。配置无效时保留 durable pending，修正配置并重启后恢复。shutdown 先停止领取/派发，再按既有 `shutdown_save_grace_seconds` 有界等待，超时取消并回收全部子任务，然后应用才关闭共享 HTTP/engine。未完成 running 保留租约，重启后过期回收；不续派、不自动 purge 旧 generations/versions。
 
@@ -475,7 +475,7 @@ M6 startup 先导入批准资源，再启动每秒轮询的 worker；默认并�
 
 按 [AGENT.md](../../AGENT.md) 构建前端并升级数据库；说明书迁移为 `20261020_02`。浏览器 `/guidelines` 提供双库列表、草稿保存、检查发布、准备状态/重试、停用/启用和显式恢复。自编内容可以无出处；整理资料须填写出处。检查对话框展示服务器保存版本，发布绑定其 digest；准备成功前新版本不进入有效目录。查看运行的参考资料使用 transcript 保存版本，不读取当前资料库替换旧正文。
 
-配置来源为 `AppSettings.guideline_policy` 和模型目录的 embedding 条目；当前适配器使用 `WATERAGENTS_OPENAI_BASE_URL` 及现有 OpenAI credential lease，分析与 embedding 共用这一服务配置。仅分析模型可调用不代表同一服务提供 embedding。`WATERAGENTS_MEMORY_ENABLED=false` 关闭历史 memory，不关闭说明书。需要调整时可在本地设置 `WATERAGENTS_GUIDELINE_POLICY` JSON（例如 `'{"worker_max_concurrency":1}'`）；未指定项沿用 `GuidelinePolicy` 默认值。默认 top-k=3、cosine cutoff=0.35、知识预算=3072 tokens，在线单次最多 3 秒；后台并发 2、单次 20 秒、最多 3 次，退避 2/10 秒。cutoff 尚未由真实首批资料标注集校准。
+配置来源为 `AppSettings.guideline_policy` 和模型目录的 embedding 条目；适配器支持同时配置 `WATERAGENTS_EMBEDDING_BASE_URL` 与 `WATERAGENTS_EMBEDDING_API_KEY`，让 guideline/M8 的在线与后台 embedding 使用独立的 OpenAI-compatible 服务。两项均不设置时沿用 `WATERAGENTS_OPENAI_BASE_URL` 及现有 OpenAI credential lease；只设置一项会拒绝启动，不混用地址/密钥。独立密钥由本地 deployment 配置提供，修改后重启；设置页 OpenAI 用户密钥不会覆盖它，当前 run/attempt 持有固定快照。分析模型仍使用原 `OPENAI_*` 与用户密钥优先规则。示例见 [backend/README.md](../../backend/README.md#independent-embedding-service)。仅分析模型可调用不代表同一服务提供 embedding。`WATERAGENTS_MEMORY_ENABLED=false` 关闭历史 memory，不关闭说明书。需要调整时可在本地设置 `WATERAGENTS_GUIDELINE_POLICY` JSON（例如 `'{"worker_max_concurrency":1}'`）；未指定项沿用 `GuidelinePolicy` 默认值。默认 top-k=3、cosine cutoff=0.35、知识预算=3072 tokens，在线单次最多 3 秒；后台并发 2、单次 20 秒、最多 3 次，退避 2/10 秒。cutoff 尚未由真实首批资料标注集校准。
 
 草稿仍可在 embedding 不可用时保存。先修正本地服务、模型与密钥，再按需重启、对原批准版本显式重试；不能通过重新批准或改写版本解决供应商错误。版本/索引重建保留旧快照、用户 override 和历史引用；启动导入不删除资源包中缺失的用户内容。不执行业务库重置或自动 purge。
 

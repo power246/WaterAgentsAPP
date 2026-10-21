@@ -716,6 +716,13 @@ git rev-parse HEAD
 | GK-C23 | `backend/tests/application/guidelines/test_evaluation.py` 原始/派生/隐藏均值泄漏拒绝及统计匹配；M11 冻结公开输入记录 | 评估守卫通过；真实模型的完整成对结果 **not run**。 |
 | GK-C24 | 本阶段与 M11 完成记录、下方 GK-A 清单 | 程序/PG/browser/真实供应商/批准/CI 分列，不宣称整体完成。 |
 
+### 后续授权补充：独立 embedding 配置（2026-10-21）
+
+- 用户另行授权保留分析服务并增加独立 embedding 地址/密钥。基线 `06600a3a9f38fa00aedcf5b9e7f44cce4af1d925`，仍在 `codex/guidelines-m0`；实现 `WATERAGENTS_EMBEDDING_BASE_URL` / `WATERAGENTS_EMBEDDING_API_KEY` 成对校验，未配置时保留原有效 OpenAI credential lease。独立 deployment 密钥只供 M8/guideline 在线与后台调用，分析/地图仍用原配置；run/attempt 固定快照、脱敏、设置页用途及评估脚本一并更新。配置/Google 模型目录示例见 `backend/README.md#independent-embedding-service`，不改本地 `.env`。
+- 定向配置/凭据/run bundle/M8/guideline/API/真实 PostgreSQL 回归 **127 passed**（21.51s）；最终完整后端 **3359 passed / 1 skipped / 0 failed**（391.00s），两条既有依赖弃用 warning。唯一 skip 是 opt-in 说明书浏览器，另行开启说明书/M9 browser 两个环境开关运行两份 smoke 文件为 **5 passed / 0 skipped**（29.89s，真实 HTTP/PG/Chrome，确定性测试供应商）。前端 `check:api`、lint、typecheck 与 **114 passed / 15 files** 通过，生成契约未变；17 个改动 Python 文件通过 3.11 语法检查，本机执行仍为 Python 3.12，hosted CI/其他平台 **not run**。
+- 首次完整运行 **1 failed / 3358 passed / 1 skipped**：新测试的假密钥包含通用词 `analysis`，全局已知密钥片段脱敏使后续日志精确断言失败。仅改用不含该通用词的测试凭据，不放宽生产脱敏；配置模块 → observability 日志模块的同进程顺序回归 **31 passed**（4.71s），随后完整重跑得到上述最终通过结果。沿 M12 的 DB-only runner 仅注入 `WATERAGENTS_DB_*` 和进程级测试库名；pytest 参数仍为 `-q -p no:cacheprovider --tb=short --show-capture=no`，临时前缀为 `.tmp/embedding-config-20261021/{focused-final,log-order,backend-final,browser}`（同名 log/XML），所有结果仅留本机。
+- 新增独立地址的 HTTP header/host 校验、analysis key 替换/删除期间的 query/worker 行为、单独 M8 无分析 key 装配、错误配对拒绝与启动日志脱敏。未请求真实 Google embedding，未更换任何本地密钥或声称真实连通；生产 bundle 与待审内容不变。`gemini-embedding-001` 示例下两份草稿超过现有 2048-byte 保守门禁，记录在 README，未静默截断或抬高真实模型上限。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。

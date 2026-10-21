@@ -25,9 +25,11 @@ from app.domain.evidence import WaterObservationRecord, DischargeObservationReco
 from app.domain.evidence.provenance import Provenance
 from app.infrastructure.adapters.openai_guideline_embeddings import OpenAIGuidelineEmbeddingAdapter
 from app.infrastructure.config import AppSettings, load_parameter_capability_registry
+from app.infrastructure.credentials.embedding import embedding_api_key, embedding_base_url
 from app.infrastructure.guidelines.bundled_source import PackageBundledGuidelineSource
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
+from app.ports import PortAuthenticationError
 from scripts.guideline_holdout import HoldoutCase, compact_dataset, load_cases, prepared_inputs, score_prediction, Prediction
 from scripts.guideline_pair_review import RecordedArm, review_pair
 from scripts.test_database import temporary_migrated_schema
@@ -111,15 +113,17 @@ async def live_retrieval(settings, bundle_path, cases_path):
     profile = desired_guideline_profile(ModelCatalogSnapshot(capabilities=settings.model_catalog), settings.guideline_policy)
     report = {'status': 'not_run', 'profile': profile.model_dump(mode='json'), 'cutoff': settings.guideline_policy.semantic_min_similarity,
         'versions': [str(v.version_id) for v in versions], 'cases': [], 'provider_requests': 0}
-    if settings.openai_api_key is None:
+    try:
+        key = embedding_api_key(settings).get_secret_value()
+    except PortAuthenticationError:
         return {**report, 'reason': 'guideline_embedding_credentials_unavailable'}
     repository = PostgresGuidelineRepository(settings)
     try:
         async with ProviderHttpClient(timeout_seconds=20, max_response_bytes=4000000, retry_delay_seconds=0, attempts=1) as http:
-            port = OpenAIGuidelineEmbeddingAdapter(http, api_key=settings.openai_api_key.get_secret_value(),
-                base_url=settings.openai_base_url, timeout_seconds=20)
-            query_port = OpenAIGuidelineEmbeddingAdapter(http, api_key=settings.openai_api_key.get_secret_value(),
-                base_url=settings.openai_base_url, timeout_seconds=settings.guideline_policy.online_timeout_seconds)
+            port = OpenAIGuidelineEmbeddingAdapter(http, api_key=key,
+                base_url=embedding_base_url(settings), timeout_seconds=20)
+            query_port = OpenAIGuidelineEmbeddingAdapter(http, api_key=key,
+                base_url=embedding_base_url(settings), timeout_seconds=settings.guideline_policy.online_timeout_seconds)
             class Counted:
                 def __init__(self, selected):
                     self.port = selected
