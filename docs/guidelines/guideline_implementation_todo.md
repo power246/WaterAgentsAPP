@@ -776,6 +776,8 @@ git rev-parse HEAD
 
 最终完整后端 **3423 passed / 2 skipped / 0 failed**（473.634s，包含隔离 PostgreSQL）；两个 opt-in skip 已分别以真实 embedding **9 passed**、真实 HTTP/PG/Chrome **5 passed** 覆盖。固定身份后对比源码另行复测通过，33 个改动 Python 文件通过 3.11 语法检查，当前执行环境为 3.12。主设计、讨论记录及 README 已同步 v3/迁移/运行门禁与隔离测试方式，`git diff --cached --check` 通过；实现与本记录一并提交当前分支本地，不推送远程。
 
+本地部署补充（2026-10-21，用户明确授权更新业务库）：已确认目标 `127.0.0.1:5432/wateragents` / `public`，先以 `pg_dump --format=custom` 备份并通过 `pg_restore --list` 目录检查，再执行现有 CLI `upgrade` / `check`，由 `20261020_01` 升至 **`20261021_01`**，完整结构检查通过。原有 **65 runs、307 sessions、23,783 transcript items、533 contents、154 unit-policy entries** 及其他既有表行数均一致；说明书版本、关系向量和关联仍为零，没有导入测试资料或待审草稿。备份与前后计数仅保存在 `.tmp/guideline-relations-20261021/`，不纳入 Git；该部署操作不替代真实资料与分析效果验收。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。
