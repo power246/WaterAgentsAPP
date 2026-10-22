@@ -851,6 +851,17 @@ git rev-parse HEAD
 - 只读保全核对：业务库 revision `20261021_01`、65 runs / 307 sessions / 23783 transcript items / 533 contents 及原配置行计数均未变，guideline 表仍为空；应用下次启动由既有 importer 安装批准 bundle。`runtime-test-1019/` 原 32 个文件 SHA256 均未变；既有 21,290,438 字节数据库备份仍在。配置密钥对提交范围扫描无命中；本地只改 cutoff 0.35→0.79，其他 dotenv 值相同，测试库名未写入 dotenv。
 - 按既有清理授权删除本次三处被成功验证替代的失败测试 scratch（347 文件、741,132 字节），保留失败日志/JUnit、全部真实成功/失败/取消快照；未清理用户目录或无关缓存。验收没有剩余未勾选必需项；未执行的费用重复、独立平台/CI 和科学推广验证保留上述边界。
 
+### 审查修复（2026-10-22）
+
+- 基线 `codex/guidelines-m0` / `b47e807`，只修复本轮确认的三个问题，不修改批准正文、数值资格或既有推理预算。
+- [x] 可选查询模型超时记录 unavailable，原 planning/numeric 请求继续，且只查一次；错误返回后重新检查取消及原会话截止时间，全局终止和 transcript 写入失败仍传播。新增两条完整推理/持久化链路，以及超时、取消、到期边界回归。
+- [x] 离线检索直接复用生产 `rank_guidelines()` 的 cutoff/top-k；实际 `ranking/selected` 与诊断 `unfiltered_ranking` 分开。真实 PG 合成向量反例覆盖 cutoff=0.79、片段匹配 0.9、聚合分数 0.765 仍合法，以及 top-k=1，避免再次筛掉合法命中。
+- [x] 注册表按需加载 guideline 记录类型，解除模块初始化的循环依赖；移除 live-review 的手工预加载补丁。四条独立 Python 进程导入/生产注册表创建回归通过，不依赖应用或 pytest 的预先初始化。
+- 缺陷回归修复前 **7 failed / 2 passed，8.12s**；修复后（增加 live-review 直接导入）**10 passed，13.50s**。原失败记录保留，日志/XML 仅在 `.tmp/guidelines-repair-20261022/`。
+- 真实 Google 重算 12 条补充查询及两条保留改写：**14 查询 / 18 requests**（含四份 v1 的准备），仍为 **6/6 正例 top-3、4/6 首位、6/6 负例无命中、两条实际改写漏检**，本组选择计数未变。profile、cutoff=0.79、top-k=3 均未变；正确流程的结果为 `retrieval-corrected.json`，旧报告保留。原 12+8 单查询及 DeepSeek/实测配对本轮 **not run**，不把已有真实结果说成重跑。
+- 本轮 Chrome/HTTP/独立 PG 集成 **5 passed，30.18s**，API `check:api` exit 0；模型/embedding/采集为测试组合，没有前端实现或 API schema 变更。只读保全核对业务库计数未变、归档原 32 文件 hash 未变、原数据库备份保留；本轮不改 `.env` 或业务库，配置密钥扫描无命中。
+- [x] 完整后端回归与本地交付：**3475 passed / 2 skipped / 0 failed，573.76s**；沿用原 DB-only pytest runner，参数为 `tests -q -p no:cacheprovider --tb=short --show-capture=no`，临时前缀为 `.tmp/guidelines-repair-20261022/backend-full`（log/XML）。两项 skip 仍是 opt-in 合成真实 embedding 比较与 guideline 浏览器，后者已在本轮独立集成 5 项通过；前者及 hosted CI **not run**。标准两条弃用 warning 保留，修改 Python 与现有评估入口共 10 个文件通过 3.11 AST；原位文档和代码仅提交本地，不 push，不提交临时结果。
+
 ## 最终验收清单
 
 - [x] **GK-A01**：用户可在前端创建/保存自编无出处草稿，人工检查后发布；来源性质准确。证据：GK-C04/C05，`frontend/tests/guidelines.test.tsx` 自编/审核/来源用例和真实后端说明书浏览器测试（合成内容的显式 UI 操作）。

@@ -53,7 +53,6 @@ from app.domain.evidence.evidence_tool_result import EvidenceToolResult
 from app.domain.evidence.numeric_dependency_plan import NumericDependencyPlan
 from app.domain.hydrology import HydrologyGraph
 from app.domain.inference import InferenceResult
-from app.application.guidelines.transcript_models import GUIDELINE_RECORDS, guideline_references, validate_guideline_identity
 
 
 class UnsupportedTranscriptContentError(ValueError):
@@ -195,6 +194,8 @@ class TranscriptRegistry:
         return copied
 
     def validate_knowledge_content(self, content, identity, items):
+        from app.application.guidelines.transcript_models import GUIDELINE_RECORDS
+
         if content.content_type not in {*GUIDELINE_RECORDS, "inference_result"}:
             return
         from app.application.guidelines.transcript_validation import validate_guideline_links
@@ -297,6 +298,8 @@ class TranscriptRegistry:
             )
         try:
             body = registration.adapter.validate_json(safe_body)
+            from app.application.guidelines.transcript_models import validate_guideline_identity
+
             validate_guideline_identity(body, item)
         except (ValidationError, ValueError, TypeError):
             return ReadTranscriptItem(
@@ -894,6 +897,8 @@ def _evidence_source_records_projection(body: object) -> JsonValue:
 
 
 def create_production_registry() -> TranscriptRegistry:
+    from app.application.guidelines.transcript_models import GUIDELINE_RECORDS, guideline_references
+
     from app.application.analysis_runs.topology_result_models import (
         TopologyRunResult,
         WaterbodyDependencyManifest,

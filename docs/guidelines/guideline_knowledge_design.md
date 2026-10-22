@@ -270,6 +270,8 @@ M6 的 `ensure_generation()` / `queue_generation()` 每轮检查期望 profile�
 
 稳定排序为得分 DESC、family root UUID ASC、version UUID ASC；不按用户来源或内置来源直接赋科学可信度。无关联候选或片段全部低于阈值时允许空结果。现有结果字段 `similarity` 在 v3 表示上述聚合相关性，不能与旧 profile 的单 cosine 分数直接对比；权重与去重阈值是初版工程参数，尚非真实资料上的校准结论。
 
+cutoff 只筛选片段匹配，不能再次用于筛选聚合分数：例如一个侧面匹配 0.9、其他侧面未覆盖时，聚合分数可为 0.765，仍是 cutoff=0.79 下的合法命中。离线评估的 `ranking/selected` 直接使用生产 `rank_guidelines()` 的配置 cutoff/top-k 返回值；无门槛排名单列 `unfiltered_ranking`，不代替实际选择。2026-10-22 已按此流程重算 12 个补充输入和两条真实改写，原命中计数保持，原始反例仍保留。
+
 M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标检查候选，区分 empty-library/no-candidate；此时零 embedding。`rank_guidelines()` 在 materialized 授权候选内以 pgvector exact cosine 排序，执行 cutoff、family 去重及 top-k；拒绝不一致的 generation/profile、维度、向量范数或 canonical digest，并重新验证返回的批准版本/model view。scenario 仅进入语义 query，不授予候选资格。
 
 `build_guideline_query()` 只采用验证后的问题、canonical 指标、mode、agent/target COMID 和拓扑直接上游数；可选问题过长或包含不安全内容时整项省略，记录 `input_reduced`，结构化字段优先。包括角色前缀的实际输入仍受 8,192 bytes 与该 profile 的保守 max-input 约束，无法容纳必需字段则 unavailable。
@@ -277,6 +279,8 @@ M7 repository 的 `retrieval_counts()` 先按固定目录及主/related 指标�
 每个实际 Agent session 拥有独立的 `GuidelineSessionKnowledge.search()`，内部通过 `get_or_load()` 缓存一次已验证改写查询：并发共享一次任务，取消单个等待者不重发请求；缓存只绑定该 run/session/query/context/profile。整次检索（SQL、一次 query embedding、ranking）不超过 3 秒且受剩余 session deadline 约束，无在线重试；取消会回收在途任务，session finally 关闭并释放缓存。zero-model 分支不创建查询任务。`GuidelineModelContext` 先检查原请求 fit，再在首次真实 planning/numeric 请求前执行上述有界工具回合；空库、无候选和不可用时不新增模型或 embedding dispatch，零模型路径不进入此回合。新增回合复用当前分析模型、记录真实 request/response 和原问题，计入 planning_calls、tool_calls 及 token usage，并受原 session deadline 和最终请求预算约束。后续阶段复用同一检索结果，repair 不重新搜索；普通响应字段不触发检索。工具调用/返回作为 assistant/tool 消息传给后续请求，最终实际提供的完整正文仍使用既有 `advisory_knowledge` 块、版本 alias 与 delivery/usage 记录。上下文不足时整份裁剪正文，不挤占原 evidence/output 预算。M9 已通过既有 writer 持久化 retrieval/delivery/usage；仅实际进入模型端口才记录 delivery。
 
 补证必须说明预计改变原问题的哪条判断，辅助指标不自动成为新的研究任务。无新证据或已确认不可获取时收敛；整轮仅复用缓存工具结果且没有新增规则，后端以 `no_progress` 停止规划。既有轮次、工具和数值任务预算继续生效；剩余缺口进入不确定性，不新增证据资格门槛。
+
+查询改写自身的模型超时与其他可选查询失败一样记录 `unavailable` 并继续原请求，不增加重试。错误返回后再次核对原请求的取消与 deadline；用户取消、会话到期以及 transcript 写入失败继续传播，不能为了参考降级而吞掉全局终止信号。
 
 查询 skill 中的 guideline 指可选科学参考。估值、预测和缺测补全查询应检索已有证据的适用条件、机制及推断限制；只有原问题明确要求标准、限值或达标判断时才查找相应 criteria。这个目标约束同时适用于 query 和每个实际参与 embedding 的 aspect，不能把估值问题改写成标准查询。
 

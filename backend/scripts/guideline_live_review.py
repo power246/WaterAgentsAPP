@@ -5,7 +5,6 @@ from collections import Counter
 from pathlib import Path
 from uuid import UUID
 
-from app.application.transcripts import registry as _transcript_registry
 from app.application.guidelines.transcript_models import GuidelineDeliveryV1, GuidelineUsageV1, ResultGuidelineUsageV1
 from app.application.query_understanding import AnalysisContext
 from app.application.reasoning.transcript_models import WaterbodyModelRequestV1

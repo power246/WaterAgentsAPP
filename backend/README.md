@@ -258,6 +258,8 @@ In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the s
 
 补充的任务上下文/多方面输入集 `tests/fixtures/guidelines/ph_retrieval_context_cases.json` 有 6 个正例、6 个负例：期望主题均进入 top-3，4/6 首位命中，负例均未返回；两条保留的真实模型改写却仍未命中。最终三个 holdout 配对全部完成，两组实际提供并引用批准内容，一组未命中。六个评分窗口均为范围，没有合格 pH anchor；Potomac 第二天两臂都未覆盖观测均值。这个结果验证链路和边界，尚不能证明估值精度改善，详见现有 guideline TODO。
 
+2026-10-22 已修正离线评估的阈值流程，并以真实 Google embedding 重算上述 14 个输入（18 次供应商请求，含四篇内容准备），本组命中计数不变。v3 的 cutoff 作用于关系片段，返回的多方面聚合分数可以低于 cutoff；评估直接使用线上 `rank_guidelines()` 的 cutoff/top-k 返回值，不再对聚合分数重复过滤。报告中的 `ranking/selected` 表示实际筛选结果，`unfiltered_ranking` 仅用于无门槛诊断。旧报告保留，原 12+8 个单查询本轮未重跑。
+
 真实配对需完整 UTC 采集日输入，评分仍限原六小时窗口。目标站整天的 pH 均被隔离，不能把相邻窗口读数用于补值。下列命令从 `backend/` 在已加载服务配置、并设置进程级 `WATERAGENTS_TEST_DB_NAME` 的环境执行；只创建临时测试 schema，输出目录必须尚不存在。`--allow-live` 会向已配置服务发出真实模型/embedding 请求；默认不运行：
 
 ```powershell
@@ -266,6 +268,8 @@ In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the s
 ```
 
 首次实际模型请求前，查询 skill 通过一次 `search_guidelines(query, aspects)` 提交专业改写和 1–3 个原问题侧面；后端做一次批量 embedding，固定范围/profile/top-k（最多 3 份），按最佳片段匹配及独立侧面覆盖排序，后续阶段复用。近同查询向量去重，每侧面最多取一个最佳匹配，同一片段不重复贡献；不会仅靠文章片段多就堆高排名。空库和零模型路径不新增该调用，实际额外回合计入调用数和用量。升级 profile 仍通过完整 building generation 原子切换；显式旧 v1/v2 generation 及历史全文继续可读。
+
+查询改写自身的模型超时按参考不可用记录，原推理可以继续且不重试查询；用户取消、会话到期或引用记录写入失败仍终止原流程。完整正文、delivery/usage 与既有数值资格规则继续保持。
 
 合成语义对比的源码位于 `tests/fixtures/guidelines/synthetic_relation_corpus.json` 和 `tests/guideline_relation_benchmark.py`，不属于生产资源。可在已配置独立测试库的进程中设置 `WATERAGENTS_RELATION_LIVE_E2E=1`，运行 `tests/application/guidelines/test_relation_retrieval.py::test_real_embedding_synthetic_relation_comparison`；它只向真实 embedding 发送虚构内容，比较摘要单查询、片段单查询和片段多侧面，结束后清理测试 schema。可选 `WATERAGENTS_RELATION_REPORT_PATH` 指定本地 JSON 结果路径；不向 `.env` 写测试库名、不导入业务库。结果与限制见现有 guideline TODO；合成查询使用人工编写侧面，不代表真实分析模型改写或实测 pH 验收。
 

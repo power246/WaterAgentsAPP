@@ -24,7 +24,7 @@ from app.application.transcript_memory import TranscriptRAGCaseSourceReader, bui
 from app.application.transcripts.read_models import ReadView
 from app.domain.guidelines import GuidelineMatch
 from app.infrastructure.config import AppSettings
-from app.ports import WaterbodyModelUnavailableError
+from app.ports import WaterbodyModelUnavailableError, WaterbodyModelTimeoutError
 from scripts.run_sse_smoke import running_server
 from scripts.test_database import temporary_migrated_schema
 from tests.application.guidelines.test_model_context import advisory, real_context
@@ -135,6 +135,42 @@ async def run_state(state):
     outcome = await state.runner.run(state.task, deadline=state.deadline)
     await _wait_persisted(state.app, state.task.task.run_id)
     return outcome
+
+
+@pytest.mark.parametrize("water_mode", ["full", "empty"])
+def test_lookup_timeout_records_unavailable_and_completes_original_reasoning(monkeypatch, water_mode):
+    class Model(AdvisoryModel):
+        search_attempts = 0
+
+        async def stream(self, request):
+            if request.batch_id == "guideline-search":
+                self.search_attempts += 1
+                raise WaterbodyModelTimeoutError(provider=request.model.provider,
+                    model=request.model.model, operation_id=str(request.operation_id))
+            async for event in super().stream(request):
+                yield event
+
+    async def exercise():
+        async with scenario(monkeypatch, model=Model(numeric=water_mode == "empty"), water_mode=water_mode) as state:
+            outcome = await run_state(state)
+            assert outcome.status is WaterbodyAgentRunStatus.COMPLETED, outcome.error
+            assert state.model.search_attempts == state.context.search_calls == 1
+            assert state.model.calls and not state.embedding.calls
+            _, items = await records(state)
+            retrieval = next(entry.body for entry in items.values() if entry.item.content_type == "guideline_retrieval")
+            assert retrieval.selection.status == "unavailable"
+            failed_lookup = next(entry.body for entry in items.values()
+                if entry.item.content_type == "waterbody_model_response"
+                and entry.body.operation_id == state.context.search_request.operation_id)
+            assert failed_lookup.finish_reason.value == "error"
+            assert not any(entry.item.content_type == "guideline_usage" for entry in items.values())
+            for entry in items.values():
+                if entry.item.content_type == "guideline_delivery":
+                    assert entry.body.selection_status == "unavailable" and not entry.body.entries
+            if water_mode == "empty":
+                assert any(call.phase is WaterbodyModelPhase.NUMERIC_ESTIMATION for call in state.model.calls)
+                assert all(point.representative_value is None for series in outcome.result.series for point in series.points)
+    asyncio.run(exercise())
 
 
 def test_constructing_request_records_retrieval_but_never_delivery(monkeypatch):

@@ -100,9 +100,10 @@ class GuidelineModelContext:
                 result = GuidelineRetrievalResult(status="unavailable", safe_error_code="guideline_embedding_configuration_invalid")
             self._search_messages = search_messages(calls[0], result)
             return result
-        except (WaterbodyModelCancelledError, WaterbodyModelTimeoutError):
+        except WaterbodyModelCancelledError:
             raise
         except (WaterbodyModelPortError, ValueError):
+            self._checkpoint(request, cancellation)
             return GuidelineRetrievalResult(status="unavailable", safe_error_code="guideline_search_unavailable")
 
     def bind_transcript(self, store):

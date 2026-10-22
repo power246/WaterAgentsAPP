@@ -1,13 +1,16 @@
 import asyncio
 import json
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
 
+from app.application.analysis_runs.workflow import CancellationToken
 from app.application.reasoning.model_models import ToolCallCompleted, StructuredOutputCompleted, Terminal, UsageReported
 from app.domain.guidelines import CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, canonical_guideline_document
 from app.infrastructure.config import load_parameter_capability_registry
 from app.infrastructure.adapters.openai_responses_waterbody import _request_body
+from app.ports import WaterbodyModelCancelledError, WaterbodyModelTimeoutError
 from tests.application.guidelines.test_model_context import real_context, model_context, advisory, token
 from tests.application.guidelines.test_retrieval import Repository
 from tests.application.reasoning.test_numeric_estimation import _estimator, EstimatePort
@@ -105,6 +108,47 @@ def test_empty_catalog_has_no_added_model_call(library, candidates):
         try:
             await context.prepare(request, cancellation=token(), model_port=port)
             assert not port.calls and not embedding.calls and context.search_calls == 0
+        finally:
+            await session.aclose()
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("boundary", [None, "cancelled", "deadline"])
+def test_lookup_timeout_is_optional_until_the_original_request_boundary(boundary):
+    async def exercise():
+        session, embedding, repository = await real_context()
+        context = model_context(session, model_request().model)
+        request = model_request().model_copy(update={"deadline": context._clock.now()+timedelta(seconds=60)})
+        stop = asyncio.Event()
+        cancellation = CancellationToken(stop)
+
+        class Timeout:
+            calls = 0
+
+            async def stream(self, lookup):
+                self.calls += 1
+                if boundary == "cancelled":
+                    stop.set()
+                elif boundary == "deadline":
+                    context._clock.value = request.deadline
+                raise WaterbodyModelTimeoutError(provider=lookup.model.provider,
+                    model=lookup.model.model, operation_id=str(lookup.operation_id))
+                yield
+
+        port = Timeout()
+        try:
+            if boundary:
+                with pytest.raises(WaterbodyModelCancelledError if boundary == "cancelled" else WaterbodyModelTimeoutError):
+                    await context.prepare(request, cancellation=cancellation, model_port=port)
+                assert not context.operations
+            else:
+                prepared = await context.prepare(request, cancellation=cancellation, model_port=port)
+                assert prepared == request and not advisory(prepared)
+                assert context.operations[request.operation_id].status == "unavailable"
+                await context.prepare(request.model_copy(update={"operation_id": uuid4()}),
+                    cancellation=cancellation, model_port=port)
+                assert context.search_calls == 1 and context._selection.status == "unavailable"
+            assert port.calls == 1 and not embedding.calls and not repository.ranks
         finally:
             await session.aclose()
     asyncio.run(exercise())

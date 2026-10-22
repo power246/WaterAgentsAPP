@@ -290,3 +290,52 @@ def test_retrieval_runner_prepares_real_postgres_generation_and_reports_all_miss
         # Deliberately equal synthetic vectors expose, rather than hide, irrelevant matches.
         assert 'irrelevant_office' in result['negative_false_positive_ids']
         assert result['provider_requests'] == 15
+
+
+def test_multi_aspect_evaluation_uses_production_fragment_cutoff_and_top_k(monkeypatch, tmp_path):
+    from pydantic import SecretStr
+    from scripts.test_database import temporary_migrated_schema
+    from app.domain.guidelines import CanonicalGuidelineQueryV1, GuidelineEmbeddingBatch, GuidelinePolicy
+    from app.domain.memory_rag.embedding_vector import EmbeddingVector
+    from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
+    from tests.application.guidelines.test_embedding import catalog
+    import scripts.guideline_evaluation as evaluation
+
+    reviewed_fixture(tmp_path)
+    query_vectors = (EmbeddingVector(values=(1, 0, 0)), EmbeddingVector(values=(0, 0, 1)))
+
+    class Port:
+        async def embed(self, profile, inputs, *_):
+            vectors = query_vectors if isinstance(inputs[0], CanonicalGuidelineQueryV1) else tuple(
+                EmbeddingVector(values=(.9, .19**.5, 0)) for _ in inputs)
+            return GuidelineEmbeddingBatch(profile=profile, vectors=vectors)
+
+    monkeypatch.setattr(evaluation, 'OpenAIGuidelineEmbeddingAdapter', lambda *a, **k: Port())
+    path = tmp_path / 'queries.json'
+    write_json(path, [{'id': 'synthetic_aspects', 'question': 'Synthetic relationship comparison',
+        'parameter_keys': [{'code_system': 'usgs', 'code': '00400'}],
+        'aspects': ['First independent relationship', 'Second independent relationship'], 'expected': []}])
+
+    async def exercise(settings):
+        result = await live_retrieval(settings, tmp_path / 'bundle', path)
+        repository = PostgresGuidelineRepository(settings)
+        try:
+            from tests.guideline_support import PH
+            production = await repository.rank_guidelines(await repository.read_catalog(), (PH,),
+                query_vectors, cutoff=.79, limit=1)
+            assert result['status'] == 'completed'
+            case = result['cases'][0]
+            assert case['selected'] == [match.version.identity.bundle_key for match in production]
+            assert len(case['selected']) == 1
+            assert case['ranking'][0]['similarity'] == pytest.approx(.765)
+            assert len(case['unfiltered_ranking']) == 3
+            assert result['negative_false_positive_ids'] == ['synthetic_aspects']
+            assert result['top_k'] == 1
+        finally:
+            await repository.aclose()
+
+    with temporary_migrated_schema() as database:
+        settings = database.model_copy(update={'model_catalog': catalog(max_input_tokens=8192).capabilities,
+            'openai_api_key': SecretStr('synthetic-fixture-key'), 'openai_base_url': 'https://fixture.invalid/v1',
+            'guideline_policy': GuidelinePolicy(semantic_min_similarity=.79, top_k=1)})
+        asyncio.run(exercise(settings))

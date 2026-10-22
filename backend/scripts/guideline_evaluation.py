@@ -113,6 +113,7 @@ async def live_retrieval(settings, bundle_path, cases_path):
         raise ValueError('retrieval evaluation requires a nonempty reviewed bundle')
     profile = desired_guideline_profile(ModelCatalogSnapshot(capabilities=settings.model_catalog), settings.guideline_policy)
     report = {'status': 'not_run', 'profile': profile.model_dump(mode='json'), 'cutoff': settings.guideline_policy.semantic_min_similarity,
+        'top_k': settings.guideline_policy.top_k,
         'versions': [str(v.version_id) for v in versions], 'cases': [], 'provider_requests': 0}
     try:
         key = embedding_api_key(settings).get_secret_value()
@@ -160,19 +161,22 @@ async def live_retrieval(settings, bundle_path, cases_path):
                     queries = tuple(CanonicalGuidelineQueryV1.model_validate(
                         query.model_dump() | {'question': aspect}) for aspect in arguments.aspects)
                 library, candidates = await repository.retrieval_counts(catalog, keys)
-                ranked = ()
+                ranked, unfiltered = (), ()
                 if candidates:
                     from app.application.guidelines.embedding import distinct_query_vectors
                     result = await query_counted.embed(profile, queries, asyncio.get_running_loop().time() + settings.guideline_policy.online_timeout_seconds, None)
                     vectors = distinct_query_vectors(result.vectors)
-                    ranked = await repository.rank_guidelines(catalog, keys,
-                        vectors[0] if len(vectors) == 1 else vectors, cutoff=0, limit=3)
-                selected = [m.version.identity.bundle_key for m in ranked if m.similarity >= settings.guideline_policy.semantic_min_similarity]
+                    query_vectors = vectors[0] if len(vectors) == 1 else vectors
+                    unfiltered = await repository.rank_guidelines(catalog, keys, query_vectors, cutoff=0, limit=3)
+                    ranked = await repository.rank_guidelines(catalog, keys, query_vectors,
+                        cutoff=settings.guideline_policy.semantic_min_similarity, limit=settings.guideline_policy.top_k)
+                selected = [m.version.identity.bundle_key for m in ranked]
                 expected = set(case['expected'])
                 report['cases'].append({'id': case['id'], 'question': case['question'], 'expected': sorted(expected),
                     'library_count': library, 'metadata_candidates': candidates, 'query_digest': query.canonical_digest,
                     'embedding_inputs': len(queries),
                     'ranking': [{'key': m.version.identity.bundle_key, 'similarity': m.similarity} for m in ranked],
+                    'unfiltered_ranking': [{'key': m.version.identity.bundle_key, 'similarity': m.similarity} for m in unfiltered],
                     'selected': selected, 'missed': sorted(expected - set(selected)), 'unexpected': sorted(set(selected) - expected)})
             report['status'] = 'completed'
             report['missed_query_ids'] = [c['id'] for c in report['cases'] if c['missed']]
