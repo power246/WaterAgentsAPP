@@ -173,7 +173,7 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_PORT` | `8000` |
 | `WATERAGENTS_ANALYSIS_TIMEZONE` | `America/Chicago` |
 | `WATERAGENTS_MODEL_CATALOG` | `[]`; JSON capabilities with `provider`, `model`, and `roles`; configured catalogs require exactly one exclusive `embedding` capability with a cosine `embedding_profile` including dimensions, input-token limit, threshold, and schema versions, while every `waterbody` model requires its exact token limits |
-| `WATERAGENTS_MEMORY_ENABLED` | `true`; set `false` to offer only stateless analysis and stop background embedding/index reconciliation. The embedding catalog entry remains required by the current settings schema but is not called while memory is disabled. |
+| `WATERAGENTS_MEMORY_ENABLED` | `true`; set `false` to disable historical memory and its background indexing. The embedding catalog entry remains required. Published guidelines use a separate index and can still use embedding when historical memory is disabled. |
 | `WATERAGENTS_TOPOLOGY_MAX_DISTANCE_KM` | `500` |
 | `WATERAGENTS_TOPOLOGY_MAX_HOPS` | `48` |
 | `WATERAGENTS_TOPOLOGY_MAX_NODES` | `128` |
@@ -195,6 +195,8 @@ Settings use the `WATERAGENTS_` environment variable prefix. Explicit constructo
 | `WATERAGENTS_USGS_API_KEY` | unset; backend-only optional rate-limit secret |
 | `WATERAGENTS_OPENAI_API_KEY` | unset; required backend-only parser secret |
 | `WATERAGENTS_OPENAI_BASE_URL` | `https://api.openai.com/v1` |
+| `WATERAGENTS_EMBEDDING_BASE_URL` | unset; optional independent OpenAI-compatible embedding base URL; configure together with `WATERAGENTS_EMBEDDING_API_KEY` |
+| `WATERAGENTS_EMBEDDING_API_KEY` | unset; backend-only embedding secret from deployment configuration, paired with the independent URL |
 | `WATERAGENTS_TOPOLOGY_STAGE_TIMEOUT_SECONDS` | `1200`; total topology-building deadline, valid range `(0, 3600]` |
 | `WATERAGENTS_DB_HOST` | `127.0.0.1` |
 | `WATERAGENTS_DB_PORT` | `5432` |
@@ -217,6 +219,65 @@ Each waterbody token limit belongs to that exact provider/model entry. Copy the 
 `WATERAGENTS_TEST_DB_NAME` has no runtime default and is read only from the test/smoke process environment; the formal service neither reads it nor uses it to override `WATERAGENTS_DB_NAME`. Keep it out of `backend/.env`. If persistent test-only configuration becomes necessary, use a separate uncommitted `.env.test` loaded by test tooling only; the service must not load that file.
 
 Production startup validates the complete topology workflow and requires at least one `query_parser` catalog entry (currently with provider `openai`), one `waterbody` entry with explicit token limits, and one supported embedding profile. It does not permanently capture the OpenAI or Google key at startup: each run leases its effective user-store override or deployment fallback before creation, and each background embedding attempt leases its key when claimed. Missing effective credentials prevent the relevant run or attempt. The run summarizer uses the run's exact waterbody model and catalog token limits; it has no separate model setting or tools. The catalog stores only public model identities, roles, and waterbody token limits; endpoints, credentials, API keys, and authorization values are not valid catalog fields. Tests and deterministic smokes may inject an explicit workflow through the application factory.
+
+### Independent embedding service
+
+To keep the current analysis provider and use a separate OpenAI-compatible embedding service, add both entries to the uncommitted `backend/.env`:
+
+```dotenv
+WATERAGENTS_EMBEDDING_BASE_URL='https://generativelanguage.googleapis.com/v1beta/openai/'
+WATERAGENTS_EMBEDDING_API_KEY='your-local-gemini-api-key'
+```
+
+Create a Gemini API key in [Google AI Studio](https://aistudio.google.com/api-keys). Google documents the `/embeddings` compatibility endpoint in its [OpenAI compatibility guide](https://ai.google.dev/gemini-api/docs/openai/#embeddings). Leave the existing analysis `WATERAGENTS_OPENAI_*` values unchanged. Do not use the Google Geocoding key for this service.
+
+In `WATERAGENTS_MODEL_CATALOG`, replace only the embedding capability with the service's model/profile. For Google's text-only `gemini-embedding-001`, an example is:
+
+```json
+{
+  "provider": "openai",
+  "model": "gemini-embedding-001",
+  "roles": ["embedding"],
+  "embedding_profile": {
+    "provider": "openai",
+    "model": "gemini-embedding-001",
+    "output_dimensions": 1536,
+    "max_input_tokens": 2048,
+    "distance_metric": "cosine",
+    "semantic_min_similarity": 0.79,
+    "canonical_query_schema_version": 1,
+    "canonical_template_version": 1,
+    "projection_schema_version": 1
+  }
+}
+```
+
+说明书索引当前采用关系模板 v3：安全正文按完整段落及标题边界生成关系单元，保留标题层级、条件与否定；完全相同的单元共享向量，并以多对多关联指向不可变文章版本。标题/摘要保留作简介，命中后仍读取完整正文与出处。四份 pH 说明书已于 2026-10-21 获用户明确批准并以 v1 纳入内置资源，逐项批准记录位于 bundle manifest；在上述 Google 示例下分别生成 6／6／7／6 个片段，最长完整 wire 输入分别为 623／680／675／624 UTF-8 字节，均通过 2048 字节保守门禁。门禁检查包含角色指令的完整输入，单个超长段落仍会明确准备失败，不截断条件或提高模型限制。
+
+上例的 0.79 门槛仅针对当前 Google `gemini-embedding-001`、1536 维、v3 和这四篇内容校准：原 12 题在默认 0.35 下有 2 个负例误命中；固定为 0.79 后，原集和另行编写的 8 题中，14 个正例均首位命中、6 个负例均未返回。原始误命中记录保留。门槛不是其他模型/语料的通用默认值；`GuidelinePolicy` 默认仍为 0.35，部署通过 `WATERAGENTS_GUIDELINE_POLICY` 指定。仅改 cutoff 不改变向量输入/profile，不需重建 generation；更换模型、模板或角色指令须按原流程重建。扩大资料库后需重新核对，不能以小样本证明普遍检索质量。
+
+补充的任务上下文/多方面输入集 `tests/fixtures/guidelines/ph_retrieval_context_cases.json` 有 6 个正例、6 个负例：期望主题均进入 top-3，4/6 首位命中，负例均未返回；两条保留的真实模型改写却仍未命中。最终三个 holdout 配对全部完成，两组实际提供并引用批准内容，一组未命中。六个评分窗口均为范围，没有合格 pH anchor；Potomac 第二天两臂都未覆盖观测均值。这个结果验证链路和边界，尚不能证明估值精度改善，详见现有 guideline TODO。
+
+2026-10-22 已修正离线评估的阈值流程，并以真实 Google embedding 重算上述 14 个输入（18 次供应商请求，含四篇内容准备），本组命中计数不变。v3 的 cutoff 作用于关系片段，返回的多方面聚合分数可以低于 cutoff；评估直接使用线上 `rank_guidelines()` 的 cutoff/top-k 返回值，不再对聚合分数重复过滤。报告中的 `ranking/selected` 表示实际筛选结果，`unfiltered_ranking` 仅用于无门槛诊断。旧报告保留，原 12+8 个单查询本轮未重跑。
+
+真实配对需完整 UTC 采集日输入，评分仍限原六小时窗口。目标站整天的 pH 均被隔离，不能把相邻窗口读数用于补值。下列命令从 `backend/` 在已加载服务配置、并设置进程级 `WATERAGENTS_TEST_DB_NAME` 的环境执行；只创建临时测试 schema，输出目录必须尚不存在。`--allow-live` 会向已配置服务发出真实模型/embedding 请求；默认不运行：
+
+```powershell
+.venv/Scripts/python.exe -m scripts.guideline_live_pairs --dataset tests/fixtures/guidelines/ph_holdout_acquisition_cases.json --metadata-root tests/fixtures/guidelines/ph_sites --output ../.tmp/my-live-pairs --allow-live
+.venv/Scripts/python.exe -m scripts.guideline_live_review --dataset tests/fixtures/guidelines/ph_holdout_acquisition_cases.json --runs-root ../.tmp/my-live-pairs --output ../.tmp/my-live-comparison.json
+```
+
+首次实际模型请求前，查询 skill 通过一次 `search_guidelines(query, aspects)` 提交专业改写和 1–3 个原问题侧面；后端做一次批量 embedding，固定范围/profile/top-k（最多 3 份），按最佳片段匹配及独立侧面覆盖排序，后续阶段复用。近同查询向量去重，每侧面最多取一个最佳匹配，同一片段不重复贡献；不会仅靠文章片段多就堆高排名。空库和零模型路径不新增该调用，实际额外回合计入调用数和用量。升级 profile 仍通过完整 building generation 原子切换；显式旧 v1/v2 generation 及历史全文继续可读。
+
+查询改写自身的模型超时按参考不可用记录，原推理可以继续且不重试查询；用户取消、会话到期或引用记录写入失败仍终止原流程。完整正文、delivery/usage 与既有数值资格规则继续保持。
+
+合成语义对比的源码位于 `tests/fixtures/guidelines/synthetic_relation_corpus.json` 和 `tests/guideline_relation_benchmark.py`，不属于生产资源。可在已配置独立测试库的进程中设置 `WATERAGENTS_RELATION_LIVE_E2E=1`，运行 `tests/application/guidelines/test_relation_retrieval.py::test_real_embedding_synthetic_relation_comparison`；它只向真实 embedding 发送虚构内容，比较摘要单查询、片段单查询和片段多侧面，结束后清理测试 schema。可选 `WATERAGENTS_RELATION_REPORT_PATH` 指定本地 JSON 结果路径；不向 `.env` 写测试库名、不导入业务库。结果与限制见现有 guideline TODO；合成查询使用人工编写侧面，不代表真实分析模型改写或实测 pH 验收。
+
+The pair applies to both historical-memory and guideline embeddings: run query adapters keep their captured key, and background attempts resolve the embedding connection at their own boundary. Independent credentials come only from deployment configuration and require a restart to change; the Settings OpenAI user override continues to control analysis, and does not override the independent embedding key. With both entries unset, embeddings retain the effective OpenAI credential lease, including its OS-store override. A partially configured pair is rejected before any provider request; an embedding failure never retries against the analysis endpoint.
+
+At the exact HTTPS Google compatibility endpoint shown above, an omitted first response `index` means zero. All subsequent indices remain mandatory and must match input order; explicit invalid indices, model/count/dimension mismatches and invalid vector values are rejected. Other endpoints retain mandatory indices for every result.
+
+Restart after changing configuration. Changing the model/profile rebuilds the guideline generation; historical memory retains its persisted generation until the existing Admin profile handoff/rebuild is explicitly applied. Old vectors, local documents and run snapshots are preserved; no database reset is required. A successful provider connection does not establish guideline retrieval relevance or scientific accuracy.
 
 ### Local PostgreSQL with Compose
 

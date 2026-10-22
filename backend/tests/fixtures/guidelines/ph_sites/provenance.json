@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "purpose": "Public NLDI station metadata used to resolve frozen holdout inputs; contains no model results.",
+  "sites": [
+    {
+      "file": "USGS-01457500.json",
+      "source_url": "https://api.water.usgs.gov/nldi/linked-data/nwissite/USGS-01457500?f=json",
+      "accessed_date": "2026-10-21",
+      "sha256": "c5a8fa85a30c6586ca5917ec3b01fd4d68f8811c2cee1e962cdfe44e43d7323d"
+    },
+    {
+      "file": "USGS-01463500.json",
+      "source_url": "https://api.water.usgs.gov/nldi/linked-data/nwissite/USGS-01463500?f=json",
+      "accessed_date": "2026-10-21",
+      "sha256": "2d78e495742e29ea987cd68986ddd46e6c3a058bff7e2a527f0ab59dac6c93f5"
+    },
+    {
+      "file": "USGS-01638500.json",
+      "source_url": "https://api.water.usgs.gov/nldi/linked-data/nwissite/USGS-01638500?f=json",
+      "accessed_date": "2026-10-21",
+      "sha256": "f2995f5ca9c1b44c2ddf7c6cefdde575119ef3a2c38308c851869967b198033a"
+    },
+    {
+      "file": "USGS-01646500.json",
+      "source_url": "https://api.water.usgs.gov/nldi/linked-data/nwissite/USGS-01646500?f=json",
+      "accessed_date": "2026-10-21",
+      "sha256": "0eafd5354e73f8ea538ee2a49169b77e92380989fa642dbb279ae6522ec44c02"
+    }
+  ]
+}

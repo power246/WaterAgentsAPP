@@ -1,0 +1,10 @@
+[
+  {"id":"validation_mixing","question":"Why can incomplete buffering information prevent transferring upstream pH to a downstream mixture?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.mixing-transport"]},
+  {"id":"validation_buffering","question":"没有碱度或 ANC 记录，怎样说明河流抵抗酸输入能力的不确定性？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.acid-buffering"]},
+  {"id":"validation_biology","question":"How can daytime carbon dioxide uptake and nighttime release affect river acidity without a direct oxygen-to-pH formula?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.photosynthesis-respiration"]},
+  {"id":"validation_causes","question":"Compare acid discharges, biological cycles and dilution as competing pH explanations with missing observations.","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.compare-causes"]},
+  {"id":"validation_probe_case","question":"Where can I buy a waterproof carrying case for my pH probe?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":[]},
+  {"id":"validation_parking","question":"pH 实验室周末的停车费是多少？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":[]},
+  {"id":"validation_logarithm","question":"上游氢离子活度采用对数 pH 表示，为什么不能直接平均两股水的 pH？","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":["ph.mixing-transport"]},
+  {"id":"validation_flood_frequency","question":"What flood return period corresponds to a measured peak discharge?","parameter_keys":[{"code_system":"usgs","code":"00400"}],"expected":[]}
+]

@@ -1,0 +1,7 @@
+[
+  {"id":"zh_upstream_ph","question":"解释上下游酸碱变化","parameter_code":"00400","expected_match":true,"expected_dispatches":1},
+  {"id":"en_ph_synonym","question":"Explain upstream and downstream pH changes","parameter_code":"00400","expected_match":true,"expected_dispatches":1},
+  {"id":"related_alkalinity","question":"How is alkalinity related to acid-base conditions?","parameter_code":"00410","expected_match":true,"expected_dispatches":1},
+  {"id":"unrelated_parameter","question":"Explain water temperature","parameter_code":"00010","expected_match":false,"expected_dispatches":0},
+  {"id":"unrelated_semantics","question":"What are the business hours?","parameter_code":"00400","expected_match":false,"expected_dispatches":1}
+]

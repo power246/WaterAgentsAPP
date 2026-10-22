@@ -15,6 +15,7 @@ from app.application.evidence_tools.numeric_estimation import (
     NumericEstimateResult,
     NumericEstimationError,
 )
+from app.application.guidelines.citation_resolver import GuidelineRefs, sanitize_guideline_refs
 from app.application.reasoning.model_models import (
     StructuredOutputCompleted,
     ToolCallCompleted,
@@ -39,6 +40,7 @@ from app.domain import (
     ParameterCapabilityRegistry,
 )
 from app.domain.common import CanonicalDecimal, NonEmptyString
+from app.domain.guidelines import GuidelineUsageTarget
 from app.ports.errors import (
     WaterbodyModelCancelledError,
     WaterbodyModelIncompleteError,
@@ -76,8 +78,9 @@ its coverage gap once, without a fixed penalty or automatic abstention.
 Confidence is an uncalibrated assessment, not a probability of numerical accuracy.
 pH is logarithmic: copying, averaging or flow-weighting upstream pH is not a validated
 chemical mixing method. Consider missing buffering and chemistry information.
-Return exactly one JSON object with these five top-level keys and no others:
-value, value_lower, value_upper, confidence, rationale. Task identifiers, parameter,
+Return exactly one JSON object with these five required top-level keys:
+value, value_lower, value_upper, confidence, rationale. The only optional key is
+guideline_refs: null or an array of supplied aliases actually used. Task identifiers, parameter,
 outcome, risk, and evidence references are INPUT context, not output fields.
 Write confidence as a JSON number from 0 to 1, not a word such as "low".
 All numerical values except confidence
@@ -88,6 +91,7 @@ rationale must explain why. Do not output a whole-domain range such as pH 0 to 1
 
 
 class NumericEstimateResponse(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     value: CanonicalDecimal | None
     value_lower: CanonicalDecimal | None
     value_upper: CanonicalDecimal | None
@@ -159,6 +163,7 @@ class ModelNumericEstimator:
         clock,
         max_calls: int = 64,
         operation_id_factory: Callable[[], UUID] = uuid4,
+        guidelines=None,
     ) -> None:
         if type(max_calls) is not int or not 1 <= max_calls <= 64:
             raise ValueError("numeric model call limit must be between 1 and 64")
@@ -170,6 +175,7 @@ class ModelNumericEstimator:
         self._clock = clock
         self._max_calls = max_calls
         self._operation_id_factory = operation_id_factory
+        self._guidelines = guidelines
         self.calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
@@ -260,6 +266,14 @@ class ModelNumericEstimator:
             remaining_seconds = (self._deadline - self._clock.now()).total_seconds()
             if remaining_seconds <= 0:
                 raise NumericEstimationError("numeric_estimation_deadline_exceeded")
+            if self._guidelines is not None:
+                request = await self._guidelines.prepare(request, cancellation=scope.cancel_token,
+                    parameters=(task.output_parameter,), targets=(task.task_id,), model_port=self._port)
+                prompt_digest = canonical_json_digest({"policy": request.system_prompt,
+                    "input": [item.model_dump(mode="json") for item in request.messages]})
+                remaining_seconds = (self._deadline - self._clock.now()).total_seconds()
+                if remaining_seconds <= 0:
+                    raise NumericEstimationError("numeric_estimation_deadline_exceeded")
             self.calls += 1
             timeout = asyncio.timeout(remaining_seconds)
             try:
@@ -300,9 +314,11 @@ class ModelNumericEstimator:
                 # JSON-object mode does not enforce a provider-side schema. Keep
                 # harmless extra explanation fields in the recorded response,
                 # while validating only the five fields the scheduler consumes.
+                raw_result = sanitize_guideline_refs(raw_result,
+                    self._guidelines.aliases(operation_id) if self._guidelines is not None else frozenset())
                 result = NumericEstimateResponse.model_validate({
                     key: raw_result[key]
-                    for key in ("value", "value_lower", "value_upper", "confidence", "rationale")
+                    for key in ("value", "value_lower", "value_upper", "confidence", "rationale", "guideline_refs")
                     if key in raw_result
                 })
                 if result.value is not None and not task_request.measured_anchors:
@@ -327,6 +343,9 @@ class ModelNumericEstimator:
                     "which is not a useful prediction. " + result.rationale
                 )[:4000],
             )
+        if self._guidelines is not None:
+            await self._guidelines.accept(operation_id,
+                GuidelineUsageTarget(kind="numeric_task", task_id=task.task_id, window_id=task.window_id), result.guideline_refs)
         return NumericEstimateResult(
             value=result.value,
             value_lower=result.value_lower,

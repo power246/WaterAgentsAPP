@@ -181,7 +181,8 @@ async def build_m4_runtime(
             capability_registry=parameter_capabilities,
         )
         private_values = tuple(
-            value for value in (openai_key, google_key, usgs_key) if value
+            value for value in (openai_key, google_key, usgs_key,
+                settings.embedding_api_key.get_secret_value() if settings.embedding_api_key is not None else None) if value
         )
         workflow = compose_m4_workflow(
             settings,

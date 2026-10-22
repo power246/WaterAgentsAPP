@@ -113,6 +113,7 @@ class RunSingleWaterbodyAgent:
         error_id_factory: Callable[[], UUID] = uuid4,
         clock: object | None = None,
         transcript_store: "ReasoningTranscriptStore | None" = None,
+        guidelines=None,
     ) -> None:
         self._planning_loop = planning_loop
         self._capabilities = capability_registry
@@ -124,6 +125,7 @@ class RunSingleWaterbodyAgent:
         self._error_id_factory = error_id_factory
         self._clock = clock or _UtcClock()
         self._transcript_store = transcript_store
+        self._guidelines = guidelines
 
     async def run(
         self,
@@ -234,12 +236,15 @@ class RunSingleWaterbodyAgent:
                     planning.sealed_input,
                     fragments,
                 )
+                if self._guidelines is not None:
+                    self._guidelines.bind_evidence(fragments)
                 validator = DraftValidator(catalog)
                 exchange = ValidationExchange(
                     model_port=self._model_port,
                     prompt_builder=self._prompt_builder,
                     validator=validator,
                     decision_store=self._transcript_store,
+                    guidelines=self._guidelines,
                 )
                 validated_batches = []
                 stage = "reasoning_batch"
@@ -296,7 +301,7 @@ class RunSingleWaterbodyAgent:
 
             stage = "assembling_result"
             self._checkpoint(task, deadline, stage=stage)
-            execution = _execution_summary(task, planning, audits, plan)
+            execution = _execution_summary(task, planning, audits, plan, self._guidelines)
             result = assemble_inference_result(
                 skeleton,
                 reasoning=reasoning,
@@ -319,6 +324,8 @@ class RunSingleWaterbodyAgent:
                 model_execution_summary=execution,
                 evidence_catalog=catalog,
             )
+            if self._guidelines is not None:
+                result = await self._guidelines.attach_result_usage(result, skeleton.windows)
             self._checkpoint(task, deadline, stage=stage)
             return WaterbodyAgentRunOutcome(
                 status=WaterbodyAgentRunStatus.COMPLETED,
@@ -534,16 +541,21 @@ def _committed_outcome(
     return calculated
 
 
-def _execution_summary(task, planning, audits, plan) -> ModelExecutionSummary:
+def _execution_summary(task, planning, audits, plan, guidelines=None) -> ModelExecutionSummary:
     usage = _aggregate_usage(planning.counts.usage, audits)
+    if guidelines is not None and guidelines.search_usage is not None:
+        extra = guidelines.search_usage
+        usage = ModelUsageSummary(input_tokens=(usage.input_tokens or 0 if usage else 0) + (extra.input_tokens or 0),
+            output_tokens=(usage.output_tokens or 0 if usage else 0) + (extra.output_tokens or 0))
     return ModelExecutionSummary(
         model=task.task.waterbody_model,
-        planning_calls=planning.counts.planning_model_calls,
+        planning_calls=planning.counts.planning_model_calls + (guidelines.search_calls if guidelines else 0),
         numeric_estimation_calls=planning.counts.numeric_estimation_calls,
         numeric_failure_codes=planning.counts.numeric_failure_codes,
         tool_calls=(
             planning.counts.preflight_tool_calls
             + planning.counts.agent_tool_calls
+            + (guidelines.search_tool_calls if guidelines else 0)
         ),
         reasoning_batches=plan.batch_plan.batch_count,
         repair_calls=sum(audit.repair_request is not None for audit in audits),

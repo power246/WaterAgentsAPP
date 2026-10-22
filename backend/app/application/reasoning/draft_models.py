@@ -4,6 +4,7 @@ from typing import Annotated, Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from app.application.guidelines.citation_resolver import GuidelineRefs
 from app.application.reasoning.model_models import (
     ModelItemName,
     NonBlankText,
@@ -23,6 +24,7 @@ from app.domain import (
     DataQualityFlag,
     DomainFloat,
     DomainModel,
+    EvidenceApplicability,
     IndeterminateReason,
     NonEmptyString,
     OutcomeStatus,
@@ -40,7 +42,19 @@ class DraftValidationIssue(DomainModel):
     path: NonEmptyString
 
 
+class AttributionReferenceConstraint(DomainModel):
+    evidence_ref: NonEmptyString
+    current_waterbody_applicability: EvidenceApplicability
+    dependency_evidence_refs: tuple[NonEmptyString, ...]
+
+
+class CellSupportReferenceGroup(DomainModel):
+    cell_id: NonEmptyString
+    reference_options: Annotated[tuple[NonEmptyString, ...], Field(min_length=1)]
+
+
 class ReasoningCellDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     cell_id: NonEmptyString
     outcome_status: OutcomeStatus
     representative_value: CanonicalDecimal | None
@@ -173,6 +187,7 @@ class SynthesisSeriesDraft(DomainModel):
 
 
 class SynthesisWindowDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     window_id: NonEmptyString
     risk_level: RiskLevel
     risk_rationale: NonBlankText
@@ -194,6 +209,7 @@ class SynthesisWindowDraft(DomainModel):
 
 
 class SynthesisOverallDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     risk_level: RiskLevel
     risk_rationale: NonBlankText
     confidence: Annotated[DomainFloat, Field(ge=0.0, le=1.0)]
@@ -222,6 +238,7 @@ class SynthesisOverallDraft(DomainModel):
 
 
 class AnalysisStepDraft(DomainModel):
+    guideline_refs: GuidelineRefs = Field(default=None, exclude=True)
     type: ModelItemName
     title: NonBlankText
     content: NonBlankText

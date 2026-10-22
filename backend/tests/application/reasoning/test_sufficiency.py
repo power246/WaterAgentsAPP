@@ -353,6 +353,38 @@ async def test_target_and_same_window_discharge_form_the_only_final_gate(
 
 
 @_async_test
+async def test_flow_context_for_target_remains_usable_only_as_required_support():
+    validated, handoff, registry = await _validated_fixture(mode="full")
+    handoff = _replace_window_statuses(
+        handoff, target_status=EvidenceCellStatus.SUPPORTED,
+        discharge_status=EvidenceCellStatus.SUPPORTED, move_target_to="contextual",
+    )
+    window = handoff.bundle.window_refs[0]
+    support = next(cell for cell in handoff.cells if cell.window_id == window
+                   and cell.role is EvidenceCellRole.REQUIRED_SUPPORT)
+    target = next(cell for cell in handoff.cells if cell.window_id == window
+                  and cell.role is EvidenceCellRole.TARGET)
+    flow_refs = support.direct_fragment_refs
+    assert flow_refs
+    cells = tuple(cell.model_copy(update={
+        "contextual_fragment_refs": tuple(sorted(set(target.contextual_fragment_refs + flow_refs))),
+    }) if cell is target else cell for cell in handoff.cells)
+    bundle = EvidenceBundle.model_validate(handoff.bundle.model_copy(update={"cells": cells}).model_dump())
+    handoff = replace(handoff, bundle=bundle, cells=cells)
+
+    sealed = seal_evidence_input(validated, handoff, registry)
+
+    gate = sealed.gates[0]
+    assert gate.decision is ReasoningGateDecision.UNSUPPORTED
+    assert gate.target_status is EvidenceCellStatus.UNSUPPORTED
+    assert gate.discharge_status is EvidenceCellStatus.SUPPORTED
+    assert set(flow_refs) <= set(gate.allowed_evidence_refs)
+    assert set(gate.allowed_evidence_refs).isdisjoint(gate.contextual_refs)
+    assert next(cell for cell in sealed.cells if cell.parameter == target.parameter
+                and cell.window_id == window).direct_fragment_refs == ()
+
+
+@_async_test
 async def test_direct_and_materialized_indirect_support_but_contextual_does_not():
     validated, handoff, registry = await _validated_fixture(mode="full")
     direct = seal_evidence_input(validated, handoff, registry)

@@ -38,6 +38,8 @@ class RequestContextMiddleware:
                 status_code = message["status"]
                 message = {**message, "headers": list(message.get("headers", []))}
                 MutableHeaders(scope=message)["X-Request-ID"] = str(request_id)
+                if scope.get("path", "").startswith("/api/guidelines"):
+                    MutableHeaders(scope=message)["Cache-Control"] = "no-store"
             await send(message)
 
         try:

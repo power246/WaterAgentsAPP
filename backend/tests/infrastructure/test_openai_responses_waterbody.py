@@ -534,6 +534,62 @@ def test_reasoning_repairable_phase_still_rejects_non_object_json(
         run(exercise())
 
 
+def malformed_object_events(raw, model=MODEL.model, *, streamed=False):
+    message = {"id": "object-message", "type": "message", "role": "assistant", "status": "completed",
+               "content": [{"type": "output_text", "text": raw}]}
+    events = []
+    if streamed:
+        events = [
+            {"type": "response.created", "response": {"id": "object-response", "model": model,
+                "status": "in_progress", "output": []}},
+            {"type": "response.output_item.added", "output_index": 0,
+             "item": {**message, "status": "in_progress", "content": []}},
+            {"type": "response.output_text.delta", "item_id": "object-message", "output_index": 0,
+             "content_index": 0, "delta": raw},
+            {"type": "response.output_text.done", "item_id": "object-message", "output_index": 0,
+             "content_index": 0, "text": raw},
+            {"type": "response.output_item.done", "output_index": 0, "item": message},
+        ]
+    return [*events, {"type": "response.completed", "response": {"id": "object-response", "model": model,
+        "status": "completed", "output": [message]}}]
+
+
+@pytest.mark.parametrize("phase", [WaterbodyModelPhase.REASONING_BATCH, WaterbodyModelPhase.OVERALL_SYNTHESIS])
+@pytest.mark.parametrize("streamed", [False, True])
+def test_completed_malformed_object_stays_visible_for_bounded_application_repair(phase, streamed):
+    raw = '{"note":"pH indicates "low" risk"}'
+
+    def handler(request):
+        return response_for(request, (encode_events(malformed_object_events(raw, streamed=streamed)),))
+
+    async def exercise():
+        async with client(handler) as http:
+            return await collect(http, model_request(phase=phase, tools=()))
+
+    events = run(exercise())
+    assert not any(isinstance(event, StructuredOutputCompleted) for event in events)
+    assert "".join(event.text for event in events if isinstance(event, VisibleTextDelta)) == raw
+    assert events[-1].finish_reason is WaterbodyFinishReason.COMPLETED
+
+
+@pytest.mark.parametrize("phase", [WaterbodyModelPhase.EVIDENCE_PLANNING,
+                                  WaterbodyModelPhase.NUMERIC_ESTIMATION, WaterbodyModelPhase.SCHEMA_REPAIR])
+def test_malformed_object_does_not_change_other_phase_protocol_errors(phase):
+    def handler(request):
+        return response_for(request, (encode_events(malformed_object_events('{"value":')),))
+
+    async def exercise():
+        values = model_request(phase=WaterbodyModelPhase.REASONING_BATCH, tools=()).model_dump()
+        values["phase"] = phase
+        if phase is WaterbodyModelPhase.NUMERIC_ESTIMATION:
+            values["numeric_plan_ref"] = ItemReference(item_id="saved-numeric-plan")
+        async with client(handler) as http:
+            return await collect(http, WaterbodyModelRequest.model_validate(values))
+
+    with pytest.raises(WaterbodyModelProtocolError):
+        run(exercise())
+
+
 def test_tool_result_message_is_sent_as_function_call_output() -> None:
     requests: list[httpx.Request] = []
     outcome = load_fixture("openai_waterbody_terminal_outcomes.json")
@@ -569,6 +625,25 @@ def test_tool_result_message_is_sent_as_function_call_output() -> None:
             "output": '{"safe_ref":"item-1"}',
         },
     ]
+
+
+def test_assistant_tool_call_is_sent_with_matching_function_output() -> None:
+    from app.infrastructure.adapters.openai_responses_waterbody import _request_body
+
+    call = WaterbodyModelMessage(message_id="lookup-call", role="assistant", text='{"query":"pH buffer capacity"}',
+        provider_call_id="lookup-1", tool_name="search_guidelines")
+    result = WaterbodyModelMessage(message_id="lookup-result", role="tool", text='{"status":"no_match"}',
+        provider_call_id="lookup-1", tool_name="search_guidelines")
+    body = _request_body(model_request(messages=(call, result)))
+    assert body["input"] == [
+        {"type": "function_call", "call_id": "lookup-1", "name": "search_guidelines", "arguments": call.text},
+        {"type": "function_call_output", "call_id": "lookup-1", "output": result.text},
+    ]
+    with pytest.raises(ValueError):
+        WaterbodyModelMessage(message_id="partial", role="assistant", text='{}', tool_name="search_guidelines")
+    with pytest.raises(ValueError):
+        WaterbodyModelMessage(message_id="invalid", role="assistant", text='not JSON',
+            tool_name="search_guidelines", provider_call_id="lookup-1")
 
 
 @pytest.mark.parametrize(

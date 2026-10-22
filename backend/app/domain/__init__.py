@@ -275,7 +275,31 @@ from app.domain.settings_admin import (
     UnitPolicyVersion,
 )
 
+from app.domain.guidelines import (
+    GuidelineMatch, GuidelineRunPin, GuidelineRetrievalResult,
+    GuidelineRelationEmbeddingCache, CanonicalGuidelineFragmentV3, CanonicalGuidelineDocumentV3, CanonicalGuidelineDocumentV1, CanonicalGuidelineDocumentV2, canonical_guideline_document, CanonicalGuidelineQueryV1, GuidelineCatalogSnapshot,
+    GuidelineCitationV1, GuidelineContentV1, GuidelineDeliveryRef, GuidelineDocumentSnapshot,
+    GuidelineDraftV1, GuidelineDraftSourceRef, GuidelineEmbeddingBatch, GuidelineEmbeddingProfileV1,
+    GuidelineIdentity, GuidelineIndexGeneration, GuidelineModelViewV1, GuidelineMutation,
+    GuidelineMutationReceipt, GuidelineOperation, GuidelineOperationKind, GuidelineOperationState,
+    GuidelineOrigin, GuidelineResultUsageBinding, GuidelineReview, GuidelineSourceKind,
+    GuidelineSourceRef, GuidelineUsageTarget, GuidelineValidationError, GuidelineVersionV1,
+)
+
+from app.domain.guidelines.document_details import GuidelineDocumentDetails
+from app.domain.guidelines.list_item import GuidelineListItem
+from app.domain.guidelines.policy import GuidelinePolicy
+
 __all__ = [
+    "GuidelineMatch", "GuidelineRunPin", "GuidelineRetrievalResult",
+    "GuidelinePolicy", "GuidelineDocumentDetails", "GuidelineListItem",
+    "GuidelineRelationEmbeddingCache", "CanonicalGuidelineFragmentV3", "CanonicalGuidelineDocumentV3", "CanonicalGuidelineDocumentV1", "CanonicalGuidelineDocumentV2", "canonical_guideline_document", "CanonicalGuidelineQueryV1", "GuidelineCatalogSnapshot",
+    "GuidelineCitationV1", "GuidelineContentV1", "GuidelineDeliveryRef", "GuidelineDocumentSnapshot",
+    "GuidelineDraftV1", "GuidelineDraftSourceRef", "GuidelineEmbeddingBatch", "GuidelineEmbeddingProfileV1",
+    "GuidelineIdentity", "GuidelineIndexGeneration", "GuidelineModelViewV1", "GuidelineMutation",
+    "GuidelineMutationReceipt", "GuidelineOperation", "GuidelineOperationKind", "GuidelineOperationState",
+    "GuidelineOrigin", "GuidelineResultUsageBinding", "GuidelineReview", "GuidelineSourceKind",
+    "GuidelineSourceRef", "GuidelineUsageTarget", "GuidelineValidationError", "GuidelineVersionV1",
     "AdminActionKind",
     "AdminCommand",
     "AdminConfirmation",

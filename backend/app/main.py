@@ -17,6 +17,9 @@ from app.api.http.health import router as health_router
 from app.api.http.settings import router as settings_router
 from app.api.http.admin import router as admin_router
 from app.api.http.keys import router as keys_router
+from app.api.http.guidelines import router as guidelines_router
+from app.application.guidelines.authoring import GuidelineAuthoringService
+from app.application.transcripts.redaction import register_private_value
 from app.api.http.request_context import RequestContextMiddleware
 from app.api.http.local_mutation import LocalMutationGuardMiddleware, _loopback
 from app.api.schemas.analysis_runs import CreateAnalysisRunRequest
@@ -69,6 +72,7 @@ from app.infrastructure.persistence.store import PostgresTranscriptStore
 from app.infrastructure.persistence.tombstone_repository import PostgresTombstoneRepository
 from app.infrastructure.persistence.admin_operation_repository import PostgresAdminOperationRepository
 from app.infrastructure.persistence.settings_repository import PostgresSettingsRepository
+from app.infrastructure.persistence.guideline_repository import PostgresGuidelineRepository
 from app.infrastructure.persistence.memory_settings import InMemorySettingsRepository
 from app.infrastructure.credentials import OSKeyStore
 from app.infrastructure.credentials.memory_key_store import (
@@ -77,6 +81,7 @@ from app.infrastructure.credentials.memory_key_store import (
 from app.infrastructure.credentials.tester import ProviderCredentialTester
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.runtime.provider_bundle import RunProviderBundleFactory
+from app.infrastructure.runtime.guidelines import GuidelineRuntime
 from app.infrastructure.runtime.system_clock import SystemClock
 from app.infrastructure.web.frontend import FrontendResponder
 from app.infrastructure.runtime import (
@@ -94,6 +99,7 @@ from app.ports.model_catalog import ModelCatalogPort
 from app.ports.transcript_store import TranscriptStorePort
 from app.ports.settings_store import SettingsStorePort
 from app.ports.key_store import KeyStorePort
+from app.ports.guidelines import GuidelineRepositoryPort
 from app.domain.settings_admin import CredentialName
 
 
@@ -136,8 +142,11 @@ def create_app(
         Callable[..., AsyncContextManager[M8Runtime]] | None
     ) = None,
     frontend_dist: Path | None = None,
+    guideline_repository: GuidelineRepositoryPort | None = None,
 ) -> FastAPI:
     resolved_settings = settings or load_app_settings()
+    if resolved_settings.embedding_api_key is not None:
+        register_private_value(resolved_settings.embedding_api_key.get_secret_value())
     if not _loopback(resolved_settings.host):
         raise SettingsConfigurationError("local API requires a loopback bind host")
     resolved_clock = clock if clock is not None else SystemClock()
@@ -183,6 +192,12 @@ def create_app(
                     resolved_parameter_capabilities
                 )
             )
+            active_guideline_repository = guideline_repository
+            if active_guideline_repository is None and engine is not None:
+                active_guideline_repository = PostgresGuidelineRepository(
+                    resolved_settings, engine=engine, registry=resolved_parameter_capabilities, clock=resolved_clock)
+            application.state.guideline_service = GuidelineAuthoringService(
+                active_guideline_repository, resolved_parameter_capabilities, resolved_clock, id_factory=id_factory)
             try:
                 initial_defaults = deployment_defaults(
                     resolved_settings.analysis_timezone,
@@ -217,6 +232,7 @@ def create_app(
                     CredentialName.GOOGLE_GEOCODING: resolved_settings.google_geocoding_api_key,
                 },
                 resolved_clock, active_tester,
+                embedding_uses_openai=resolved_settings.embedding_base_url is None,
             )
             async with AsyncExitStack() as stack:
                 # Provider auth belongs to adapters created for one run. The
@@ -230,6 +246,7 @@ def create_app(
                             resolved_settings.reasoning_model_timeout_seconds,
                             resolved_settings.run_summary_timeout_seconds,
                             resolved_settings.rag_embedding_timeout_seconds,
+                            resolved_settings.guideline_policy.worker_timeout_seconds,
                         ),
                         max_response_bytes=resolved_settings.provider_http_max_response_bytes,
                         retry_delay_seconds=resolved_settings.provider_http_retry_delay_seconds,
@@ -237,6 +254,10 @@ def create_app(
                     )) if workflow is None else None
                 )
                 runtime = await stack.enter_async_context(_provided_runtime(workflow))
+                guideline_runtime = GuidelineRuntime(
+                    settings=resolved_settings, catalog=resolved_model_catalog.snapshot(),
+                    credentials=credential_service, http=provider_http, clock=resolved_clock,
+                )
                 provider_bundle_factory: RunProviderBundleFactory | None = None
 
                 async def build_run_bundle(configuration):
@@ -345,6 +366,7 @@ def create_app(
                             settings=resolved_settings, credentials=credential_service,
                             http=provider_http, operations=coordinator,
                             m5_runtime=m5_runtime, m8_runtime=m8_runtime,
+                            guideline_runtime=guideline_runtime,
                             upstream_results=upstream_results,
                             result_reader=result_reader,
                             capability_registry=resolved_parameter_capabilities,
@@ -386,6 +408,7 @@ def create_app(
                             )
                         )
                     await m8_runtime.start()
+                    await guideline_runtime.start(active_guideline_repository, resolved_parameter_capabilities)
                     admin_service = None
                     if engine is not None and isinstance(m8_runtime, M8Runtime):
                         profile_by_id = {
@@ -425,6 +448,7 @@ def create_app(
                     application.state.transcript_reader = transcript_reader
                     application.state.transcript_store = active_store
                     application.state.m8_runtime = m8_runtime
+                    application.state.guideline_runtime = guideline_runtime
                     application.state.admin_service = admin_service
                     application.state.admin_runner = admin_runner
                     application.state.m5_runtime = m5_runtime
@@ -434,10 +458,13 @@ def create_app(
                     yield
                 finally:
                     try:
-                        if admin_runner is not None:
-                            await admin_service.drain_accepts()
-                            await admin_runner.shutdown()
-                        await m8_runtime.shutdown()
+                        try:
+                            await guideline_runtime.shutdown()
+                        finally:
+                            if admin_runner is not None:
+                                await admin_service.drain_accepts()
+                                await admin_runner.shutdown()
+                            await m8_runtime.shutdown()
                     finally:
                         try:
                             await coordinator.shutdown()
@@ -458,6 +485,8 @@ def create_app(
     application.state.id_factory = id_factory
     application.state.parameter_capability_registry = resolved_parameter_capabilities
     application.state.frontend_responder = frontend_responder
+    application.state.guideline_service = GuidelineAuthoringService(
+        guideline_repository, resolved_parameter_capabilities, resolved_clock, id_factory=id_factory)
     application.add_middleware(
         LocalMutationGuardMiddleware,
         bind_host=resolved_settings.host, bind_port=resolved_settings.port,
@@ -471,6 +500,7 @@ def create_app(
     application.include_router(settings_router)
     application.include_router(keys_router)
     application.include_router(admin_router)
+    application.include_router(guidelines_router)
 
     async def frontend_navigation(request: Request):
         return await frontend_responder.respond(request, request.path_params.get("full_path", ""))

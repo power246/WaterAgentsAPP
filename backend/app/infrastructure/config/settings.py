@@ -13,6 +13,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from app.domain.model_catalog import ModelCapability
+from app.domain.guidelines.policy import GuidelinePolicy
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 BACKEND_ENV_FILE = BACKEND_ROOT / ".env"
@@ -46,6 +47,7 @@ class AppSettings(BaseSettings):
     analysis_timezone: str = "America/Chicago"
     model_catalog: tuple[ModelCapability, ...] = ()
     memory_enabled: bool = True
+    guideline_policy: GuidelinePolicy = Field(default_factory=GuidelinePolicy)
     topology_max_distance_km: float = Field(
         default=500,
         gt=0,
@@ -157,6 +159,8 @@ class AppSettings(BaseSettings):
         default="https://api.openai.com/v1",
         min_length=1,
     )
+    embedding_api_key: SecretStr | None = Field(default=None, min_length=1)
+    embedding_base_url: str | None = Field(default=None, min_length=1)
     topology_stage_timeout_seconds: float = Field(
         default=1200,
         gt=0,
@@ -255,6 +259,7 @@ class AppSettings(BaseSettings):
         "google_geocoding_api_key",
         "usgs_api_key",
         "openai_api_key",
+        "embedding_api_key",
         mode="before",
     )
     @classmethod
@@ -345,9 +350,11 @@ class AppSettings(BaseSettings):
             return value or None
         return value
 
-    @field_validator("openai_base_url")
+    @field_validator("openai_base_url", "embedding_base_url")
     @classmethod
-    def normalize_openai_base_url(cls, value: str) -> str:
+    def normalize_provider_base_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip().rstrip("/")
         parsed = urlsplit(normalized)
         if (
@@ -359,7 +366,7 @@ class AppSettings(BaseSettings):
             or parsed.query
             or parsed.fragment
         ):
-            raise ValueError("openai_base_url must be an HTTP(S) URL")
+            raise ValueError("provider base URL must be an HTTP(S) URL without credentials, query or fragment")
         return normalized
 
     @field_validator("nws_user_agent_project", "nws_user_agent_contact")
@@ -384,6 +391,14 @@ class AppSettings(BaseSettings):
         except (ValueError, ZoneInfoNotFoundError) as error:
             raise ValueError(f"Unknown IANA timezone: {value}") from error
         return value
+
+    @model_validator(mode="after")
+    def validate_embedding_connection(self) -> "AppSettings":
+        if (self.embedding_base_url is None) != (self.embedding_api_key is None):
+            raise ValueError("embedding_base_url and embedding_api_key must be configured together")
+        if self.embedding_api_key is not None and not self.embedding_api_key.get_secret_value().strip():
+            raise ValueError("embedding_api_key must not be blank")
+        return self
 
     @model_validator(mode="after")
     def validate_transcript_thresholds(self) -> "AppSettings":

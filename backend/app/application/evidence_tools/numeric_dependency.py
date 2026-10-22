@@ -8,6 +8,7 @@ from decimal import Decimal
 from hashlib import sha256
 from uuid import NAMESPACE_URL, uuid5
 
+from app.application.analysis_runs.workflow import WorkflowFailed, WorkflowStopped
 from app.application.evidence_tools.errors import EvidenceScopeViolationError
 from app.application.evidence_tools.measurement_provenance import (
     derive_measured_anchors,
@@ -643,6 +644,8 @@ class NumericDependencyExecutor:
                     try:
                         published[task_id] = future.result()
                     except asyncio.CancelledError:
+                        raise
+                    except (WorkflowFailed, WorkflowStopped):
                         raise
                     except NumericInputsUnavailable:
                         blocked.add(task_id)

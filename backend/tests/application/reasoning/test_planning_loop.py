@@ -133,6 +133,12 @@ def _ready_script(operation_id):
 
 class AbstainingNumericModel(DeterministicWaterbodyModelPort):
     async def stream(self, request):
+        if request.batch_id == "guideline-search":
+            from tests.guideline_support import search_events
+            self.search_requests = [*getattr(self, "search_requests", []), request]
+            for event in search_events(request):
+                yield event
+            return
         if request.phase is not WaterbodyModelPhase.NUMERIC_ESTIMATION:
             async for event in super().stream(request):
                 yield event
@@ -1285,7 +1291,8 @@ def test_multi_turn_tools_rebuild_bundles_and_exact_duplicates_reuse_provider_wo
 
         assert len(weather.calls) == 1
         assert outcome.counts.agent_tool_calls == 2
-        assert outcome.counts.planning_model_calls == 3
+        assert outcome.counts.planning_model_calls == 2
+        assert outcome.counts.convergence_reason is PlanningConvergenceReason.NO_PROGRESS
         assert len(outcome.counts.bundle_refs) == 4
         assert len({ref.item_id for ref in outcome.counts.bundle_refs}) == 4
         assert set(store.bundles[0][1].fragment_refs) <= set(

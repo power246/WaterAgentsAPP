@@ -792,7 +792,7 @@ def test_numeric_derivation_catalog_rejects_wrong_saved_input_identity_and_cap()
             rebuild_catalog(catalog, facts=facts)
 
 
-def test_low_basis_flow_range_does_not_cap_direct_target_confidence() -> None:
+def _low_basis_flow_support_fixture():
     _skeleton, plan, catalog, _validator = m7_fixture()
     batch = plan.batch_plan.batches[0]
     target_ref = batch.cells[0].allowed_evidence_refs[0]
@@ -831,11 +831,19 @@ def test_low_basis_flow_range_does_not_cap_direct_target_confidence() -> None:
     combined = rebuild_catalog(
         catalog, facts=(*catalog.facts, flow), cell_scopes=scopes,
     )
-    validator = DraftValidator(combined)
     planned = batch.cells[0].model_copy(update={
         "allowed_evidence_refs": tuple(sorted((target_ref, flow_ref))),
     })
-    cell = ReasoningCellDraft.model_validate(batch_payload(batch, catalog)["cells"][0])
+    return batch, combined, planned, target, flow
+
+
+def test_low_basis_flow_range_does_not_cap_direct_target_confidence() -> None:
+    batch, combined, planned, target, flow = _low_basis_flow_support_fixture()
+    validator = DraftValidator(combined)
+    target_ref, flow_ref = target.evidence_ref, flow.evidence_ref
+    groups = validator.required_support_reference_groups((planned.cell_id,))
+    assert len(groups) == 1 and groups[0].reference_options == (flow_ref,)
+    cell = ReasoningCellDraft.model_validate(batch_payload(batch, combined)["cells"][0])
     issues = []
     validator._validate_cell(cell, planned=planned, path="$.cell", issues=issues)
     assert {issue.code for issue in issues} == {"derived_discharge_support_missing"}
