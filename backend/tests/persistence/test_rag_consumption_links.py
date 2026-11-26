@@ -293,5 +293,5 @@ def test_legacy_consumption_schema_upgrades_without_losing_a_source_link() -> No
         source, consumer, link = asyncio.run(seed(settings))
         command.downgrade(alembic_config(settings), "20261008_03")
         asyncio.run(restore_legacy_shape(settings))
-        assert upgrade_database(settings) == "20261020_01"
+        assert upgrade_database(settings) == "20261021_01"
         asyncio.run(verify(settings, source, consumer, link))

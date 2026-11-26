@@ -31,6 +31,15 @@ def test_nested_redaction_is_case_insensitive_and_does_not_mutate(name):
     assert source == before
 
 
+def test_repeated_values_keep_each_redaction_calls_private_scope():
+    source = {"items": [{"name": "different-private-text", "value": "different-private-text"}] * 300}
+    before = deepcopy(source)
+    hidden = redact(source, ("different-private-text",))
+    visible = redact(source)
+    assert all(item == {"name": REDACTED, "value": REDACTED} for item in hidden["items"])
+    assert visible == source == before
+
+
 @pytest.mark.parametrize("text", [
     'Authorization: Bearer hidden-credential',
     'Cookie: sid=hidden-credential; preferences=hidden-credential',

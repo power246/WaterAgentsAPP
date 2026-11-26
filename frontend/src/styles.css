@@ -151,6 +151,21 @@ button:hover:not(:disabled) { background: var(--primary-hover); border-color: va
 .admin-preview, .admin-operations { grid-column: 1 / -1; }
 .simple-page { max-width: 700px; margin: 60px auto; padding: 24px; background: white; border-radius: 12px; }
 .mobile-switch { display: none; }
+.guidelines-page { max-width: 1400px; margin: auto; padding: 24px; }
+.guidelines-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2fr); gap: 20px; align-items: start; }
+.guideline-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.guideline-fields { min-width: 0; border: 0; padding: 0; }
+.guideline-fields label, .guideline-review label, .guidelines-page form label { display: block; margin: 12px 0; }
+.guideline-fields input, .guideline-fields select, .guideline-fields textarea, .guidelines-page form input,
+.guidelines-page form select, .guideline-review input:not([type=checkbox]), .guideline-review textarea { display: block; width: 100%; margin-top: 5px; }
+.guideline-fields input, .guideline-fields textarea, .guideline-review input, .guideline-review textarea { padding: 8px; }
+.guideline-editor-body { min-height: 300px; }
+.guideline-list { list-style: none; padding: 0; }
+.guideline-list li { border-top: 1px solid var(--line); padding: 10px 0; }
+.guideline-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: var(--subtle); padding: 12px; }
+.guideline-viewer { overflow-wrap: anywhere; }
+.guideline-review { width: min(850px, 94vw); max-height: 90vh; overflow-y: auto; }
+.run-guidelines details { margin: 10px 0; }
 
 @media (max-width: 1050px) {
   .workspace { grid-template-columns: minmax(250px, 300px) minmax(320px, 1fr); }
@@ -170,6 +185,8 @@ button:hover:not(:disabled) { background: var(--primary-hover); border-color: va
   .admin-page { padding: 12px; }
   .admin-header { flex-wrap: wrap; }
   .admin-grid { display: block; }
+  .guidelines-grid { display: block; }
+  .guidelines-page { padding: 12px; }
   .admin-card { margin-bottom: 12px; }
 }
 @media (max-width: 420px) {

@@ -121,6 +121,7 @@ class TranscriptBuffer:
                 content.references,
                 same_batch=reserved_references,
             )
+        self._registry.validate_knowledge_content(content, identity, self._items)
         error_ids = self._registry.error_ids(content)
         if self._error_ids.intersection(error_ids):
             raise ValueError("an embedded error must not be copied to another item")

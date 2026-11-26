@@ -19,6 +19,7 @@ from app.application.analysis_runs.models import (
 )
 
 if TYPE_CHECKING:
+    from app.application.guidelines.retrieval import GuidelineRunContext
     from app.application.analysis_runs.persistence import RAGConsumptionSource
     from app.application.analysis_runs.topology_result_models import (
         DependencyOutcome,
@@ -258,6 +259,7 @@ class WorkflowContext:
     cancellation: CancellationToken
     request: "AnalysisRequestV1" = field(repr=False)
     operations: WorkflowOperations = field(repr=False)
+    guidelines: GuidelineRunContext | None = field(default=None, repr=False)
 
 
 class AnalysisWorkflow(Protocol):

@@ -38,6 +38,7 @@ include = ["app*"]
 [tool.setuptools.package-data]
 "app.infrastructure.persistence.migrations" = ["script.py.mako"]
 "app.infrastructure.config" = ["*.json"]
+"app.infrastructure.guidelines.bundled" = ["manifest.json", "*.md", "topics/**/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

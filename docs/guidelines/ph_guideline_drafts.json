@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "status": "approved_for_bundled_distribution",
+  "drafts": [
+    {
+      "bundle_key": "ph.mixing-transport",
+      "proposed_version": 1,
+      "content": {
+        "schema_version": 1,
+        "title": "上下游 pH：混合与传递的边界",
+        "summary": "以水流联系和化学反应约束解释混合；仅凭上游 pH 与流量不能保证准确计算下游 pH。",
+        "parameter_keys": [{"code_system":"usgs","code":"00400"},{"code_system":"usgs","code":"00403"}],
+        "related_parameter_keys": [{"code_system":"usgs","code":"00060"},{"code_system":"usgs","code":"00410"}],
+        "scenario_tags": ["mixing", "transport", "prediction"],
+        "keywords": ["混合", "传递", "酸碱平衡", "upstream", "mixing", "pH"],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": "## 现象\n上下游 pH 不同可能与混合、途中反应或不同采样时间有关，差异本身不证明某种原因。\n\n## 可能机制\nPHREEQC MIX 按各溶液的组成和混合份额合并物质，再求溶液平衡；它不是对 pH 数字直接加权的通用公式。[source:USGS_MIX]\n\n## 适用条件\n先确认真实上下游联系、支流输入、观测时刻和传播时间。计算化学混合通常还需组成及酸碱缓冲信息，不能用未知量的假设代替观测。\n\n## 观察线索\n检查上游同指标读数及时间、流量、碱度和沿途输入；记录实际已知与尚未测得的量。\n\n## 例外与替代解释\nMIX 的平衡假设不是自然河段已达平衡的证据。缓慢反应、外部输入、生物过程、传递延迟和采样差异都可能使简单混合解释不足。\n\n## 估值注意事项\n这是一条机制参考，不产生新的实测资格。缺少合格同指标锚点时沿用原 range-only 规则；只有 pH 和流量时不声称精确解，也不把候选机制写成确定事实。\n",
+        "sources": [{"source_id":"USGS_MIX","title":"USGS PHREEQC Version 3 — MIX","url":"https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-27.htm","locator":"MIX: Explanation and Notes; mole mixing and equilibrium assumptions","accessed_date":"2026-10-21"}]
+      }
+    },
+    {
+      "bundle_key": "ph.acid-buffering",
+      "proposed_version": 1,
+      "content": {
+        "schema_version": 1,
+        "title": "酸性输入与碱度缓冲",
+        "summary": "碱度表示中和酸性输入的能力；未知碱度不能被解释为必然强缓冲或弱缓冲。",
+        "parameter_keys": [{"code_system":"usgs","code":"00400"},{"code_system":"usgs","code":"00403"}],
+        "related_parameter_keys": [{"code_system":"usgs","code":"00410"},{"code_system":"usgs","code":"00060"}],
+        "scenario_tags": ["acid_input", "buffering", "prediction"],
+        "keywords": ["碱度", "酸性输入", "缓冲", "alkalinity", "acid", "buffering"],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": "## 现象\n相似的酸性输入下，不同水体的 pH 响应可能不同；pH 读数本身不能替代碱度测量。\n\n## 可能机制\nUSGS 将碱度解释为水体中和酸、抵抗 pH 改变的能力；碳酸氢盐等组分会影响这一能力。[source:USGS_ALKALINITY]\n\n## 适用条件\n只有酸性输入及相关时空联系有证据时，才将该路径用于本次解释。较强缓冲可能减弱响应，但不能据一般机制确定本次幅度。\n\n## 观察线索\n核对碱度或酸中和能力（ANC）实测，并检查样品处理、滴定方法及时间和位置是否匹配。同时核对酸性输入的时间与位置、输入前后的 pH 和流量、流域地质等；区分实测结果与从地质背景作出的推测。\n\n## 例外与替代解释\n地质和土地利用只能提供背景，不能保证某站某时的碱度。混合、途中其他输入、生物过程和时间不匹配也可能造成相似变化。\n\n## 估值注意事项\n未知碱度是信息缺口，不自动说明 pH 变化大或小。不凭此资料生成酸负荷、碱度或精确 pH；沿用原同指标锚点和点值/范围资格规则。\n",
+        "sources": [{"source_id":"USGS_ALKALINITY","title":"USGS Water Science School — Alkalinity and Water","url":"https://www.usgs.gov/water-science-school/science/alkalinity-and-water","locator":"Alkalinity and Acid Neutralizing Capacity; What affects alkalinity?; Measuring alkalinity","accessed_date":"2026-10-21"}]
+      }
+    },
+    {
+      "bundle_key": "ph.photosynthesis-respiration",
+      "proposed_version": 1,
+      "content": {
+        "schema_version": 1,
+        "title": "光照、光合作用与呼吸的竞争路径",
+        "summary": "营养物质与光照可影响生产和呼吸，进而影响 pH 与溶解氧；日变化不是本地已发生某过程的证明。",
+        "parameter_keys": [{"code_system":"usgs","code":"00400"},{"code_system":"usgs","code":"00403"}],
+        "related_parameter_keys": [{"code_system":"usgs","code":"00300"},{"code_system":"usgs","code":"00010"},{"code_system":"usgs","code":"00600"},{"code_system":"usgs","code":"00665"}],
+        "scenario_tags": ["diel_cycle", "photosynthesis", "respiration"],
+        "keywords": ["光合作用", "呼吸", "营养物质", "昼夜", "photosynthesis", "respiration", "nutrients"],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": "## 现象\npH 或溶解氧随时段变化时，可把生产与呼吸列为候选路径；单个高值或低值不能据此诊断原因。\n\n## 可能机制\nEPA CADDIS 描述：在光照等条件适合时，营养物质可促进植物或藻类生产；增强的光合作用可能提高 pH 和溶解氧，增强的呼吸会耗氧，尤其当光合作用受限时。[source:EPA_NUTRIENTS]\n\n光合作用消耗水中 CO₂，可使 pH 上升；呼吸和分解释放 CO₂，经水中的酸碱平衡可使 pH 下降。实际方向和幅度取决于这些过程的净效应、缓冲能力和气体交换等条件，不能由溶解氧变化直接换算。[source:EPA_PH]\n\n## 适用条件\n该路径取决于光照、生产者和微生物等条件。不能仅因营养物质偏高就断定 pH 必定上升，也不能把耗氧现象直接换算为 pH 降幅。\n\n## 观察线索\n比较同一地点匹配时段的 pH、溶解氧、温度、光照或昼夜时段、藻类及营养物质信息；注明没有观测的环节。\n\n## 例外与替代解释\n遮阴、浑浊、混合、酸碱缓冲、其他输入和采样时差可能改变或掩盖该模式。相同现象也可能由其他路径产生。\n\n## 估值注意事项\n机制只用于条件化解释与不确定性说明，不产生本次事实，不强迫给出 pH 点值；没有合格同指标锚点时保持原范围输出要求。\n",
+        "sources": [
+          {"source_id":"EPA_NUTRIENTS","title":"US EPA CADDIS — Nutrients","url":"https://www.epa.gov/caddis/nutrients","locator":"Overview; Conceptual Diagrams: production, light limitation, respiration and pH","accessed_date":"2026-10-21"},
+          {"source_id":"EPA_PH","title":"US EPA CADDIS — pH","url":"https://www.epa.gov/caddis/ph","locator":"Overview; When to List: High pH — Sources and Activities; Conceptual Diagrams: Low pH — buffering and respiration","accessed_date":"2026-10-21"}
+        ]
+      }
+    },
+    {
+      "bundle_key": "ph.compare-causes",
+      "proposed_version": 1,
+      "content": {
+        "schema_version": 1,
+        "title": "比较 pH 候选原因与证据缺口",
+        "summary": "将本地事实和一般机理分开，比较支持与反证；因果图中的箭头表示可能联系，不能当成无条件因果。",
+        "parameter_keys": [{"code_system":"usgs","code":"00400"},{"code_system":"usgs","code":"00403"}],
+        "related_parameter_keys": [{"code_system":"usgs","code":"00410"},{"code_system":"usgs","code":"00300"},{"code_system":"usgs","code":"00060"}],
+        "scenario_tags": ["causal_comparison", "missing_information"],
+        "keywords": ["原因比较", "替代解释", "证据缺口", "causal", "alternative", "evidence"],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": "## 现象\n同一种 pH 变化可与多条机制一致，应比较候选原因而非按一条相关线索定论。\n\n## 可能机制\nEPA 的概念图组织来源、压力与响应之间的假设联系；存在箭头只表示这条联系可能发生。把混合、酸性输入/缓冲、生物过程等候选路径分别与本地事实对照。[source:EPA_DIAGRAMS]\n\n## 适用条件\n先明确站点、指标、时间和采样/汇总方式。EPA 数据分析指南强调数据匹配与质量检查；一般文献和其他地点的数据只能补充本地证据，不能冒充本次观测。[source:EPA_DATA]\n\n## 观察线索\n对每个候选分别列出本地支持、削弱该解释的证据、尚缺的观测及可区分其他路径的线索。指出时空不匹配、样本量不足和传递延迟。\n\n## 例外与替代解释\n相关不等于因果，缺少一段路径的数据也不证明该过程不存在。若多条路径都能解释现象，应保留并列可能性。\n\n## 估值注意事项\n不能以一般机制、模型输出或说明书例子替代目标实测。不确定性随缺口明确呈现，数值资格、来源和范围规则沿用既有流程。\n",
+        "sources": [
+          {"source_id":"EPA_DIAGRAMS","title":"US EPA CADDIS — About Conceptual Diagrams","url":"https://www.epa.gov/caddis/about-conceptual-diagrams","locator":"Opening description and site-specific interpretation of potential causal linkages","accessed_date":"2026-10-21"},
+          {"source_id":"EPA_DATA","title":"US EPA CADDIS — Getting Started with Data Analysis (official 2021 archive)","url":"https://19january2021snapshot.epa.gov/caddis-vol4/caddis-volume-4-data-analysis-getting-started_.html","locator":"Matching Data; Organizing Data By Causal Pathway; Data Quality. Historical first-party archive, not a current EPA policy.","accessed_date":"2026-10-21"}
+        ]
+      }
+    }
+  ]
+}

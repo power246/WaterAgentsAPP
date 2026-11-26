@@ -43,7 +43,7 @@ if (-not (Test-Path backend/.env)) {
 }
 ```
 
-编辑 `backend/.env`：设置本地数据库密码，并将示例中的模型目录、模型名称及所需服务密钥替换为真实配置。`backend/.env.example` 中的模型和密钥只是占位值，不能用于真实分析。没有 embedding 服务时，可设置 `WATERAGENTS_MEMORY_ENABLED='false'`；模型目录仍须包含配置格式要求的 embedding 条目，但此模式不会调用它。配置字段见 [backend/README.md](backend/README.md#configuration)。不要提交或打印 `backend/.env` 中的密钥。
+编辑 `backend/.env`：设置本地数据库密码，并将示例中的模型目录、模型名称及所需服务密钥替换为真实配置。`backend/.env.example` 中的模型和密钥只是占位值，不能用于真实分析。设置 `WATERAGENTS_MEMORY_ENABLED='false'` 可关闭历史 memory 及其索引；模型目录仍须包含 embedding 条目，已发布说明书的检索/准备仍可独立调用 embedding。可同时设置 `WATERAGENTS_EMBEDDING_BASE_URL` 与 `WATERAGENTS_EMBEDDING_API_KEY`，让 embedding 使用独立的兼容服务；两项均不设置时沿用分析服务。配置字段及 Google 示例见 [backend/README.md](backend/README.md#configuration)。不要提交或打印 `backend/.env` 中的密钥。
 
 ### 构建并运行
 

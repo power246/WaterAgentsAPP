@@ -1,6 +1,9 @@
 import json
+import subprocess
+import sys
 from datetime import UTC, datetime
 from uuid import UUID
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -30,6 +33,20 @@ from tests.m4_support import (
 )
 
 RUN_ID = UUID("10000000-0000-0000-0000-000000000001")
+
+
+@pytest.mark.parametrize("module", ["app.application.guidelines.transcript_models",
+                                  "scripts.guideline_pair_review", "scripts.guideline_live_review",
+                                  "app.application.transcripts"])
+def test_guideline_records_import_without_application_bootstrap(module):
+    code = (f"import {module}; "
+            "from app.application.transcripts import TranscriptBuffer, create_production_registry; "
+            "from app.application.guidelines.transcript_models import GUIDELINE_RECORDS; "
+            "registry=create_production_registry(); "
+            "assert len(GUIDELINE_RECORDS)==5")
+    completed = subprocess.run([sys.executable, "-B", "-c", code],
+        cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True, timeout=30)
+    assert completed.returncode == 0, completed.stderr
 OTHER_RUN_ID = UUID("10000000-0000-0000-0000-000000000002")
 SESSION_ID = UUID("20000000-0000-0000-0000-000000000001")
 ITEM_ID = UUID("30000000-0000-0000-0000-000000000001")
@@ -72,6 +89,11 @@ def test_production_registry_has_only_real_writable_types() -> None:
     registry = create_production_registry()
 
     assert registry.writable_keys == (
+        ("guideline_run_context", 1),
+        ("guideline_retrieval", 1),
+        ("guideline_delivery", 1),
+        ("guideline_usage", 1),
+        ("result_guideline_usage", 1),
         ("analysis_request", 1),
         ("lifecycle_event", 2),
         ("error", 1),

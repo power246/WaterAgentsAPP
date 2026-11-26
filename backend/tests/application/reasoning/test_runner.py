@@ -105,6 +105,12 @@ class AdaptiveWaterbodyModelPort:
         self.calls = []
 
     async def stream(self, request) -> AsyncIterator[WaterbodyModelEvent]:
+        if request.batch_id == "guideline-search":
+            from tests.guideline_support import search_events
+            self.search_requests = [*getattr(self, "search_requests", []), request]
+            for event in search_events(request):
+                yield event
+            return
         self.calls.append(request)
         if request.phase is self.fail_phase:
             raise self.failure_type(

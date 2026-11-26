@@ -1,3 +1,4 @@
+from tests.guideline_api_support import GUIDELINE_METHODS
 import asyncio
 import json
 import logging
@@ -937,6 +938,7 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
     schema = create_app().openapi()
     paths = schema["paths"]
     assert {path: set(operations) for path, operations in paths.items()} == {
+        **GUIDELINE_METHODS,
         "/health": {"get"}, BASE: {"get", "post"},
         BASE + "/{run_id}": {"get"},
         BASE + "/{run_id}/sessions/{session_id}": {"get"},
@@ -1069,7 +1071,9 @@ def test_openapi_describes_only_the_supported_routes_and_actual_envelopes() -> N
             for status, response in operation["responses"].items():
                 assert response["headers"]["X-Request-ID"]["schema"] == {"type": "string", "format": "uuid"}
                 if int(status) >= 400 and not (
-                    operation is paths["/api/settings"]["put"] and status == "409"
+                    (operation is paths["/api/settings"]["put"] and status == "409")
+                    or (status == "409" and any(operation is value for key, methods in paths.items()
+                                              if key in GUIDELINE_METHODS for value in methods.values()))
                 ):
                     assert response["content"]["application/json"]["schema"]["$ref"].endswith("/AnalysisRunErrorResponse")
 

@@ -21,6 +21,8 @@ from sqlalchemy import (
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy.dialects.postgresql import JSONB, TSTZRANGE, TSVECTOR, UUID
 
+from app.infrastructure.persistence.guideline_schema import define_guideline_tables
+
 metadata = MetaData(
     naming_convention={
         "ck": "ck_%(table_name)s_%(constraint_name)s",
@@ -866,3 +868,5 @@ Index(
     "ix_admin_operations_recent",
     admin_operations.c.created_at.desc(), admin_operations.c.operation_id.desc(),
 )
+
+define_guideline_tables(metadata)

@@ -19,6 +19,15 @@ def test_schema_has_core_transcript_and_m8_rag_tables() -> None:
         "unit_policy_confirmations",
         "analysis_run_idempotency_tombstones",
         "admin_operations",
+        "guideline_documents",
+        "guideline_versions",
+        "guideline_catalog_state",
+        "guideline_catalog_entries",
+        "guideline_index_generations",
+        "guideline_embeddings",
+        "guideline_relation_embeddings",
+        "guideline_relation_links",
+        "guideline_operations",
     }
 
 
@@ -85,6 +94,10 @@ def test_schema_has_the_declared_query_and_rag_indexes() -> None:
         "ix_rag_consumption_consumer",
         "uq_admin_operations_one_active_resource",
         "ix_admin_operations_recent",
+        "uq_guideline_override_per_root",
+        "uq_guideline_generation_one_active",
+        "uq_guideline_generation_one_building",
+        "ix_guideline_operations_claim",
     }
 
 

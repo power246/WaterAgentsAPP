@@ -381,6 +381,177 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/guidelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Guidelines */
+        get: operations["list_guidelines_api_guidelines_get"];
+        put?: never;
+        /** Create Guideline */
+        post: operations["create_guideline_api_guidelines_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/operations/{operation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Guideline Operation */
+        get: operations["get_guideline_operation_api_guidelines_operations__operation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/operations/{operation_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Guideline Operation */
+        post: operations["retry_guideline_operation_api_guidelines_operations__operation_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Guideline */
+        get: operations["get_guideline_api_guidelines__document_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Guideline Draft */
+        put: operations["save_guideline_draft_api_guidelines__document_id__draft_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}/local-edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Local Edit Guideline */
+        post: operations["local_edit_guideline_api_guidelines__document_id__local_edit_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Publish Guideline */
+        post: operations["publish_guideline_api_guidelines__document_id__publish_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}/restore-bundled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Bundled Guideline */
+        post: operations["restore_bundled_guideline_api_guidelines__document_id__restore_bundled_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}/set-enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Guideline Enabled */
+        post: operations["set_guideline_enabled_api_guidelines__document_id__set_enabled_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/guidelines/{document_id}/versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Guideline Version */
+        get: operations["get_guideline_version_api_guidelines__document_id__versions__version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/keys": {
         parameters: {
             query?: never;
@@ -1220,6 +1391,379 @@ export interface components {
              */
             usable_nodes: number;
         };
+        /** GuidelineConflictResponse */
+        GuidelineConflictResponse: {
+            current_document?: components["schemas"]["GuidelineDocumentDetails"] | null;
+            error: components["schemas"]["HttpPublicError"];
+            /** History Url */
+            history_url?: string | null;
+            run?: components["schemas"]["RunStatusResponse"] | null;
+            /**
+             * Validation
+             * @default []
+             */
+            validation: components["schemas"]["ValidationViolation"][];
+        };
+        /** GuidelineContentV1 */
+        GuidelineContentV1: {
+            /** Body Markdown */
+            body_markdown: string;
+            /**
+             * Keywords
+             * @default []
+             */
+            keywords: string[];
+            /**
+             * Language
+             * @enum {string}
+             */
+            language: "zh" | "en" | "mixed";
+            /** Parameter Keys */
+            parameter_keys: components["schemas"]["ParameterKey"][];
+            /**
+             * Related Parameter Keys
+             * @default []
+             */
+            related_parameter_keys: components["schemas"]["ParameterKey"][];
+            /**
+             * Scenario Tags
+             * @default []
+             */
+            scenario_tags: string[];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            source_kind: components["schemas"]["GuidelineSourceKind"];
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["GuidelineSourceRef"][];
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+        };
+        /** GuidelineDocumentDetails */
+        GuidelineDocumentDetails: {
+            /** Activation Epoch */
+            activation_epoch: number;
+            active_version?: components["schemas"]["GuidelineVersionV1"] | null;
+            /** Active Version Id */
+            active_version_id?: string | null;
+            /**
+             * Disabled
+             * @default false
+             */
+            disabled: boolean;
+            draft?: components["schemas"]["GuidelineDraftV1"] | null;
+            /** Draft Digest */
+            draft_digest?: string | null;
+            /** Effective Version Id */
+            effective_version_id?: string | null;
+            /**
+             * Has Bundled Update
+             * @default false
+             */
+            has_bundled_update: boolean;
+            /**
+             * Has Unpublished Changes
+             * @default false
+             */
+            has_unpublished_changes: boolean;
+            identity: components["schemas"]["GuidelineIdentity"];
+            latest_bundled_version?: components["schemas"]["GuidelineVersionV1"] | null;
+            /**
+             * Latest Version Number
+             * @default 0
+             */
+            latest_version_number: number;
+            pending_version?: components["schemas"]["GuidelineVersionV1"] | null;
+            /** Pending Version Id */
+            pending_version_id?: string | null;
+            preparation?: components["schemas"]["GuidelineOperation"] | null;
+            /** Revision */
+            revision: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "draft" | "preparing" | "available" | "preparation_failed" | "disabled" | "unavailable";
+        };
+        /** GuidelineDraftSourceRef */
+        GuidelineDraftSourceRef: {
+            /** Accessed Date */
+            accessed_date?: string | null;
+            /** Locator */
+            locator?: string | null;
+            /** Published Date */
+            published_date?: string | null;
+            /** Source Id */
+            source_id: string;
+            /** Title */
+            title?: string | null;
+            /** Url */
+            url?: string | null;
+        };
+        /** GuidelineDraftV1 */
+        GuidelineDraftV1: {
+            /** Body Markdown */
+            body_markdown?: string | null;
+            /**
+             * Keywords
+             * @default []
+             */
+            keywords: string[];
+            /** Language */
+            language?: ("zh" | "en" | "mixed") | null;
+            /**
+             * Parameter Keys
+             * @default []
+             */
+            parameter_keys: components["schemas"]["ParameterKey"][];
+            /**
+             * Related Parameter Keys
+             * @default []
+             */
+            related_parameter_keys: components["schemas"]["ParameterKey"][];
+            /**
+             * Scenario Tags
+             * @default []
+             */
+            scenario_tags: string[];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            source_kind?: components["schemas"]["GuidelineSourceKind"] | null;
+            /**
+             * Sources
+             * @default []
+             */
+            sources: components["schemas"]["GuidelineDraftSourceRef"][];
+            /** Summary */
+            summary?: string | null;
+            /** Title */
+            title?: string | null;
+        };
+        /** GuidelineIdentity */
+        GuidelineIdentity: {
+            /** Base Bundle Key */
+            base_bundle_key?: string | null;
+            /** Base Content Digest */
+            base_content_digest?: string | null;
+            /** Based On Version Id */
+            based_on_version_id?: string | null;
+            /** Bundle Key */
+            bundle_key?: string | null;
+            /**
+             * Family Root Id
+             * Format: uuid
+             */
+            family_root_id: string;
+            /**
+             * Guideline Id
+             * Format: uuid
+             */
+            guideline_id: string;
+            origin: components["schemas"]["GuidelineOrigin"];
+        };
+        /** GuidelineListItem */
+        GuidelineListItem: {
+            /** Activation Epoch */
+            activation_epoch: number;
+            /** Active Version Id */
+            active_version_id: string | null;
+            /** Draft Digest */
+            draft_digest: string | null;
+            /** Effective Version Id */
+            effective_version_id: string | null;
+            /** Has Bundled Update */
+            has_bundled_update: boolean;
+            /** Has Unpublished Changes */
+            has_unpublished_changes: boolean;
+            identity: components["schemas"]["GuidelineIdentity"];
+            /** Latest Bundled Version Id */
+            latest_bundled_version_id: string | null;
+            /** Pending Version Id */
+            pending_version_id: string | null;
+            /** Revision */
+            revision: number;
+            source_kind: components["schemas"]["GuidelineSourceKind"] | null;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "draft" | "preparing" | "available" | "preparation_failed" | "disabled" | "unavailable";
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string | null;
+        };
+        /** GuidelineListResponse */
+        GuidelineListResponse: {
+            /** Items */
+            items: components["schemas"]["GuidelineListItem"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+        };
+        /** GuidelineModelViewV1 */
+        GuidelineModelViewV1: {
+            /** Body */
+            body: string;
+            /** Content Digest */
+            content_digest: string;
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /** Source Ids */
+            source_ids: string[];
+            source_kind: components["schemas"]["GuidelineSourceKind"];
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+        };
+        /** GuidelineMutation */
+        GuidelineMutation: {
+            /**
+             * Idempotency Key
+             * Format: uuid4
+             */
+            idempotency_key: string;
+            kind: components["schemas"]["GuidelineOperationKind"];
+            /** Request Fingerprint */
+            request_fingerprint: string;
+        };
+        /** GuidelineMutationReceipt */
+        GuidelineMutationReceipt: {
+            /** Accepted Revision */
+            accepted_revision?: number | null;
+            /** Content Digest */
+            content_digest?: string | null;
+            /** Document Id */
+            document_id?: string | null;
+            mutation: components["schemas"]["GuidelineMutation"];
+            /**
+             * Operation Id
+             * Format: uuid
+             */
+            operation_id: string;
+            /**
+             * Status Code
+             * @enum {integer}
+             */
+            status_code: 200 | 201 | 202;
+            /** Version Id */
+            version_id?: string | null;
+        };
+        /** GuidelineOperation */
+        GuidelineOperation: {
+            /** Activation Epoch */
+            activation_epoch?: number | null;
+            /**
+             * Attempts
+             * @default 0
+             */
+            attempts: number;
+            /** Generation Id */
+            generation_id?: string | null;
+            /** Lease Owner */
+            lease_owner?: string | null;
+            /** Lease Until */
+            lease_until?: string | null;
+            receipt: components["schemas"]["GuidelineMutationReceipt"];
+            /** Safe Error Code */
+            safe_error_code?: string | null;
+            state: components["schemas"]["GuidelineOperationState"];
+        };
+        /**
+         * GuidelineOperationKind
+         * @enum {string}
+         */
+        GuidelineOperationKind: "create" | "save_draft" | "local_edit" | "publish" | "set_enabled" | "restore_bundled" | "rebuild_index" | "retry" | "import_bundled";
+        /**
+         * GuidelineOperationState
+         * @enum {string}
+         */
+        GuidelineOperationState: "pending" | "running" | "succeeded" | "failed" | "superseded";
+        /**
+         * GuidelineOrigin
+         * @enum {string}
+         */
+        GuidelineOrigin: "bundled" | "local_custom" | "local_override";
+        /** GuidelineReview */
+        GuidelineReview: {
+            /** Content Digest */
+            content_digest: string;
+            /**
+             * Guideline Id
+             * Format: uuid
+             */
+            guideline_id: string;
+            /**
+             * Review Confirmed
+             * @constant
+             */
+            review_confirmed: true;
+            /** Review Note */
+            review_note: string;
+            /**
+             * Reviewed At
+             * Format: date-time
+             */
+            reviewed_at: string;
+            /** Reviewer */
+            reviewer: string;
+        };
+        /**
+         * GuidelineSourceKind
+         * @enum {string}
+         */
+        GuidelineSourceKind: "reference_derived" | "user_authored";
+        /** GuidelineSourceRef */
+        GuidelineSourceRef: {
+            /** Accessed Date */
+            accessed_date?: string | null;
+            /** Locator */
+            locator?: string | null;
+            /** Published Date */
+            published_date?: string | null;
+            /** Source Id */
+            source_id: string;
+            /** Title */
+            title: string;
+            /** Url */
+            url?: string | null;
+        };
+        /** GuidelineVersionV1 */
+        GuidelineVersionV1: {
+            content: components["schemas"]["GuidelineContentV1"];
+            identity: components["schemas"]["GuidelineIdentity"];
+            model_view: components["schemas"]["GuidelineModelViewV1"];
+            review: components["schemas"]["GuidelineReview"];
+            /**
+             * Schema Version
+             * @default 1
+             * @constant
+             */
+            schema_version: 1;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+            /** Version Number */
+            version_number: number;
+        };
         /** HistoryCleanupEstimate */
         HistoryCleanupEstimate: {
             /** Retained Idempotency Tombstones */
@@ -1507,6 +2051,18 @@ export interface components {
              * Format: date
              */
             start_date: string;
+        };
+        /** LocalEditGuidelineRequest */
+        LocalEditGuidelineRequest: {
+            /** Base Content Digest */
+            base_content_digest: string;
+            /**
+             * Base Version Id
+             * Format: uuid
+             */
+            base_version_id: string;
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** MeasuredAnchor */
         MeasuredAnchor: {
@@ -1803,6 +2359,19 @@ export interface components {
             /** Retryable */
             retryable: boolean;
         };
+        /** PublishGuidelineRequest */
+        PublishGuidelineRequest: {
+            /** Content Digest */
+            content_digest: string;
+            /** Expected Revision */
+            expected_revision: number;
+            /** Review Confirmed */
+            review_confirmed: boolean;
+            /** Review Note */
+            review_note: string;
+            /** Reviewer */
+            reviewer: string;
+        };
         /** PutCredentialRequest */
         PutCredentialRequest: {
             /**
@@ -2034,6 +2603,16 @@ export interface components {
             /** Subdivision Code */
             subdivision_code: string;
         };
+        /** RestoreBundledGuidelineRequest */
+        RestoreBundledGuidelineRequest: {
+            /** Expected Revision */
+            expected_revision: number;
+            /**
+             * Version Id
+             * Format: uuid
+             */
+            version_id: string;
+        };
         /**
          * ResultSource
          * @enum {string}
@@ -2055,6 +2634,11 @@ export interface components {
             kind: "retry_failed_jobs";
             /** Retried Jobs */
             retried_jobs: number;
+        };
+        /** RetryGuidelineOperationRequest */
+        RetryGuidelineOperationRequest: {
+            /** Expected Revision */
+            expected_revision: number;
         };
         /**
          * RiskLevel
@@ -2368,6 +2952,12 @@ export interface components {
             /** Target Comid */
             target_comid: string;
         };
+        /** SaveGuidelineDraftRequest */
+        SaveGuidelineDraftRequest: {
+            draft: components["schemas"]["GuidelineDraftV1"];
+            /** Expected Revision */
+            expected_revision: number;
+        };
         /** SessionDetailResponse */
         SessionDetailResponse: {
             /**
@@ -2489,6 +3079,13 @@ export interface components {
              */
             session_id: string;
             source: components["schemas"]["ReadSource"];
+        };
+        /** SetGuidelineEnabledRequest */
+        SetGuidelineEnabledRequest: {
+            /** Enabled */
+            enabled: boolean;
+            /** Expected Revision */
+            expected_revision: number;
         };
         /** SettingsCatalogProjection */
         SettingsCatalogProjection: {
@@ -5278,6 +5875,1294 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    list_guidelines_api_guidelines_get: {
+        parameters: {
+            query?: {
+                source?: "all" | "bundled" | "mine";
+                state?: ("draft" | "preparing" | "available" | "preparation_failed" | "disabled" | "unavailable") | null;
+                q?: string;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineListResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    create_guideline_api_guidelines_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GuidelineDraftV1"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    get_guideline_operation_api_guidelines_operations__operation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineOperation"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_guideline_operation_api_guidelines_operations__operation_id__retry_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                operation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryGuidelineOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    get_guideline_api_guidelines__document_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineDocumentDetails"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    save_guideline_draft_api_guidelines__document_id__draft_put: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveGuidelineDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    local_edit_guideline_api_guidelines__document_id__local_edit_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocalEditGuidelineRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    publish_guideline_api_guidelines__document_id__publish_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishGuidelineRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    restore_bundled_guideline_api_guidelines__document_id__restore_bundled_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreBundledGuidelineRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    set_guideline_enabled_api_guidelines__document_id__set_enabled_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                document_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetGuidelineEnabledRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineMutationReceipt"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+        };
+    };
+    get_guideline_version_api_guidelines__document_id__versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                document_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineVersionV1"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Method Not Allowed */
+            405: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisRunErrorResponse"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    /** @description Server-generated request UUID. */
+                    "X-Request-ID"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GuidelineConflictResponse"];
                 };
             };
             /** @description Unprocessable Entity */

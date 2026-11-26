@@ -1,6 +1,7 @@
 import asyncio
 
 import httpx
+import pytest
 from pydantic import SecretStr
 
 from app.application.settings_admin.credential_service import CredentialService
@@ -32,7 +33,8 @@ def _response(profile):
     ]}
 
 
-def test_attempt_lease_is_fixed_until_batch_ends_and_next_attempt_uses_replacement():
+@pytest.mark.parametrize("independent", [False, True])
+def test_attempt_lease_is_fixed_until_batch_ends_and_next_attempt_uses_replacement(independent):
     async def exercise():
         _, credentials = _credentials()
         await credentials.save(CredentialName.OPENAI, SecretStr("old-attempt-private-0001"))
@@ -40,11 +42,13 @@ def test_attempt_lease_is_fixed_until_batch_ends_and_next_attempt_uses_replaceme
         generation = _generation().model_copy(update={"profile": profile})
         entered, release = asyncio.Event(), asyncio.Event()
         seen = []
+        first_key = 'independent-attempt-fixture-key' if independent else 'old-attempt-private-0001'
 
         async def handler(request):
             auth = request.headers["Authorization"]
             seen.append(auth)
-            if auth == "Bearer old-attempt-private-0001":
+            assert request.url.host == ('embedding.test' if independent else 'api.openai.com')
+            if auth == f"Bearer {first_key}" and len(seen) == 1:
                 entered.set()
                 await release.wait()
             return httpx.Response(200, json=_response(profile))
@@ -56,7 +60,8 @@ def test_attempt_lease_is_fixed_until_batch_ends_and_next_attempt_uses_replaceme
         ) as http:
             factory = AttemptEmbeddingFactory(
                 credentials=credentials, http=http,
-                settings=AppSettings(_env_file=None),
+                settings=AppSettings(_env_file=None, **({'embedding_base_url': 'https://embedding.test/v1',
+                    'embedding_api_key': first_key} if independent else {})),
                 metrics=RAGRuntimeMetrics(), monotonic=asyncio.get_running_loop().time,
             )
             old_store = _Store((_job(),))
@@ -70,10 +75,10 @@ def test_attempt_lease_is_fixed_until_batch_ends_and_next_attempt_uses_replaceme
             release.set()
             assert await old_task == 1
             assert len(old_store.projections) == len(new_store.projections) == 1
-            assert seen == [
+            assert seen == ([f'Bearer {first_key}'] * 2 if independent else [
                 "Bearer old-attempt-private-0001",
                 "Bearer new-attempt-private-0002",
-            ]
+            ])
 
     asyncio.run(exercise())
 

@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "documents": [
+    {
+      "bundle_key": "fixture.mechanism",
+      "version": 1,
+      "body_resource": "topics/fixture.mechanism/v1.md",
+      "body_digest": "sha256:41cb8d96ef004d7820beacc9a4d35789b72bb6f50f5ce5d8b9ec087514792cf1",
+      "content_digest": "sha256:cc89cbea8799609490b17a3bf5c03a6387e47d965c8665cb570419c8e8f9d3a6",
+      "model_view_digest": "sha256:41d5f166c73722530aa0abf197e114bc536b662e6ab72f8f90e2e123722897e1",
+      "metadata": {
+        "schema_version": 1,
+        "title": "Synthetic bundle fixture",
+        "summary": "Synthetic advisory content",
+        "parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00400"
+          }
+        ],
+        "related_parameter_keys": [],
+        "scenario_tags": [],
+        "keywords": [],
+        "language": "en",
+        "source_kind": "reference_derived",
+        "sources": [
+          {
+            "source_id": "S1",
+            "title": "Synthetic test source",
+            "url": "https://source.invalid/mechanism",
+            "locator": null,
+            "published_date": null,
+            "accessed_date": null
+          }
+        ]
+      },
+      "review": {
+        "guideline_id": "b19da7ae-7e24-558a-b1ad-59af6d652ac6",
+        "content_digest": "sha256:cc89cbea8799609490b17a3bf5c03a6387e47d965c8665cb570419c8e8f9d3a6",
+        "review_confirmed": true,
+        "reviewer": "fixture-reviewer",
+        "review_note": "Synthetic fixture approval; not an actual content review.",
+        "reviewed_at": "2026-10-20T00:00:00Z"
+      }
+    }
+  ]
+}

@@ -1,4 +1,6 @@
 import type { components } from './generated'
+import { guidelineDocument, guidelineList, guidelineOperation, guidelineReceipt,
+  type GuidelineDocument, type GuidelineList, type GuidelineOperation, type GuidelineReceipt } from './guidelineContracts'
 
 type Schema<Name extends keyof components['schemas']> = components['schemas'][Name]
 export type CreateRequest = Schema<'CreateAnalysisRunRequest'>
@@ -36,6 +38,7 @@ export class ApiError extends Error {
     readonly requestId: string | null,
     readonly historyUrl: string | null = null,
     readonly currentSettings: Settings | null = null,
+    readonly currentDocument: GuidelineDocument | null = null,
   ) {
     super(code)
   }
@@ -149,14 +152,15 @@ function generationPreview(value: unknown): value is GenerationPreview {
   return record(value) && typeof value.generation_id === 'string' && typeof value.affected_jobs === 'number'
 }
 
-function errorEnvelope(value: unknown): { code: string; historyUrl: string | null; currentSettings: Settings | null } {
-  if (!record(value)) return { code: 'invalid_error_response', historyUrl: null, currentSettings: null }
+function errorEnvelope(value: unknown): { code: string; historyUrl: string | null; currentSettings: Settings | null; currentDocument: GuidelineDocument | null } {
+  if (!record(value)) return { code: 'invalid_error_response', historyUrl: null, currentSettings: null, currentDocument: null }
   const detail = value.error
   return {
     code: record(detail) && typeof detail.code === 'string' ? detail.code : 'invalid_error_response',
     historyUrl: typeof value.history_url === 'string' && value.history_url.startsWith('/api/analysis/runs/')
       ? value.history_url : null,
     currentSettings: settingsResponse(value.current_settings) ? value.current_settings : null,
+    currentDocument: guidelineDocument(value.current_document) ? value.current_document : null,
   }
 }
 
@@ -209,7 +213,7 @@ export class ApiClient {
     }
     if (!response.ok) {
       const detail = errorEnvelope(value)
-      throw new ApiError(response.status, detail.code, requestId, detail.historyUrl, detail.currentSettings)
+      throw new ApiError(response.status, detail.code, requestId, detail.historyUrl, detail.currentSettings, detail.currentDocument)
     }
     if (!valid(value)) throw new ApiError(response.status, 'invalid_response', requestId)
     return value
@@ -217,6 +221,28 @@ export class ApiClient {
 
   settings(signal?: AbortSignal): Promise<Settings> {
     return this.send('/api/settings', 'GET', settingsResponse, { signal })
+  }
+
+  guidelines(query: { source: 'bundled' | 'mine'; q?: string; state?: string; cursor?: string }, signal?: AbortSignal): Promise<GuidelineList> {
+    const params = new URLSearchParams({ source: query.source, limit: '20' })
+    for (const key of ['q', 'state', 'cursor'] as const) if (query[key]) params.set(key, query[key])
+    return this.send(`/api/guidelines?${params}`, 'GET', guidelineList, { signal })
+  }
+
+  async guideline(id: string, signal?: AbortSignal): Promise<GuidelineDocument> {
+    const value = await this.send(`/api/guidelines/${encodeURIComponent(id)}`, 'GET', guidelineDocument, { signal })
+    if (value.identity.guideline_id !== id) throw new ApiError(200, 'invalid_response', null)
+    return value
+  }
+
+  mutateGuideline(path: `/api/guidelines${string}`, method: 'POST' | 'PUT', submission: Submission): Promise<GuidelineReceipt> {
+    return this.send(path, method, guidelineReceipt, { body: submission.bytes, headers: { 'Idempotency-Key': submission.key }, signal: AbortSignal.timeout(20_000) })
+  }
+
+  async guidelineOperation(id: string, signal?: AbortSignal): Promise<GuidelineOperation> {
+    const value = await this.send(`/api/guidelines/operations/${encodeURIComponent(id)}`, 'GET', guidelineOperation, { signal })
+    if (value.receipt.operation_id !== id) throw new ApiError(200, 'invalid_response', null)
+    return value
   }
 
   replaceSettings(expectedRevision: number, defaults: Defaults): Promise<Settings> {

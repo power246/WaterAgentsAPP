@@ -143,8 +143,10 @@ class WaterbodyModelMessage(DomainModel):
         if self.role is WaterbodyMessageRole.TOOL:
             if any(value is None for value in tool_fields):
                 raise ValueError("tool messages require call and tool identity")
+        elif self.role is WaterbodyMessageRole.ASSISTANT and all(value is not None for value in tool_fields):
+            _validate_json_object_text(self.text)
         elif any(value is not None for value in tool_fields):
-            raise ValueError("only tool messages may contain tool identity")
+            raise ValueError("tool identity requires a complete assistant call or tool result")
         return self
 
 

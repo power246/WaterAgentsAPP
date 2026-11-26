@@ -121,6 +121,12 @@ class TranscriptRAGCaseSourceReader:
         )
 
         by_id = {item.item.item_id: item for item in snapshot.items}
+        from app.application.guidelines.transcript_validation import validate_guideline_links
+
+        try:
+            validate_guideline_links(result.body, result.item, by_id.get)
+        except (ValueError, TypeError, KeyError) as error:
+            raise RAGSourceReadError("historical_source_reference_invalid") from error
         confirmed: list[ConfirmedSourceReference] = []
         fragments: list[TypedRAGSourceItem[EvidenceFragment]] = []
         for reference_id in result.references:

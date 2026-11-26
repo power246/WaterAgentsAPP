@@ -232,6 +232,8 @@ def _offline_providers(monkeypatch, *, gate_parser=True, gate_waterbody=False,
 
     def embedding(*args, **kwargs):
         del args
+        if not kwargs["api_key"].startswith("fixture-"):
+            raise AssertionError("Offline embedding fixture received a deployment credential.")
         leases["run_embedding"].append(kwargs["api_key"])
         return DeterministicEmbeddingPort()
 
@@ -280,6 +282,8 @@ def test_explicit_discharge_target_reaches_model_and_committed_result(
             "model_catalog": catalog(),
             "openai_api_key": SecretStr("fixture-openai-only"),
             "google_geocoding_api_key": SecretStr("fixture-google-only"),
+            "embedding_base_url": None,
+            "embedding_api_key": None,
             "log_level": "warning",
         })
 
@@ -391,6 +395,8 @@ def test_production_routes_settings_run_sse_history_and_restart(monkeypatch):
             "model_catalog": catalog(),
             "openai_api_key": SecretStr("fixture-openai-only"),
             "google_geocoding_api_key": SecretStr("fixture-google-only"),
+            "embedding_base_url": None,
+            "embedding_api_key": None,
             "analysis_timezone": "America/New_York",
             "log_level": "warning",
             "live_state_grace_seconds": 5,
@@ -632,6 +638,8 @@ def test_production_cancel_converges_real_session_without_result(monkeypatch):
             "model_catalog": catalog(),
             "openai_api_key": SecretStr("fixture-openai-cancel"),
             "google_geocoding_api_key": SecretStr("fixture-google-cancel"),
+            "embedding_base_url": None,
+            "embedding_api_key": None,
             "log_level": "warning",
             "live_state_grace_seconds": 5,
         })

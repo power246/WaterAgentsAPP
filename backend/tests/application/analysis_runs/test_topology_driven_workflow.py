@@ -633,7 +633,8 @@ def test_target_failure_is_fatal_but_target_indeterminate_is_not() -> None:
     asyncio.run(target_indeterminate())
 
 
-def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> None:
+@pytest.mark.parametrize("with_guidelines", [False, True])
+def test_node_runner_uses_committed_session_and_suppresses_cancel_winner(with_guidelines) -> None:
     async def exercise(committed_status, *, cancel_wins=False):
         graph = topology(("100", TARGET))
         base_context = analysis_context()
@@ -691,6 +692,16 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
             stop_requested if cancel_wins else None,
         )
         acquisition = RunnableAcquisition()
+        knowledge_sessions = []
+        class Knowledge:
+            closed = False
+            async def aclose(self): self.closed = True
+        class PinnedRun:
+            def session(self, task, *, deadline):
+                assert task.task.run_id == RUN_ID and deadline == waterbody_runner.session_deadline()
+                selected = Knowledge()
+                knowledge_sessions.append(selected)
+                return selected
         runner = ProductionTopologyNodeRunner(
             context=WorkflowContext(
                 run=run,
@@ -698,6 +709,7 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
                 cancellation=cancellation,
                 request=SimpleNamespace(),
                 operations=operations,
+                guidelines=PinnedRun() if with_guidelines else None,
             ),
             analysis_context=saved_context,
             topology=graph,
@@ -733,10 +745,15 @@ def test_node_runner_uses_committed_session_and_suppresses_cancel_winner() -> No
             with pytest.raises(asyncio.CancelledError):
                 await runner.run(request)
             assert len(waterbody_runner.calls) == 1
+            assert all(value.closed for value in knowledge_sessions)
+            assert len(knowledge_sessions) == int(with_guidelines)
             return None
         outcome = await runner.run(request)
         assert len(waterbody_runner.calls) == 1
         task = waterbody_runner.calls[0]
+        assert len(knowledge_sessions) == int(with_guidelines)
+        if with_guidelines:
+            assert task.task.guidelines is knowledge_sessions[0] and knowledge_sessions[0].closed
         assert acquisition.events == ["prepare", "start"]
         assert task.task.evidence_scope is acquisition.prepared_scope
         assert acquisition.scopes == [acquisition.prepared_scope]

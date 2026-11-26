@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api, ApiError, type RunDetail, type RunSnapshot, type TranscriptItem } from '../../api/http'
 import type { ProcessItem } from './state'
 import type { Graph, InferenceResult, RunSummaryResult } from './models'
+import { guidelineRecords, RunGuidelines } from '../guidelines/RunGuidelines'
 
 export type DetailTab = 'overview' | 'agent' | 'evidence'
 type TranscriptRead = { status: 'loading' | 'ready' | 'error'; error: string | null }
@@ -10,6 +11,7 @@ const visibleRecords = new Set([
   'waterbody_agent_message', 'evidence_bundle', 'evidence_fragment',
   'evidence_tool_result', 'evidence_source_records', 'reasoning_decision',
   'inference_result', 'waterbody_dependency_manifest', 'numeric_dependency_plan',
+  ...guidelineRecords,
 ])
 
 function objectValue(value: unknown): Record<string, unknown> | null {
@@ -78,6 +80,7 @@ function RecordView({ entry, runId, readView }: { entry: ProcessItem; runId: str
   const item = entry.finalized
   const message = entry.header.content_type === 'waterbody_agent_message'
   if (!visibleRecords.has(entry.header.content_type)) return null
+  if (guidelineRecords.has(entry.header.content_type)) return null
   const savedMessageStatus = item?.content.kind === 'inline'
     ? objectValue(item.content.body)?.generation_status : null
   const messageStatus = entry.generationStatus ?? (typeof savedMessageStatus === 'string'
@@ -137,6 +140,12 @@ export function DetailPanel({ runId, snapshot, detail, graph, sessionId, process
   onRefresh: () => void
 }) {
   const [retryMessage, setRetryMessage] = useState('')
+  const guidelineItems = useMemo(() => [...new Map([...processItems.flatMap((p) => p.finalized ? [p.finalized] : []),
+    ...referencedItems, ...(detail?.referenced_items ?? []), ...(detail?.items ?? [])]
+    .filter((i) => guidelineRecords.has(i.content_type)).map((i) => [i.item_id, i])).values()], [processItems, referencedItems, detail])
+  const historicalItems = referencedItems.filter((i) => !guidelineRecords.has(i.content_type))
+  const guidelines = runId && sessionId ? <RunGuidelines items={guidelineItems} runId={runId} sessionId={sessionId}
+    result={result} readView={readView} /> : null
   const session = snapshot?.sessions.find((item) => item.session_id === sessionId)
     ?? detail?.sessions?.find((item) => item.session_id === sessionId)
   const persistence = snapshot?.persistence ?? detail?.persistence
@@ -221,6 +230,7 @@ export function DetailPanel({ runId, snapshot, detail, graph, sessionId, process
           </div>)}
         </>}
         <h3>Process</h3>
+        {guidelines}
         {transcriptRead.status === 'error' && <p className="error" role="alert">Process records could not be loaded: {transcriptRead.error}</p>}
         {processItems.length ? processItems.map((item) => <RecordView key={`${readView}:${item.itemId}`} entry={item} runId={runId ?? ''} readView={readView} />)
           : transcriptRead.status === 'loading' ? <p className="muted">Loading process records…</p>
@@ -237,9 +247,10 @@ export function DetailPanel({ runId, snapshot, detail, graph, sessionId, process
           : transcriptRead.status === 'loading' ? <p className="muted">Loading current evidence…</p>
             : transcriptRead.status === 'error' ? null
               : <p className="muted">No current evidence records.</p>}
+        {guidelines}
         <h3>Historical context</h3>
         <p className="muted">Historical records are context only and do not replace current observations.</p>
-        {referencedItems.length ? referencedItems.map((item) => <ReadItem key={item.item_id} item={item} runId={runId ?? ''} />)
+        {historicalItems.length ? historicalItems.map((item) => <ReadItem key={item.item_id} item={item} runId={runId ?? ''} />)
           : transcriptRead.status === 'loading' ? <p className="muted">Loading historical context…</p>
             : transcriptRead.status === 'error' ? <p className="muted">Historical context could not be loaded.</p>
               : <p className="muted">No saved historical context.</p>}

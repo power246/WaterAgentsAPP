@@ -1,0 +1,301 @@
+{
+  "schema_version": 1,
+  "documents": [
+    {
+      "bundle_key": "ph.mixing-transport",
+      "version": 1,
+      "body_resource": "topics/ph.mixing-transport/v1.md",
+      "body_digest": "sha256:dd7e19b1d7bea5e712468aa0652f774caf51c4cd1221b3b5b9446991f5cdf185",
+      "content_digest": "sha256:d77a344bfba1128b759ec30a24cbe743080205224e63f97ea8799e9d78f6bf25",
+      "model_view_digest": "sha256:f4529ebaffd45dd770f6e189ab8f622d24577629e1a3ead839c4de940aee2bab",
+      "metadata": {
+        "schema_version": 1,
+        "title": "上下游 pH：混合与传递的边界",
+        "summary": "以水流联系和化学反应约束解释混合；仅凭上游 pH 与流量不能保证准确计算下游 pH。",
+        "parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00400"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00403"
+          }
+        ],
+        "related_parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00060"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00410"
+          }
+        ],
+        "scenario_tags": [
+          "mixing",
+          "prediction",
+          "transport"
+        ],
+        "keywords": [
+          "mixing",
+          "pH",
+          "upstream",
+          "传递",
+          "混合",
+          "酸碱平衡"
+        ],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": null,
+        "sources": [
+          {
+            "source_id": "USGS_MIX",
+            "title": "USGS PHREEQC Version 3 — MIX",
+            "url": "https://water.usgs.gov/water-resources/software/PHREEQC/documentation/phreeqc3-html/phreeqc3-27.htm",
+            "locator": "MIX: Explanation and Notes; mole mixing and equilibrium assumptions",
+            "published_date": null,
+            "accessed_date": "2026-10-21"
+          }
+        ]
+      },
+      "review": {
+        "guideline_id": "37b7c2a8-0e72-5feb-9a43-6fbd36223f35",
+        "content_digest": "sha256:d77a344bfba1128b759ec30a24cbe743080205224e63f97ea8799e9d78f6bf25",
+        "review_confirmed": true,
+        "reviewer": "project-user-explicit-approval",
+        "review_note": "User explicitly approved: 批准当前四份 v1 纳入内置库. Exact four-version packet approved for bundled distribution in this conversation on 2026-10-21.",
+        "reviewed_at": "2026-10-21T15:12:35Z"
+      }
+    },
+    {
+      "bundle_key": "ph.acid-buffering",
+      "version": 1,
+      "body_resource": "topics/ph.acid-buffering/v1.md",
+      "body_digest": "sha256:0097dd61189de814a6c7474c6fc9791ef047ee7e5a556e18c37b0a074c548a84",
+      "content_digest": "sha256:a56bd4d56a8b13c9094007c70a27d006445ac60f0a9b973da90554baadb2b17c",
+      "model_view_digest": "sha256:003d1f3df4ac96fe1c27da12301b8d657f92865b6e41644a0caf94e883e2c46e",
+      "metadata": {
+        "schema_version": 1,
+        "title": "酸性输入与碱度缓冲",
+        "summary": "碱度表示中和酸性输入的能力；未知碱度不能被解释为必然强缓冲或弱缓冲。",
+        "parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00400"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00403"
+          }
+        ],
+        "related_parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00060"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00410"
+          }
+        ],
+        "scenario_tags": [
+          "acid_input",
+          "buffering",
+          "prediction"
+        ],
+        "keywords": [
+          "acid",
+          "alkalinity",
+          "buffering",
+          "碱度",
+          "缓冲",
+          "酸性输入"
+        ],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": null,
+        "sources": [
+          {
+            "source_id": "USGS_ALKALINITY",
+            "title": "USGS Water Science School — Alkalinity and Water",
+            "url": "https://www.usgs.gov/water-science-school/science/alkalinity-and-water",
+            "locator": "Alkalinity and Acid Neutralizing Capacity; What affects alkalinity?; Measuring alkalinity",
+            "published_date": null,
+            "accessed_date": "2026-10-21"
+          }
+        ]
+      },
+      "review": {
+        "guideline_id": "51911a5d-4cdd-5a46-b0fc-f1c99cc57a51",
+        "content_digest": "sha256:a56bd4d56a8b13c9094007c70a27d006445ac60f0a9b973da90554baadb2b17c",
+        "review_confirmed": true,
+        "reviewer": "project-user-explicit-approval",
+        "review_note": "User explicitly approved: 批准当前四份 v1 纳入内置库. Exact four-version packet approved for bundled distribution in this conversation on 2026-10-21.",
+        "reviewed_at": "2026-10-21T15:12:35Z"
+      }
+    },
+    {
+      "bundle_key": "ph.photosynthesis-respiration",
+      "version": 1,
+      "body_resource": "topics/ph.photosynthesis-respiration/v1.md",
+      "body_digest": "sha256:43ffd36756e7ebc73fd5fe36dd0f5de0df1c89095020e085b25d28495b1c2e5d",
+      "content_digest": "sha256:0c518b635cc144bcad55932ef9b580ea67ee47ce8ca79f787036a5387671e072",
+      "model_view_digest": "sha256:291985322d43b8c28a40a5e328305a4ea89cd4ab400ed5ff1e924c7b2ead3442",
+      "metadata": {
+        "schema_version": 1,
+        "title": "光照、光合作用与呼吸的竞争路径",
+        "summary": "营养物质与光照可影响生产和呼吸，进而影响 pH 与溶解氧；日变化不是本地已发生某过程的证明。",
+        "parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00400"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00403"
+          }
+        ],
+        "related_parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00010"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00300"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00600"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00665"
+          }
+        ],
+        "scenario_tags": [
+          "diel_cycle",
+          "photosynthesis",
+          "respiration"
+        ],
+        "keywords": [
+          "nutrients",
+          "photosynthesis",
+          "respiration",
+          "光合作用",
+          "呼吸",
+          "昼夜",
+          "营养物质"
+        ],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": null,
+        "sources": [
+          {
+            "source_id": "EPA_NUTRIENTS",
+            "title": "US EPA CADDIS — Nutrients",
+            "url": "https://www.epa.gov/caddis/nutrients",
+            "locator": "Overview; Conceptual Diagrams: production, light limitation, respiration and pH",
+            "published_date": null,
+            "accessed_date": "2026-10-21"
+          },
+          {
+            "source_id": "EPA_PH",
+            "title": "US EPA CADDIS — pH",
+            "url": "https://www.epa.gov/caddis/ph",
+            "locator": "Overview; When to List: High pH — Sources and Activities; Conceptual Diagrams: Low pH — buffering and respiration",
+            "published_date": null,
+            "accessed_date": "2026-10-21"
+          }
+        ]
+      },
+      "review": {
+        "guideline_id": "7d2f55a2-d0d4-58a7-ab8c-c44fe259b3c0",
+        "content_digest": "sha256:0c518b635cc144bcad55932ef9b580ea67ee47ce8ca79f787036a5387671e072",
+        "review_confirmed": true,
+        "reviewer": "project-user-explicit-approval",
+        "review_note": "User explicitly approved: 批准当前四份 v1 纳入内置库. Exact four-version packet approved for bundled distribution in this conversation on 2026-10-21.",
+        "reviewed_at": "2026-10-21T15:12:35Z"
+      }
+    },
+    {
+      "bundle_key": "ph.compare-causes",
+      "version": 1,
+      "body_resource": "topics/ph.compare-causes/v1.md",
+      "body_digest": "sha256:e8f8610ca8e22257915a19a3edb4698e3032e5d60fbc829e6139a102b800951c",
+      "content_digest": "sha256:331ba148e748202c3197733b32b9fce347e5002a0755df1dadc843adb4a9d6c6",
+      "model_view_digest": "sha256:637affe2d90de0148bd3822a6e57b80e32027ca097ebc7eec7968154c4b17bb6",
+      "metadata": {
+        "schema_version": 1,
+        "title": "比较 pH 候选原因与证据缺口",
+        "summary": "将本地事实和一般机理分开，比较支持与反证；因果图中的箭头表示可能联系，不能当成无条件因果。",
+        "parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00400"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00403"
+          }
+        ],
+        "related_parameter_keys": [
+          {
+            "code_system": "usgs",
+            "code": "00060"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00300"
+          },
+          {
+            "code_system": "usgs",
+            "code": "00410"
+          }
+        ],
+        "scenario_tags": [
+          "causal_comparison",
+          "missing_information"
+        ],
+        "keywords": [
+          "alternative",
+          "causal",
+          "evidence",
+          "原因比较",
+          "替代解释",
+          "证据缺口"
+        ],
+        "language": "mixed",
+        "source_kind": "reference_derived",
+        "body_markdown": null,
+        "sources": [
+          {
+            "source_id": "EPA_DATA",
+            "title": "US EPA CADDIS — Getting Started with Data Analysis (official 2021 archive)",
+            "url": "https://19january2021snapshot.epa.gov/caddis-vol4/caddis-volume-4-data-analysis-getting-started_.html",
+            "locator": "Matching Data; Organizing Data By Causal Pathway; Data Quality. Historical first-party archive, not a current EPA policy.",
+            "published_date": null,
+            "accessed_date": "2026-10-21"
+          },
+          {
+            "source_id": "EPA_DIAGRAMS",
+            "title": "US EPA CADDIS — About Conceptual Diagrams",
+            "url": "https://www.epa.gov/caddis/about-conceptual-diagrams",
+            "locator": "Opening description and site-specific interpretation of potential causal linkages",
+            "published_date": null,
+            "accessed_date": "2026-10-21"
+          }
+        ]
+      },
+      "review": {
+        "guideline_id": "365aabfa-3413-5daa-8354-323daa74b104",
+        "content_digest": "sha256:331ba148e748202c3197733b32b9fce347e5002a0755df1dadc843adb4a9d6c6",
+        "review_confirmed": true,
+        "reviewer": "project-user-explicit-approval",
+        "review_note": "User explicitly approved: 批准当前四份 v1 纳入内置库. Exact four-version packet approved for bundled distribution in this conversation on 2026-10-21.",
+        "reviewed_at": "2026-10-21T15:12:35Z"
+      }
+    }
+  ]
+}

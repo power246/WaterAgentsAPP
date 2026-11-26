@@ -1,3 +1,4 @@
+from tests.guideline_api_support import GUIDELINE_METHODS
 import json
 import re
 from pathlib import Path
@@ -100,6 +101,7 @@ def test_runtime_registry_openapi_and_risk_levels_match_m6_docs() -> None:
 
     paths = set(create_test_app().openapi()["paths"])
     assert {
+        *GUIDELINE_METHODS,
         "/health",
         "/api/settings",
         "/api/settings/unit-policies/preview",

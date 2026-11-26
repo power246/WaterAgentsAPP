@@ -570,6 +570,7 @@ def _build_gates(
             contextual = _unique_sorted(
                 target.contextual_fragment_refs + support.contextual_fragment_refs
             )
+            contextual = tuple(ref for ref in contextual if ref not in allowed)
             facts = _unique_sorted(
                 target.collection_fact_refs + support.collection_fact_refs
             )

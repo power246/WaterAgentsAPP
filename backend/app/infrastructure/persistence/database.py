@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.infrastructure.config.settings import AppSettings
 from app.infrastructure.config import load_parameter_capability_registry
+from app.infrastructure.persistence.guideline_schema import guideline_schema_matches
+from app.infrastructure.persistence.schema import metadata
 
 _REVISION_PATTERN = re.compile(r"^(?P<date>\d{8})_(?P<sequence>\d+)$")
 
@@ -168,6 +170,9 @@ async def check_database_schema(
                         "WHERE extname = 'vector'"
                     )
                 )
+                if revisions == (expected,) and expected >= "20261020_02":
+                    if not await guideline_schema_matches(connection, metadata):
+                        raise IncompatibleSchemaError("guideline database schema is incomplete")
                 if revisions == (expected,) and expected >= "20261008_01":
                     unit_policy_digest = await connection.scalar(text(
                         "SELECT registry_digest FROM unit_policy_versions WHERE version = 1"

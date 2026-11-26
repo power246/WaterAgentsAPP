@@ -30,13 +30,10 @@ from app.domain import (
     ModelCatalogSnapshot,
     RAGIndexGenerationStatus,
 )
-from app.domain.settings_admin import CredentialName
 from app.application.settings_admin.credential_service import CredentialService
-from app.application.settings_admin.errors import (
-    CredentialMissingError, CredentialStoreUnavailableError,
-)
 from app.infrastructure.adapters import OpenAIEmbeddingAdapter
 from app.infrastructure.config import AppSettings, SettingsConfigurationError
+from app.infrastructure.credentials.embedding import embedding_api_key, embedding_base_url, lease_embedding_api_key
 from app.infrastructure.http import ProviderHttpClient
 from app.infrastructure.observability.rag_metrics import RAGRuntimeMetrics
 from app.infrastructure.persistence import (
@@ -108,17 +105,11 @@ class AttemptEmbeddingFactory:
         self._monotonic = monotonic
 
     async def __call__(self) -> EmbeddingPort:
-        try:
-            lease = await self._credentials.lease(CredentialName.OPENAI)
-        except (CredentialMissingError, CredentialStoreUnavailableError):
-            raise PortAuthenticationError(
-                "Embedding credential is unavailable.",
-                provider="openai", operation="embedding",
-            ) from None
+        key = await lease_embedding_api_key(self._settings, self._credentials)
         return _ObservedEmbeddingPort(
             OpenAIEmbeddingAdapter(
-                self._http, api_key=lease.value.get_secret_value(),
-                base_url=self._settings.openai_base_url,
+                self._http, api_key=key.get_secret_value(),
+                base_url=embedding_base_url(self._settings),
             ),
             self._metrics, stage="indexing", monotonic=self._monotonic,
         )
@@ -377,11 +368,10 @@ async def build_m8_runtime(
                     "unsupported embedding provider configuration: "
                     + desired_profile.provider
                 )
-            if settings.openai_api_key is None:
-                raise SettingsConfigurationError("openai_api_key is required")
-            api_key = settings.openai_api_key.get_secret_value()
-            if not api_key:
-                raise SettingsConfigurationError("openai_api_key is required")
+            try:
+                api_key = embedding_api_key(settings).get_secret_value()
+            except PortAuthenticationError:
+                raise SettingsConfigurationError("embedding credential is required") from None
             http = await stack.enter_async_context(
                 ProviderHttpClient(
                     timeout_seconds=settings.rag_embedding_timeout_seconds,
@@ -393,7 +383,7 @@ async def build_m8_runtime(
             active_embedding = OpenAIEmbeddingAdapter(
                 http,
                 api_key=api_key,
-                base_url=settings.openai_base_url,
+                base_url=embedding_base_url(settings),
             )
 
         loop = asyncio.get_running_loop()

@@ -63,6 +63,18 @@ class ReasoningTranscriptStore:
         self._private_values = private_values
         self._response_refs: dict[UUID, TranscriptContentRef] = {}
         self._cancellation = None
+        self.guidelines = None
+
+    async def write_guideline_record(self, content_type, body):
+        from app.application.guidelines.transcript_models import GUIDELINE_RECORDS
+
+        body = GUIDELINE_RECORDS[content_type].model_validate(body)
+        if body.run_id != self.run_id or body.session_id != self.session_id:
+            raise ValueError("guideline record is outside the reasoning store scope")
+        return await self._write(content_type, body, operation_id=getattr(body, "operation_id", None))
+
+    def response_reference(self, operation_id):
+        return self._response_refs[operation_id]
 
     async def write_agent_input(
         self,
@@ -365,7 +377,27 @@ class TranscriptRecordingWaterbodyModelPort:
         self,
         request: WaterbodyModelRequest,
     ) -> AsyncIterator[WaterbodyModelEvent]:
-        await self._store.write_model_request(request)
+        if self._store.guidelines is None:
+            await self._store.write_model_request(request)
+        else:
+            from app.application.guidelines.transcript import GuidelineTranscriptWriteError
+            from app.application.analysis_runs.workflow import WorkflowStopped
+            import asyncio
+
+            cancellation = self._store._cancellation
+            async with cancellation.commit_section():
+                self._store.guidelines._checkpoint(request, cancellation)
+                if (request.operation_id not in self._store.guidelines.operations
+                        and request != self._store.guidelines.search_request):
+                    raise GuidelineTranscriptWriteError()
+                try:
+                    request_ref = await self._store.write_model_request(request)
+                except (asyncio.CancelledError, WorkflowStopped):
+                    raise
+                except Exception as error:
+                    raise GuidelineTranscriptWriteError() from error
+                if request.operation_id in self._store.guidelines.operations:
+                    await self._store.guidelines.transcript.submitted(request, request_ref)
         messages: dict[str, _OpenMessage] = {}
         message_refs: list[TranscriptContentRef] = []
         tool_calls: list[ToolCallCompleted] = []

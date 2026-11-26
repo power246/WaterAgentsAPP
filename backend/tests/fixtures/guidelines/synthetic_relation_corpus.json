@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "synthetic": true,
+  "notice": "TEST FIXTURES ONLY. Invented articles and labels; never import into a production bundle or business database.",
+  "documents": [
+    {
+      "id": "synthetic.bio",
+      "title": "Synthetic fixture: Biological daily changes",
+      "summary": "Synthetic water quality advisory on biological daily changes.",
+      "paragraphs": [
+        "In this synthetic river scenario, photosynthesis can consume dissolved carbon dioxide and raise pH; light availability and competing respiration determine the net response.",
+        "In this synthetic biological example, oxygen and pH can respond to shared processes, but an oxygen difference alone cannot be converted into a numerical pH change."
+      ]
+    },
+    {
+      "id": "synthetic.buffer",
+      "title": "Synthetic fixture: Response to acid loading",
+      "summary": "Synthetic water quality advisory on response to acid loading.",
+      "paragraphs": [
+        "In this synthetic river scenario, acid-neutralizing capacity moderates the pH response to an acid input; without a matching measurement the buffering magnitude remains unknown."
+      ]
+    },
+    {
+      "id": "synthetic.combined",
+      "title": "Synthetic fixture: Conditional biological and chemical response",
+      "summary": "Synthetic water quality advisory on conditional biological and chemical response.",
+      "paragraphs": [
+        "In this synthetic river scenario, photosynthesis can consume dissolved carbon dioxide and raise pH; light availability and competing respiration determine the net response.",
+        "In this synthetic river scenario, acid-neutralizing capacity moderates the pH response to an acid input; without a matching measurement the buffering magnitude remains unknown.",
+        "These synthetic records contain general mechanisms, not measurements of the target river; missing observations must remain explicit uncertainty."
+      ]
+    },
+    {
+      "id": "synthetic.mixing",
+      "title": "Synthetic fixture: Mixture and transport boundaries",
+      "summary": "Synthetic water quality advisory on mixture and transport boundaries.",
+      "paragraphs": [
+        "In this synthetic mixing example, pH values cannot generally be averaged directly; mixture composition, flow fractions, and acid-base equilibrium influence the resulting pH.",
+        "In this synthetic sampling example, unmatched observation times and travel delays can mimic a spatial pH gradient; compare sampling method, location, and time before attribution."
+      ]
+    },
+    {
+      "id": "synthetic.sampling",
+      "title": "Synthetic fixture: Sampling comparability",
+      "summary": "Synthetic water quality advisory on sampling comparability.",
+      "paragraphs": [
+        "In this synthetic sampling example, unmatched observation times and travel delays can mimic a spatial pH gradient; compare sampling method, location, and time before attribution.",
+        "These synthetic records contain general mechanisms, not measurements of the target river; missing observations must remain explicit uncertainty."
+      ]
+    },
+    {
+      "id": "synthetic.oxygen",
+      "title": "Synthetic fixture: Oxygen interpretation limits",
+      "summary": "Synthetic water quality advisory on oxygen interpretation limits.",
+      "paragraphs": [
+        "In this synthetic biological example, oxygen and pH can respond to shared processes, but an oxygen difference alone cannot be converted into a numerical pH change.",
+        "These synthetic records contain general mechanisms, not measurements of the target river; missing observations must remain explicit uncertainty."
+      ]
+    },
+    {
+      "id": "synthetic.alternatives",
+      "title": "Synthetic fixture: Several competing explanations",
+      "summary": "Synthetic water quality advisory on several competing explanations.",
+      "paragraphs": [
+        "These synthetic records contain general mechanisms, not measurements of the target river; missing observations must remain explicit uncertainty.",
+        "In this synthetic comparison, alternative explanations remain possible when observations cannot distinguish local inputs, biological processes, and transport."
+      ]
+    },
+    {
+      "id": "synthetic.repetitive",
+      "title": "Synthetic fixture: Repeated biological explanations",
+      "summary": "Synthetic water quality advisory on repeated biological explanations.",
+      "paragraphs": [
+        "In this synthetic river scenario, photosynthesis can consume dissolved carbon dioxide and raise pH; light availability and competing respiration determine the net response.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 0 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 1 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 2 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 3 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 4 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 5 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 6 does not add an independent mechanism.",
+        "In this synthetic example, biological production can influence carbon dioxide and pH under light; alternative wording 7 does not add an independent mechanism."
+      ]
+    },
+    {
+      "id": "synthetic.temperature",
+      "title": "Synthetic fixture: Temperature measurement handling",
+      "summary": "Synthetic water quality advisory on temperature measurement handling.",
+      "paragraphs": [
+        "In this synthetic instrument example, temperature calibration drift requires checking the sensor and method; no statement about pH response follows from that calibration record."
+      ]
+    },
+    {
+      "id": "synthetic.turbidity",
+      "title": "Synthetic fixture: Turbidity instrument handling",
+      "summary": "Synthetic water quality advisory on turbidity instrument handling.",
+      "paragraphs": [
+        "In this synthetic instrument example, suspended particles change optical turbidity readings; calibrate the optical sensor before comparing two turbidity records."
+      ]
+    },
+    {
+      "id": "synthetic.salinity",
+      "title": "Synthetic fixture: Conductivity instrument handling",
+      "summary": "Synthetic water quality advisory on conductivity instrument handling.",
+      "paragraphs": [
+        "In this synthetic instrument example, conductivity measurements depend on instrument calibration and temperature compensation; this article concerns the conductivity reading procedure."
+      ]
+    },
+    {
+      "id": "synthetic.scope",
+      "title": "Synthetic fixture: Evidence and uncertainty boundaries",
+      "summary": "Synthetic water quality advisory on evidence and uncertainty boundaries.",
+      "paragraphs": [
+        "These synthetic records contain general mechanisms, not measurements of the target river; missing observations must remain explicit uncertainty.",
+        "In this synthetic estimation example, a general advisory does not create a local measured anchor or authorize a new point estimate."
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "id": "synthetic.query.1",
+      "question": "What could make pH rise during the daylight hours?",
+      "aspects": [
+        "Photosynthesis, dissolved carbon dioxide and daytime pH response"
+      ],
+      "expected_ids": [
+        "synthetic.bio",
+        "synthetic.combined",
+        "synthetic.repetitive"
+      ]
+    },
+    {
+      "id": "synthetic.query.2",
+      "question": "为什么白天 pH 上升，但酸输入后幅度又不同？",
+      "aspects": [
+        "光合作用与二氧化碳对日间pH的条件性影响",
+        "酸中和能力如何缓冲酸性输入引起的pH变化"
+      ],
+      "expected_ids": [
+        "synthetic.combined"
+      ]
+    },
+    {
+      "id": "synthetic.query.3",
+      "question": "Can I average upstream pH readings to obtain downstream pH?",
+      "aspects": [
+        "Mixing water with different pH: composition and acid-base equilibrium"
+      ],
+      "expected_ids": [
+        "synthetic.mixing"
+      ]
+    },
+    {
+      "id": "synthetic.query.4",
+      "question": "Does more dissolved oxygen tell us how many pH units changed?",
+      "aspects": [
+        "Limits of converting dissolved oxygen changes directly into a pH change"
+      ],
+      "expected_ids": [
+        "synthetic.oxygen",
+        "synthetic.bio"
+      ]
+    },
+    {
+      "id": "synthetic.query.5",
+      "question": "Two sites sampled at different hours have different pH. Is that a spatial effect?",
+      "aspects": [
+        "Sampling-time mismatch, travel delay and apparent spatial pH differences"
+      ],
+      "expected_ids": [
+        "synthetic.sampling",
+        "synthetic.mixing"
+      ]
+    },
+    {
+      "id": "synthetic.query.6",
+      "question": "Is missing alkalinity evidence for strong or weak buffering?",
+      "aspects": [
+        "Unknown acid-neutralizing capacity and uncertainty in the response to acid inputs"
+      ],
+      "expected_ids": [
+        "synthetic.buffer",
+        "synthetic.combined"
+      ]
+    },
+    {
+      "id": "synthetic.query.7",
+      "question": "Can a handbook provide a measured value for this river?",
+      "aspects": [
+        "General advisory guidance cannot create local measured anchors"
+      ],
+      "expected_ids": [
+        "synthetic.scope",
+        "synthetic.alternatives"
+      ]
+    },
+    {
+      "id": "synthetic.query.8",
+      "question": "How should an optical turbidity sensor be checked?",
+      "aspects": [
+        "Calibration and suspended particles in optical turbidity measurements"
+      ],
+      "expected_ids": [
+        "synthetic.turbidity"
+      ]
+    },
+    {
+      "id": "synthetic.query.9",
+      "question": "Temperature sensor calibration drift",
+      "aspects": [
+        "Temperature sensor calibration and observation method"
+      ],
+      "expected_ids": [
+        "synthetic.temperature"
+      ]
+    },
+    {
+      "id": "synthetic.query.10",
+      "question": "Conductivity instrument temperature compensation",
+      "aspects": [
+        "Conductivity calibration and temperature compensation"
+      ],
+      "expected_ids": [
+        "synthetic.salinity"
+      ]
+    }
+  ]
+}

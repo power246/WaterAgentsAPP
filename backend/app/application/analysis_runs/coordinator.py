@@ -1896,9 +1896,9 @@ class RunCoordinator:
         runtime = await self._lookup(run_id)
         key = _UUID.validate_python(item_id)
         encoded_content = None
-        if content_type in {"evidence_source_records", "evidence_fragment"}:
+        if content_type in {"topology_ready", "evidence_source_records", "evidence_fragment"}:
             try:
-                # Evidence content is validated and serialized off the event
+                # Large content is validated and serialized off the event
                 # loop before entering the run's mutation lock.
                 encoded_content = await asyncio.to_thread(
                     self._registry.encode,

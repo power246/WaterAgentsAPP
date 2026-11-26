@@ -19,6 +19,7 @@ from app.application.transcripts.redaction import (
 _FIELDS = (
     "operation", "from_status", "to_status", "method", "route", "status_code",
     "duration_ms", "exception_type", "public_error", "lifecycle_event",
+    "db_connection_wait_ms", "db_transaction_ms",
     "original_status", "outcome", "attempt", "generation_status",
     "generation_age_seconds", "job_pending", "job_leased", "job_retry_wait",
     "job_failed", "job_lag_seconds", "embedding_stage", "error_code",

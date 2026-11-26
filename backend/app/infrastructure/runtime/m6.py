@@ -9,6 +9,7 @@ from math import ceil
 from uuid import UUID, uuid4
 
 from app.application.analysis_runs.workflow import WorkflowOperations
+from app.application.guidelines.model_context import GuidelineModelContext
 from app.application.evidence_tools import EvidenceAcquisitionHandoff
 from app.application.reasoning import (
     EvidencePlanningLoop,
@@ -55,7 +56,7 @@ class M6RuntimeLimits:
 
     @property
     def maximum_model_calls(self) -> int:
-        return self.planning_turns + self.numeric_estimation_calls + 2 * self.batches + 2
+        return self.planning_turns + self.numeric_estimation_calls + 2 * self.batches + 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,13 +244,20 @@ class M6RunnerService:
         task: ValidatedWaterbodyAgentTask,
     ) -> RunSingleWaterbodyAgent:
         model_fit = self._model_router.model_fit(task.task.waterbody_model)
+        guidelines = (GuidelineModelContext(task.task.guidelines, model_fit=model_fit,
+            size_estimator=self._model_router, clock=self._clock) if task.task.guidelines is not None else None)
         store = ReasoningTranscriptStore(
             operations=self._operations,
             run_id=task.task.run_id,
             session_id=task.task.session_id,
             private_values=self._private_values,
         )
+        if guidelines is not None:
+            guidelines.bind_transcript(store)
+            store.guidelines = guidelines
         recording_port = store.recording_port(self._model_router)
+        if guidelines is not None:
+            guidelines._model_port = recording_port
         planning_loop = EvidencePlanningLoop(
             acquisition=self._m5_runtime.acquisition,
             capability_registry=self._capability_registry,
@@ -263,6 +271,7 @@ class M6RunnerService:
             clock=self._clock,
             operation_id_factory=self._operation_id_factory,
             transcript_store=store,
+            guidelines=guidelines,
         )
         return RunSingleWaterbodyAgent(
             planning_loop=planning_loop,
@@ -275,6 +284,7 @@ class M6RunnerService:
             error_id_factory=self._error_id_factory,
             clock=self._clock,
             transcript_store=store,
+            guidelines=guidelines,
         )
 
     async def run(
@@ -439,7 +449,9 @@ async def build_m6_runtime(
             operation_id_factory=operation_id_factory,
             result_id_factory=result_id_factory,
             error_id_factory=error_id_factory,
-            private_values=(api_key,),
+            private_values=(api_key, *(
+                (settings.embedding_api_key.get_secret_value(),) if settings.embedding_api_key is not None else ()
+            )),
         )
 
 

@@ -18,12 +18,15 @@ from pydantic import (
 from app.application.evidence_tools.measurement_provenance import (
     derive_measured_anchors,
 )
+from app.application.guidelines.citation_resolver import sanitize_guideline_refs
 from app.application.reasoning.batch_planner import (
     ReasoningBatch,
     ReasoningBatchPlan,
     SynthesisInputPlan,
 )
 from app.application.reasoning.draft_models import (
+    AttributionReferenceConstraint,
+    CellSupportReferenceGroup,
     DraftValidationIssue,
     OverallSynthesisDraft,
     ReasoningBatchDraft,
@@ -375,17 +378,42 @@ class DraftValidator:
             scope.cell_id: scope for scope in evidence_catalog.cell_scopes
         }
 
+    def attribution_reference_constraints(
+        self, references: tuple[str, ...],
+    ) -> tuple[AttributionReferenceConstraint, ...]:
+        return tuple(
+            AttributionReferenceConstraint(
+                evidence_ref=reference,
+                current_waterbody_applicability=self._facts[reference].applicability,
+                dependency_evidence_refs=self._facts[reference].dependency_evidence_refs,
+            )
+            for reference in sorted(set(references)) if reference in self._facts
+        )
+
+    def required_support_reference_groups(self, cell_ids: tuple[str, ...]) -> tuple[CellSupportReferenceGroup, ...]:
+        return tuple(
+            CellSupportReferenceGroup(cell_id=cell_id, reference_options=references)
+            for cell_id in cell_ids
+            if (references := self._derived_support_refs(self._cell_scopes[cell_id]))
+        )
+
+    def _derived_support_refs(self, scope: CellEvidenceValidationScope) -> tuple[str, ...]:
+        references = (*scope.support_direct_refs, *scope.support_indirect_refs)
+        return references if all(self._facts[ref].payload_type in {"temporal_estimate", "numeric_derived"}
+                                 for ref in references) else ()
+
     def validate_batch(
         self,
         batch: ReasoningBatch,
         raw: object,
+        *, guideline_aliases=frozenset(),
     ) -> ValidatedReasoningBatch:
         self._validate_batch_identity(batch)
         normalized, filled_unit_paths = _fill_single_allowed_units(raw, batch)
         normalized, filled_range_paths = _fill_cited_numeric_ranges(
             normalized, batch, self._facts, self._cell_scopes
         )
-        draft = _parse_draft(normalized, ReasoningBatchDraft)
+        draft = _parse_draft(normalized, ReasoningBatchDraft, guideline_aliases=guideline_aliases)
         issues: list[DraftValidationIssue] = []
         if draft.batch_id != batch.batch_id:
             _issue(issues, "batch_identity_mismatch", "$.batch_id")
@@ -521,8 +549,9 @@ class DraftValidator:
         plan: SynthesisInputPlan,
         reasoning: ValidatedReasoningSet,
         raw: object,
+        *, guideline_aliases=frozenset(),
     ) -> ValidatedOverallSynthesis:
-        draft = _parse_draft(raw, OverallSynthesisDraft)
+        draft = _parse_draft(raw, OverallSynthesisDraft, guideline_aliases=guideline_aliases)
         issues: list[DraftValidationIssue] = []
         if (
             reasoning.batch_plan_digest != batch_plan.plan_digest
@@ -809,15 +838,8 @@ class DraftValidator:
             fact for fact in selected_derived
             if fact.payload_type == "numeric_derived"
         )
-        support_refs = (
-            *evidence_scope.support_direct_refs,
-            *evidence_scope.support_indirect_refs,
-        )
-        if support_refs and all(
-            self._facts[ref].payload_type
-            in {"temporal_estimate", "numeric_derived"}
-            for ref in support_refs
-        ):
+        support_refs = self._derived_support_refs(evidence_scope)
+        if support_refs:
             cited_support_refs = refs & set(support_refs)
             if (
                 cell.outcome_status is not OutcomeStatus.INDETERMINATE
@@ -1591,9 +1613,10 @@ def _fill_cited_numeric_ranges(
     return {**raw, "cells": cells}, tuple(filled_paths)
 
 
-def _parse_draft(raw: object, model_type):
+def _parse_draft(raw: object, model_type, *, guideline_aliases=frozenset()):
     try:
         value = _strict_json_object(raw) if isinstance(raw, str) else raw
+        value = sanitize_guideline_refs(value, guideline_aliases)
         return model_type.model_validate(value)
     except ValidationError as error:
         issues = []

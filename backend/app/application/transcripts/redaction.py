@@ -1,5 +1,6 @@
 import json
 import re
+from functools import lru_cache
 from threading import Lock
 
 _REGISTERED_PRIVATE_VALUES: set[str] = set()
@@ -68,6 +69,12 @@ _SYNTAX_MARKERS = tuple(
     ),
 )
 _SYNTAX_MARKER_KIND = {marker: kind for marker, kind in _SYNTAX_MARKERS}
+_KEY_PREFIXES = frozenset(marker[:length] for marker, kind in _SYNTAX_MARKERS
+                          if kind == "key" for length in range(1, len(marker) + 1))
+_AUTH_PREFIXES = frozenset(marker[:length] for marker, kind in _SYNTAX_MARKERS
+                           if kind == "auth" for length in range(1, len(marker) + 1))
+_NON_AUTH_PREFIXES = _KEY_PREFIXES | frozenset(marker[:length] for marker, kind in _SYNTAX_MARKERS
+                                             if kind == "url" for length in range(1, len(marker) + 1))
 _SYNTAX_PATTERN = re.compile(
     "|".join(re.escape(marker) for marker, _ in _SYNTAX_MARKERS),
     re.IGNORECASE | re.ASCII,
@@ -335,14 +342,9 @@ class _SyntaxFilter:
     def _partial_start(self) -> int:
         lowered = _ascii_lower(self._pending)
         earliest = len(self._pending)
-        maximum = max((len(marker) for marker, _ in _SYNTAX_MARKERS), default=0)
-        for start in range(max(0, len(lowered) - maximum + 1), len(lowered)):
+        for start in range(max(0, len(lowered) - _NORMAL_HOLDBACK + 1), len(lowered)):
             suffix = lowered[start:]
-            if any(
-                marker.startswith(suffix)
-                and (kind != "auth" or self._boundary_before(start))
-                for marker, kind in _SYNTAX_MARKERS
-            ):
+            if suffix in _NON_AUTH_PREFIXES or (suffix in _AUTH_PREFIXES and self._boundary_before(start)):
                 earliest = start
                 break
         return earliest
@@ -352,10 +354,7 @@ class _SyntaxFilter:
         if len(visible) < 3 or not self._boundary_before(self._suppressed):
             return False
         lowered = _ascii_lower(visible)
-        return any(
-            kind == "key" and marker.startswith(lowered)
-            for marker, kind in _SYNTAX_MARKERS
-        )
+        return lowered in _KEY_PREFIXES
 
     def _drain(self, *, final: bool) -> str:
         output: list[str] = []
@@ -690,25 +689,32 @@ def redact_tags(
 
 
 def redact(value: object, private_values: tuple[str, ...] = ()) -> object:
-    if isinstance(value, dict):
-        return {
-            redact_text(key, private_values): (
-                REDACTED
-                if (
-                    SENSITIVE_KEY.fullmatch(key)
-                    and not (
-                        key.lower() in _SAFE_NUMERIC_METRIC_KEYS
-                        and (item is None or type(item) is int)
+    @lru_cache(maxsize=256)
+    def safe_text(text: str) -> str:
+        return redact_text(text, private_values)
+
+    def visit(item: object) -> object:
+        if isinstance(item, dict):
+            return {
+                safe_text(key): (
+                    REDACTED
+                    if (
+                        SENSITIVE_KEY.fullmatch(key)
+                        and not (
+                            key.lower() in _SAFE_NUMERIC_METRIC_KEYS
+                            and (child is None or type(child) is int)
+                        )
                     )
+                    else visit(child)
                 )
-                else redact(item, private_values)
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, (list, tuple)):
-        return [redact(item, private_values) for item in value]
-    if isinstance(value, str):
-        return redact_text(value, private_values)
-    if value is None or type(value) in (bool, int, float):
-        return value
-    raise TypeError("Expected a JSON-like value.")
+                for key, child in item.items()
+            }
+        if isinstance(item, (list, tuple)):
+            return [visit(child) for child in item]
+        if isinstance(item, str):
+            return safe_text(item)
+        if item is None or type(item) in (bool, int, float):
+            return item
+        raise TypeError("Expected a JSON-like value.")
+
+    return visit(value)

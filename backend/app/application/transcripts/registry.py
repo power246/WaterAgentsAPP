@@ -3,6 +3,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit, urlunsplit
 from uuid import UUID, uuid4
+from types import SimpleNamespace
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -192,6 +193,26 @@ class TranscriptRegistry:
         copied.register(registration)
         return copied
 
+    def validate_knowledge_content(self, content, identity, items):
+        from app.application.guidelines.transcript_models import GUIDELINE_RECORDS
+
+        if content.content_type not in {*GUIDELINE_RECORDS, "inference_result"}:
+            return
+        from app.application.guidelines.transcript_validation import validate_guideline_links
+
+        by_id = {item.item_id: item for item in items}
+        decoded = {}
+
+        def lookup(item_id):
+            if item_id not in decoded and item_id in by_id:
+                item = by_id[item_id]
+                registration = self._registrations[(item.content.content_type, item.content.content_schema_version)]
+                decoded[item_id] = SimpleNamespace(item=item, body=registration.adapter.validate_json(item.content.safe_body))
+            return decoded.get(item_id)
+
+        body = self._registrations[(content.content_type, content.content_schema_version)].adapter.validate_json(content.safe_body)
+        validate_guideline_links(body, identity, lookup)
+
     def encode(
         self,
         content_type: str,
@@ -277,6 +298,9 @@ class TranscriptRegistry:
             )
         try:
             body = registration.adapter.validate_json(safe_body)
+            from app.application.guidelines.transcript_models import validate_guideline_identity
+
+            validate_guideline_identity(body, item)
         except (ValidationError, ValueError, TypeError):
             return ReadTranscriptItem(
                 item=item,
@@ -873,6 +897,8 @@ def _evidence_source_records_projection(body: object) -> JsonValue:
 
 
 def create_production_registry() -> TranscriptRegistry:
+    from app.application.guidelines.transcript_models import GUIDELINE_RECORDS, guideline_references
+
     from app.application.analysis_runs.topology_result_models import (
         TopologyRunResult,
         WaterbodyDependencyManifest,
@@ -897,6 +923,11 @@ def create_production_registry() -> TranscriptRegistry:
     )
 
     registry = TranscriptRegistry()
+    for content_type, record_type in GUIDELINE_RECORDS.items():
+        registry.register(ContentRegistration(content_type=content_type, content_schema_version=1,
+            adapter=TypeAdapter(record_type), references=guideline_references,
+            metadata=_static_metadata("guideline"), project_full_content=True,
+            public_projection=lambda body: body.model_dump(mode="json")))
     registry.register(ContentRegistration(
         content_type="analysis_request",
         content_schema_version=1,

@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { api, type RunSnapshot, type TranscriptItem } from '../src/api/http'
 import { DetailPanel } from '../src/features/analysis/DetailPanel'
 import type { Graph } from '../src/features/analysis/models'
+import { knowledgeRecords } from './guideline-fixtures'
 
 const runId = '00000000-0000-4000-8000-000000000001'
 const sessionId = '00000000-0000-4000-8000-000000000002'
@@ -27,6 +28,17 @@ const historical: TranscriptItem = {
 }
 
 afterEach(() => { cleanup(); vi.restoreAllMocks() })
+
+it('classifies guideline snapshots separately from historical scientific evidence', () => {
+  render(<DetailPanel runId={runId} snapshot={snapshot} detail={null} graph={null} sessionId={sessionId}
+    processItems={[]} referencedItems={[historical, ...knowledgeRecords()]} result={null} summary={null}
+    readView="history" tab="evidence" onTab={() => undefined} onRefresh={() => undefined} />)
+  const references = screen.getByRole('region', { name: '运行说明书参考' })
+  expect(within(references).getByText(/查看提供的说明书/)).toBeVisible()
+  expect(within(references).getByText('当前结果没有已验证的说明书引用。')).toBeVisible()
+  expect(screen.getByText('evidence fragment · 1')).toBeVisible()
+  expect(screen.queryByText('guideline delivery · 1')).not.toBeInTheDocument()
+})
 
 it('keeps persistence retry separate from analysis status and shows three tabs', async () => {
   const retry = vi.spyOn(api, 'retryPersistence').mockResolvedValue({ run_id: runId,
